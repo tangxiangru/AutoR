@@ -58,6 +58,7 @@ Several recent mainline changes matter for real use:
 - `00_intake` now has a dedicated clarification flow. The first intake pass asks questions one by one; each question can be answered with a model-proposed option, a custom answer, or skip. The revised pass then shows a compact intake brief instead of treating those questions as normal suggestions.
 - The terminal UI is better suited for real runs and recordings: panel body rows keep colored borders, long lines, long paths, and wide characters wrap inside the frame, and Stage 0 plus approval menus support keyboard navigation.
 - The Codex backend now uses the current Codex CLI `--sandbox workspace-write` execution flag, so it should not emit the deprecated Codex CLI `--full-auto` warning. This is separate from AutoR's own `--full-auto` approval mode.
+- If a Codex-backed run needs remote SSH / GPU execution, you can explicitly use `--codex-sandbox danger-full-access`. The default remains the safer `workspace-write`; do not use unrestricted mode by default.
 - AutoR's `--full-auto` still means automated approval: a strict reviewer agent replaces the waiting human gate, while the 9-stage research workflow itself stays unchanged.
 
 ---
@@ -383,6 +384,17 @@ python main.py \
   --model default \
   --goal "Study whether retrieval-augmented chain-of-thought improves factual QA under a fixed token budget, and produce a submission-style PDF."
 ```
+
+If your Codex-backed run needs to submit remote GPU jobs through SSH, for example after you have manually verified `ssh gpu-server "hostname && nvidia-smi"`, explicitly relax the Codex sandbox:
+
+```bash
+python main.py \
+  --operator codex \
+  --codex-sandbox danger-full-access \
+  --goal "Run the planned experiments on the remote GPU server and produce a submission-style PDF."
+```
+
+This gives the Codex backend unrestricted local and remote execution ability. Use it only for trusted tasks where remote execution is intentional.
 
 Useful defaults to remember:
 
@@ -816,6 +828,7 @@ Do not force a bad run forward.
 | Start a new run | `python main.py --goal "your research goal"` |
 | Use Claude as the backend | `python main.py --operator claude --model sonnet --goal "..."` |
 | Use Codex as the backend | `python main.py --operator codex --model default --goal "..."` |
+| Allow Codex-backed SSH / remote GPU execution | `python main.py --operator codex --codex-sandbox danger-full-access --goal "..."` |
 | Set a target venue | `python main.py --venue neurips_2025 --goal "..."` |
 | Start with resources | `python main.py --goal "..." --resources paper.pdf refs.bib data.csv notes.md` |
 | Store runs on another disk | `python main.py --runs-dir /path/to/runs --goal "..."` |

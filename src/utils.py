@@ -11,6 +11,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE_REGISTRY_PATH = REPO_ROOT / "templates" / "registry.yaml"
 DEFAULT_VENUE = "neurips_2025"
 MAX_STAGE_ATTEMPTS = 5
+DEFAULT_CODEX_SANDBOX = "workspace-write"
+CODEX_SANDBOX_CHOICES = {"read-only", "workspace-write", "danger-full-access"}
 
 
 @dataclass(frozen=True)
@@ -258,6 +260,14 @@ def initialize_memory(paths: RunPaths, user_goal: str, intake_summary: str | Non
     write_text(paths.memory, build_memory_text(user_goal, [], intake_summary=intake_summary))
 
 
+def normalize_codex_sandbox(value: Any) -> str:
+    if isinstance(value, str):
+        normalized = value.strip()
+        if normalized in CODEX_SANDBOX_CHOICES:
+            return normalized
+    return DEFAULT_CODEX_SANDBOX
+
+
 def initialize_run_config(
     paths: RunPaths,
     model: str,
@@ -266,6 +276,7 @@ def initialize_run_config(
     approval_mode: str = "manual",
     review_operator: str | None = None,
     review_model: str | None = None,
+    codex_sandbox: str | None = None,
 ) -> dict[str, Any]:
     normalized_operator = operator.strip().lower() if operator.strip() else "claude"
     normalized_review_operator = (
@@ -284,6 +295,7 @@ def initialize_run_config(
             review_model
             or ("default" if normalized_review_operator == "codex" else "sonnet")
         ),
+        "codex_sandbox": normalize_codex_sandbox(codex_sandbox),
         "created_at": datetime.now().isoformat(timespec="seconds"),
     }
     write_text(paths.run_config, json.dumps(config, indent=2, ensure_ascii=False))
@@ -299,6 +311,7 @@ def load_run_config(paths: RunPaths) -> dict[str, Any]:
             "approval_mode": "manual",
             "review_operator": "claude",
             "review_model": "sonnet",
+            "codex_sandbox": DEFAULT_CODEX_SANDBOX,
         }
 
     try:
@@ -311,6 +324,7 @@ def load_run_config(paths: RunPaths) -> dict[str, Any]:
             "approval_mode": "manual",
             "review_operator": "claude",
             "review_model": "sonnet",
+            "codex_sandbox": DEFAULT_CODEX_SANDBOX,
         }
 
     if not isinstance(payload, dict):
@@ -321,6 +335,7 @@ def load_run_config(paths: RunPaths) -> dict[str, Any]:
             "approval_mode": "manual",
             "review_operator": "claude",
             "review_model": "sonnet",
+            "codex_sandbox": DEFAULT_CODEX_SANDBOX,
         }
 
     model = payload.get("model")
@@ -335,6 +350,7 @@ def load_run_config(paths: RunPaths) -> dict[str, Any]:
     )
     review_model = payload.get("review_model")
     approval_mode = payload.get("approval_mode")
+    codex_sandbox = payload.get("codex_sandbox")
     config = {
         "model": model if isinstance(model, str) and model.strip() else "unknown",
         "operator": normalized_operator,
@@ -346,6 +362,7 @@ def load_run_config(paths: RunPaths) -> dict[str, Any]:
             if isinstance(review_model, str) and review_model.strip()
             else ("default" if normalized_review_operator == "codex" else "sonnet")
         ),
+        "codex_sandbox": normalize_codex_sandbox(codex_sandbox),
     }
     created_at = payload.get("created_at")
     if isinstance(created_at, str) and created_at.strip():
@@ -368,6 +385,7 @@ def save_run_config(paths: RunPaths, config: dict[str, Any]) -> None:
             config.get("review_model")
             or ("default" if normalized_review_operator == "codex" else "sonnet")
         ),
+        "codex_sandbox": normalize_codex_sandbox(config.get("codex_sandbox")),
     }
     created_at = config.get("created_at")
     if isinstance(created_at, str) and created_at.strip():
@@ -385,6 +403,7 @@ def ensure_run_config(
     approval_mode: str | None = None,
     review_operator: str | None = None,
     review_model: str | None = None,
+    codex_sandbox: str | None = None,
 ) -> dict[str, Any]:
     current = load_run_config(paths)
     effective_operator = operator or current.get("operator") or "claude"
@@ -398,6 +417,7 @@ def ensure_run_config(
         "review_model": review_model or current.get("review_model") or (
             "default" if effective_review_operator == "codex" else "sonnet"
         ),
+        "codex_sandbox": normalize_codex_sandbox(codex_sandbox or current.get("codex_sandbox")),
         "created_at": current.get("created_at") or datetime.now().isoformat(timespec="seconds"),
     }
     save_run_config(paths, updated)

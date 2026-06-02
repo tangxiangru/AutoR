@@ -8,7 +8,7 @@ from typing import TextIO
 
 from .operator import ClaudeOperator
 from .terminal_ui import TerminalUI
-from .utils import RunPaths, read_text
+from .utils import CODEX_SANDBOX_CHOICES, DEFAULT_CODEX_SANDBOX, RunPaths, read_text
 
 
 class CodexOperator(ClaudeOperator):
@@ -18,11 +18,18 @@ class CodexOperator(ClaudeOperator):
         self,
         command: str = "codex",
         model: str = "default",
+        codex_sandbox: str = DEFAULT_CODEX_SANDBOX,
         fake_mode: bool = False,
         output_stream: TextIO | None = None,
         ui: TerminalUI | None = None,
         stage_timeout: int = 14400,
     ) -> None:
+        normalized_sandbox = codex_sandbox.strip() if codex_sandbox.strip() else DEFAULT_CODEX_SANDBOX
+        if normalized_sandbox not in CODEX_SANDBOX_CHOICES:
+            raise ValueError(
+                "Unsupported Codex sandbox mode: "
+                f"{codex_sandbox}. Expected one of: {', '.join(sorted(CODEX_SANDBOX_CHOICES))}."
+            )
         super().__init__(
             command=command,
             model=model,
@@ -31,6 +38,7 @@ class CodexOperator(ClaudeOperator):
             ui=ui,
             stage_timeout=stage_timeout,
         )
+        self.codex_sandbox = normalized_sandbox
 
     def _prepare_invocation(
         self,
@@ -51,7 +59,7 @@ class CodexOperator(ClaudeOperator):
             "exec",
             "--json",
             "--sandbox",
-            "workspace-write",
+            self.codex_sandbox,
             "--skip-git-repo-check",
         ]
         if self.model and self.model != "default":

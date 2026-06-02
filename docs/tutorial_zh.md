@@ -57,6 +57,7 @@ AutoR 负责的是更上层的 research loop，而不是重新发明一个新的
 - `00_intake` 现在是专门的需求澄清阶段。第一轮会逐个问你澄清问题，每个问题可以选择模型给的选项、输入自定义回答，或者 skip；第二轮会展示更新后的 intake brief，不再把那 3 个问题当成普通 suggestion。
 - 终端 UI 更适合真实录屏和长 run：输出框正文行会保持彩色边框，长行、长路径和中文宽字符会自动换行，Stage 0 和审批菜单支持上下键选择。
 - Codex backend 已经改用当前 Codex CLI 的 `--sandbox workspace-write` 执行参数，不再触发 Codex CLI 内部旧 `--full-auto` 参数的 deprecated warning。注意这和 AutoR 自己的 `--full-auto` 审批模式不是一回事。
+- 如果你用 Codex 跑远程 SSH / GPU 实验，可以显式设置 `--codex-sandbox danger-full-access`。默认仍然是更安全的 `workspace-write`，不要把 unrestricted 模式当成默认选择。
 - `--full-auto` 仍然是 AutoR 的自动审批模式：它让一个严格 reviewer agent 替代人工等待，但不改变 9 个 stage 的主体流程。
 
 ---
@@ -376,6 +377,17 @@ python main.py \
   --model default \
   --goal "Study whether retrieval-augmented chain-of-thought improves factual QA under a fixed token budget, and produce a submission-style PDF."
 ```
+
+如果你的 Codex-backed run 需要通过 SSH 提交远程 GPU 任务，例如你已经手动验证过 `ssh gpu-server "hostname && nvidia-smi"` 可以正常执行，可以这样显式放开 Codex sandbox：
+
+```bash
+python main.py \
+  --operator codex \
+  --codex-sandbox danger-full-access \
+  --goal "Run the planned experiments on the remote GPU server and produce a submission-style PDF."
+```
+
+这个选项会给 Codex 后端不受 sandbox 限制的本地和远程执行能力。只在你信任当前任务、确认 SSH 命令安全、并且确实需要远程执行时使用。
 
 补充两条很有用的默认行为：
 
@@ -811,6 +823,7 @@ AutoR 的强项不是“第一轮就完美”，而是：
 | 新建一个 run | `python main.py --goal "你的研究目标"` |
 | 指定 Claude 作为执行层 | `python main.py --operator claude --model sonnet --goal "..."` |
 | 指定 Codex 作为执行层 | `python main.py --operator codex --model default --goal "..."` |
+| 允许 Codex 通过 SSH 跑远程 GPU | `python main.py --operator codex --codex-sandbox danger-full-access --goal "..."` |
 | 指定投稿 venue | `python main.py --venue neurips_2025 --goal "..."` |
 | 同时带资源启动 | `python main.py --goal "..." --resources paper.pdf refs.bib data.csv notes.md` |
 | 把大体积 run 放到其他磁盘 | `python main.py --runs-dir /path/to/runs --goal "..."` |

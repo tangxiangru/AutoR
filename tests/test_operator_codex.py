@@ -68,6 +68,29 @@ class CodexOperatorTests(unittest.TestCase):
         self.assertLess(command.index("--json"), command.index("resume"))
         self.assertEqual(command[-2:], ["thread-123", "-"])
 
+    def test_prepare_invocation_uses_configured_sandbox(self) -> None:
+        paths = self._build_paths()
+        prompt_path = paths.prompt_cache_dir / "01_literature_survey_attempt_01.prompt.md"
+        write_text(prompt_path, "Run remote experiment.\n")
+        operator = CodexOperator(
+            codex_sandbox="danger-full-access",
+            fake_mode=False,
+            output_stream=io.StringIO(),
+        )
+
+        command, _, _ = operator._prepare_invocation(
+            prompt_path,
+            "unused-session",
+            paths=paths,
+            resume=False,
+        )
+
+        self.assertEqual(command[command.index("--sandbox") + 1], "danger-full-access")
+
+    def test_invalid_sandbox_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            CodexOperator(codex_sandbox="network-magic", output_stream=io.StringIO())
+
 
 if __name__ == "__main__":
     unittest.main()

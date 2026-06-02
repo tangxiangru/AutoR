@@ -122,6 +122,8 @@ class CliSmokeTests(unittest.TestCase):
                     "--fake-operator",
                     "--operator",
                     "codex",
+                    "--codex-sandbox",
+                    "danger-full-access",
                     "--goal",
                     "CLI codex smoke goal",
                     "--runs-dir",
@@ -139,6 +141,7 @@ class CliSmokeTests(unittest.TestCase):
             config = load_run_config(build_run_paths(run_roots[0]))
             self.assertEqual(config["operator"], "codex")
             self.assertEqual(config["model"], "default")
+            self.assertEqual(config["codex_sandbox"], "danger-full-access")
 
     def test_cli_full_auto_persists_automated_approval_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

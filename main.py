@@ -12,6 +12,8 @@ from src.operator_codex import CodexOperator
 from src.operator_protocol import OperatorProtocol
 from src.terminal_ui import TerminalUI
 from src.utils import (
+    CODEX_SANDBOX_CHOICES,
+    DEFAULT_CODEX_SANDBOX,
     DEFAULT_VENUE,
     STAGES,
     StageSpec,
@@ -49,6 +51,15 @@ def parse_args() -> argparse.Namespace:
         "--operator",
         choices=["claude", "codex"],
         help="Execution backend. Defaults to 'claude' for new runs and preserves the existing backend when resuming.",
+    )
+    parser.add_argument(
+        "--codex-sandbox",
+        choices=sorted(CODEX_SANDBOX_CHOICES),
+        help=(
+            "Codex CLI sandbox mode for Codex-backed execution. Defaults to "
+            f"'{DEFAULT_CODEX_SANDBOX}' and is preserved when resuming. "
+            "Use 'danger-full-access' only when you intentionally need unrestricted local/SSH execution."
+        ),
     )
     parser.add_argument(
         "--approval-mode",
@@ -136,12 +147,19 @@ def create_operator(
     operator_name: str,
     *,
     model: str,
+    codex_sandbox: str,
     fake_mode: bool,
     ui: TerminalUI,
     stage_timeout: int,
 ) -> OperatorProtocol:
     if operator_name == "codex":
-        return CodexOperator(model=model, fake_mode=fake_mode, ui=ui, stage_timeout=stage_timeout)
+        return CodexOperator(
+            model=model,
+            codex_sandbox=codex_sandbox,
+            fake_mode=fake_mode,
+            ui=ui,
+            stage_timeout=stage_timeout,
+        )
     return ClaudeOperator(model=model, fake_mode=fake_mode, ui=ui, stage_timeout=stage_timeout)
 
 
@@ -256,6 +274,7 @@ def main() -> int:
             model = default_model_for_operator(operator_name)
         else:
             model = (existing_model if existing_model != "unknown" else None) or default_model_for_operator(operator_name)
+        codex_sandbox = args.codex_sandbox or existing_config.get("codex_sandbox") or DEFAULT_CODEX_SANDBOX
         approval_mode = "agent" if args.full_auto else (args.approval_mode or existing_config.get("approval_mode") or "manual")
         review_operator = (args.review_operator or existing_config.get("review_operator") or operator_name).strip().lower()
         existing_review_model = existing_config.get("review_model")
@@ -271,6 +290,7 @@ def main() -> int:
         operator = create_operator(
             operator_name,
             model=model,
+            codex_sandbox=codex_sandbox,
             fake_mode=args.fake_operator,
             ui=ui,
             stage_timeout=args.stage_timeout,
@@ -304,6 +324,7 @@ def main() -> int:
 
     operator_name = (args.operator or "claude").strip().lower()
     model = args.model or default_model_for_operator(operator_name)
+    codex_sandbox = args.codex_sandbox or DEFAULT_CODEX_SANDBOX
     approval_mode = "agent" if args.full_auto else (args.approval_mode or "manual")
     review_operator = (args.review_operator or operator_name).strip().lower()
     review_model = args.review_model or default_model_for_operator(review_operator)
@@ -311,6 +332,7 @@ def main() -> int:
     operator = create_operator(
         operator_name,
         model=model,
+        codex_sandbox=codex_sandbox,
         fake_mode=args.fake_operator,
         ui=ui,
         stage_timeout=args.stage_timeout,

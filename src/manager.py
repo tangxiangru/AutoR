@@ -202,6 +202,7 @@ class ResearchManager:
             approval_mode=self.approval_mode,
             review_operator=self.review_operator,
             review_model=self.review_model,
+            codex_sandbox=getattr(self.operator, "codex_sandbox", None),
         )
         ensure_run_manifest(paths)
         if not paths.user_input.exists():
@@ -301,6 +302,7 @@ class ResearchManager:
             approval_mode=self.approval_mode,
             review_operator=self.review_operator,
             review_model=self.review_model,
+            codex_sandbox=getattr(self.operator, "codex_sandbox", None),
         )
         initialize_run_manifest(paths)
         write_artifact_index(paths)
@@ -314,7 +316,8 @@ class ResearchManager:
                 f"Venue: {config['venue']}\n"
                 f"Approval mode: {config['approval_mode']}\n"
                 f"Review backend: {config['review_operator']}\n"
-                f"Review model: {config['review_model']}"
+                f"Review model: {config['review_model']}\n"
+                f"Codex sandbox: {config.get('codex_sandbox', 'workspace-write')}"
             ),
         )
         return paths

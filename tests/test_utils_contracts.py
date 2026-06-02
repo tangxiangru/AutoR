@@ -87,6 +87,23 @@ class UtilsContractTests(unittest.TestCase):
         self.assertEqual(config["review_operator"], "claude")
         self.assertEqual(config["review_model"], "opus")
 
+    def test_run_config_preserves_codex_sandbox(self) -> None:
+        paths = self._build_paths()
+
+        ensure_run_config(
+            paths,
+            model="default",
+            operator="codex",
+            venue="nature",
+            codex_sandbox="danger-full-access",
+        )
+        first = load_run_config(paths)
+        ensure_run_config(paths, model="default", operator="codex", venue="jmlr")
+        second = load_run_config(paths)
+
+        self.assertEqual(first["codex_sandbox"], "danger-full-access")
+        self.assertEqual(second["codex_sandbox"], "danger-full-access")
+
     def test_stage3_validation_requires_current_execution_data(self) -> None:
         paths = self._build_paths()
         stage = STAGES[2]
