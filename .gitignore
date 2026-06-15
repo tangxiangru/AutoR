@@ -4,6 +4,7 @@ __pycache__/
 runs/
 .tmp/
 AGENTS.md
+AGENTS.local/
 .codex
 .autor/
 configs/diagram_config.yaml
