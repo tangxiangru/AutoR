@@ -81,7 +81,8 @@ AutoR takes a different position: research is too important to hand over as a bl
 | Execution model | A coding agent as the execution layer, AutoR as the research control loop |
 | Control model | Human approval by default, with an optional strict reviewer-agent gate for unattended runs |
 | Research unit | A reproducible run under `runs/<run_id>/` |
-| Workflow shape | 9-stage workflow: optional intake plus eight formal research stages |
+| Workflow shape | Nine stages as a **directed graph** the run navigates; the linear sequence is one path through it |
+| Improvement | Drafts are measured and ratcheted, so a stage can only get better — and the score is blind to what the run concluded |
 | Quality bar | Artifact-backed outputs, not markdown-only summaries |
 | Recovery | Resume, redo-stage, rollback-stage, stage-local continuation |
 
@@ -90,6 +91,10 @@ AutoR takes a different position: research is too important to hand over as a bl
 | Layer | Highlight | What AutoR actually does |
 | --- | --- | --- |
 | Big idea | **Human-centered research execution** | AutoR is not an autonomous scientist. AI handles execution; humans retain approval and direction at every stage boundary. |
+| Big idea | **The stages are a graph, not a list** | Analysis that exposes a design flaw can send the run back to Stage 03 instead of writing up around it. AutoR computes which moves are open by checking artifacts on disk; the agent chooses among those and says why. [Details](docs/self-improvement.md) |
+| Big idea | **Improvement that is measured, not hoped for** | A refinement round is scored against a rigour rubric read off disk. The best-scoring draft is what gets promoted; a round that scores worse is reverted. A stage can only improve. |
+| Big idea | **Self-improvement that cannot p-hack** | The fitness function is blind to what the run concluded — a refuted hypothesis with clean evidence outscores a supported one resting on an assertion — and any round that moves a hypothesis verdict is rejected outright. |
+| Big idea | **The harness learns across runs** | An optional archive compares each graph edge against runs that reached the same node and did not take it, and reorders which move is preferred. It can never open a guarded edge. |
 | Big idea | **Research loop over agent loop** | The system manages stage progression, validation, repair, recovery, and human checkpoints above the lower-level agent execution loop. |
 | Big idea | **Every run is a reproducible research artifact** | Each run leaves behind prompts, logs, approved summaries, code, data, figures, writing sources, and packaged outputs under `runs/<run_id>/`. |
 | Big idea | **Verifiable outputs, not paper-shaped theater** | The workflow is judged by inspectable artifacts and human approval, not by whether a generated document merely looks polished. |
@@ -133,6 +138,7 @@ It is:
 
 Latest mainline updates:
 
+- **2026-08-06**: Added recursive self-improvement. The nine stages are now a **directed graph** the run navigates (`--stage-graph adaptive`), with the agent choosing the move out of each node among the ones AutoR's guards leave open (`--routing auto`). Stage drafts are scored against a rigour rubric read off disk and iterated under a champion ratchet, so a stage can only improve (`--evolve`); a round that scores worse is reverted, and a round that changes a hypothesis verdict is rejected outright. An optional cross-run archive learns which moves pay (`--archive`). All of it is off by default: a run that passes none of these flags walks 01 through 08 exactly as before, through the same engine. See [Recursive Self-Improvement](docs/self-improvement.md).
 - **2026-06-02**: Added a configurable Codex sandbox mode. Codex-backed runs still default to `workspace-write`, but users who intentionally need remote GPU or SSH execution can now opt into `--codex-sandbox danger-full-access`; the setting is persisted in `run_config.json` and preserved on resume.
 - **2026-05-10**: Refined the terminal-first run experience. Stage 00 now uses a dedicated clarification flow: the first intake pass asks the user questions one by one with selectable options, custom answers, and skip; the revised intake brief then uses a compact refine / approve / abort menu instead of showing the normal suggestion template. The terminal UI also keeps colored frames on wrapped body rows, handles long lines and wide characters more reliably, and the Codex backend now uses the current `--sandbox workspace-write` execution flag instead of the deprecated Codex CLI `--full-auto` flag.
 - **2026-04-20**: Added an optional `--full-auto` approval mode. The execution loop is unchanged, but the manual approval gate can now be replaced by a strict simulated reviewer agent backed by Claude or Codex, with reviewer settings persisted in `run_config.json`.
@@ -318,6 +324,21 @@ For Codex-backed runs, AutoR defaults to `--codex-sandbox workspace-write`. If a
 
 Valid stage identifiers include `03`, `3`, and `03_study_design`.
 
+```bash
+# Let the run navigate its own topology: backward moves enabled, agent routing.
+python main.py --goal "..." --stage-graph adaptive --routing auto
+
+# Measured self-improvement rounds inside each stage.
+python main.py --goal "..." --evolve --evolve-rounds 3
+
+# Everything, plus a cross-run archive that learns which moves pay.
+python main.py --goal "..." --stage-graph adaptive --routing auto \
+               --evolve --archive ~/.autor/archive
+
+# What the archive has learned so far.
+python main.py --archive ~/.autor/archive --archive-report
+```
+
 ### Studio (browser UI)
 
 AutoR Studio is a local web UI that drives the same real Claude-backed pipeline through a browser instead of a terminal. Human-in-the-loop approval, feedback, stage re-runs, live session traces, and the compiled paper all live in one page.
@@ -432,6 +453,64 @@ flowchart TD
     H8 -- Approve --> Z[Run complete]
     H8 -- Abort --> X
 ```
+
+### The Stage Graph
+
+The nine stages are nodes in a directed graph. The default topology has one edge
+out of each node, which is the sequence above. `--stage-graph adaptive` adds the
+backward moves, and the run chooses.
+
+```mermaid
+flowchart LR
+    S1[01 Literature] --> S2[02 Hypotheses]
+    S2 --> S3[03 Design]
+    S3 --> S4[04 Implementation]
+    S4 --> S5[05 Experiments]
+    S5 --> S6[06 Analysis]
+    S6 -->|guard: every hypothesis adjudicated| S7[07 Writing]
+    S7 --> S8[08 Dissemination]
+    S8 --> Z([finish])
+
+    S4 -.->|not executable as specified| S3
+    S5 -.->|comparison cannot distinguish| S3
+    S5 -.->|implementation is at fault| S4
+    S6 -.->|results insufficient to decide| S5
+    S6 -.->|confound the results cannot repair| S3
+    S6 -.->|evidence refutes, and points somewhere| S2
+    S7 -.->|claim has no analysis behind it| S6
+    S7 -.->|needs a result never produced| S5
+    S8 -.->|deliverable is not what a reader needs| S7
+```
+
+Solid edges advance, dotted edges go back. The move into Stage 07 is guarded: the
+hypotheses have to be frozen and every one of them adjudicated before anything can
+be written up. That check is over artifacts on disk, so it is not something an
+agent can argue its way past — a gated edge is simply not on the menu it chooses
+from.
+
+A refusal or a routing failure falls back to the forward edge, so the worst case
+is the linear pipeline rather than a stall. Two budgets bound the walk:
+`--graph-max-visits` per stage and `--graph-max-steps` overall.
+
+### Self-Improvement Rounds
+
+With `--evolve`, a stage that produces a valid draft is measured against a rigour
+rubric read off disk — do the paths it names resolve, do the numbers it reports
+appear in a results file, did it produce artifacts during *this* execution, is the
+decision ledger four different things. AutoR then spends further rounds targeting
+the criteria that lost points.
+
+The best-scoring draft is what gets promoted. A round that scores worse is
+reverted, so a stage can only improve. A round that changes a hypothesis verdict
+is rejected outright, whatever it scored — the rubric is blind to what the run
+concluded, which removes the incentive, and the drift check removes the
+possibility.
+
+A revision a *human* asked for always stands. The ratchet governs AutoR's own
+rounds, not the direction it is given.
+
+Full mechanism, and the reasoning behind each refusal, in
+[docs/self-improvement.md](docs/self-improvement.md).
 
 ### Stage Attempt Loop
 
@@ -754,6 +833,11 @@ A run with only markdown notes does not pass validation.
 
 - optional intake stage and resource ingestion
 - 9-stage workflow: optional intake plus eight formal research stages
+- the stages as a navigable directed graph, with guarded backward moves
+- agent-chosen routing constrained to the moves the guards leave open
+- measured self-improvement rounds under a champion ratchet
+- an outcome-blind rigour rubric, and verdict-drift rejection
+- an optional cross-run archive of topology variants and edge payoffs
 - mandatory human approval after every stage
 - Claude Code or Codex as the execution layer
 - Stage 00 clarification Q&A plus a compact intake approval flow
@@ -796,6 +880,7 @@ The [docs/](docs/) directory is the reference documentation. This README is the 
 | [Run Artifacts](docs/run-artifacts.md) | The run directory, file by file, and the schema of every machine-readable artifact. |
 | [Stage Contract](docs/stage-contract.md) | Exactly what a stage must produce to be accepted, as the code enforces it. |
 | [Studio Guide & API](docs/studio.md) | The browser workspace and its complete HTTP API. |
+| [Recursive Self-Improvement](docs/self-improvement.md) | The stage graph, routing, the rigour rubric and the champion ratchet, the cross-run archive — and the constraint that keeps a scored loop from becoming an automated p-hacker. |
 | [ResearchClawBench](docs/researchclawbench.md) | Running with no human in the loop: unattended execution, the benchmark adapter and its output contract, and Gemini-backed web search. |
 | [ResearchClawBench Landscape](docs/researchclawbench-landscape.md) | How EvoScientist, ARIS Codex and MIRA actually score on the benchmark, which reported numbers reproduce, and the baseline any result must be quoted against. |
 
@@ -830,6 +915,7 @@ The most valuable next steps are the ones that make AutoR more like a real resea
 
 Implemented milestone:
 
+- ~~Recursive self-improvement.~~ The stages are a directed graph the run navigates, stage drafts are measured and ratcheted so a stage can only improve, and an optional archive learns which moves pay across runs. Implemented in `src/stage_graph.py`, `src/router.py`, `src/rubric.py`, `src/evolution.py`, `src/pareto.py` and `src/archive.py`; see [docs/self-improvement.md](docs/self-improvement.md).
 - ~~Stage-local continuation sessions.~~ Keep one Claude conversation per stage, reuse it for `1/2/3/4` refinement, and fall back to a fresh session only when resume fails. This is now implemented in the operator and manager flow.
 - ~~Artifact-level validation for non-toy outputs.~~ Enforce machine-readable data, result files, figures, LaTeX sources, PDF output, and review artifacts at the right stages. This is now part of the workflow validation path.
 

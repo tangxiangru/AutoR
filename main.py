@@ -16,6 +16,9 @@ from src.web_search import (
     resolve_web_search_context,
     web_search_notice,
 )
+from src.archive import Archive, resolve_graph
+from src.evolution import DEFAULT_ROUNDS, EvolutionConfig
+from src.stage_graph import DEFAULT_MAX_STEPS, DEFAULT_MAX_VISITS
 from src.utils import (
     CODEX_SANDBOX_CHOICES,
     DEFAULT_CODEX_SANDBOX,
@@ -23,6 +26,9 @@ from src.utils import (
     DEFAULT_VENUE,
     OUTPUT_FORMAT_CLI_CHOICES,
     MAX_STAGE_ATTEMPTS,
+    normalize_walk_settings,
+    ROUTING_MODE_CHOICES,
+    STAGE_GRAPH_CHOICES,
     STAGES,
     build_run_paths,
     load_run_config,
@@ -202,12 +208,133 @@ def parse_args() -> argparse.Namespace:
              "AutoR will analyze them to build a researcher profile that seeds downstream stages.",
     )
     parser.add_argument(
+        "--stage-graph",
+        choices=list(STAGE_GRAPH_CHOICES),
+        help=(
+            "How the run moves between stages. 'linear' (the default) runs 01 through 08 in "
+            "order, which is one edge out of every node. 'adaptive' adds the backward moves: "
+            "an analysis that exposes a design flaw can send the run back to Stage 03 instead "
+            "of writing up around it. Preserved when resuming."
+        ),
+    )
+    parser.add_argument(
+        "--routing",
+        choices=list(ROUTING_MODE_CHOICES),
+        help=(
+            "Who chooses the move out of a completed stage. 'off' (the default) always takes "
+            "the graph's default edge. 'auto' asks the backend wherever more than one move is "
+            "available, which on a linear graph is never. 'agent' asks at every node. AutoR "
+            "decides which moves are available by evaluating each edge's guard against the "
+            "artifacts on disk; the backend only chooses among those. Preserved when resuming."
+        ),
+    )
+    parser.add_argument(
+        "--graph-max-steps",
+        type=int,
+        help=(
+            f"Stage executions allowed in one graph walk before the run stops. Defaults to "
+            f"{DEFAULT_MAX_STEPS}. Only bites in adaptive mode; a linear walk cannot exceed "
+            "eight."
+        ),
+    )
+    parser.add_argument(
+        "--graph-max-visits",
+        type=int,
+        help=(
+            f"Times one stage may be entered. Defaults to {DEFAULT_MAX_VISITS}. A revisit is a "
+            "productive move; the fourth entry into the same stage is a loop."
+        ),
+    )
+    parser.add_argument(
+        "--evolve",
+        action="store_true",
+        help=(
+            "Turn on self-improvement rounds. After a stage produces a valid draft, AutoR scores "
+            "it against a rigour rubric read off disk, then spends up to --evolve-rounds further "
+            "rounds targeting the criteria that lost points. The best-scoring draft is what gets "
+            "promoted, and a round that scores worse is reverted, so a stage can only improve. "
+            "The score is blind to what the run concluded, and a round that changes a hypothesis "
+            "verdict is rejected outright."
+        ),
+    )
+    parser.add_argument(
+        "--evolve-rounds",
+        type=int,
+        help=(
+            f"Self-improvement rounds per stage. Implies --evolve when above zero. Defaults to "
+            f"{DEFAULT_ROUNDS} with --evolve. These rounds are budgeted separately from "
+            "--max-attempts, which bounds a stage that is failing rather than one being improved."
+        ),
+    )
+    parser.add_argument(
+        "--evolve-stages",
+        nargs="+",
+        metavar="STAGE",
+        help=(
+            "Restrict self-improvement to these stage slugs or numbers (for example '06_analysis' "
+            "or '5 6 7'). Defaults to every stage."
+        ),
+    )
+    parser.add_argument(
+        "--archive",
+        metavar="PATH",
+        help=(
+            "Directory holding the cross-run topology archive. When set, AutoR records this "
+            "run's route and measured fitness there, compares each graph edge against runs that "
+            "reached the same node and did not take it, and samples the topology it runs from "
+            "what the archive has learned. Requires --evolve, which is what produces the "
+            "fitness. A learned prior only reorders which move is preferred; it can never open "
+            "a guarded edge."
+        ),
+    )
+    parser.add_argument(
+        "--archive-report",
+        action="store_true",
+        help="Print what the archive at --archive has learned so far, and exit.",
+    )
+    parser.add_argument(
         "--stage-timeout",
         type=int,
         default=14400,
         help="Maximum seconds per stage attempt before timeout. Defaults to 14400 (4 hours).",
     )
     return parser.parse_args()
+
+
+def resolve_walk_settings(args: argparse.Namespace, existing: dict | None = None) -> dict:
+    """CLI flags over the resumed run's settings over the defaults.
+
+    A flag that was not passed must not overwrite what the run was started with,
+    which is why every one of these is checked for presence rather than read for
+    its value: `--stage-graph` defaults to None here, not to "linear", so resuming
+    an adaptive run without repeating the flag keeps it adaptive.
+    """
+    current = dict(existing or {})
+    if args.stage_graph:
+        current["stage_graph"] = args.stage_graph
+    if args.routing:
+        current["routing_mode"] = args.routing
+    if args.evolve_rounds is not None:
+        current["evolve_rounds"] = max(0, args.evolve_rounds)
+    elif args.evolve and not current.get("evolve_rounds"):
+        current["evolve_rounds"] = DEFAULT_ROUNDS
+    return normalize_walk_settings(current)
+
+
+def build_evolution_config(walk: dict, args: argparse.Namespace) -> EvolutionConfig:
+    rounds = int(walk["evolve_rounds"])
+    stages: tuple[str, ...] = ()
+    if args.evolve_stages:
+        resolved = [resolve_stage(value) for value in args.evolve_stages]
+        unknown = [
+            value for value, stage in zip(args.evolve_stages, resolved) if stage is None
+        ]
+        if unknown:
+            raise ValueError(
+                "--evolve-stages does not recognise: " + ", ".join(unknown)
+            )
+        stages = tuple(stage.slug for stage in resolved if stage is not None)
+    return EvolutionConfig(enabled=rounds > 0, rounds=rounds or DEFAULT_ROUNDS, stages=stages)
 
 
 def default_model_for_operator(operator_name: str) -> str:
@@ -336,12 +463,61 @@ def _build_resource_entries(paths: list[str]) -> list[ResourceEntry]:
     return entries
 
 
+def open_archive(args: argparse.Namespace) -> Archive | None:
+    return Archive(Path(args.archive).expanduser().resolve()) if args.archive else None
+
+
+def record_into_archive(
+    archive: Archive | None,
+    manager: ResearchManager,
+    variant_id: str,
+    ui: TerminalUI,
+) -> None:
+    """Fold a finished run into the archive, and let it propose and promote.
+
+    Recording is best-effort on purpose. An archive is a research aid; a failure to
+    write one must not turn a completed run into a failed command, because the run
+    already produced everything the operator asked for.
+    """
+    if archive is None or manager.last_run_paths is None:
+        return
+    try:
+        record = archive.record_run(manager.last_run_paths, variant_id=variant_id)
+        if record is None:
+            ui.show_status(
+                "Nothing was recorded in the archive: this run has no measured stages. "
+                "Pass --evolve so stages are scored.",
+                level="warn",
+            )
+            return
+        ui.show_status(
+            f"Archived {record.run_id} under variant `{variant_id}` "
+            f"(mean fitness {record.mean_fitness:.3f}, route: {record.route or 'n/a'}).",
+            level="info",
+        )
+        if archive.promote(variant_id):
+            ui.show_status(f"Variant `{variant_id}` has replayed its improvement and is promoted.", level="success")
+        proposal = archive.propose_variant()
+        if proposal is not None:
+            ui.show_status(f"Archive proposed `{proposal.variant_id}`: {proposal.note}", level="info")
+    except OSError as exc:
+        ui.show_status(f"Could not update the archive: {exc}", level="warn")
+
+
 def main() -> int:
     args = parse_args()
     repo_root = Path(__file__).resolve().parent
     runs_dir = repo_root / args.runs_dir
     unattended = resolve_unattended(args)
     ui = TerminalUI(interactive=not unattended)
+
+    if args.archive_report:
+        archive = open_archive(args)
+        if archive is None:
+            raise ValueError("--archive-report needs --archive PATH to say which archive to read.")
+        print(archive.report())
+        return 0
+
     ui.show_banner()
 
     # Assessed against the operator this run will actually use, because the sandbox the
@@ -402,6 +578,9 @@ def main() -> int:
             ) or default_model_for_operator(review_operator)
         venue = resolve_venue_key(args.venue or existing_config["venue"])
         output_format = resolve_output_format(args.output_format or existing_config.get("output_format"))
+        walk = resolve_walk_settings(args, existing_config)
+        archive = open_archive(args)
+        graph, variant_id = resolve_graph(archive, walk["stage_graph"])
         operator = create_operator(
             operator_name,
             model=model,
@@ -432,8 +611,13 @@ def main() -> int:
             max_auto_skips=args.max_auto_skips,
             max_stage_attempts=args.max_attempts,
             web_search_context=web_search_context,
+            stage_graph=graph,
+            routing_mode=walk["routing_mode"],
+            evolution=build_evolution_config(walk, args),
+            graph_max_steps=args.graph_max_steps,
+            graph_max_visits=args.graph_max_visits,
         )
-        return 0 if manager.resume_run(
+        completed = manager.resume_run(
             run_root,
             start_stage=start_stage or rollback_stage,
             venue=venue,
@@ -441,7 +625,9 @@ def main() -> int:
             research_diagram=args.research_diagram,
             output_format=output_format,
             final_stage=final_stage,
-        ) else 1
+        )
+        record_into_archive(archive, manager, variant_id, ui)
+        return 0 if completed else 1
 
     operator_name = (args.operator or "claude").strip().lower()
     model = args.model or default_model_for_operator(operator_name)
@@ -452,6 +638,9 @@ def main() -> int:
     venue = resolve_venue_key(args.venue or DEFAULT_VENUE)
     output_format = resolve_output_format(args.output_format or DEFAULT_OUTPUT_FORMAT)
     final_stage = resolve_stage(args.final_stage)
+    walk = resolve_walk_settings(args)
+    archive = open_archive(args)
+    graph, variant_id = resolve_graph(archive, walk["stage_graph"])
     operator = create_operator(
         operator_name,
         model=model,
@@ -482,6 +671,11 @@ def main() -> int:
         max_auto_skips=args.max_auto_skips,
         max_stage_attempts=args.max_attempts,
         web_search_context=web_search_context,
+        stage_graph=graph,
+        routing_mode=walk["routing_mode"],
+        evolution=build_evolution_config(walk, args),
+        graph_max_steps=args.graph_max_steps,
+        graph_max_visits=args.graph_max_visits,
     )
 
     goal = resolve_goal(args, unattended=unattended)
@@ -499,7 +693,7 @@ def main() -> int:
     project_root_arg = Path(args.project_root).expanduser().resolve() if args.project_root else None
     paper_corpus = Path(args.paper_corpus).expanduser().resolve() if args.paper_corpus else None
 
-    return 0 if manager.run(
+    completed = manager.run(
         goal,
         venue=venue,
         resources=resources or None,
@@ -509,7 +703,9 @@ def main() -> int:
         paper_corpus=paper_corpus,
         output_format=output_format,
         final_stage=final_stage,
-    ) else 1
+    )
+    record_into_archive(archive, manager, variant_id, ui)
+    return 0 if completed else 1
 
 
 if __name__ == "__main__":

@@ -42,6 +42,51 @@ DECISION_TO_CHOICE = {
 }
 
 
+def _try_load_json(text: str) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def extract_json_payload(raw_response: str) -> dict[str, Any] | None:
+    """Recover a JSON object from whatever a backend actually printed.
+
+    Shared with :mod:`src.router`, which asks a backend for a decision on the same
+    terms. Two copies of this would drift on the day one backend starts wrapping
+    its output differently, and the copy that was not updated would silently fall
+    back to its refusal path instead of reading a decision that was right there.
+    """
+    candidate = raw_response.strip()
+    if not candidate:
+        return None
+
+    direct = _try_load_json(candidate)
+    if direct is not None:
+        return direct
+
+    fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", candidate, flags=re.DOTALL)
+    if fence_match:
+        fenced = _try_load_json(fence_match.group(1))
+        if fenced is not None:
+            return fenced
+
+    brace_match = re.search(r"(\{.*\})", candidate, flags=re.DOTALL)
+    if brace_match:
+        extracted = _try_load_json(brace_match.group(1))
+        if extracted is not None:
+            return extracted
+
+    fragments = extract_stream_text_fragments(candidate)
+    for fragment in reversed(fragments):
+        extracted = _try_load_json(fragment)
+        if extracted is not None:
+            return extracted
+
+    return None
+
+
 @dataclass(frozen=True)
 class ReviewDecision:
     choice: str
@@ -264,40 +309,10 @@ class AutomatedReviewer:
         )
 
     def _extract_json_payload(self, raw_response: str) -> dict[str, Any] | None:
-        candidate = raw_response.strip()
-        if not candidate:
-            return None
-
-        direct = self._try_load_json(candidate)
-        if direct is not None:
-            return direct
-
-        fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", candidate, flags=re.DOTALL)
-        if fence_match:
-            fenced = self._try_load_json(fence_match.group(1))
-            if fenced is not None:
-                return fenced
-
-        brace_match = re.search(r"(\{.*\})", candidate, flags=re.DOTALL)
-        if brace_match:
-            extracted = self._try_load_json(brace_match.group(1))
-            if extracted is not None:
-                return extracted
-
-        fragments = extract_stream_text_fragments(candidate)
-        for fragment in reversed(fragments):
-            extracted = self._try_load_json(fragment)
-            if extracted is not None:
-                return extracted
-
-        return None
+        return extract_json_payload(raw_response)
 
     def _try_load_json(self, text: str) -> dict[str, Any] | None:
-        try:
-            payload = json.loads(text)
-        except json.JSONDecodeError:
-            return None
-        return payload if isinstance(payload, dict) else None
+        return _try_load_json(text)
 
     def _normalize_decision_token(self, value: Any) -> str:
         if not isinstance(value, str):
