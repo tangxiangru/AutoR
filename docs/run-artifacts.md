@@ -597,6 +597,14 @@ indistinguishable in the run directory from one nobody raised.
 A reviewer that crashed records `reviewer_failed: true`. An empty finding list
 from a failed critique would read as "nothing wrong".
 
+**When `--review-panel` is on**, the panel's own Methodologist and Reviewer 2
+already cover these categories, so no second critic runs: the concerns still
+standing after the panel's final round *become* the findings, and the next stage
+owes them the same answer. A concern a member withdrew during deliberation was
+answered inside the panel and is not re-raised. What this adds on top of the
+panel is the part the panel does not have — an obligation on the **next** stage,
+in its own artifacts, rather than a decision at this one's gate.
+
 Validated by `validate_validity_response` in
 [`src/validity_review.py`](../src/validity_review.py).
 

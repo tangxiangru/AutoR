@@ -248,6 +248,62 @@ def format_findings_for_prompt(paths: RunPaths, stage: StageSpec) -> str:
     return "\n".join(lines)
 
 
+def findings_from_panel(paths: RunPaths, stage: StageSpec) -> list[ValidityFinding]:
+    """Convert a review panel's surviving concerns into answerable findings.
+
+    The panel (:mod:`src.review_panel`) already fields a Methodologist and a
+    Reviewer 2 whose mandates overlap this module's categories, so running a
+    separate critic on top of it would ask the same questions twice and pay for
+    both. When a panel deliberated over this stage, its concerns *are* the
+    findings — what this module adds is the part the panel does not have: an
+    obligation on the **next** stage to answer them.
+
+    Only the final round counts. A concern that a member withdrew during
+    deliberation was answered inside the panel, and re-raising it would punish
+    the deliberation for working.
+    """
+    panel_dir = paths.reviews_dir / "panel"
+    if not panel_dir.is_dir():
+        return []
+
+    latest = None
+    for candidate in sorted(panel_dir.glob(f"{stage.slug}*.json")):
+        payload = _load_json(candidate)
+        if isinstance(payload, dict) and payload.get("stage") == stage.slug:
+            latest = payload
+    if latest is None:
+        return []
+
+    rounds = latest.get("rounds")
+    if not isinstance(rounds, list) or not rounds:
+        return []
+    final_round = rounds[-1]
+    if not isinstance(final_round, list):
+        return []
+
+    findings: list[ValidityFinding] = []
+    for verdict in final_round:
+        if not isinstance(verdict, dict) or verdict.get("failed"):
+            continue
+        role = str(verdict.get("title") or verdict.get("role") or "panel member").strip()
+        blocking = bool(verdict.get("blocking"))
+        for concern in verdict.get("concerns", []):
+            text = str(concern).strip()
+            if not text:
+                continue
+            findings.append(
+                ValidityFinding(
+                    identifier=f"V{len(findings) + 1}",
+                    category="overclaim",
+                    severity="critical" if blocking else "major",
+                    finding=text,
+                    why_it_matters=f"Raised by the {role} and still standing after deliberation.",
+                    what_would_settle_it=str(verdict.get("feedback") or "").strip(),
+                )
+            )
+    return findings
+
+
 class ValidityReviewer:
     """Runs the red-team pass. Shares the operator machinery with the approval gate."""
 
@@ -262,6 +318,16 @@ class ValidityReviewer:
     def review(self, *, paths: RunPaths, stage: StageSpec, stage_markdown: str) -> list[ValidityFinding]:
         if stage.number not in REVIEWED_STAGE_NUMBERS:
             return []
+
+        # If a panel already deliberated over this stage, its surviving concerns
+        # are the findings. Running a second critic would ask the Methodologist's
+        # questions twice and pay for both.
+        from_panel = findings_from_panel(paths, stage)
+        if from_panel:
+            self._write_review(
+                paths, stage, from_panel, note="carried from the review panel's final round"
+            )
+            return from_panel
 
         if self.fake_mode:
             findings = [

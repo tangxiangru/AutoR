@@ -288,3 +288,77 @@ class ReviewerFailureTest(ValidityTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PanelBridgeTest(ValidityTestCase):
+    """When a review panel deliberated, its concerns are the findings.
+
+    The panel already fields a Methodologist and a Reviewer 2 whose mandates
+    cover these categories. Running a second critic on top would ask the same
+    questions twice; what this module adds on top of the panel is the
+    obligation on the *next* stage to answer what survived.
+    """
+
+    def _panel_file(self, *rounds: list[dict]) -> None:
+        panel_dir = self.paths.reviews_dir / "panel"
+        panel_dir.mkdir(parents=True, exist_ok=True)
+        write_text(
+            panel_dir / f"{STAGE_05.slug}_attempt_01.json",
+            json.dumps({"stage": STAGE_05.slug, "rounds": [list(group) for group in rounds]}),
+        )
+
+    def _verdict(self, *concerns: str, blocking: bool = False, failed: bool = False) -> dict:
+        return {
+            "role": "method",
+            "title": "Methodologist",
+            "blocking": blocking,
+            "failed": failed,
+            "feedback": "Re-tune both conditions on a development split.",
+            "concerns": list(concerns),
+        }
+
+    def test_surviving_concerns_become_findings(self) -> None:
+        self._panel_file([self._verdict("Both arms were tuned on the reporting split.", blocking=True)])
+        reviewer = ValidityReviewer(_FakeOperator())
+
+        findings = reviewer.review(paths=self.paths, stage=STAGE_05, stage_markdown="# Stage 05")
+
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].severity, "critical")
+        self.assertIn("Methodologist", findings[0].why_it_matters)
+
+    def test_a_nonblocking_concern_is_major_rather_than_critical(self) -> None:
+        self._panel_file([self._verdict("Only three seeds were run.")])
+        reviewer = ValidityReviewer(_FakeOperator())
+        findings = reviewer.review(paths=self.paths, stage=STAGE_05, stage_markdown="x")
+        self.assertEqual(findings[0].severity, "major")
+
+    def test_only_the_final_round_counts(self) -> None:
+        """A concern withdrawn during deliberation was answered inside the panel."""
+        self._panel_file(
+            [self._verdict("Withdrawn after round one.")],
+            [self._verdict("Still standing.")],
+        )
+        reviewer = ValidityReviewer(_FakeOperator())
+        findings = reviewer.review(paths=self.paths, stage=STAGE_05, stage_markdown="x")
+        self.assertEqual([item.finding for item in findings], ["Still standing."])
+
+    def test_a_failed_panel_member_contributes_nothing(self) -> None:
+        self._panel_file([self._verdict("Never actually produced.", failed=True)])
+        reviewer = ValidityReviewer(_FakeOperator())
+        findings = reviewer.review(paths=self.paths, stage=STAGE_05, stage_markdown="x")
+        # Falls through to the standalone critic rather than reporting a clean panel.
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].category, "insufficient_replication")
+
+    def test_with_no_panel_the_standalone_critic_runs(self) -> None:
+        reviewer = ValidityReviewer(_FakeOperator())
+        findings = reviewer.review(paths=self.paths, stage=STAGE_05, stage_markdown="x")
+        self.assertEqual(findings[0].category, "insufficient_replication")
+
+    def test_panel_findings_are_owed_the_same_answer(self) -> None:
+        self._panel_file([self._verdict("Both arms were tuned on the reporting split.", blocking=True)])
+        ValidityReviewer(_FakeOperator()).review(paths=self.paths, stage=STAGE_05, stage_markdown="x")
+
+        problems = validate_stage_artifacts(STAGE_06, self.paths)
+        self.assertTrue(any("validity_response" in problem for problem in problems), problems)
