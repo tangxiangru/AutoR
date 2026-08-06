@@ -15,11 +15,14 @@ from src.web_search import resolve_web_search_context, web_search_notice
 from src.utils import (
     CODEX_SANDBOX_CHOICES,
     DEFAULT_CODEX_SANDBOX,
+    DEFAULT_OUTPUT_FORMAT,
     DEFAULT_VENUE,
+    OUTPUT_FORMAT_CLI_CHOICES,
     STAGES,
     StageSpec,
     build_run_paths,
     load_run_config,
+    resolve_output_format,
     resolve_venue_key,
 )
 
@@ -115,6 +118,19 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--output-format",
+        choices=list(OUTPUT_FORMAT_CLI_CHOICES),
+        help=(
+            "Final deliverable produced by Stage 07. 'markdown' (the default) writes a "
+            "standalone report to workspace/report/report.md with PNG figures under "
+            "workspace/report/images/, which is what automated research benchmarks such as "
+            "ResearchClawBench score. 'latex' keeps the submission-oriented paper package: "
+            "main.tex, sections/*.tex, a bibliography, and a compiled PDF. "
+            f"Defaults to '{DEFAULT_OUTPUT_FORMAT}' for new runs and preserves the existing "
+            "run setting when resuming."
+        ),
+    )
+    parser.add_argument(
         "--venue",
         help=(
             "Target venue profile for Stage 07 writing. "
@@ -150,7 +166,8 @@ def parse_args() -> argparse.Namespace:
         "--research-diagram",
         action="store_true",
         help="After the writing stage, generate a method illustration diagram using "
-             "the Gemini API and insert it into the LaTeX paper.",
+             "the Gemini API and insert it into the report (report.md in markdown mode, "
+             "method.tex in latex mode).",
     )
     parser.add_argument(
         "--project-root",
@@ -358,6 +375,7 @@ def main() -> int:
                 existing_review_model if existing_review_model != "unknown" else None
             ) or default_model_for_operator(review_operator)
         venue = resolve_venue_key(args.venue or existing_config["venue"])
+        output_format = resolve_output_format(args.output_format or existing_config.get("output_format"))
         operator = create_operator(
             operator_name,
             model=model,
@@ -394,6 +412,7 @@ def main() -> int:
             venue=venue,
             rollback_stage=rollback_stage,
             research_diagram=args.research_diagram,
+            output_format=output_format,
         ) else 1
 
     operator_name = (args.operator or "claude").strip().lower()
@@ -403,6 +422,7 @@ def main() -> int:
     review_operator = (args.review_operator or operator_name).strip().lower()
     review_model = args.review_model or default_model_for_operator(review_operator)
     venue = resolve_venue_key(args.venue or DEFAULT_VENUE)
+    output_format = resolve_output_format(args.output_format or DEFAULT_OUTPUT_FORMAT)
     operator = create_operator(
         operator_name,
         model=model,
@@ -457,6 +477,7 @@ def main() -> int:
         research_diagram=args.research_diagram,
         project_root=project_root_arg,
         paper_corpus=paper_corpus,
+        output_format=output_format,
     ) else 1
 
 

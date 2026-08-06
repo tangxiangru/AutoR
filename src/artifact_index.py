@@ -150,6 +150,10 @@ def _scan_artifacts(paths: RunPaths) -> list[ArtifactRecord]:
         ("data", paths.data_dir, MACHINE_DATA_SUFFIXES),
         ("results", paths.results_dir, RESULT_SUFFIXES),
         ("figures", paths.figures_dir, FIGURE_SUFFIXES),
+        # In markdown mode the report's own figures live beside it rather than in
+        # workspace/figures, and the writing manifest is built from this index — leaving them
+        # out would show Stage 07 an empty figure inventory for the figures it just made.
+        ("figures", paths.report_images_dir, FIGURE_SUFFIXES),
     ):
         if not directory.exists():
             continue

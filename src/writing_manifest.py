@@ -6,12 +6,22 @@ from pathlib import Path
 import re
 
 from .artifact_index import indexed_artifacts_for_category, write_artifact_index
-from .utils import RunPaths, read_text
+from .utils import (
+    MIN_REPORT_CHARS,
+    PREFERRED_REPORT_IMAGE_SUFFIX,
+    RENDERABLE_IMAGE_SUFFIXES,
+    RunPaths,
+    extract_markdown_image_targets,
+    read_text,
+    resolve_report_image,
+    selected_output_format,
+)
 
 
 FIGURE_SUFFIXES = {".png", ".pdf", ".svg", ".jpg", ".jpeg", ".eps"}
 RESULT_SUFFIXES = {".json", ".jsonl", ".csv", ".tsv", ".parquet", ".npz", ".npy"}
 _LATEX_WARNING_SAMPLE_LIMIT = 5
+_REPORT_ISSUE_SAMPLE_LIMIT = 5
 
 
 def build_writing_manifest(paths: RunPaths) -> dict[str, object]:
@@ -24,9 +34,14 @@ def build_writing_manifest(paths: RunPaths) -> dict[str, object]:
         "data_files": indexed_artifacts_for_category(artifact_index, "data"),
         "stage_summaries": _collect_stage_summaries(paths),
     }
-    layout_review = _load_layout_review_summary(paths)
-    if layout_review is not None:
-        manifest["layout_review"] = layout_review
+    if selected_output_format(paths) == "markdown":
+        report_review = _load_review_summary(paths, "report_review.json")
+        if report_review is not None:
+            manifest["report_review"] = report_review
+    else:
+        layout_review = _load_review_summary(paths, "layout_review.json")
+        if layout_review is not None:
+            manifest["layout_review"] = layout_review
 
     paths.writing_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = paths.writing_dir / "manifest.json"
@@ -77,9 +92,9 @@ def format_manifest_for_prompt(manifest: dict[str, object]) -> str:
     if isinstance(artifact_index_path, str) and artifact_index_path.strip():
         parts.append(f"Artifact index: `{artifact_index_path}`")
 
-    layout_review = manifest.get("layout_review")
+    layout_review = manifest.get("report_review") or manifest.get("layout_review")
     if isinstance(layout_review, dict):
-        parts.append("\n### Layout Review")
+        parts.append("\n### Report Review" if "report_review" in manifest else "\n### Layout Review")
         review_path = str(layout_review.get("path") or "").strip()
         if review_path:
             parts.append(f"- Layout review artifact: `{review_path}`")
@@ -270,6 +285,225 @@ def generate_layout_review(paths: RunPaths) -> dict[str, object]:
     return review
 
 
+def generate_report_review(paths: RunPaths) -> dict[str, object]:
+    """Audit the markdown deliverable the way the benchmark judge will consume it.
+
+    The judge reads ``report/report.md`` as text and attaches image files it finds on disk.
+    Nothing in that path renders markdown, so the failure modes are not typographic like
+    LaTeX's: they are a figure reference that points at nothing, a path that only resolves on
+    the machine that wrote it, and a format the viewer cannot decode. This mirrors
+    :func:`generate_layout_review`'s contract so the stage prompt can carry either one.
+    """
+    report_path = paths.report_file
+    report_exists = report_path.exists()
+    report_text = read_text(report_path) if report_exists else ""
+
+    targets = extract_markdown_image_targets(report_text)
+    broken: list[str] = []
+    non_relative: list[str] = []
+    unrenderable: list[str] = []
+    non_preferred: list[str] = []
+    resolved_names: set[str] = set()
+
+    for target in targets:
+        resolved = resolve_report_image(paths.report_dir, target)
+        if resolved is None:
+            non_relative.append(target)
+            continue
+        if not resolved.exists():
+            broken.append(target)
+            continue
+        suffix = resolved.suffix.lower()
+        if suffix not in RENDERABLE_IMAGE_SUFFIXES:
+            unrenderable.append(target)
+            continue
+        if suffix != PREFERRED_REPORT_IMAGE_SUFFIX:
+            non_preferred.append(target)
+        resolved_names.add(resolved.resolve().as_posix())
+
+    available = [
+        path
+        for path in sorted(paths.report_images_dir.rglob("*"))
+        if path.is_file() and path.suffix.lower() in RENDERABLE_IMAGE_SUFFIXES
+    ]
+    unreferenced = [path.name for path in available if path.resolve().as_posix() not in resolved_names]
+
+    issue_counts = {
+        "broken_image_links": len(broken),
+        "non_relative_image_links": len(non_relative),
+        "unrenderable_images": len(unrenderable),
+        "non_png_images": len(non_preferred),
+        "unreferenced_images": len(unreferenced),
+    }
+    issue_counts["total"] = sum(issue_counts.values())
+
+    issues: list[dict[str, object]] = []
+    if not report_exists:
+        issues.append(
+            {
+                "category": "report",
+                "severity": "critical",
+                "summary": "No markdown research report was found at workspace/report/report.md.",
+                "evidence": [],
+            }
+        )
+    elif len(report_text.strip()) < MIN_REPORT_CHARS:
+        issues.append(
+            {
+                "category": "report_length",
+                "severity": "critical",
+                "summary": (
+                    f"report.md holds only {len(report_text.strip())} characters, below the "
+                    f"{MIN_REPORT_CHARS}-character floor for a scored research report."
+                ),
+                "evidence": [],
+            }
+        )
+    if report_exists and not targets:
+        issues.append(
+            {
+                "category": "missing_figures",
+                "severity": "critical",
+                "summary": "report.md embeds no figures; the judge scores figure criteria against images the report references.",
+                "evidence": [],
+            }
+        )
+    if broken:
+        issues.append(
+            {
+                "category": "broken_image_link",
+                "severity": "critical",
+                "summary": f"{len(broken)} figure reference(s) point at files that do not exist under report/.",
+                "evidence": broken[:_REPORT_ISSUE_SAMPLE_LIMIT],
+            }
+        )
+    if non_relative:
+        issues.append(
+            {
+                "category": "non_relative_image_link",
+                "severity": "major",
+                "summary": (
+                    f"{len(non_relative)} figure reference(s) are absolute paths or URLs and will not "
+                    "resolve for the judge."
+                ),
+                "evidence": non_relative[:_REPORT_ISSUE_SAMPLE_LIMIT],
+            }
+        )
+    if unrenderable:
+        issues.append(
+            {
+                "category": "unrenderable_image",
+                "severity": "major",
+                "summary": f"{len(unrenderable)} figure reference(s) use a format the report viewer cannot render.",
+                "evidence": unrenderable[:_REPORT_ISSUE_SAMPLE_LIMIT],
+            }
+        )
+    if non_preferred:
+        issues.append(
+            {
+                "category": "non_png_image",
+                "severity": "minor",
+                "summary": f"{len(non_preferred)} figure(s) are not PNG; the benchmark asks for PNG only.",
+                "evidence": non_preferred[:_REPORT_ISSUE_SAMPLE_LIMIT],
+            }
+        )
+    if unreferenced:
+        issues.append(
+            {
+                "category": "unreferenced_image",
+                "severity": "minor",
+                "summary": (
+                    f"{len(unreferenced)} image(s) under report/images/ are never referenced by report.md "
+                    "and carry no caption to be judged against."
+                ),
+                "evidence": unreferenced[:_REPORT_ISSUE_SAMPLE_LIMIT],
+            }
+        )
+
+    review = {
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "overall_status": "needs_attention" if issues else "clean",
+        "report_available": report_exists,
+        "report_relative_path": str(report_path.relative_to(paths.run_root)) if report_exists else None,
+        "report_char_count": len(report_text.strip()),
+        "referenced_image_count": len(targets),
+        "available_image_count": len(available),
+        "issue_counts": issue_counts,
+        "issues": issues,
+        "priority_fixes": _suggest_report_fixes(
+            report_exists=report_exists,
+            report_chars=len(report_text.strip()),
+            referenced=len(targets),
+            broken=len(broken),
+            non_relative=len(non_relative),
+            unrenderable=len(unrenderable),
+            unreferenced=len(unreferenced),
+        ),
+    }
+    paths.artifacts_dir.mkdir(parents=True, exist_ok=True)
+    output_path = paths.artifacts_dir / "report_review.json"
+    output_path.write_text(json.dumps(review, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+    return review
+
+
+def validate_report_review(path: Path) -> list[str]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return ["report_review.json is missing."]
+    except json.JSONDecodeError as exc:
+        return [f"report_review.json is not valid JSON: {exc}"]
+
+    if not isinstance(payload, dict):
+        return ["report_review.json must contain a JSON object."]
+
+    problems: list[str] = []
+    if not isinstance(payload.get("overall_status"), str) or not str(payload.get("overall_status")).strip():
+        problems.append("report_review.json must contain a non-empty string field 'overall_status'.")
+    if not isinstance(payload.get("report_available"), bool):
+        problems.append("report_review.json must contain a boolean field 'report_available'.")
+    if not isinstance(payload.get("referenced_image_count"), int):
+        problems.append("report_review.json must contain an integer field 'referenced_image_count'.")
+    if not isinstance(payload.get("issue_counts"), dict):
+        problems.append("report_review.json must contain an object field 'issue_counts'.")
+    if not isinstance(payload.get("issues"), list):
+        problems.append("report_review.json must contain a list field 'issues'.")
+    priority_fixes = payload.get("priority_fixes")
+    if not isinstance(priority_fixes, list) or not all(isinstance(item, str) and item.strip() for item in priority_fixes):
+        problems.append("report_review.json must contain a non-empty string list field 'priority_fixes'.")
+    return problems
+
+
+def _suggest_report_fixes(
+    *,
+    report_exists: bool,
+    report_chars: int,
+    referenced: int,
+    broken: int,
+    non_relative: int,
+    unrenderable: int,
+    unreferenced: int,
+) -> list[str]:
+    fixes: list[str] = []
+    if not report_exists:
+        fixes.append("Write the research report to workspace/report/report.md before approval.")
+    elif report_chars < MIN_REPORT_CHARS:
+        fixes.append("Expand report.md with the actual methodology, quantitative results, and discussion.")
+    if broken:
+        fixes.append("Repair figure references that point at files missing from report/images/.")
+    if non_relative:
+        fixes.append("Rewrite absolute or URL figure references as paths relative to report.md, e.g. `images/plot.png`.")
+    if unrenderable:
+        fixes.append(f"Re-export unrenderable figures as {PREFERRED_REPORT_IMAGE_SUFFIX} files.")
+    if referenced == 0 and report_exists:
+        fixes.append("Generate figures into report/images/ and embed them with `![Caption](images/name.png)`.")
+    if unreferenced and len(fixes) < 3:
+        fixes.append("Reference or remove the images in report/images/ that the report never cites.")
+    if not fixes:
+        fixes.append("No structural report issues were detected; make a final evidence-vs-claim pass before approval.")
+    return fixes[:3]
+
+
 def validate_layout_review(path: Path) -> list[str]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -321,8 +555,8 @@ def _format_schema(schema: object) -> str:
     return ", ".join(pieces)
 
 
-def _load_layout_review_summary(paths: RunPaths) -> dict[str, object] | None:
-    path = paths.artifacts_dir / "layout_review.json"
+def _load_review_summary(paths: RunPaths, filename: str) -> dict[str, object] | None:
+    path = paths.artifacts_dir / filename
     if not path.exists():
         return None
     try:

@@ -758,7 +758,7 @@ AutoR 的强项不是“第一轮就完美”，而是：
 | `04_implementation` | 真实代码、配置、数据准备、 sanity check | 只有代码骨架、伪代码或空脚本 | “不要停留在 skeleton。请把最小可运行实验链路真正跑通，并把关键脚本、配置、日志写出来。” |
 | `05_experimentation` | 机器可读结果文件、基线比较、重复运行、失败记录 | 只跑了样例；只在极小子集上试了一次 | “当前实验只是 smoke test。请补齐正式实验、基线对比、重复次数和结果文件，不要只给一张 demo 图。” |
 | `06_analysis` | 真实图表、误差分析、失败案例、消融解释、机制性结论 | 只是在复述最好的数值 | “分析不要只做结果复述。请解释为什么有效、在哪些设置失效、哪些因素最关键，并补齐图和表。” |
-| `07_writing` | LaTeX、Bib、可编译 PDF、citation verification、结构完整的稿件 | 只有 markdown；或有 PDF 但内容空、证据弱、引用虚 | “不要只写出 paper shape。请保证每个核心 claim 都有实验或文献支撑，并完成 citation verification。” |
+| `07_writing` | 默认产出 `report/report.md`：每个图片引用都能解析、每个结论都带数字（`--output-format latex` 则要求 LaTeX、Bib、可编译 PDF） | 稿件有形无实：有图注没有图、只有形容词没有测量值、引用虚 | “不要只写出 paper shape。请保证每个核心 claim 都有实验或文献支撑，并完成 citation verification。” |
 | `08_dissemination` | review 材料、release/package、摘要性对外交付物 | 只停在论文，不管发布和检查 | “请补齐 release/review 材料，让这个 run 可以被别人检查、复现、展示。” |
 
 一个非常实用的经验是：

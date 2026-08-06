@@ -185,9 +185,41 @@ know that intake will not run.
 
 ## Stage 07 writing
 
+Stage 07's requirements depend on the run's `output_format`, recorded in
+`run_config.json`. The default is `markdown`; `latex` is opt-in via
+`--output-format latex`.
+
+### `... requires a markdown research report at workspace/report/report.md`
+
+The stage never wrote the deliverable. In markdown mode nothing else in the
+stage substitutes for it — not the stage summary, not the writing directory.
+
+### `report.md references \`images/x.png\`, but no such file exists under report/`
+
+The report promises a figure that is not on disk. This is the most expensive
+markdown-mode defect: a benchmark judge reads the caption and is shown nothing,
+so the figure criterion scores as absent. Fix the reference or generate the
+figure — do not delete the caption to silence the gate.
+
+`workspace/artifacts/report_review.json` lists every such reference under
+`issues[].evidence`, and is re-read by the next attempt's prompt.
+
+### `report.md references ... which is not a report-relative path`
+
+An absolute path or a URL. Figure references must be relative to `report.md`
+itself, for example `images/main_result.png`. An absolute path resolves only
+on the machine that wrote it.
+
+### `report.md is only N characters`
+
+Below the 1,200-character floor the report is a stub rather than a
+deliverable. Expand it with the actual methodology, quantitative results, and
+discussion.
+
 ### The PDF never compiles
 
-Stage 07 needs a working LaTeX toolchain. Check:
+Only applies to `--output-format latex`. Stage 07 needs a working LaTeX
+toolchain. Check:
 
 ```bash
 which pdflatex latexmk
@@ -199,10 +231,11 @@ does not vendor official style files, so the stage has to obtain them.
 
 ### `... requires build_log.txt under workspace/artifacts`
 
-The build never ran, or ran somewhere else. The build log is required
-evidence that compilation was attempted, and at Stage 07 it must be fresh.
+`latex` mode only. The build never ran, or ran somewhere else. The build log is
+required evidence that compilation was attempted, and at Stage 07 it must be
+fresh.
 
-### `citation_verification.json` / `layout_review.json` validation fails
+### `citation_verification.json` / `report_review.json` / `layout_review.json` validation fails
 
 The file exists but does not match the schema. The exact missing field is in
 the error. Schemas are in

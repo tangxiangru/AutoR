@@ -110,7 +110,7 @@ class DiagramGenerationTests(unittest.TestCase):
                 return output_path
 
             with patch("src.diagram_gen.generate_method_diagram_sync", side_effect=_fake_generate):
-                result = post_writing_diagram_hook(run_root)
+                result = post_writing_diagram_hook(run_root, output_format="latex")
 
             self.assertEqual(result, figures_dir / "method_overview.jpg")
             self.assertTrue((figures_dir / "method_overview.jpg").exists())
