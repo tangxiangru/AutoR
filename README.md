@@ -97,6 +97,7 @@ AutoR takes a different position: research is too important to hand over as a bl
 | Useful feature | **Automated experiment manifests** | Machine-readable experiment and result files make runs inspectable, comparable, and reusable downstream. |
 | Useful feature | **Citation verification and writing checks** | Writing expects citation verification, figure-link checks, and self-review artifacts before Stage 07 is considered complete. |
 | Useful feature | **Artifact indexing across stages** | `artifact_index.json` and related manifests help later stages find data, results, and figures without guessing from filenames. |
+| Useful feature | **Obligations carried forward** | An approving reviewer records what a later stage still owes; the debt is injected into that stage and its review, and only a reviewer can discharge it. |
 | Useful feature | **Cross-model review veto** | When the reviewer approves, a different model family audits that approval and can send the stage back. A veto, never an override, so it can only tighten the gate. |
 | Useful feature | **Self-improving review policy** | Every correction the reviewer demands becomes a standing rule checked on all later stages, recorded in an auditable `review_policy.json` with the stage and attempt that produced it. |
 | Useful feature | **Resume, redo, and rollback controls** | Long research runs can continue in place, retry a stage, or roll downstream state back without starting over. |
@@ -466,6 +467,35 @@ flowchart TD
 - Stages 01-08 use the standard six-action review menu: `1 / 2 / 3` continue with an AI refinement suggestion, `4` continues with custom feedback, `5` approves, and `6` aborts.
 
 The stage loop is controlled by AutoR, not by Claude.
+
+### Obligations carried forward
+
+The reviewer's insight used to be captured only when it refused. But most stages are
+approved, and an approval discarded everything the reviewer noticed — which is where most
+of the review actually lives. A real reviewer approving a literature survey says "fine, but
+you owe me a power analysis at design time", and then checks.
+
+An approving reviewer can now attach **obligations** to a later stage. Each is injected into
+that stage's prompt *and* into its review, so the reviewer who inherits one is asked whether
+it was met:
+
+```
+approval ──obligation──▶ later stage prompt ──▶ that stage's review ──▶ discharged
+                                                          │
+                                                 not met ─┴──▶ refusal
+```
+
+Recorded in `runs/<run_id>/obligations.json`. Three rules keep it from becoming theatre:
+
+- **Only a reviewer may discharge one.** The stage that owes it cannot mark its own
+  homework — it can do the work and say so, and a reviewer decides.
+- **Deferral is counted, never silent.** A stage may push an obligation later, but it stays
+  open and its deferral count is shown to every subsequent reviewer, so "carried forward"
+  cannot quietly become "dropped".
+- **Bounded and deduplicated**, so a reviewer restating itself cannot manufacture rigour.
+
+Together with the two mechanisms below, refusals teach rules, approvals set debts, and a
+different model family can veto either.
 
 ### Cross-model review
 

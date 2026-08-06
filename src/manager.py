@@ -16,6 +16,14 @@ from .bootstrap import (
 )
 from .approval_agent import AutomatedReviewer, ReviewDecision
 from .cross_reviewer import GeminiCrossReviewer
+from .obligations import (
+    discharge_obligations,
+    format_for_stage_prompt,
+    ledger_summary,
+    load_ledger,
+    note_deferrals,
+    record_obligations,
+)
 from .review_policy import load_policy, policy_summary, record_correction
 from .project_bootstrap import (
     format_project_context_for_prompt,
@@ -1826,6 +1834,7 @@ class ResearchManager:
                 attempt_no=attempt_no,
                 previous_validation_errors=previous_validation_errors,
                 web_search_context=self.web_search_context,
+                obligations_context=format_for_stage_prompt(load_ledger(paths), stage),
             )
 
         user_request = read_text(paths.user_input)
@@ -1833,6 +1842,7 @@ class ResearchManager:
             stage, stage_template, user_request, approved_memory, handoff_context, revision_feedback,
             intake_context_text=intake_context_text,
             web_search_context=self.web_search_context,
+            obligations_context=format_for_stage_prompt(load_ledger(paths), stage),
         )
 
     def _display_stage_output(self, stage: StageSpec, markdown: str) -> None:
@@ -1900,6 +1910,7 @@ class ResearchManager:
         self._record_review_correction(
             paths=paths, stage=stage, attempt_no=attempt_no, decision=decision, suggestions=suggestions
         )
+        self._settle_obligations(paths=paths, stage=stage, attempt_no=attempt_no, decision=decision)
 
         cross = self._apply_cross_review(
             paths=paths, stage=stage, attempt_no=attempt_no, decision=decision,
@@ -1909,6 +1920,57 @@ class ResearchManager:
             return cross
 
         return decision.choice, decision.feedback or None
+
+    def _settle_obligations(
+        self,
+        *,
+        paths: RunPaths,
+        stage: StageSpec,
+        attempt_no: int,
+        decision: ReviewDecision,
+    ) -> None:
+        """Close the obligations this stage met, and record the ones it created.
+
+        Discharges are applied first: an approval that both settles an inherited debt and
+        raises a new one should not have the new one immediately counted as deferred.
+        Deferral is only recorded on approval, because a refused stage gets another attempt
+        at the same obligations and has not deferred anything yet.
+        """
+        closed = discharge_obligations(
+            paths, stage=stage, obligation_ids=decision.discharged, note=decision.reason
+        )
+        for obligation in closed:
+            append_log_entry(
+                paths.logs,
+                f"{stage.slug} attempt {attempt_no} obligation_discharged",
+                f"{obligation.obligation_id}: {obligation.text}",
+            )
+
+        approved = decision.choice == "5"
+        if approved:
+            deferred = note_deferrals(paths, stage=stage)
+            if deferred:
+                append_log_entry(
+                    paths.logs,
+                    f"{stage.slug} attempt {attempt_no} obligations_deferred",
+                    f"{deferred} obligation(s) carried past this stage without being discharged.",
+                )
+
+        added = record_obligations(paths, stage=stage, entries=decision.carry_forward)
+        for obligation in added:
+            target = obligation.target_stage or "any later stage"
+            append_log_entry(
+                paths.logs,
+                f"{stage.slug} attempt {attempt_no} obligation_recorded",
+                f"{obligation.obligation_id} -> {target}: {obligation.text}",
+            )
+
+        if closed or added:
+            self.ui.show_status(
+                f"Obligations: +{len(added)} new, {len(closed)} discharged; "
+                f"{ledger_summary(load_ledger(paths))}.",
+                level="info",
+            )
 
     def _apply_cross_review(
         self,
