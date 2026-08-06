@@ -95,10 +95,10 @@ AutoR takes a different position: research is too important to hand over as a bl
 | Big idea | **Verifiable outputs, not paper-shaped theater** | The workflow is judged by inspectable artifacts and human approval, not by whether a generated document merely looks polished. |
 | Useful feature | **Structured literature organization** | Survey notes, bibliographies, related-work tables, and reading artifacts stay under `workspace/literature/` instead of disappearing into chat history. |
 | Useful feature | **Automated experiment manifests** | Machine-readable experiment and result files make runs inspectable, comparable, and reusable downstream. |
-| Useful feature | **Citation verification and writing checks** | Writing expects citation verification, build logs, and self-review artifacts before Stage 07 is considered complete. |
+| Useful feature | **Citation verification and writing checks** | Writing expects citation verification, figure-link checks, and self-review artifacts before Stage 07 is considered complete. |
 | Useful feature | **Artifact indexing across stages** | `artifact_index.json` and related manifests help later stages find data, results, and figures without guessing from filenames. |
 | Useful feature | **Resume, redo, and rollback controls** | Long research runs can continue in place, retry a stage, or roll downstream state back without starting over. |
-| Useful feature | **Venue-aware packaging** | AutoR can package manuscript sources, PDFs, review materials, and release-ready artifacts instead of stopping at markdown summaries. |
+| Useful feature | **Two output formats** | Stage 07 writes a benchmark-ready markdown report (`report/report.md` + PNG figures) by default, or a venue-aware LaTeX paper package with a compiled PDF via `--output-format latex`. |
 
 In practice, that means AutoR is useful not only because of the high-level framing, but also because it handles real research chores: literature organization, experiment manifests, citation verification, artifact indexing, manuscript packaging, and recoverable long-running workflows.
 
@@ -273,8 +273,8 @@ AI handles execution load; humans steer the research when direction actually mat
 
 - Python 3.10+
 - Claude CLI or Codex CLI available on `PATH` for real runs
-- Local TeX tools are helpful for Stage 07, but not required for smoke tests
-- For `--research-diagram` (Gemini-generated method illustration inserted into the LaTeX paper):
+- Local TeX tools are only needed for `--output-format latex`; the default markdown output needs no TeX
+- For `--research-diagram` (Gemini-generated method illustration inserted into the report):
   - `pip install google-genai` (the `google.genai` SDK is **not** a default dependency; if it is missing the diagram step prints `Diagram generation failed: No module named 'google'` and the rest of the run continues unaffected)
   - A Gemini API key exposed via `GOOGLE_API_KEY` or `GEMINI_API_KEY`, or a local `configs/diagram_config.yaml` (see `configs/diagram_config.template.yaml`)
 
@@ -292,6 +292,7 @@ AI handles execution load; humans steer the research when direction actually mat
 | Choose a Claude model | `python main.py --operator claude --model sonnet` or `python main.py --operator claude --model opus` |
 | Start with Codex | `python main.py --operator codex --model default --goal "Your research goal here"` |
 | Allow Codex-backed SSH / remote GPU execution | `python main.py --operator codex --codex-sandbox danger-full-access --goal "Your research goal here"` |
+| Produce a LaTeX paper package instead of a markdown report | `python main.py --output-format latex --goal "..."` |
 | Choose a writing venue profile | `python main.py --venue neurips_2025` or `python main.py --venue nature` or `python main.py --venue jmlr` |
 | Resume the latest run | `python main.py --resume-run latest` |
 | Redo a stage inside the same run | `python main.py --resume-run 20260329_210252 --redo-stage 03` |
@@ -342,7 +343,7 @@ What you can do in the Studio:
 - **Review & Approve** — the Review page shows a "You are reviewing" hero card with a TL;DR extracted from the stage markdown, a Files Produced pill list, and an `✅ Approve → Advance to <next stage>` button
 - **Send Feedback & Re-run** — feedback is woven into the **first attempt's prompt** of the next run (not wasted on an intermediate Claude call). Works on `human_review` AND `failed` stages
 - **Resume across restarts** — if you stop the server and come back, clicking Approve/Feedback lazy-resumes the existing on-disk run without re-running stages that already have a draft
-- **Paper preview** — the Paper tab renders the compiled PDF, the LaTeX sources, and the build log
+- **Paper preview** — the Paper tab renders `report.md` for markdown runs, or the compiled PDF, LaTeX sources, and build log for LaTeX runs
 - **Versions page** — the full checkpoint/attempt timeline for every stage
 
 The Studio requires the **Claude CLI** (`claude` on `PATH`) since every run is a real Claude-driven pipeline. The check happens when you start a run, not at server startup: without `claude` the server still comes up and you can browse existing runs, read stage documents, and view papers, but starting a run fails with a clear error.
@@ -376,7 +377,7 @@ AutoR uses a 9-stage research workflow: one optional intake stage plus eight for
 | `04_implementation` | Build the runnable code, configs, data preparation, and sanity checks. | Do not approve skeletons; require executable scripts, reproducible commands, and logs or checks showing the path runs. |
 | `05_experimentation` | Run the planned experiments and write machine-readable results. | Distinguish smoke tests from real experiments; require baselines, repeats, result files, and failure records. |
 | `06_analysis` | Interpret the results, create figures, analyze failures, and refine the evidence story. | Require real plots, ablations, error analysis, and explanations rather than metric narration. |
-| `07_writing` | Produce venue-aware manuscript sources, bibliography, compiled PDF, and writing checks. | Verify that every major claim is backed by artifacts, experiments, or citations. |
+| `07_writing` | Produce the final deliverable: a markdown research report with embedded figures, or a venue-aware LaTeX package with a compiled PDF. | Verify that every major claim is backed by artifacts, experiments, or citations. |
 | `08_dissemination` | Package the run for review, release, reproduction, or external presentation. | Confirm that readiness notes, review materials, manifests, and outward-facing deliverables exist. |
 
 ```mermaid
@@ -479,7 +480,8 @@ AutoR does not consider a run successful just because it generated a plausible m
 | Stage 03+ | Machine-readable data under `workspace/data/` |
 | Stage 05+ | Machine-readable results under `workspace/results/`, plus a valid `experiment_manifest.json` |
 | Stage 06+ | Real figure files under `workspace/figures/` |
-| Stage 07+ | `main.tex` matching the venue, `sections/*.tex`, a bibliography, a compiled PDF, `build_log.txt`, `citation_verification.json`, `self_review.json`, `layout_review.json` |
+| Stage 07+ (markdown) | `report/report.md` with resolving figure references, `report/images/*.png`, `citation_verification.json`, `self_review.json`, `report_review.json` |
+| Stage 07+ (latex) | `main.tex` matching the venue, `sections/*.tex`, a bibliography, a compiled PDF, `build_log.txt`, `citation_verification.json`, `self_review.json`, `layout_review.json` |
 | Stage 08+ | Review and readiness assets under `workspace/reviews/` |
 
 Requirements are cumulative, and the stage that *produces* a class of artifact must produce it **during that stage's execution** — a re-run is not credited with the previous attempt's files.
@@ -533,6 +535,7 @@ runs/<run_id>/
     ├── code/
     ├── data/
     ├── results/
+    ├── report/
     ├── writing/
     ├── figures/
     ├── artifacts/
@@ -546,9 +549,10 @@ runs/<run_id>/
 - `code/`: runnable code, scripts, configs, implementations
 - `data/`: machine-readable data and manifests
 - `results/`: machine-readable experiment outputs
-- `writing/`: LaTeX sources, sections, bibliography, tables
+- `report/`: the markdown deliverable, `report.md` plus `images/` (markdown mode)
+- `writing/`: LaTeX sources, sections, bibliography, tables (latex mode)
 - `figures/`: real plots and paper figures
-- `artifacts/`: compiled PDFs and packaged deliverables
+- `artifacts/`: review JSON, build metadata, compiled PDFs, and packaged deliverables
 - `notes/`: temporary or supporting research notes
 - `reviews/`: readiness, critique, and dissemination materials
 
@@ -665,6 +669,7 @@ flowchart TD
     A --> C[code/]
     A --> D[data/]
     A --> E[results/]
+    A --> R[report/]
     A --> F[writing/]
     A --> G[figures/]
     A --> H[artifacts/]
@@ -679,9 +684,10 @@ Workspace directories:
 - `data/`: machine-readable datasets, manifests, processed splits, caches, and loaders.
 - `results/`: machine-readable metrics, predictions, ablations, tables, and evaluation outputs.
   AutoR also standardizes `results/experiment_manifest.json` as a machine-readable summary over result, code, and note artifacts for downstream analysis.
-- `writing/`: manuscript sources, LaTeX, section drafts, tables, and bibliography.
+- `report/`: the markdown deliverable in markdown mode — `report.md` and the PNG figures it embeds under `images/`.
+- `writing/`: manuscript sources, LaTeX, section drafts, tables, and bibliography in latex mode.
 - `figures/`: plots, diagrams, charts, and paper figures.
-- `artifacts/`: compiled PDFs and packaged deliverables.
+- `artifacts/`: review JSON, build metadata, compiled PDFs, and packaged deliverables.
 - `notes/`: temporary notes and setup material.
 - `reviews/`: critique notes, threat-to-validity notes, and readiness reviews.
 
@@ -727,7 +733,7 @@ Artifact requirements by stage:
 - Stage 05+: machine-readable results under `workspace/results/`
 - Stage 05+: `workspace/results/experiment_manifest.json` must exist and remain structurally valid
 - Stage 06+: figure files under `workspace/figures/`
-- Stage 07+: venue-aware conference or journal-style LaTeX sources plus a compiled PDF under `workspace/writing/` or `workspace/artifacts/`
+- Stage 07+: a markdown report at `workspace/report/report.md` whose figure references all resolve, or with `--output-format latex`, venue-aware LaTeX sources plus a compiled PDF under `workspace/writing/` or `workspace/artifacts/`
 - Stage 08+: review and readiness artifacts under `workspace/reviews/`
 
 A run with only markdown notes does not pass validation.

@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import re
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -538,7 +539,6 @@ def inject_diagram_into_latex(
                 return True
         return False
 
-    import re
     if _has_real_label(content):
         return False
 
@@ -592,15 +592,199 @@ def inject_diagram_into_latex(
 
 
 # ---------------------------------------------------------------------------
+# Markdown integration helpers
+# ---------------------------------------------------------------------------
+
+#: Explicit insertion point a markdown report may leave for the generated diagram.
+METHOD_DIAGRAM_PLACEHOLDER = "<!-- METHOD_DIAGRAM_PLACEHOLDER -->"
+#: Marker written alongside the figure so a second run does not insert it twice.
+METHOD_DIAGRAM_MARKER = "<!-- autor:method_overview -->"
+
+_METHOD_HEADING_RE = re.compile(r"^#{2,4}\s+.*\bmethod", flags=re.IGNORECASE)
+
+
+def inject_diagram_into_markdown(
+    report_path: Path,
+    image_rel_path: str,
+    caption: str,
+) -> bool:
+    """Insert a method illustration into a markdown report.
+
+    Placement, in order of preference: an explicit ``METHOD_DIAGRAM_PLACEHOLDER`` comment, the
+    first heading that names the method, or the end of the report. Returns True when the figure
+    was inserted, False when it is already present or the report is missing.
+    """
+    if not report_path.exists():
+        return False
+
+    content = report_path.read_text(encoding="utf-8")
+    if METHOD_DIAGRAM_MARKER in content or image_rel_path in content:
+        return False
+
+    figure_block = f"{METHOD_DIAGRAM_MARKER}\n![{caption}]({image_rel_path})"
+
+    if METHOD_DIAGRAM_PLACEHOLDER in content:
+        new_content = content.replace(METHOD_DIAGRAM_PLACEHOLDER, figure_block, 1)
+        report_path.write_text(new_content, encoding="utf-8")
+        return True
+
+    lines = content.splitlines()
+    for index, line in enumerate(lines):
+        if _METHOD_HEADING_RE.match(line):
+            insert_at = index + 1
+            # Keep one blank line between the heading and the figure.
+            block = ["", figure_block, ""]
+            while insert_at < len(lines) and not lines[insert_at].strip():
+                insert_at += 1
+            new_lines = lines[:insert_at] + block + lines[insert_at:]
+            report_path.write_text("\n".join(new_lines).rstrip() + "\n", encoding="utf-8")
+            return True
+
+    report_path.write_text(content.rstrip() + "\n\n" + figure_block + "\n", encoding="utf-8")
+    return True
+
+
+def _convert_to_png(path: Path) -> Path:
+    """Re-encode a generated diagram as PNG, or return it unchanged when that is not possible.
+
+    The image backend returns JPEG bytes whatever the filename says. Benchmark harnesses ask for
+    PNG, and a ``.png`` file holding JPEG bytes is a worse outcome than an honest ``.jpg``, so the
+    conversion is real rather than a rename.
+    """
+    if path.suffix.lower() == ".png":
+        return path
+    try:
+        from PIL import Image
+    except ImportError:
+        return path
+
+    png_path = path.with_suffix(".png")
+    try:
+        with Image.open(path) as image:
+            image.convert("RGB").save(png_path, format="PNG")
+    except Exception as exc:  # noqa: BLE001 - a failed conversion must not lose the figure
+        print(f"[diagram_gen] PNG conversion failed ({exc}); keeping {path.name}.")
+        return path
+
+    path.unlink(missing_ok=True)
+    return png_path
+
+
+# ---------------------------------------------------------------------------
 # Post-writing hook: extract method text and generate diagram
 # ---------------------------------------------------------------------------
 
-def post_writing_diagram_hook(run_root: Path, model_name: str = "gemini-2.5-flash") -> Path | None:
-    """After Stage 07 writing, extract method.tex content and generate a diagram.
+def _read_memory_context(run_root: Path) -> str:
+    """Pull the earlier-stage sections that give the diagram planner real context."""
+    memory_path = run_root / "memory.md"
+    if not memory_path.exists():
+        return ""
 
-    This reads the already-written method.tex, generates an illustration, saves it
-    to the figures directory, and injects the figure reference into method.tex.
+    full_memory = memory_path.read_text(encoding="utf-8")
+    snippet = ""
+    for section_name in ["Hypothesis Generation", "Study Design", "Implementation"]:
+        idx = full_memory.find(section_name)
+        if idx >= 0:
+            end_idx = full_memory.find("\n# Stage", idx + 1)
+            if end_idx < 0:
+                end_idx = min(idx + 3000, len(full_memory))
+            snippet += full_memory[idx:end_idx] + "\n\n"
+    return snippet
+
+
+def _extract_markdown_method_section(report_text: str) -> str:
+    """Return the methodology section of a markdown report, or the whole report as a fallback."""
+    lines = report_text.splitlines()
+    start: int | None = None
+    heading_level = 0
+    for index, line in enumerate(lines):
+        if _METHOD_HEADING_RE.match(line):
+            start = index
+            heading_level = len(line) - len(line.lstrip("#"))
+            break
+    if start is None:
+        return report_text
+
+    for index in range(start + 1, len(lines)):
+        stripped = lines[index].lstrip()
+        if stripped.startswith("#"):
+            level = len(stripped) - len(stripped.lstrip("#"))
+            if level <= heading_level:
+                return "\n".join(lines[start:index])
+    return "\n".join(lines[start:])
+
+
+def _markdown_diagram_hook(run_root: Path, model_name: str) -> Path | None:
+    """Generate a method illustration for a markdown report and embed it."""
+    report_path = run_root / "workspace" / "report" / "report.md"
+    images_dir = run_root / "workspace" / "report" / "images"
+
+    if not report_path.exists():
+        print("[diagram_gen] report.md not found, skipping diagram generation.")
+        return None
+
+    report_text = report_path.read_text(encoding="utf-8")
+    method_text = _extract_markdown_method_section(report_text)
+    if len(method_text.strip()) < 100:
+        print("[diagram_gen] method section too short, skipping diagram generation.")
+        return None
+
+    memory_snippet = _read_memory_context(run_root)
+    combined_method = method_text
+    if memory_snippet:
+        combined_method = (
+            "## Context from earlier research stages:\n"
+            + memory_snippet[:4000]
+            + "\n\n## Method section:\n"
+            + method_text
+        )
+
+    caption = (
+        "Overview of the proposed method. "
+        "The diagram illustrates the key components and data flow of our approach."
+    )
+
+    result = generate_method_diagram_sync(
+        method_text=combined_method,
+        figure_caption=caption,
+        output_path=images_dir / "method_overview.jpg",
+        model_name=model_name,
+    )
+    if result is None:
+        return None
+
+    result = _convert_to_png(result)
+
+    # The judge resolves figure paths relative to report.md, so the reference must be
+    # `images/<name>` and the file must live under report/images/.
+    injected = inject_diagram_into_markdown(report_path, f"images/{result.name}", caption)
+    if injected:
+        print("[diagram_gen] Injected figure reference into report.md")
+    else:
+        print("[diagram_gen] Figure reference already exists or could not be injected.")
+
+    return result
+
+
+def post_writing_diagram_hook(
+    run_root: Path,
+    model_name: str = "gemini-2.5-flash",
+    output_format: str | None = None,
+) -> Path | None:
+    """After Stage 07 writing, extract the method text and generate a diagram.
+
+    In ``latex`` mode this reads ``writing/sections/method.tex`` and injects a ``figure*`` block.
+    In ``markdown`` mode it reads ``report/report.md`` and injects a markdown image whose path is
+    relative to the report, which is the only form a benchmark judge can resolve.
     """
+    if output_format is None:
+        from .utils import build_run_paths, selected_output_format
+
+        output_format = selected_output_format(build_run_paths(run_root))
+
+    if output_format == "markdown":
+        return _markdown_diagram_hook(run_root, model_name=model_name)
+
     workspace = run_root / "workspace"
     method_tex = workspace / "writing" / "sections" / "method.tex"
     figures_dir = workspace / "figures"

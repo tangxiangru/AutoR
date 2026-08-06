@@ -41,7 +41,7 @@ class WritingPipelineTests(unittest.TestCase):
         ensure_run_layout(paths)
         write_text(paths.user_input, "Test writing pipeline")
         write_text(paths.memory, "# Approved Run Memory\n\n## Original User Goal\nTest\n\n## Approved Stage Summaries\n\n_None yet._\n")
-        ensure_run_config(paths, model="sonnet", venue=DEFAULT_VENUE)
+        ensure_run_config(paths, model="sonnet", venue=DEFAULT_VENUE, output_format="latex")
         write_text(paths.data_dir / "design.json", '{"task":"test"}')
         write_text(paths.results_dir / "metrics.json", '{"accuracy": 0.9}')
         (paths.figures_dir / "accuracy.png").write_bytes(b"\x89PNG fake image data")

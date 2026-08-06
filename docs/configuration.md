@@ -21,7 +21,7 @@ Three things are configurable:
 | Python 3.10+ | everything |
 | `claude` on `PATH` ([Claude Code](https://docs.claude.com/en/docs/claude-code)) | real runs with `--operator claude`, and all Studio runs |
 | `codex` on `PATH` ([Codex CLI](https://developers.openai.com/codex/cli)) | real runs with `--operator codex` |
-| A LaTeX toolchain (`pdflatex`/`latexmk`) | Stage 07 compiling a PDF |
+| A LaTeX toolchain (`pdflatex`/`latexmk`) | Stage 07 compiling a PDF — only with `--output-format latex`; the default markdown mode needs no TeX |
 | `pip install google-genai pyyaml` | `--research-diagram` only |
 
 **AutoR itself has no third-party Python dependencies.** Everything but the
@@ -50,6 +50,7 @@ The precedence rules differ slightly per field:
 | `model` | recorded value | If you switch backends with `--operator` and give no `--model`, the *new* backend's default is used, not the old model name. A recorded `"unknown"` also falls back to the default. |
 | `codex_sandbox` | recorded value | |
 | `venue` | recorded value | |
+| `output_format` | recorded value | `markdown` for new runs. A run started as `latex` stays `latex` on resume unless `--output-format` says otherwise. |
 | `approval_mode` | recorded value | `--full-auto` always forces `agent`. |
 | `review_operator` | recorded value, else `operator` | |
 | `review_model` | recorded value | If you pass `--review-operator` without `--review-model`, the new reviewer backend's default is used. |

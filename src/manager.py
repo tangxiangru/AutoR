@@ -60,7 +60,12 @@ from .operator_protocol import OperatorProtocol
 from .diagram_gen import post_writing_diagram_hook
 from .terminal_ui import TerminalUI
 from .platform.foundry import generate_paper_package, generate_release_package
-from .writing_manifest import build_writing_manifest, format_manifest_for_prompt, generate_layout_review
+from .writing_manifest import (
+    build_writing_manifest,
+    format_manifest_for_prompt,
+    generate_layout_review,
+    generate_report_review,
+)
 from .utils import (
     DEFAULT_REFINEMENT_SUGGESTIONS,
     FIXED_STAGE_OPTIONS,
@@ -97,6 +102,7 @@ from .utils import (
     read_attempt_count,
     read_text,
     required_stage_output_template,
+    selected_output_format,
     truncate_text,
     validate_stage_artifacts,
     validate_stage_markdown,
@@ -151,9 +157,12 @@ class ResearchManager:
         research_diagram: bool = False,
         project_root: Path | None = None,
         paper_corpus: Path | None = None,
+        output_format: str | None = None,
     ) -> bool:
         self._research_diagram = research_diagram
-        paths = self._create_run(user_goal, venue=venue, resources=resources)
+        paths = self._create_run(
+            user_goal, venue=venue, resources=resources, output_format=output_format
+        )
         self.ui.show_run_started(paths.run_root.as_posix(), self.operator.model, venue or "default")
         self._announce_approval_mode()
 
@@ -198,6 +207,7 @@ class ResearchManager:
         rollback_stage: StageSpec | None = None,
         venue: str | None = None,
         research_diagram: bool = False,
+        output_format: str | None = None,
     ) -> bool:
         self._research_diagram = research_diagram
         paths = build_run_paths(run_root)
@@ -211,6 +221,7 @@ class ResearchManager:
             review_operator=self.review_operator,
             review_model=self.review_model,
             codex_sandbox=getattr(self.operator, "codex_sandbox", None),
+            output_format=output_format,
         )
         ensure_run_manifest(paths)
         if not paths.user_input.exists():
@@ -229,7 +240,8 @@ class ResearchManager:
             f"Resumed run at: {paths.run_root}"
             + (f"\nRequested start stage: {start_stage.stage_title}" if start_stage else "")
             + (f"\nRequested rollback stage: {rollback_stage.stage_title}" if rollback_stage else "")
-            + f"\nVenue: {config['venue']}",
+            + f"\nVenue: {config['venue']}"
+            + f"\nOutput format: {config['output_format']}",
         )
         self.ui.show_run_started(
             paths.run_root.as_posix(),
@@ -282,11 +294,22 @@ class ResearchManager:
         self._print("All stages approved. Run complete.")
         return True
 
+    def _generate_writing_review(self, paths: RunPaths) -> dict[str, object]:
+        """Produce the Stage 07 triage artifact that matches this run's output format.
+
+        Both variants land in workspace/artifacts and are re-read by the next attempt's prompt,
+        so a failed gate always comes back with the specific defect attached.
+        """
+        if selected_output_format(paths) == "markdown":
+            return generate_report_review(paths)
+        return generate_layout_review(paths)
+
     def _create_run(
         self,
         user_goal: str,
         venue: str | None = None,
         resources: list[ResourceEntry] | None = None,
+        output_format: str | None = None,
     ) -> RunPaths:
         run_root = create_run_root(self.runs_dir)
         paths = build_run_paths(run_root)
@@ -311,6 +334,7 @@ class ResearchManager:
             review_operator=self.review_operator,
             review_model=self.review_model,
             codex_sandbox=getattr(self.operator, "codex_sandbox", None),
+            output_format=output_format,
         )
         initialize_run_manifest(paths)
         write_artifact_index(paths)
@@ -322,6 +346,7 @@ class ResearchManager:
             (
                 f"Model: {config['model']}\n"
                 f"Venue: {config['venue']}\n"
+                f"Output format: {config['output_format']}\n"
                 f"Approval mode: {config['approval_mode']}\n"
                 f"Review backend: {config['review_operator']}\n"
                 f"Review model: {config['review_model']}\n"
@@ -1030,7 +1055,7 @@ class ResearchManager:
         revision_feedback: str | None,
         continue_session: bool,
     ) -> str:
-        template = load_prompt_template(self.prompt_dir, stage)
+        template = load_prompt_template(self.prompt_dir, stage, output_format=selected_output_format(paths))
         stage_template = format_stage_template(template, stage, paths)
 
         if continue_session:
@@ -1074,7 +1099,7 @@ class ResearchManager:
         continue_session: bool,
     ) -> str:
         """Build the prompt for the bootstrap stage."""
-        template = load_prompt_template(self.prompt_dir, stage)
+        template = load_prompt_template(self.prompt_dir, stage, output_format=selected_output_format(paths))
         stage_template = format_stage_template(template, stage, paths)
 
         if continue_session:
@@ -1262,7 +1287,7 @@ class ResearchManager:
             if stage.slug == "02_hypothesis_generation":
                 write_hypothesis_manifest(paths, stage_markdown)
             if stage.slug == "07_writing":
-                generate_layout_review(paths)
+                self._generate_writing_review(paths)
             validation_errors = validate_stage_markdown(stage_markdown, stage=stage, paths=paths) + validate_stage_artifacts(stage, paths)
             if validation_errors:
                 mark_stage_failed_manifest(paths, stage, "; ".join(validation_errors))
@@ -1316,7 +1341,7 @@ class ResearchManager:
                 if stage.slug == "02_hypothesis_generation":
                     write_hypothesis_manifest(paths, stage_markdown)
                 if stage.slug == "07_writing":
-                    generate_layout_review(paths)
+                    self._generate_writing_review(paths)
                 validation_errors = validate_stage_markdown(stage_markdown, stage=stage, paths=paths) + validate_stage_artifacts(stage, paths)
                 if validation_errors:
                     self.ui.show_status(
@@ -1462,10 +1487,13 @@ class ResearchManager:
                     self._stage_file_paths(stage_markdown),
                 )
                 if stage.slug == "07_writing":
+                    output_format = selected_output_format(paths)
                     if self._research_diagram:
                         self.ui.show_status("Generating method illustration diagram...", level="info")
                         try:
-                            diagram_path = post_writing_diagram_hook(paths.run_root)
+                            diagram_path = post_writing_diagram_hook(
+                                paths.run_root, output_format=output_format
+                            )
                             if diagram_path:
                                 append_log_entry(
                                     paths.logs,
@@ -1487,12 +1515,29 @@ class ResearchManager:
                                 f"Diagram generation failed: {exc}",
                             )
                             self.ui.show_status(f"Diagram generation failed: {exc}", level="warn")
-                    package = generate_paper_package(paths.run_root)
-                    append_log_entry(
-                        paths.logs,
-                        f"{stage.slug} paper_package",
-                        package.summary,
-                    )
+                    # The paper package is a LaTeX submission bundle. In markdown mode the
+                    # deliverable is report/report.md, and emitting a stub manuscript.tex and a
+                    # placeholder paper.pdf beside it would only invite a reader to grade the
+                    # wrong artifact.
+                    if output_format == "latex":
+                        package = generate_paper_package(paths.run_root)
+                        append_log_entry(
+                            paths.logs,
+                            f"{stage.slug} paper_package",
+                            package.summary,
+                        )
+                    else:
+                        review = self._generate_writing_review(paths)
+                        append_log_entry(
+                            paths.logs,
+                            f"{stage.slug} report_review",
+                            (
+                                f"Markdown report finalized at {paths.report_file}\n"
+                                f"status: {review.get('overall_status')}\n"
+                                f"referenced figures: {review.get('referenced_image_count')}\n"
+                                f"characters: {review.get('report_char_count')}"
+                            ),
+                        )
                 elif stage.slug == "08_dissemination":
                     package = generate_release_package(paths.run_root)
                     append_log_entry(
@@ -1537,7 +1582,7 @@ class ResearchManager:
         attempt_no: int = 1,
         previous_validation_errors: list[str] | None = None,
     ) -> str:
-        template = load_prompt_template(self.prompt_dir, stage)
+        template = load_prompt_template(self.prompt_dir, stage, output_format=selected_output_format(paths))
         stage_template = format_stage_template(template, stage, paths)
         handoff_context = build_handoff_context(paths, upto_stage=stage)
         stage_template = (

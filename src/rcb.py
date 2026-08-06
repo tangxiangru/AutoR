@@ -10,16 +10,24 @@ Two things have to be bridged for AutoR to run in that harness:
 1. **No human.** AutoR's approval gate is replaced by the reviewer agent (``--full-auto``)
    and every remaining terminal prompt is turned into a hard error rather than a hang.
    See :mod:`src.terminal_ui`'s unattended mode.
-2. **No shared output contract.** AutoR writes a run tree under ``runs/<run_id>/`` with a
-   LaTeX paper package; the benchmark reads ``report/report.md``, ``report/images/*.png``,
-   ``code/`` and ``outputs/`` inside the workspace. :func:`export_run` performs that
-   translation after the pipeline finishes, whether it succeeded or not — a partial report
-   scores better than no report.
+2. **No shared output contract.** AutoR writes a run tree under ``runs/<run_id>/``; the
+   benchmark reads ``report/report.md``, ``report/images/*.png``, ``code/`` and ``outputs/``
+   inside the workspace. :func:`export_run` performs that translation after the pipeline
+   finishes, whether it succeeded or not — a partial report scores better than no report.
 
-The report itself is produced by the first of three paths that yields real content:
+   With the default ``markdown`` output format Stage 07 already produces the report, so the
+   translation is a copy. With ``latex`` it produces a paper package instead, and the report
+   has to be synthesized from the approved artifacts.
+
+The report itself is produced by the first of four paths that yields real content:
 
 ``agent``
-    Stage 07 wrote ``report/report.md`` directly, because the goal contract asked for it.
+    Something wrote ``report/report.md`` at the benchmark path directly, because the goal
+    contract asked for it. A report AutoR exported on an earlier pass does not count: the
+    digest in ``.autor_export.json`` distinguishes the two.
+``stage``
+    Stage 07 ran in ``markdown`` output mode, so its gate-checked deliverable already exists in
+    the run tree and is promoted verbatim.
 ``synthesized``
     A single extra operator call converts the approved run artifacts into the benchmark's
     markdown format.
@@ -31,6 +39,7 @@ The report itself is produced by the first of three paths that yields real conte
 from __future__ import annotations
 
 import filecmp
+import hashlib
 import json
 import shutil
 import sys
@@ -40,11 +49,14 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from .utils import (
+    DEFAULT_OUTPUT_FORMAT,
+    MIN_REPORT_CHARS,
     RunPaths,
     StageSpec,
     approved_stage_summaries,
     build_run_paths,
     read_text,
+    resolve_output_format,
     truncate_text,
     write_text,
 )
@@ -56,8 +68,10 @@ RCB_WORKSPACE_DIRS = ("code", "outputs", "report", "report/images")
 #: Directory holding the AutoR run tree, kept inside the workspace so a run is self-contained.
 AUTOR_RUNS_DIRNAME = ".autor"
 
-#: Below this many characters a report is treated as a stub rather than a deliverable.
-MIN_REPORT_CHARS = 1200
+#: Records which report AutoR last exported, so a re-export can tell its own output apart
+#: from one the agent wrote. A dotfile at the workspace root: the benchmark reads only
+#: report/, outputs/ and the metadata files it writes itself, so this stays invisible to it.
+EXPORT_MARKER_NAME = ".autor_export.json"
 
 #: Synthetic stage used only to label the report-synthesis operator call in the logs.
 REPORT_STAGE = StageSpec(9, "09_benchmark_report", "Benchmark Report")
@@ -111,7 +125,11 @@ def ensure_workspace_layout(workspace: Path) -> None:
         (workspace / name).mkdir(parents=True, exist_ok=True)
 
 
-def build_benchmark_goal(workspace: Path, instructions: str) -> str:
+def build_benchmark_goal(
+    workspace: Path,
+    instructions: str,
+    output_format: str = DEFAULT_OUTPUT_FORMAT,
+) -> str:
     """Wrap the benchmark instructions in an explicit output contract.
 
     The goal is injected verbatim into every stage prompt, so stating the workspace
@@ -119,6 +137,13 @@ def build_benchmark_goal(workspace: Path, instructions: str) -> str:
     to the AutoR run tree.
     """
     resolved = workspace.resolve()
+    report_instruction = (
+        "Stage 07 (Writing) writes this file as its primary deliverable. Keep the copy here in "
+        "sync with it."
+        if resolve_output_format(output_format) == "markdown"
+        else "Write this file during Stage 07 (Writing) at the latest, in addition to the "
+        "normal LaTeX paper package. Do not defer it to the end of the run."
+    )
     return "\n\n".join(
         [
             "# Benchmark Run: ResearchClawBench",
@@ -149,8 +174,7 @@ def build_benchmark_goal(workspace: Path, instructions: str) -> str:
                 "with absolute paths. Report concrete numbers, not adjectives; the judge compares "
                 "your results against the original paper's and is explicitly sceptical of "
                 "plausible-sounding claims with no evidence behind them. Length is not rewarded.\n\n"
-                "Write this file during Stage 07 (Writing) at the latest, in addition to the "
-                "normal LaTeX paper package. Do not defer it to the end of the run."
+                f"{report_instruction}"
             ),
             "## Research Task",
             instructions.strip(),
@@ -198,7 +222,16 @@ def collect_figures(paths: RunPaths, workspace: Path) -> list[str]:
 
     names = {path.name for path in images_dir.iterdir() if path.is_file() and path.suffix.lower() in FIGURE_SUFFIXES}
 
-    for source_root in (paths.figures_dir, paths.writing_dir, paths.results_dir, paths.artifacts_dir):
+    # The run tree's own report/images/ comes first: in markdown mode those are the figures the
+    # report actually references by name, so they must keep their filenames. A same-named figure
+    # swept up later from figures/ or results/ is the one that gets qualified.
+    for source_root in (
+        paths.report_images_dir,
+        paths.figures_dir,
+        paths.writing_dir,
+        paths.results_dir,
+        paths.artifacts_dir,
+    ):
         for path in _iter_files(source_root):
             if path.suffix.lower() not in FIGURE_SUFFIXES:
                 continue
@@ -267,6 +300,39 @@ def build_fallback_report(
     return "\n".join(sections).rstrip() + "\n"
 
 
+def _report_digest(text: str) -> str:
+    return hashlib.sha256(text.strip().encode("utf-8")).hexdigest()
+
+
+def _matches_export_marker(workspace: Path, report_text: str) -> bool:
+    """True when the report at the benchmark path is one AutoR itself exported earlier.
+
+    The marker records the digest of what was written; this comparison is the only thing
+    that makes it worth writing. An unreadable or absent marker means "assume the agent
+    wrote it", which is the conservative answer: it preserves a real report.
+    """
+    if not report_text:
+        return False
+    marker_path = workspace / EXPORT_MARKER_NAME
+    if not marker_path.exists():
+        return False
+    try:
+        payload = json.loads(marker_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return isinstance(payload, dict) and payload.get("report_sha256") == _report_digest(report_text)
+
+
+def _publish_report(workspace: Path, report_path: Path, text: str, source: str) -> None:
+    """Write the benchmark report and record that AutoR, not the agent, authored it."""
+    body = text.strip() + "\n"
+    write_text(report_path, body)
+    marker = {"report_source": source, "report_sha256": _report_digest(body)}
+    (workspace / EXPORT_MARKER_NAME).write_text(
+        json.dumps(marker, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+
+
 def export_run(
     *,
     paths: RunPaths,
@@ -285,31 +351,42 @@ def export_run(
     figures = collect_figures(paths, workspace)
 
     report_path = workspace / "report" / "report.md"
-    existing = read_text(report_path).strip() if report_path.exists() else ""
-    if len(existing) >= MIN_REPORT_CHARS:
+
+    def result(source: str) -> ExportResult:
         return ExportResult(
             report_path=report_path,
-            report_source="agent",
+            report_source=source,
             figures=figures,
             code_files=code_files,
             output_files=output_files,
         )
 
+    existing = read_text(report_path).strip() if report_path.exists() else ""
+    # A report AutoR exported on an earlier pass is not the agent's own work, and must not
+    # outrank a Stage 07 report written since. Without this check `--export-only` after an
+    # interrupted run keeps re-publishing the first fallback forever.
+    existing_is_ours = _matches_export_marker(workspace, existing)
+    if len(existing) >= MIN_REPORT_CHARS and not existing_is_ours:
+        return result("agent")
+
+    # In markdown mode Stage 07's deliverable is workspace/report/report.md *inside the run
+    # tree*. Promoting it is the normal path, not a fallback: it is a validated, gate-checked
+    # report, so it outranks both a stub at the benchmark path and a fresh synthesis call.
+    stage_report = read_text(paths.report_file).strip() if paths.report_file.exists() else ""
+    if len(stage_report) >= MIN_REPORT_CHARS:
+        _publish_report(workspace, report_path, stage_report, "stage")
+        return result("stage")
+
     if synthesize is not None:
         synthesized = synthesize(paths=paths, workspace=workspace, figures=figures)
         if synthesized and len(synthesized.strip()) >= MIN_REPORT_CHARS:
-            write_text(report_path, synthesized.strip() + "\n")
-            return ExportResult(
-                report_path=report_path,
-                report_source="synthesized",
-                figures=figures,
-                code_files=code_files,
-                output_files=output_files,
-            )
+            _publish_report(workspace, report_path, synthesized.strip(), "synthesized")
+            return result("synthesized")
         # A synthesis attempt that came back thin is worse than the deterministic assembly,
         # so fall through rather than shipping it.
 
-    write_text(
+    _publish_report(
+        workspace,
         report_path,
         build_fallback_report(
             paths=paths,
@@ -317,14 +394,9 @@ def export_run(
             pipeline_completed=pipeline_completed,
             auto_skipped_stages=auto_skipped_stages,
         ),
+        "fallback",
     )
-    return ExportResult(
-        report_path=report_path,
-        report_source="fallback",
-        figures=figures,
-        code_files=code_files,
-        output_files=output_files,
-    )
+    return result("fallback")
 
 
 # ---------------------------------------------------------------------------

@@ -14,6 +14,27 @@ MAX_STAGE_ATTEMPTS = 5
 DEFAULT_CODEX_SANDBOX = "workspace-write"
 CODEX_SANDBOX_CHOICES = {"read-only", "workspace-write", "danger-full-access"}
 
+#: Final deliverable produced by Stage 07.
+#:
+#: ``markdown`` writes ``workspace/report/report.md`` plus ``workspace/report/images/*.png``,
+#: which is the artifact automated research benchmarks read (ResearchClawBench scores exactly
+#: ``<workspace>/report/report.md``). ``latex`` keeps the original submission-oriented paper
+#: package: ``main.tex``, ``sections/*.tex``, a bibliography, and a compiled PDF.
+DEFAULT_OUTPUT_FORMAT = "markdown"
+OUTPUT_FORMAT_CHOICES = ("markdown", "latex")
+#: What the CLIs advertise. A subset of the alias table below, short enough for ``--help``;
+#: `test_every_cli_choice_resolves` is what keeps the two from drifting apart.
+OUTPUT_FORMAT_CLI_CHOICES = ("markdown", "md", "latex", "tex")
+_OUTPUT_FORMAT_ALIASES = {
+    "markdown": "markdown",
+    "md": "markdown",
+    "report": "markdown",
+    "latex": "latex",
+    "tex": "latex",
+    "pdf": "latex",
+    "paper": "latex",
+}
+
 
 @dataclass(frozen=True)
 class StageSpec:
@@ -52,6 +73,9 @@ class RunPaths:
     experiment_manifest: Path
     hypothesis_manifest: Path
     writing_dir: Path
+    report_dir: Path
+    report_file: Path
+    report_images_dir: Path
     figures_dir: Path
     artifacts_dir: Path
     notes_dir: Path
@@ -146,6 +170,21 @@ LATEX_SUFFIXES = {".tex"}
 PDF_SUFFIXES = {".pdf"}
 BIB_SUFFIXES = {".bib"}
 
+#: Image formats a benchmark judge can actually render. ``.pdf``, ``.eps``, ``.tiff`` and
+#: friends are deliberately absent: a report that links one shows the judge nothing.
+RENDERABLE_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+#: The format the benchmark asks for. Anything else renderable is accepted but flagged.
+PREFERRED_REPORT_IMAGE_SUFFIX = ".png"
+#: Below this many characters ``report.md`` is a stub, not a deliverable.
+MIN_REPORT_CHARS = 1200
+
+#: ``![alt](target)``, tolerating an optional title and angle-bracketed targets.
+MARKDOWN_IMAGE_PATTERN = re.compile(
+    r"!\[[^\]]*\]\(\s*(<[^>]*>|[^)\s]+)(?:\s+[\"'][^\"']*[\"'])?\s*\)"
+)
+#: ``<img src="target">`` for reports that fall back to raw HTML.
+HTML_IMAGE_PATTERN = re.compile(r"<img\b[^>]*?\bsrc\s*=\s*[\"']([^\"']+)[\"']", flags=re.IGNORECASE)
+
 TYPED_HYPOTHESIS_HEADINGS = [
     "Theoretical Propositions",
     "Empirical Hypotheses",
@@ -189,6 +228,9 @@ def build_run_paths(run_root: Path) -> RunPaths:
         experiment_manifest=workspace_root / "results" / "experiment_manifest.json",
         hypothesis_manifest=workspace_root / "notes" / "hypothesis_manifest.json",
         writing_dir=workspace_root / "writing",
+        report_dir=workspace_root / "report",
+        report_file=workspace_root / "report" / "report.md",
+        report_images_dir=workspace_root / "report" / "images",
         figures_dir=workspace_root / "figures",
         artifacts_dir=workspace_root / "artifacts",
         notes_dir=workspace_root / "notes",
@@ -222,6 +264,8 @@ def workspace_dirs(paths: RunPaths) -> list[Path]:
         paths.data_dir,
         paths.results_dir,
         paths.writing_dir,
+        paths.report_dir,
+        paths.report_images_dir,
         paths.figures_dir,
         paths.artifacts_dir,
         paths.notes_dir,
@@ -268,6 +312,20 @@ def normalize_codex_sandbox(value: Any) -> str:
     return DEFAULT_CODEX_SANDBOX
 
 
+def default_run_config() -> dict[str, Any]:
+    """The configuration a run falls back to when run_config.json is absent or unreadable."""
+    return {
+        "model": "unknown",
+        "operator": "claude",
+        "venue": DEFAULT_VENUE,
+        "output_format": DEFAULT_OUTPUT_FORMAT,
+        "approval_mode": "manual",
+        "review_operator": "claude",
+        "review_model": "sonnet",
+        "codex_sandbox": DEFAULT_CODEX_SANDBOX,
+    }
+
+
 def initialize_run_config(
     paths: RunPaths,
     model: str,
@@ -277,6 +335,7 @@ def initialize_run_config(
     review_operator: str | None = None,
     review_model: str | None = None,
     codex_sandbox: str | None = None,
+    output_format: str | None = None,
 ) -> dict[str, Any]:
     normalized_operator = operator.strip().lower() if operator.strip() else "claude"
     normalized_review_operator = (
@@ -289,6 +348,7 @@ def initialize_run_config(
         "model": model,
         "operator": normalized_operator,
         "venue": selected_venue,
+        "output_format": resolve_output_format(output_format),
         "approval_mode": "agent" if approval_mode == "agent" else "manual",
         "review_operator": normalized_review_operator,
         "review_model": str(
@@ -304,39 +364,15 @@ def initialize_run_config(
 
 def load_run_config(paths: RunPaths) -> dict[str, Any]:
     if not paths.run_config.exists():
-        return {
-            "model": "unknown",
-            "operator": "claude",
-            "venue": DEFAULT_VENUE,
-            "approval_mode": "manual",
-            "review_operator": "claude",
-            "review_model": "sonnet",
-            "codex_sandbox": DEFAULT_CODEX_SANDBOX,
-        }
+        return default_run_config()
 
     try:
         payload = json.loads(read_text(paths.run_config))
     except json.JSONDecodeError:
-        return {
-            "model": "unknown",
-            "operator": "claude",
-            "venue": DEFAULT_VENUE,
-            "approval_mode": "manual",
-            "review_operator": "claude",
-            "review_model": "sonnet",
-            "codex_sandbox": DEFAULT_CODEX_SANDBOX,
-        }
+        return default_run_config()
 
     if not isinstance(payload, dict):
-        return {
-            "model": "unknown",
-            "operator": "claude",
-            "venue": DEFAULT_VENUE,
-            "approval_mode": "manual",
-            "review_operator": "claude",
-            "review_model": "sonnet",
-            "codex_sandbox": DEFAULT_CODEX_SANDBOX,
-        }
+        return default_run_config()
 
     model = payload.get("model")
     operator = payload.get("operator")
@@ -355,6 +391,7 @@ def load_run_config(paths: RunPaths) -> dict[str, Any]:
         "model": model if isinstance(model, str) and model.strip() else "unknown",
         "operator": normalized_operator,
         "venue": resolve_venue_key(venue if isinstance(venue, str) else None),
+        "output_format": resolve_output_format(payload.get("output_format")),
         "approval_mode": "agent" if approval_mode == "agent" else "manual",
         "review_operator": normalized_review_operator,
         "review_model": (
@@ -379,6 +416,7 @@ def save_run_config(paths: RunPaths, config: dict[str, Any]) -> None:
         "model": str(config.get("model") or "unknown"),
         "operator": normalized_operator,
         "venue": resolve_venue_key(str(config.get("venue") or DEFAULT_VENUE)),
+        "output_format": resolve_output_format(config.get("output_format")),
         "approval_mode": "agent" if config.get("approval_mode") == "agent" else "manual",
         "review_operator": normalized_review_operator,
         "review_model": str(
@@ -404,6 +442,7 @@ def ensure_run_config(
     review_operator: str | None = None,
     review_model: str | None = None,
     codex_sandbox: str | None = None,
+    output_format: str | None = None,
 ) -> dict[str, Any]:
     current = load_run_config(paths)
     effective_operator = operator or current.get("operator") or "claude"
@@ -412,6 +451,7 @@ def ensure_run_config(
         "model": model or current.get("model") or "unknown",
         "operator": effective_operator,
         "venue": resolve_venue_key(venue or current.get("venue")),
+        "output_format": resolve_output_format(output_format or current.get("output_format")),
         "approval_mode": approval_mode or current.get("approval_mode") or "manual",
         "review_operator": effective_review_operator,
         "review_model": review_model or current.get("review_model") or (
@@ -422,6 +462,22 @@ def ensure_run_config(
     }
     save_run_config(paths, updated)
     return updated
+
+
+def resolve_output_format(value: str | None) -> str:
+    """Normalize a user-facing output-format name to a canonical key.
+
+    Unknown values fall back to the default rather than raising: the value reaches this
+    function from a run config that a previous version may have written without the field
+    at all, and a run is not worth aborting over a spelling.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return DEFAULT_OUTPUT_FORMAT
+    return _OUTPUT_FORMAT_ALIASES.get(value.strip().lower(), DEFAULT_OUTPUT_FORMAT)
+
+
+def selected_output_format(paths: RunPaths) -> str:
+    return resolve_output_format(load_run_config(paths).get("output_format"))
 
 
 def selected_venue_key(paths: RunPaths) -> str:
@@ -442,7 +498,14 @@ def selected_venue_profile(paths: RunPaths) -> dict[str, str]:
 
 def format_venue_for_prompt(paths: RunPaths) -> str:
     profile = selected_venue_profile(paths)
+    output_format = selected_output_format(paths)
     lines = [
+        f"- final output format: `{output_format}`",
+        (
+            f"- scored deliverable: `{paths.report_file.resolve()}`"
+            if output_format == "markdown"
+            else f"- scored deliverable: compiled PDF from `{(paths.writing_dir / 'main.tex').resolve()}`"
+        ),
         f"- target venue key: `{profile['venue_key']}`",
         f"- display name: {profile.get('display_name', profile['venue_key'])}",
         f"- venue type: {profile.get('venue_type', 'conference')}",
@@ -457,11 +520,21 @@ def format_venue_for_prompt(paths: RunPaths) -> str:
     return "\n".join(lines)
 
 
-def load_prompt_template(prompt_dir: Path, stage: StageSpec) -> str:
-    template_path = prompt_dir / stage.filename
-    if not template_path.exists():
-        raise FileNotFoundError(f"Missing prompt template: {template_path}")
-    return read_text(template_path)
+def load_prompt_template(prompt_dir: Path, stage: StageSpec, output_format: str | None = None) -> str:
+    """Load a stage prompt, preferring a format-specific variant when one exists.
+
+    Only Stage 07 currently ships a variant (``07_writing_markdown.md``). Every other stage
+    resolves to its single template, so adding a format never has to touch them.
+    """
+    candidates: list[Path] = []
+    if output_format:
+        candidates.append(prompt_dir / f"{stage.slug}_{resolve_output_format(output_format)}.md")
+    candidates.append(prompt_dir / stage.filename)
+
+    for template_path in candidates:
+        if template_path.exists():
+            return read_text(template_path)
+    raise FileNotFoundError(f"Missing prompt template: {prompt_dir / stage.filename}")
 
 
 def format_stage_template(template: str, stage: StageSpec, paths: RunPaths) -> str:
@@ -483,6 +556,10 @@ def format_stage_template(template: str, stage: StageSpec, paths: RunPaths) -> s
         "{{WORKSPACE_DATA_DIR}}": str(paths.data_dir.resolve()),
         "{{WORKSPACE_RESULTS_DIR}}": str(paths.results_dir.resolve()),
         "{{WORKSPACE_WRITING_DIR}}": str(paths.writing_dir.resolve()),
+        "{{WORKSPACE_REPORT_DIR}}": str(paths.report_dir.resolve()),
+        "{{WORKSPACE_REPORT_FILE}}": str(paths.report_file.resolve()),
+        "{{WORKSPACE_REPORT_IMAGES_DIR}}": str(paths.report_images_dir.resolve()),
+        "{{OUTPUT_FORMAT}}": selected_output_format(paths),
         "{{WORKSPACE_FIGURES_DIR}}": str(paths.figures_dir.resolve()),
         "{{WORKSPACE_ARTIFACTS_DIR}}": str(paths.artifacts_dir.resolve()),
         "{{WORKSPACE_NOTES_DIR}}": str(paths.notes_dir.resolve()),
@@ -874,6 +951,112 @@ def validate_stage_markdown(
     return problems
 
 
+def extract_markdown_image_targets(markdown: str) -> list[str]:
+    """Return every image target referenced by a markdown document, in document order.
+
+    Both ``![alt](target)`` and ``<img src="target">`` count: a report that renders a figure
+    through raw HTML still has to point at a file that exists.
+    """
+    targets: list[tuple[int, str]] = []
+    for pattern in (MARKDOWN_IMAGE_PATTERN, HTML_IMAGE_PATTERN):
+        for match in pattern.finditer(markdown):
+            raw = match.group(1).strip()
+            if raw.startswith("<") and raw.endswith(">"):
+                raw = raw[1:-1].strip()
+            if raw:
+                targets.append((match.start(), raw))
+    return [target for _, target in sorted(targets, key=lambda item: item[0])]
+
+
+def _split_image_target(target: str) -> str:
+    """Drop a URL fragment or query string so the remainder can be treated as a path."""
+    return target.split("#", 1)[0].split("?", 1)[0]
+
+
+def resolve_report_image(report_dir: Path, target: str) -> Path | None:
+    """Resolve a report-relative image target, or None when it is not a local relative path.
+
+    A target that climbs out of the report directory is rejected even when it resolves on
+    this machine. Only ``report/`` travels to the benchmark workspace, so ``../figures/x.png``
+    is a link that works here and is broken everywhere the report is actually read.
+    """
+    cleaned = _split_image_target(target).strip()
+    if not cleaned:
+        return None
+    lowered = cleaned.lower()
+    if lowered.startswith(("http://", "https://", "data:", "ftp://", "file://")):
+        return None
+    candidate = Path(cleaned)
+    if candidate.is_absolute():
+        return None
+
+    resolved = (report_dir / candidate).resolve()
+    try:
+        resolved.relative_to(report_dir.resolve())
+    except ValueError:
+        return None
+    return resolved
+
+
+def validate_markdown_report(paths: RunPaths) -> list[str]:
+    """Check the markdown deliverable the benchmark judge will actually read.
+
+    The judge reads ``report/report.md`` as plain text and separately attaches image files it
+    finds on disk. A figure reference that does not resolve therefore fails twice over: the
+    prose promises a figure and the judge is shown nothing. That is the single most expensive
+    defect in this deliverable, so it is a hard gate rather than a warning.
+    """
+    problems: list[str] = []
+    report_path = paths.report_file
+    if not report_path.exists():
+        return [
+            "requires a markdown research report at "
+            f"{report_path.relative_to(paths.run_root).as_posix()}."
+        ]
+
+    report_text = read_text(report_path)
+    if len(report_text.strip()) < MIN_REPORT_CHARS:
+        problems.append(
+            f"report.md is only {len(report_text.strip())} characters; a scored research report "
+            f"needs at least {MIN_REPORT_CHARS} characters of methodology, results, and discussion."
+        )
+
+    if contains_placeholder_text(report_text):
+        problems.append("report.md still contains placeholder text.")
+
+    targets = extract_markdown_image_targets(report_text)
+    if not targets:
+        problems.append(
+            "report.md references no figures. Generate plots, save them under "
+            "report/images/, and embed them with `![Caption](images/name.png)`."
+        )
+
+    for target in targets:
+        resolved = resolve_report_image(paths.report_dir, target)
+        if resolved is None:
+            problems.append(
+                f"report.md references `{target}`, which is not a report-relative path. "
+                "Use paths relative to report.md, for example `images/main_result.png`."
+            )
+            continue
+        if not resolved.exists():
+            problems.append(f"report.md references `{target}`, but no such file exists under report/.")
+            continue
+        if resolved.suffix.lower() not in RENDERABLE_IMAGE_SUFFIXES:
+            problems.append(
+                f"report.md references `{target}`, whose format cannot be rendered by the "
+                f"report viewer. Save figures as {PREFERRED_REPORT_IMAGE_SUFFIX} instead."
+            )
+
+    if _count_files_with_suffixes(paths.report_images_dir, RENDERABLE_IMAGE_SUFFIXES) == 0:
+        problems.append(
+            "requires at least one rendered figure under report/images/ "
+            f"(save figures as {PREFERRED_REPORT_IMAGE_SUFFIX})."
+        )
+
+    return problems
+
+
 def validate_stage_artifacts(stage: StageSpec, paths: RunPaths) -> list[str]:
     problems: list[str] = []
     freshness_cutoff = stage_execution_started_at(paths, stage)
@@ -923,7 +1106,52 @@ def validate_stage_artifacts(stage: StageSpec, paths: RunPaths) -> list[str]:
                 f"{stage.stage_title} requires figures produced or updated during the current stage execution."
             )
 
-    if stage.number >= 7:
+    if stage.number >= 7 and selected_output_format(paths) == "markdown":
+        problems.extend(
+            f"{stage.stage_title}: {problem}"
+            for problem in validate_markdown_report(paths)
+        )
+
+        if not (paths.artifacts_dir / "citation_verification.json").exists():
+            problems.append(
+                f"{stage.stage_title} requires citation_verification.json under workspace/artifacts."
+            )
+        else:
+            from .evidence_ledger import validate_citation_verification
+
+            for problem in validate_citation_verification(paths.artifacts_dir / "citation_verification.json"):
+                problems.append(f"{stage.stage_title}: {problem}")
+
+        if not (paths.artifacts_dir / "self_review.json").exists():
+            problems.append(
+                f"{stage.stage_title} requires self_review.json under workspace/artifacts."
+            )
+
+        report_review_path = paths.artifacts_dir / "report_review.json"
+        if not report_review_path.exists():
+            problems.append(
+                f"{stage.stage_title} requires report_review.json under workspace/artifacts."
+            )
+        else:
+            from .writing_manifest import validate_report_review
+
+            for problem in validate_report_review(report_review_path):
+                problems.append(f"{stage.stage_title}: {problem}")
+
+        if stage.number == 7 and freshness_cutoff is not None:
+            stage7_required_files = [
+                paths.report_file,
+                paths.artifacts_dir / "citation_verification.json",
+                paths.artifacts_dir / "self_review.json",
+                report_review_path,
+            ]
+            if not all(path.exists() and path.stat().st_mtime >= freshness_cutoff for path in stage7_required_files):
+                problems.append(
+                    f"{stage.stage_title} requires report.md and its review artifacts to be produced "
+                    "or updated during the current stage execution."
+                )
+
+    elif stage.number >= 7:
         main_tex = paths.writing_dir / "main.tex"
         if not main_tex.exists():
             problems.append(

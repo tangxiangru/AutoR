@@ -10,7 +10,14 @@ from typing import Literal
 
 from ..artifact_index import ArtifactIndex, load_artifact_index
 from ..manifest import ensure_run_manifest, load_run_manifest
-from ..utils import STAGES, RunPaths, build_run_paths, read_text
+from ..utils import (
+    DEFAULT_OUTPUT_FORMAT,
+    STAGES,
+    RunPaths,
+    build_run_paths,
+    read_text,
+    selected_output_format,
+)
 from .sessions import parse_real_session, read_events, summarize_sessions
 from .studio_runner import StudioRunner
 
@@ -168,6 +175,10 @@ class StudioPaperPreview:
     pdf_available: bool
     build_log_relative_path: str | None
     build_log_content: str
+    output_format: str = DEFAULT_OUTPUT_FORMAT
+    report_relative_path: str | None = None
+    report_content: str = ""
+    report_available: bool = False
 
 
 @dataclass(frozen=True)
@@ -543,6 +554,8 @@ class StudioService:
 
     def get_paper_preview(self, run_id: str) -> StudioPaperPreview:
         paths = self._require_run(run_id)
+        output_format = selected_output_format(paths)
+        report_available = paths.report_file.exists()
         tex_path = paths.writing_dir / "main.tex"
         tex_content = read_text(tex_path) if tex_path.exists() else ""
         section_paths = [
@@ -566,6 +579,10 @@ class StudioService:
             pdf_available=pdf_path is not None,
             build_log_relative_path=self._relative_to_run(paths, build_log_path) if build_log_path is not None else None,
             build_log_content=read_text(build_log_path) if build_log_path is not None else "",
+            output_format=output_format,
+            report_relative_path=self._relative_to_run(paths, paths.report_file) if report_available else None,
+            report_content=read_text(paths.report_file) if report_available else "",
+            report_available=report_available,
         )
 
     def get_paper_pdf_bytes(self, run_id: str) -> bytes:
