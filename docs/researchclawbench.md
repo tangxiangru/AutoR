@@ -210,7 +210,24 @@ one to its canonical URL (`https://arxiv.org/abs/2606.07591`) before reporting i
 de-duplicates afterwards, since two stubs routinely resolve to the same page. A stub that
 cannot be resolved is kept but labelled **unresolved redirect, not citable**, and the prompt
 tells operators to treat it as a lead rather than a reference. `--no-resolve-urls` skips the
-resolution step.
+resolution step. Following the redirect is already a GET, so the tool also reads the page's
+`<title>` from it and uses that when grounding supplied only a bare domain — the difference
+between a bibliography entry that says `arxiv.org` and one that says what the paper is.
+
+**What a "snippet" is, and why the tool no longer calls it one.** Gemini's grounding
+metadata pairs each source with sentences from *its own generated answer* — it asserts that
+the source **supports** the claim, never that the page **contains** that sentence. Reported
+as a blockquote under a source hyperlink, as the tool originally did, that reads as a
+quotation, and an agent under instruction to cite only what the tool returned will transcribe
+it as one. The field is therefore named `supported_claims`, rendered as a labelled bullet
+list, and the prompt block states outright that it is not text from the page. Every claim a
+source was cited for is kept, rather than only the first.
+
+**Groundedness is a field, not a sentence.** `--json` carries `grounded` and
+`citable_source_count` at the response level and `citable` per result, and the CLI exits `2`
+(distinct from `1`, "the search failed") when nothing citable came back. Before, that
+judgement existed only as prose inside the markdown renderer, invisible to the `--json`
+consumer the prompt tells the agent to parse.
 
 Both `main.py` and `rcb_agent.py` take `--web-search`:
 
