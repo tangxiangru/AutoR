@@ -138,6 +138,30 @@ looks for in `main.tex`. A run can always override the detection with a
 
 ---
 
+## Web search (optional)
+
+Stage 01 needs real search. Some coding-agent deployments ship with the
+built-in `WebSearch` tool disabled — notably **Claude Code on Vertex AI** —
+which leaves the stage unable to search at all.
+
+`--web-search gemini` routes searches through the Gemini API's Google Search
+grounding instead, using the same key as diagram generation:
+
+```bash
+export GEMINI_API_KEY="..."
+python main.py --web-search gemini --goal "..."
+
+# The tool is also usable on its own:
+python tools/web_search.py "black hole superradiance constraints" --json
+```
+
+`auto` (the default) uses Gemini when a key is configured and falls back to the
+backend's native search otherwise, so it never advertises a tool that would
+fail on first use. Details in
+[ResearchClawBench → Web search](researchclawbench.md#web-search-on-deployments-where-websearch-is-disabled).
+
+---
+
 ## Diagram generation (optional)
 
 `--research-diagram` generates a method illustration with the Gemini API after
@@ -174,6 +198,10 @@ Key resolution order: `GOOGLE_API_KEY`, then `GEMINI_API_KEY`, then
 With none of them set, the step raises
 `Gemini API key not found. Set GOOGLE_API_KEY or GEMINI_API_KEY ...`.
 
+The resolver lives in [`src/web_search.py`](../src/web_search.py) and is shared
+with Gemini-backed web search, so a key configured for one feature works for
+the other.
+
 If `google-genai` is not installed you will see
 `Diagram generation failed: No module named 'google'` — the rest of the run is
 unaffected.
@@ -186,8 +214,10 @@ AutoR reads very few environment variables of its own.
 
 | Variable | Read by | Effect |
 | --- | --- | --- |
-| `GOOGLE_API_KEY` | `src/diagram_gen.py` | Gemini key for `--research-diagram`. |
-| `GEMINI_API_KEY` | `src/diagram_gen.py` | Same, checked second. |
+| `GOOGLE_API_KEY` | `src/web_search.py` | Gemini key for `--research-diagram` and for `--web-search gemini`. |
+| `GEMINI_API_KEY` | `src/web_search.py` | Same, checked second. |
+| `AUTOR_WEB_SEARCH_MODEL` | `src/web_search.py` | Model for Gemini-backed web search. Defaults to `gemini-2.5-flash`. |
+| `GEMINI_MODEL` | `src/web_search.py` | Same, checked second. |
 | `TERM` | `src/terminal_ui.py` | `TERM=dumb` disables colored output. Useful for CI logs and for piping to a file. |
 
 Everything else — API keys, authentication, model access — belongs to the

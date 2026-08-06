@@ -10,6 +10,7 @@ detail behind it.
 | --- | --- |
 | Install AutoR and run your first project end to end | [English Guide](tutorial_en.md) · [中文教程](tutorial_zh.md) |
 | Look up a command-line flag | [CLI Reference](cli-reference.md) |
+| Run AutoR unattended, or benchmark it on ResearchClawBench | [ResearchClawBench](researchclawbench.md) |
 | Understand what a run leaves on disk | [Run Artifacts](run-artifacts.md) |
 | Know exactly what a stage must produce to be accepted | [Stage Contract](stage-contract.md) |
 | Configure venues, backends, sandboxes, or API keys | [Configuration](configuration.md) |
@@ -42,6 +43,11 @@ detail behind it.
   `validate_stage_markdown` and `validate_stage_artifacts`.
 - **[studio.md](studio.md)** — running the local browser workspace, what each
   page does, and the complete HTTP API surface.
+- **[researchclawbench.md](researchclawbench.md)** — running AutoR with no
+  human in the loop: the unattended execution model, the
+  [ResearchClawBench](https://github.com/InternScience/ResearchClawBench)
+  adapter and its output contract, and the Gemini-backed web search used where
+  the coding agent's own `WebSearch` tool is disabled.
 
 ### Internals
 

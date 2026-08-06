@@ -1,10 +1,14 @@
 # CLI Reference
 
-Complete reference for AutoR's two entry points:
+Complete reference for AutoR's entry points:
 
 - `python main.py` — the terminal research workflow ([source](../main.py))
 - `python studio.py` — the local browser workspace
   ([source](../src/backend/studio_http.py))
+- `python rcb_agent.py` — the unattended ResearchClawBench agent
+  ([source](../rcb_agent.py))
+- `python tools/web_search.py` — Gemini-backed web search
+  ([source](../src/web_search.py))
 
 For a task-oriented introduction, read the [English Guide](tutorial_en.md)
 instead. This page is the exhaustive list.
@@ -14,11 +18,13 @@ instead. This page is the exhaustive list.
 ## `main.py`
 
 ```
-python main.py [--goal GOAL] [--runs-dir DIR] [--fake-operator]
+python main.py [--goal GOAL] [--goal-file PATH] [--runs-dir DIR] [--fake-operator]
                [--model MODEL] [--operator {claude,codex}]
                [--codex-sandbox {read-only,workspace-write,danger-full-access}]
                [--approval-mode {manual,agent}] [--full-auto]
+               [--unattended] [--max-auto-skips N]
                [--review-operator {claude,codex}] [--review-model MODEL]
+               [--web-search {auto,gemini,native}]
                [--venue VENUE] [--resume-run RUN_ID] [--redo-stage STAGE]
                [--rollback-stage STAGE] [--resources PATH [PATH ...]]
                [--skip-intake] [--research-diagram]
@@ -30,7 +36,8 @@ python main.py [--goal GOAL] [--runs-dir DIR] [--fake-operator]
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--goal GOAL` | prompted interactively | The research goal. If omitted, AutoR reads a multi-line goal from stdin and stops at the first empty line. An empty goal is an error. |
+| `--goal GOAL` | prompted interactively | The research goal. If omitted, AutoR reads a multi-line goal from stdin and stops at the first empty line. An empty goal is an error. Unattended runs cannot be prompted, so one of `--goal` or `--goal-file` is required there. |
+| `--goal-file PATH` | — | Read the goal from a file instead. Mutually exclusive with `--goal`. Use this when the goal is too long to pass as a shell argument. |
 | `--runs-dir DIR` | `runs` | Where run directories are created. Resolved **relative to the repository root**, not the current working directory. Point this at a large disk for heavy experiments. |
 
 ### Execution backend
@@ -61,13 +68,51 @@ gate for a strict reviewer agent; it does **not** change the stage pipeline.
 | Flag | Default | Description |
 | --- | --- | --- |
 | `--approval-mode {manual,agent}` | `manual` | Who approves a stage. `manual` shows the six-option review menu. `agent` delegates to an automated reviewer. Preserved on resume. |
-| `--full-auto` | off | Shortcut for `--approval-mode agent`. |
+| `--full-auto` | off | Shortcut for `--approval-mode agent` plus `--unattended`. |
 | `--review-operator {claude,codex}` | same as `--operator` | Backend used by the automated reviewer. Using a different backend than the executor gives the review some independence. |
 | `--review-model MODEL` | backend default | Model for the reviewer. A stronger reviewer model than the executor model is a reasonable configuration. |
 
 Manual review is still the recommended mode for research you intend to
 publish. `agent` mode exists for unattended sweeps, overnight runs, and
 automated dry runs.
+
+### Unattended execution
+
+Replacing the human approval gate is not by itself enough to make a run
+unattended: a handful of prompts sit outside that gate. `--unattended` closes
+them, and is implied by `--full-auto` and by `--approval-mode agent`.
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--unattended` | off (implied by `--full-auto`) | Never block on terminal input. The resource prompt is skipped even on a TTY, and any interactive prompt that is still reachable raises `UnattendedInputError` instead of waiting. |
+| `--max-auto-skips N` | `3` | How many stages may be auto-skipped after exhausting their retry budget before the run aborts. Only applies unattended. |
+
+Two behaviours change unattended:
+
+- **The resource prompt is never shown.** Pass resources with `--resources`.
+  Previously this prompt appeared whenever stdin was a TTY, even with
+  `--full-auto` — which silently hung any harness that handed AutoR the
+  launching terminal's stdin.
+- **An exhausted stage is auto-skipped, not fatal.** Attended runs offer a
+  skip/rollback/abort menu; unattended runs take the skip, promote an explicit
+  skip summary so downstream stages know the work is missing, and continue
+  until the `--max-auto-skips` budget runs out. Both outcomes are recorded in
+  `logs.txt` as `unattended_auto_skip` and `unattended_abort`.
+
+Prompts becoming hard errors is deliberate. It means a prompt added anywhere
+in the codebase later fails on its first unattended run instead of hanging an
+overnight job.
+
+### Web search
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--web-search {auto,gemini,native}` | `auto` | Which search path the operators use. `gemini` routes searches through the Gemini API's Google Search grounding via `tools/web_search.py`; `native` leaves the backend's own tool in charge; `auto` picks Gemini when a Gemini API key is configured and falls back to native otherwise. |
+
+Set `gemini` on deployments where the built-in `WebSearch` tool is disabled —
+notably **Claude Code on Vertex AI** — otherwise Stage 01 has no way to search
+and will either stall or fabricate citations. See
+[ResearchClawBench → Web search](researchclawbench.md#web-search-on-deployments-where-websearch-is-disabled).
 
 ### Writing venue
 
@@ -205,3 +250,69 @@ python studio.py --runs-dir /mnt/big-disk/runs
 
 Studio pages, behaviour, and the full HTTP API are documented in
 [studio.md](studio.md).
+
+---
+
+## `rcb_agent.py`
+
+Runs AutoR unattended against a
+[ResearchClawBench](https://github.com/InternScience/ResearchClawBench) workspace
+and exports the benchmark's deliverables. Never reads stdin.
+
+```
+python rcb_agent.py [--workspace PATH] [--prompt TEXT | --prompt-file PATH]
+                    [--operator {claude,codex}] [--model MODEL]
+                    [--review-operator {claude,codex}] [--review-model MODEL]
+                    [--codex-sandbox MODE] [--venue VENUE]
+                    [--stage-timeout SECONDS] [--max-auto-skips N]
+                    [--intake] [--web-search {auto,gemini,native}]
+                    [--no-synthesis] [--export-only] [--fake-operator]
+```
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--workspace PATH` | `.` | Benchmark workspace. The harness runs the agent with this as its working directory, so the default is usually right. |
+| `--prompt TEXT` | — | Benchmark instructions as a literal string. This is what the harness's `<PROMPT>` placeholder expands to. |
+| `--prompt-file PATH` | `<workspace>/INSTRUCTIONS.md` | Read the instructions from a file instead. |
+| `--stage-timeout SECONDS` | `3600` | Lower than `main.py`'s default, because benchmark runs are wall-clock bound. |
+| `--intake` | off | Run Stage 00. Off by default: the benchmark instructions are already a complete task specification. |
+| `--no-synthesis` | off | Skip the operator-backed report synthesis pass and use only the deterministic fallback. |
+| `--export-only` | off | Re-export the most recent run in the workspace without re-running the pipeline. Use this to recover deliverables from an interrupted job. |
+
+Every other flag mirrors its `main.py` counterpart.
+
+### Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | A report reached `<workspace>/report/report.md`. |
+| `1` | No report was produced, or the adapter could not start. |
+
+The exit code deliberately tracks the deliverable rather than pipeline
+completion: ResearchClawBench scores the report, so a run that auto-skipped a
+stage but still produced a substantive report is a success, and a "completed"
+run with an empty report is not.
+
+Full setup, the `agents.json` entry, and the output contract are in
+[researchclawbench.md](researchclawbench.md).
+
+---
+
+## `tools/web_search.py`
+
+Grounded web search backed by the Gemini API, for deployments where the coding
+agent's built-in `WebSearch` tool is disabled.
+
+```
+python tools/web_search.py QUERY... [--json] [--model MODEL] [--max-results N]
+```
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--json` | off | Emit `{query, model, answer, results[]}` instead of markdown. |
+| `--model MODEL` | `gemini-2.5-flash` | Overridable with `AUTOR_WEB_SEARCH_MODEL` or `GEMINI_MODEL`. |
+| `--max-results N` | `10` | Maximum number of grounded sources to report. |
+
+The API key is resolved from `GOOGLE_API_KEY`, then `GEMINI_API_KEY`, then
+`configs/diagram_config.yaml` — the same resolution order diagram generation
+uses. Exits `1` with the reason on stderr when a search cannot be performed.

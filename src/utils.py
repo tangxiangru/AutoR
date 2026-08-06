@@ -533,6 +533,7 @@ def build_prompt(
     handoff_context: str = "",
     revision_feedback: str | None = None,
     intake_context_text: str | None = None,
+    web_search_context: str | None = None,
 ) -> str:
     sections = [
         "# Stage Instructions",
@@ -559,6 +560,8 @@ def build_prompt(
         "# Original User Request",
         user_request.strip(),
     ]
+    if web_search_context:
+        sections.extend(["# Web Search Capability", web_search_context.strip()])
     if intake_context_text:
         sections.extend([
             "# Intake Context (User-Provided Resources and Clarifications)",
@@ -584,6 +587,7 @@ def build_continuation_prompt(
     intake_context_text: str | None = None,
     attempt_no: int = 1,
     previous_validation_errors: list[str] | None = None,
+    web_search_context: str | None = None,
 ) -> str:
     current_draft = paths.stage_tmp_file(stage)
     current_final = paths.stage_file(stage)
@@ -624,6 +628,8 @@ def build_continuation_prompt(
             "This block is for the human reviewer only and will be stripped before the stage summary is saved."
         ),
     ]
+    if web_search_context:
+        sections.extend(["# Web Search Capability", web_search_context.strip()])
     if intake_context_text:
         sections.extend([
             "# Intake Context (User-Provided Resources and Clarifications)",

@@ -1,0 +1,314 @@
+#!/usr/bin/env python3
+"""Run AutoR as an unattended ResearchClawBench agent.
+
+Register it in ResearchClawBench's ``evaluation/agents.json``::
+
+    "autor": {
+      "label": "AutoR",
+      "icon": "A",
+      "logo": "/static/logos/autor.svg",
+      "cmd": "python3 /abs/path/to/AutoR/rcb_agent.py --workspace <WORKSPACE> --prompt <PROMPT>"
+    }
+
+The harness substitutes ``<WORKSPACE>`` with the absolute workspace path and ``<PROMPT>``
+with the contents of the generated ``INSTRUCTIONS.md``. Both can also be omitted when
+running by hand: the workspace defaults to the current directory and the instructions
+default to ``<workspace>/INSTRUCTIONS.md``.
+
+Nothing here ever reads stdin. Any prompt that would block raises
+:class:`src.terminal_ui.UnattendedInputError` instead of hanging the benchmark.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+import traceback
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from src.approval_agent import AutomatedReviewer  # noqa: E402
+from src.manager import ResearchManager  # noqa: E402
+from src.operator import ClaudeOperator  # noqa: E402
+from src.operator_codex import CodexOperator  # noqa: E402
+from src.rcb import (  # noqa: E402
+    BenchmarkResult,
+    ReportSynthesizer,
+    build_benchmark_goal,
+    build_run_paths_for_workspace,
+    emit_event,
+    ensure_workspace_layout,
+    export_run,
+    resolve_instructions,
+    runs_dir_for,
+)
+from src.terminal_ui import TerminalUI  # noqa: E402
+from src.utils import DEFAULT_VENUE, resolve_venue_key  # noqa: E402
+from src.web_search import build_web_search_prompt_section, resolve_gemini_api_key  # noqa: E402
+
+
+DEFAULT_STAGE_TIMEOUT = 3600
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="rcb_agent",
+        description="Run AutoR unattended against a ResearchClawBench workspace.",
+    )
+    parser.add_argument(
+        "--workspace",
+        default=".",
+        metavar="PATH",
+        help="Benchmark workspace directory. Defaults to the current working directory, "
+             "which is what the harness sets it to.",
+    )
+    parser.add_argument(
+        "--prompt",
+        help="Benchmark instructions as a literal string. This is what <PROMPT> expands to.",
+    )
+    parser.add_argument(
+        "--prompt-file",
+        metavar="PATH",
+        help="Read the benchmark instructions from a file. "
+             "Defaults to <workspace>/INSTRUCTIONS.md when neither flag is given.",
+    )
+    parser.add_argument(
+        "--operator",
+        choices=["claude", "codex"],
+        default="claude",
+        help="Execution backend for the research stages. Defaults to claude.",
+    )
+    parser.add_argument("--model", help="Model for the execution backend. Defaults to the backend default.")
+    parser.add_argument(
+        "--review-operator",
+        choices=["claude", "codex"],
+        help="Backend for the reviewer agent that replaces the human approval gate. "
+             "Defaults to the execution backend.",
+    )
+    parser.add_argument("--review-model", help="Model for the reviewer agent. Defaults to the backend default.")
+    parser.add_argument(
+        "--codex-sandbox",
+        default="workspace-write",
+        help="Codex CLI sandbox mode, used only with --operator codex.",
+    )
+    parser.add_argument(
+        "--venue",
+        default=DEFAULT_VENUE,
+        help=f"Venue profile for Stage 07 writing. Defaults to {DEFAULT_VENUE}.",
+    )
+    parser.add_argument(
+        "--stage-timeout",
+        type=int,
+        default=DEFAULT_STAGE_TIMEOUT,
+        help=f"Seconds allowed per stage attempt. Defaults to {DEFAULT_STAGE_TIMEOUT} "
+             "(lower than AutoR's interactive default, because benchmark runs are wall-clock bound).",
+    )
+    parser.add_argument(
+        "--max-auto-skips",
+        type=int,
+        default=3,
+        help="How many stages may be auto-skipped after exhausting retries before aborting. Defaults to 3.",
+    )
+    parser.add_argument(
+        "--intake",
+        action="store_true",
+        help="Run the intake stage. Off by default: the benchmark instructions are already "
+             "a complete task specification, so intake only costs wall-clock time.",
+    )
+    parser.add_argument(
+        "--web-search",
+        choices=["auto", "gemini", "native"],
+        default="auto",
+        help="Search provider for the operators. 'gemini' is required where the built-in "
+             "WebSearch tool is disabled, such as Claude Code on Vertex AI.",
+    )
+    parser.add_argument(
+        "--no-synthesis",
+        action="store_true",
+        help="Skip the operator-backed report synthesis pass and use only the deterministic "
+             "fallback when the pipeline did not write report/report.md itself.",
+    )
+    parser.add_argument(
+        "--fake-operator",
+        action="store_true",
+        help="Use the fake operator instead of a real backend. For smoke-testing the adapter.",
+    )
+    parser.add_argument(
+        "--export-only",
+        action="store_true",
+        help="Skip the pipeline and only re-export the most recent run in the workspace into "
+             "the benchmark deliverables. Useful after an interrupted run.",
+    )
+    return parser.parse_args(argv)
+
+
+def default_model_for(backend: str) -> str:
+    return "default" if backend == "codex" else "sonnet"
+
+
+def create_operator(backend: str, *, model: str, codex_sandbox: str, fake_mode: bool, ui: TerminalUI, stage_timeout: int):
+    if backend == "codex":
+        return CodexOperator(
+            model=model,
+            codex_sandbox=codex_sandbox,
+            fake_mode=fake_mode,
+            ui=ui,
+            stage_timeout=stage_timeout,
+        )
+    return ClaudeOperator(model=model, fake_mode=fake_mode, ui=ui, stage_timeout=stage_timeout)
+
+
+def resolve_web_search_context(mode: str) -> str | None:
+    if mode == "native":
+        return None
+    if mode == "auto" and not resolve_gemini_api_key():
+        return None
+    return build_web_search_prompt_section()
+
+
+def run(args: argparse.Namespace) -> BenchmarkResult:
+    workspace = Path(args.workspace).expanduser().resolve()
+    if not workspace.exists():
+        raise FileNotFoundError(f"Benchmark workspace does not exist: {workspace}")
+    ensure_workspace_layout(workspace)
+
+    operator_backend = args.operator
+    model = args.model or default_model_for(operator_backend)
+    review_backend = args.review_operator or operator_backend
+    review_model = args.review_model or default_model_for(review_backend)
+
+    # stdout carries the harness's run log, so the UI must never try to read from stdin.
+    ui = TerminalUI(interactive=False)
+    emit_event(
+        {
+            "type": "system",
+            "subtype": "init",
+            "agent": "autor",
+            "model": model,
+            "review_model": review_model,
+            "workspace": str(workspace),
+        }
+    )
+
+    operator = create_operator(
+        operator_backend,
+        model=model,
+        codex_sandbox=args.codex_sandbox,
+        fake_mode=args.fake_operator,
+        ui=ui,
+        stage_timeout=args.stage_timeout,
+    )
+    synthesizer = None if args.no_synthesis else ReportSynthesizer(operator)
+
+    if args.export_only:
+        paths = build_run_paths_for_workspace(workspace)
+        if paths is None:
+            raise FileNotFoundError(f"No AutoR run found under {runs_dir_for(workspace)}")
+        export = export_run(
+            paths=paths,
+            workspace=workspace,
+            pipeline_completed=False,
+            synthesize=synthesizer,
+        )
+        return BenchmarkResult(
+            workspace=workspace,
+            run_root=paths.run_root,
+            pipeline_completed=False,
+            export=export,
+        )
+
+    instructions = resolve_instructions(
+        prompt=args.prompt,
+        prompt_file=args.prompt_file,
+        workspace=workspace,
+    )
+    goal = build_benchmark_goal(workspace, instructions)
+
+    reviewer = AutomatedReviewer(
+        review_backend,
+        model=review_model,
+        fake_mode=args.fake_operator,
+        ui=ui,
+        stage_timeout=args.stage_timeout,
+    )
+    manager = ResearchManager(
+        project_root=REPO_ROOT,
+        runs_dir=runs_dir_for(workspace),
+        operator=operator,
+        ui=ui,
+        reviewer=reviewer,
+        approval_mode="agent",
+        review_operator=review_backend,
+        review_model=review_model,
+        unattended=True,
+        max_auto_skips=args.max_auto_skips,
+        web_search_context=resolve_web_search_context(args.web_search),
+    )
+
+    pipeline_completed = False
+    try:
+        pipeline_completed = manager.run(
+            goal,
+            venue=resolve_venue_key(args.venue),
+            skip_intake=not args.intake,
+        )
+    except Exception:  # noqa: BLE001 - a crashed pipeline must still export what it produced
+        emit_event({"type": "error", "where": "pipeline", "traceback": traceback.format_exc()})
+
+    paths = build_run_paths_for_workspace(workspace)
+    if paths is None:
+        raise RuntimeError(
+            f"AutoR produced no run directory under {runs_dir_for(workspace)}; nothing to export."
+        )
+
+    emit_event(
+        {
+            "type": "progress",
+            "stage": "export",
+            "pipeline_completed": pipeline_completed,
+            "auto_skipped_stages": manager.auto_skipped_stages,
+        }
+    )
+    export = export_run(
+        paths=paths,
+        workspace=workspace,
+        pipeline_completed=pipeline_completed,
+        auto_skipped_stages=manager.auto_skipped_stages,
+        synthesize=synthesizer,
+    )
+    return BenchmarkResult(
+        workspace=workspace,
+        run_root=paths.run_root,
+        pipeline_completed=pipeline_completed,
+        export=export,
+        auto_skipped_stages=list(manager.auto_skipped_stages),
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    try:
+        result = run(args)
+    except Exception as exc:  # noqa: BLE001 - the harness only sees stdout and the exit code
+        emit_event({"type": "result", "status": "failed", "error": str(exc)})
+        print(traceback.format_exc(), file=sys.stderr)
+        return 1
+
+    emit_event(
+        {
+            "type": "result",
+            "status": "completed" if result.exit_code == 0 else "failed",
+            "pipeline_completed": result.pipeline_completed,
+            "auto_skipped_stages": result.auto_skipped_stages,
+            "run_root": str(result.run_root),
+            **result.export.to_dict(),
+        }
+    )
+    return result.exit_code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -49,6 +49,30 @@ formatting.
 `--redo-stage` / `--rollback-stage` accept `03`, `3`, or `03_study_design`.
 Anything else — including `stage03` and `3_study_design` — is rejected.
 
+### `AutoR is running unattended and cannot answer an interactive prompt: ...`
+
+An unattended run (`--full-auto`, `--unattended`, `--approval-mode agent`, or
+`rcb_agent.py`) reached a prompt that needs a person. The message names the
+prompt.
+
+This is deliberate: unattended AutoR refuses to read stdin at all, so a prompt
+fails immediately instead of hanging for hours. If you hit it, either supply
+the answer as a flag — `--goal`/`--goal-file` for the goal, `--resources` for
+input files — or run without `--unattended`.
+
+### `Unattended runs cannot prompt for a research goal. Pass --goal or --goal-file.`
+
+`--full-auto` implies `--unattended`, and there is no one to type a goal. Use
+`--goal "..."`, or `--goal-file path.txt` when the goal is too long for a shell
+argument.
+
+### `<Stage> exhausted its retries and the unattended auto-skip budget (N) is already spent. Aborting.`
+
+More stages failed than `--max-auto-skips` allows. Raise the budget to push
+through a run you only need partially, or read `logs.txt` for the
+`unattended_auto_skip` entries — each one records the validation errors that
+killed the stage, which is usually the real problem.
+
 ### `--redo-stage and --rollback-stage are mutually exclusive.`
 
 Pick one. Redo re-runs a single stage; rollback returns to a stage and marks
