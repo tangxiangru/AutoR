@@ -96,6 +96,7 @@ class FigureBudgetTests(unittest.TestCase):
                 "hypothesis_outcomes.json",
                 "metrics.json",
                 "preregistration.json",
+                "research_rounds.json",
             ],
         )
         # outputs/ is swept before report/, so an image there would take a judge slot.

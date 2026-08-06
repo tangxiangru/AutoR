@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .operator import ClaudeOperator
+from .review_policy import format_policy_for_prompt, load_policy
 from .operator_codex import CodexOperator
 from .terminal_ui import TerminalUI
 from .utils import (
@@ -134,7 +135,6 @@ class AutomatedReviewer:
                 raw_response='{"decision":"approve","reason":"fake reviewer"}',
             )
 
-        prompt_path = paths.prompt_cache_dir / f"{stage.slug}_review_attempt_{attempt_no:02d}.prompt.md"
         prompt = self._build_review_prompt(
             paths=paths,
             stage=stage,
@@ -142,6 +142,43 @@ class AutomatedReviewer:
             stage_markdown=stage_markdown,
             suggestions=suggestions,
         )
+        exit_code, stdout_text, stderr_text = self.run_prompt(
+            paths=paths,
+            stage=stage,
+            attempt_no=attempt_no,
+            prompt=prompt,
+            label="review",
+        )
+
+        if exit_code != 0:
+            return ReviewDecision(
+                choice="6",
+                decision_token="abort",
+                reason=(
+                    f"Automated reviewer failed with exit code {exit_code}. "
+                    "AutoR stopped instead of approving blindly."
+                ),
+                raw_response=stdout_text or stderr_text,
+            )
+
+        return self._parse_decision(stdout_text)
+
+    def run_prompt(
+        self,
+        *,
+        paths: RunPaths,
+        stage: StageSpec,
+        attempt_no: int,
+        prompt: str,
+        label: str,
+    ) -> tuple[int, str, str]:
+        """Run one reviewer-style prompt through this backend and return its raw output.
+
+        Split out from :meth:`review_stage` so a deliberating panel can reuse the invocation,
+        logging and transcript plumbing for a member's own prompt rather than reimplementing
+        it, and so every panel member is recorded on the same path a solo reviewer is.
+        """
+        prompt_path = paths.prompt_cache_dir / f"{stage.slug}_{label}_attempt_{attempt_no:02d}.prompt.md"
         write_text(prompt_path, prompt)
 
         session_id = str(uuid.uuid4())
@@ -157,7 +194,7 @@ class AutomatedReviewer:
                 "_meta": {
                     "stage": stage.slug,
                     "attempt": attempt_no,
-                    "mode": "review_start",
+                    "mode": f"{label}_start",
                     "review_backend": self.backend_name,
                     "review_model": self.model,
                     "command": command,
@@ -172,15 +209,16 @@ class AutomatedReviewer:
             stage=stage,
             attempt_no=attempt_no,
             paths=paths,
-            mode="review",
+            mode=label,
             stdin_text=stdin_text,
         )
 
-        review_record = {
+        record = {
             "backend": self.backend_name,
             "model": self.model,
             "attempt": attempt_no,
             "stage": stage.slug,
+            "label": label,
             "prompt_path": str(prompt_path),
             "exit_code": exit_code,
             "session_id": observed_session_id or session_id,
@@ -188,21 +226,13 @@ class AutomatedReviewer:
             "stderr_excerpt": stderr_text[-1000:] if stderr_text else "",
             "stream_meta": stream_meta,
         }
-        record_path = paths.operator_state_dir / f"{stage.slug}.review_attempt_{attempt_no:02d}.json"
-        write_text(record_path, json.dumps(review_record, indent=2, ensure_ascii=False))
+        record_path = paths.operator_state_dir / f"{stage.slug}.{label}_attempt_{attempt_no:02d}.json"
+        write_text(record_path, json.dumps(record, indent=2, ensure_ascii=False))
+        return exit_code, stdout_text, stderr_text
 
-        if exit_code != 0:
-            return ReviewDecision(
-                choice="6",
-                decision_token="abort",
-                reason=(
-                    f"Automated reviewer failed with exit code {exit_code}. "
-                    "AutoR stopped instead of approving blindly."
-                ),
-                raw_response=stdout_text or stderr_text,
-            )
-
-        return self._parse_decision(stdout_text)
+    def parse_decision(self, raw_response: str) -> ReviewDecision:
+        """Public alias: panel members parse the same decision grammar."""
+        return self._parse_decision(raw_response)
 
     def _build_review_prompt(
         self,
@@ -243,7 +273,8 @@ class AutomatedReviewer:
             f"- experiment manifest: `{paths.experiment_manifest.resolve()}`\n"
             f"- stage draft under review: `{paths.stage_tmp_file(stage).resolve()}`\n"
             f"- approved stage path: `{paths.stage_file(stage).resolve()}`\n\n"
-            "# Suggested Refinements\n\n"
+            + self._standing_rules_block(paths)
+            + "# Suggested Refinements\n\n"
             f"1. {suggestions[0]}\n"
             f"2. {suggestions[1]}\n"
             f"3. {suggestions[2]}\n\n"
@@ -262,6 +293,17 @@ class AutomatedReviewer:
             "# Recent Log Excerpt\n\n"
             f"{self._read_excerpt(paths.logs, max_chars=5000, tail=True)}\n"
         )
+
+    def _standing_rules_block(self, paths: RunPaths) -> str:
+        """Render the rules earlier reviews produced, so this review inherits them.
+
+        This is what makes the gate strictly harder as a run proceeds: a correction demanded
+        once is checked on every stage after it.
+        """
+        rendered = format_policy_for_prompt(load_policy(paths))
+        if not rendered:
+            return ""
+        return "# Standing Review Rules (learned earlier in this run)\n\n" + rendered + "\n\n"
 
     def _read_excerpt(self, path: Path, *, max_chars: int, tail: bool = False) -> str:
         if not path.exists():

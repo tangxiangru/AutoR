@@ -87,6 +87,7 @@ The settings the run was started with, so a resume reproduces them.
   "stage_graph": "linear",
   "routing_mode": "off",
   "evolve_rounds": 0,
+  "web_search": "auto",
   "created_at": "2026-03-30T10:12:22"
 }
 ```
@@ -104,6 +105,7 @@ The settings the run was started with, so a resume reproduces them.
 | `stage_graph` | `linear` (default) or `adaptive`. See [Recursive Self-Improvement](self-improvement.md). |
 | `routing_mode` | `off` (default), `auto`, or `agent`. Who chooses the move out of a completed stage. |
 | `evolve_rounds` | Self-improvement rounds per stage; `0` is off. |
+| `web_search` | `auto`, `gemini`, or `native`. The mode, not the resolved backend. Absent in runs created before it existed, and read as `auto`. |
 | `created_at` | ISO-8601 to the second. Preserved across rewrites. |
 
 A missing or corrupt file falls back to defaults rather than failing the run.
@@ -476,6 +478,61 @@ as support, and what would count as refutation — stated before any experiment
 runs. A hypothesis with no decision rule cannot come out negative, which makes
 "falsifiable" a word rather than a property, and Stage 05 refuses the run.
 
+### `workspace/notes/research_rounds.json`
+
+Stages 03-06 form a **research round**: design, implement, experiment, analyse.
+Stage 06 closes it with a decision, and the ledger accumulates one entry per
+round.
+
+```json
+{
+  "rounds": [
+    {
+      "round": 1,
+      "decision": "refine_design",
+      "rationale": "The comparison was confounded by tuning on the reporting split.",
+      "what_we_learned": "The gap disappears once tuning and reporting use different splits.",
+      "what_changes_next": "Tune both arms on a held-out development split and re-run.",
+      "negative_result": false,
+      "hypothesis_verdicts": {"H1": "refuted"},
+      "acted_on": true,
+      "budget_note": ""
+    }
+  ]
+}
+```
+
+| decision | what happens |
+| --- | --- |
+| `converged` | continue to Stage 07 |
+| `refine_design` | same hypotheses, next round restarts at Stage 03 |
+| `new_hypothesis` | next round restarts at Stage 02; the preregistration records an amendment |
+| `abandon` | the run stops, and Stage 07 refuses to write up a question the run declared unanswerable |
+
+There is no `continue`: a round that wants another one has to say what would
+change, because repeating a design without changing what it got wrong produces
+the same result at full cost.
+
+**`converged` is refused when no preregistered hypothesis came out supported**,
+unless the round sets `negative_result: true`. A run whose contribution is the
+refutation is a real result and should say so plainly; a run that quietly
+proceeds to write a paper about nothing is the default failure without this
+rule.
+
+`acted_on: false` with a `budget_note` means the round wanted to iterate and
+`--max-rounds` was spent. The run continues to writing, but the record says it
+stopped rather than converged — a distinction the ledger would otherwise lose.
+
+Iteration is off by default (`--max-rounds 1`) because rounds multiply the cost
+of an unattended run. The decision is recorded either way.
+
+Stage 06's pending declaration lives at `workspace/notes/round_decision.json`
+and is consumed when the round closes, so a later round cannot inherit an
+earlier one's conclusion.
+
+Validated by `validate_round_decision` in
+[`src/research_rounds.py`](../src/research_rounds.py).
+
 ### `workspace/notes/preregistration.json`
 
 The hypothesis set, frozen. Written when Stage 04 is approved — design settled,
@@ -581,6 +638,58 @@ Stage 06's verdict on every preregistered hypothesis.
   toward claiming more than it measured.
 
 Validated by `validate_hypothesis_outcomes` and `validate_outcome_statistics`.
+
+### `workspace/reviews/validity_review_<stage>.json` and `validity_response_<stage>.json`
+
+The adversarial pass. After Stage 05 and Stage 06 are approved, a reviewer with
+the opposite instruction from the approval gate — *explain why this result is
+wrong* — reads the run and files specific, checkable objections.
+
+```json
+{
+  "reviewed_stage": "05_experimentation",
+  "reviewer_failed": false,
+  "findings": [
+    {
+      "id": "V1",
+      "category": "confound",
+      "severity": "critical",
+      "finding": "Both conditions were tuned on the split that reports the headline number.",
+      "why_it_matters": "The gap may be selection, not the intervention.",
+      "what_would_settle_it": "Re-tune on a development split and re-report."
+    }
+  ]
+}
+```
+
+The reviewer cannot approve, reject or edit anything. What it produces is owed
+an answer: Stage 06 must write `validity_response_05_experimentation.json`, and
+Stage 07 must answer Stage 06's review.
+
+```json
+{"responses": [{"id": "V1", "status": "addressed | rebutted | accepted_limitation",
+  "explanation": "what changed, or why the objection does not hold",
+  "evidence": "the artifact or change (required when addressed)"}]}
+```
+
+Dismissing an objection is legitimate and deliberately cheap — `rebutted` with
+an argument is a complete answer, and so is `accepted_limitation`. There is no
+`noted`. What is refused is silence, because a finding nobody responded to is
+indistinguishable in the run directory from one nobody raised.
+
+A reviewer that crashed records `reviewer_failed: true`. An empty finding list
+from a failed critique would read as "nothing wrong".
+
+**When `--review-panel` is on**, the panel's own Methodologist and Reviewer 2
+already cover these categories, so no second critic runs: the concerns still
+standing after the panel's final round *become* the findings, and the next stage
+owes them the same answer. A concern a member withdrew during deliberation was
+answered inside the panel and is not re-raised. What this adds on top of the
+panel is the part the panel does not have — an obligation on the **next** stage,
+in its own artifacts, rather than a decision at this one's gate.
+
+Validated by `validate_validity_response` in
+[`src/validity_review.py`](../src/validity_review.py).
 
 ### `workspace/artifacts/claim_provenance.json`
 
@@ -713,6 +822,27 @@ Required: non-empty string `overall_status`; booleans `pdf_available` and
 Validated by `validate_layout_review` in
 [`src/writing_manifest.py`](../src/writing_manifest.py).
 
+### `workspace/reviews/panel/`
+
+Written only when `--review-panel` is active. Per gate, `<stage>_attempt_NN.json` and a
+readable `.md` hold every position from every round, including dissent that lost and any
+chair override.
+
+Alongside them, `panel_effect.json` accumulates the panel against its own single-pass
+baseline — the chair's round-1 verdict, which is one model, one call, no peer input:
+
+| Field | Meaning |
+| --- | --- |
+| `gates_reviewed` | Gates the panel has judged this run. |
+| `gates_where_the_panel_changed_the_decision` | How often deliberation reached a different decision than the baseline. **If this stays 0, the panel is not earning its cost.** |
+| `gates_where_round_1_disagreed` | How often the seats were not already unanimous. |
+| `chair_overrides` | Approvals converted to refinements by a blocking objection. |
+| `cost_multiple` | Reviewer calls spent per single-pass call. |
+| `verdict` | One plain sentence, written to be unflattering when that is the truth. |
+
+See [Review Panel](review-panel.md) for the pre-registered evidence this measurement exists
+to answer.
+
 ### `workspace/artifacts/self_review.json`
 
 Required to exist at Stage 07+. Its contents are not schema-validated, so its
@@ -753,3 +883,37 @@ it loses the Studio's project groupings; the runs themselves are unaffected.
   checkpoints gets big.
 - **Read `logs.txt`, then `logs_raw.jsonl`, then `prompt_cache/`.** That is
   the fastest path from "the output is wrong" to "here is why".
+
+## `review_policy.json`
+
+The standing rules the approval gate has learned during this run. Written by
+[`src/review_policy.py`](../src/review_policy.py) whenever the reviewer demands a
+correction, and injected into every subsequent review prompt.
+
+```json
+{
+  "version": 1,
+  "rules": [
+    {
+      "rule_id": "R001",
+      "text": "The design lacks a stated power analysis and the sample size is unjustified.",
+      "origin_stage": "03_study_design",
+      "origin_attempt": 2,
+      "source": "refinement"
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `rule_id` | Stable identifier, referenced in the review prompt and the run log. |
+| `text` | The correction verbatim, as the reviewer worded it. |
+| `origin_stage` / `origin_attempt` | Which review produced the rule. This is what makes the mechanism auditable rather than assertable. |
+| `source` | `refinement` for a demanded correction, `rollback` for an approval that later proved wrong. Rollbacks are rendered first in the prompt. |
+
+Absent until the first correction is recorded. Approvals teach nothing and are not
+recorded. Rules are deduplicated on normalized text (casing, punctuation and stage numbers
+collapse) and the set is capped, so a reviewer restating one complaint cannot inflate it.
+A corrupt file is treated as an empty policy: the gate falls back to baseline strictness
+rather than taking the run down.

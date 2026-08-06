@@ -74,6 +74,8 @@ class RunPaths:
     hypothesis_manifest: Path
     preregistration: Path
     experimental_protocol: Path
+    research_rounds: Path
+    round_decision: Path
     hypothesis_outcomes: Path
     claim_provenance: Path
     writing_dir: Path
@@ -253,6 +255,8 @@ def build_run_paths(run_root: Path) -> RunPaths:
         hypothesis_manifest=workspace_root / "notes" / "hypothesis_manifest.json",
         preregistration=workspace_root / "notes" / "preregistration.json",
         experimental_protocol=workspace_root / "notes" / "experimental_protocol.json",
+        research_rounds=workspace_root / "notes" / "research_rounds.json",
+        round_decision=workspace_root / "notes" / "round_decision.json",
         hypothesis_outcomes=workspace_root / "results" / "hypothesis_outcomes.json",
         claim_provenance=workspace_root / "artifacts" / "claim_provenance.json",
         writing_dir=workspace_root / "writing",
@@ -380,6 +384,20 @@ def normalize_walk_settings(source: "Mapping[str, Any]") -> dict[str, Any]:
         "routing_mode": routing if routing in ROUTING_MODE_CHOICES else DEFAULT_ROUTING_MODE,
         "evolve_rounds": rounds_value,
     }
+WEB_SEARCH_MODE_CHOICES = ("auto", "gemini", "native")
+DEFAULT_WEB_SEARCH_MODE = "auto"
+
+
+def normalize_web_search_mode(value: Any) -> str:
+    """Clamp a persisted web-search mode to a known one.
+
+    The *mode* is stored, never the resolved backend: `auto` is a question about the
+    current environment, and freezing today's answer into the run would make a resumed run
+    assert something about the deployment that may no longer be true.
+    """
+    if isinstance(value, str) and value.strip().lower() in WEB_SEARCH_MODE_CHOICES:
+        return value.strip().lower()
+    return DEFAULT_WEB_SEARCH_MODE
 
 
 def default_run_config() -> dict[str, Any]:
@@ -394,6 +412,7 @@ def default_run_config() -> dict[str, Any]:
         "review_model": "sonnet",
         "codex_sandbox": DEFAULT_CODEX_SANDBOX,
         **normalize_walk_settings({}),
+        "web_search": DEFAULT_WEB_SEARCH_MODE,
     }
 
 
@@ -408,6 +427,7 @@ def initialize_run_config(
     codex_sandbox: str | None = None,
     output_format: str | None = None,
     walk: "Mapping[str, Any] | None" = None,
+    web_search: str | None = None,
 ) -> dict[str, Any]:
     normalized_operator = operator.strip().lower() if operator.strip() else "claude"
     normalized_review_operator = (
@@ -429,6 +449,7 @@ def initialize_run_config(
         ),
         "codex_sandbox": normalize_codex_sandbox(codex_sandbox),
         **normalize_walk_settings(walk or {}),
+        "web_search": normalize_web_search_mode(web_search),
         "created_at": datetime.now().isoformat(timespec="seconds"),
     }
     write_text(paths.run_config, json.dumps(config, indent=2, ensure_ascii=False))
@@ -474,6 +495,7 @@ def load_run_config(paths: RunPaths) -> dict[str, Any]:
         ),
         "codex_sandbox": normalize_codex_sandbox(codex_sandbox),
         **normalize_walk_settings(payload),
+        "web_search": normalize_web_search_mode(payload.get("web_search")),
     }
     created_at = payload.get("created_at")
     if isinstance(created_at, str) and created_at.strip():
@@ -499,6 +521,7 @@ def save_run_config(paths: RunPaths, config: dict[str, Any]) -> None:
         ),
         "codex_sandbox": normalize_codex_sandbox(config.get("codex_sandbox")),
         **normalize_walk_settings(config),
+        "web_search": normalize_web_search_mode(config.get("web_search")),
     }
     created_at = config.get("created_at")
     if isinstance(created_at, str) and created_at.strip():
@@ -519,6 +542,7 @@ def ensure_run_config(
     codex_sandbox: str | None = None,
     output_format: str | None = None,
     walk: "Mapping[str, Any] | None" = None,
+    web_search: str | None = None,
 ) -> dict[str, Any]:
     current = load_run_config(paths)
     effective_operator = operator or current.get("operator") or "claude"
@@ -538,6 +562,7 @@ def ensure_run_config(
         # with, which is what makes `--resume-run` continue the same walk rather
         # than silently reverting an adaptive run to the linear default.
         **normalize_walk_settings({**current, **(walk or {})}),
+        "web_search": normalize_web_search_mode(web_search or current.get("web_search")),
         "created_at": current.get("created_at") or datetime.now().isoformat(timespec="seconds"),
     }
     save_run_config(paths, updated)
@@ -1200,6 +1225,16 @@ def validate_stage_artifacts(
         for problem in validate_literature_evidence(paths):
             problems.append(f"{stage.stage_title}: {problem}")
 
+    # Answering the previous stage's adversarial review. Self-selecting: only
+    # Stage 06 (answering 05) and Stage 07 (answering 06) owe anything.
+    from .research_rounds import validate_round_decision
+    from .validity_review import validate_validity_response
+
+    for problem in validate_validity_response(paths, stage):
+        problems.append(f"{stage.stage_title} {problem}")
+    for problem in validate_round_decision(paths, stage):
+        problems.append(f"{stage.stage_title} {problem}")
+
     if stage.number >= 3:
         if count_in("data", paths.data_dir, MACHINE_DATA_SUFFIXES) == 0:
             problems.append(
@@ -1684,6 +1719,69 @@ def _extract_path_references(text: str) -> list[str]:
     return paths
 
 
+#: Characters that make a "Files Produced" entry a pattern rather than a literal path.
+PATTERN_CHARS = ("*", "?", "[", "{")
+
+
+def expand_braces(pattern: str) -> list[str]:
+    """Expand ``a{b,c}d`` into ``[abd, acd]``, recursively.
+
+    A stage that produced four files naturally writes
+    ``text/paper_00{0,1,2,3}.txt`` rather than four lines. :mod:`glob` does not
+    understand braces, so without this the entry is treated as one literal
+    filename that cannot exist.
+    """
+    open_at = pattern.find("{")
+    if open_at == -1:
+        return [pattern]
+
+    depth = 0
+    for index in range(open_at, len(pattern)):
+        if pattern[index] == "{":
+            depth += 1
+        elif pattern[index] == "}":
+            depth -= 1
+            if depth == 0:
+                close_at = index
+                break
+    else:
+        return [pattern]  # unbalanced; treat literally rather than guessing
+
+    prefix, body, suffix = pattern[:open_at], pattern[open_at + 1:close_at], pattern[close_at + 1:]
+    options, depth, current = [], 0, ""
+    for char in body:
+        if char == "," and depth == 0:
+            options.append(current)
+            current = ""
+            continue
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+        current += char
+    options.append(current)
+
+    expanded: list[str] = []
+    for option in options:
+        for tail in expand_braces(suffix):
+            expanded.extend(expand_braces(prefix + option + tail))
+    return expanded
+
+
+def _pattern_matches_under(root: Path, pattern: str) -> bool:
+    """True when at least one real file matches *pattern* beneath *root*."""
+    for candidate in expand_braces(pattern):
+        if any(char in candidate for char in ("*", "?", "[")):
+            try:
+                if any(root.glob(candidate)):
+                    return True
+            except (OSError, ValueError, IndexError):
+                continue
+        elif (root / candidate).exists():
+            return True
+    return False
+
+
 def _listed_file_exists(
     run_root: Path,
     listed_path: str,
@@ -1709,25 +1807,37 @@ def _listed_file_exists(
        that complies and then lists ``outputs/metrics.csv`` is describing a
        real file the first two roots cannot see.
 
+    An entry containing ``*``, ``?``, ``[`` or ``{`` is treated as a **pattern**
+    rather than a literal name, and matches when at least one real file matches
+    it. A stage that produced four papers writes
+    ``text/paper_00{0,1,2,3}.txt`` or ``text/paper_00*.txt`` rather than four
+    lines; read literally, those are filenames that cannot exist, and the stage
+    is failed for artifacts it genuinely produced. A pattern matching nothing
+    still fails, so the gate keeps its teeth.
+
     We accept all of them. Absolute paths are honored as-is. Each fallback is
     strictly additive — every path that validated before still validates — so
     existing CLI runs are not affected.
     """
     candidate = Path(listed_path)
+    is_pattern = any(char in listed_path for char in PATTERN_CHARS)
     try:
         if candidate.is_absolute():
-            return candidate.exists()
-        # 1. Run-root-relative (canonical AutoR form)
-        via_root = run_root / candidate
-        if via_root.exists():
-            return True
-        # 2. Workspace-relative fallback
-        via_workspace = run_root / "workspace" / candidate
-        if via_workspace.exists():
-            return True
-        # 3. Extra artifact roots (for example a benchmark workspace)
-        for root in extra_roots or ():
-            if (root / candidate).exists():
+            if not is_pattern:
+                return candidate.exists()
+            anchor = Path(candidate.anchor)
+            return _pattern_matches_under(anchor, str(candidate.relative_to(anchor)))
+
+        roots = [
+            run_root,                    # 1. Run-root-relative (canonical AutoR form)
+            run_root / "workspace",      # 2. Workspace-relative fallback
+            *(extra_roots or ()),        # 3. Extra artifact roots (e.g. a benchmark workspace)
+        ]
+        for root in roots:
+            if is_pattern:
+                if _pattern_matches_under(root, listed_path):
+                    return True
+            elif (root / candidate).exists():
                 return True
     except OSError:
         return False

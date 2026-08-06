@@ -99,6 +99,8 @@ to a CLI directly; the operators never decide what stage runs next.
 | [`src/hypothesis_manifest.py`](../src/hypothesis_manifest.py) | Parses Stage 02's typed `T*`/`H*`/`C*` identifiers into `hypothesis_manifest.json`. |
 | [`src/preregistration.py`](../src/preregistration.py) | Freezes the hypothesis set before results exist, adjudicates every frozen hypothesis at Stage 06, and traces every manuscript claim back to a supported one at Stage 07. The one part of the pipeline that gates on whether a claim is warranted rather than on whether a file exists. |
 | [`src/experimental_protocol.py`](../src/experimental_protocol.py) | Declares the primary metric, the seed count and each baseline's tuning budget before the experiments run, and refuses a verdict that rests on one run or on an unstated dispersion measure. |
+| [`src/validity_review.py`](../src/validity_review.py) | The adversarial pass after Stages 05 and 06. Asks why the result is wrong rather than whether the stage is complete, and requires the next stage to answer every finding it raises. Has no authority to approve or reject. |
+| [`src/research_rounds.py`](../src/research_rounds.py) | Stages 03-06 as a repeatable round. Stage 06 decides whether the run converged, needs a better design, needs a new hypothesis, or should be abandoned, and a refuted hypothesis becomes the input to the next round instead of a dead end. |
 | [`src/writing_manifest.py`](../src/writing_manifest.py) | Stage 07 support: writing manifest, figure/result scanning, layout review generation and validation. |
 
 ### Inputs
@@ -289,6 +291,8 @@ Ordered by how much of the system you have to understand first.
 | What a stage must produce | `validate_stage_artifacts` in `src/utils.py` | small |
 | What counts as a warranted claim | `src/preregistration.py` | small |
 | What counts as adequate evidence | `src/experimental_protocol.py` | small |
+| What a hostile reviewer would object to | `VALIDITY_CATEGORIES` in `src/validity_review.py` | none |
+| How a round may conclude | `DECISIONS` in `src/research_rounds.py` | small |
 | The summary contract | `REQUIRED_STAGE_HEADINGS` + `validate_stage_markdown` | small |
 | The stage list | `STAGES` in `src/utils.py`, plus a new prompt template | moderate |
 | The execution backend | implement `OperatorProtocol`, or subclass `ClaudeOperator` | moderate |

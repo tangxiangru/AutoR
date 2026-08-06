@@ -15,6 +15,8 @@ from .bootstrap import (
     scan_corpus,
 )
 from .approval_agent import AutomatedReviewer, ReviewDecision
+from .cross_reviewer import GeminiCrossReviewer
+from .review_policy import load_policy, policy_summary, record_correction
 from .project_bootstrap import (
     format_project_context_for_prompt,
     format_project_scan_for_prompt,
@@ -41,6 +43,16 @@ from .intake import (
 from .artifact_index import format_artifact_index_for_prompt, write_artifact_index
 from .experiment_manifest import format_experiment_manifest_for_prompt, write_experiment_manifest
 from .hypothesis_manifest import write_hypothesis_manifest
+from .validity_review import ValidityReviewer, format_findings_for_prompt
+from .research_rounds import (
+    ROUND_CLOSING_STAGE_NUMBER,
+    read_round_decision,
+    format_round_status,
+    format_rounds_for_prompt,
+    load_rounds,
+    record_round,
+    resume_stage_slug_for,
+)
 from .preregistration import (
     amend_preregistration,
     format_outcomes_for_prompt,
@@ -147,14 +159,17 @@ class ResearchManager:
         review_model: str | None = None,
         unattended: bool = False,
         max_auto_skips: int = 3,
+        max_rounds: int = 1,
         max_stage_attempts: int = MAX_STAGE_ATTEMPTS,
         web_search_context: str | None = None,
+        web_search_mode: str | None = None,
         artifact_roots: list[Path] | None = None,
         stage_graph: StageGraph | None = None,
         routing_mode: str = "off",
         evolution: EvolutionConfig | None = None,
         graph_max_steps: int | None = None,
         graph_max_visits: int | None = None,
+        cross_reviewer: GeminiCrossReviewer | None = None,
     ) -> None:
         self.project_root = project_root
         self.runs_dir = runs_dir
@@ -170,21 +185,33 @@ class ResearchManager:
         self.review_operator = review_operator or getattr(reviewer, "backend_name", getattr(operator, "backend_name", "claude"))
         self.review_model = review_model or getattr(reviewer, "model", getattr(operator, "model", "unknown"))
         self.last_run_paths: RunPaths | None = None
+        self._jump_reason: str = ""
         self._redo_start_stage: StageSpec | None = None
         self._research_diagram: bool = False
         self._final_stage: StageSpec | None = None
         self._jump_target_stage: StageSpec | None = None
         self.unattended = unattended
         self.max_auto_skips = max_auto_skips
+        #: How many times Stages 03-06 may run. 1 keeps the historical
+        #: single-pass behaviour; the round decision is recorded either way,
+        #: so a one-round run still says whether it converged or just stopped.
+        self.max_rounds = max(1, int(max_rounds))
         # Retries are the cheapest quality lever there is: each one re-runs the stage with the
         # previous attempt's validation errors attached. The ceiling exists to bound a runaway
         # loop, not to save money, so callers with time to spend should raise it.
         self.max_stage_attempts = max_stage_attempts
         self.auto_skipped_stages: list[str] = []
         self.web_search_context = web_search_context
+        # The *mode* is recorded in run_config so a resume reconciles it the way it does
+        # every other backend selection, instead of silently re-deciding from whatever
+        # credentials happen to be in the environment that day.
+        self.web_search_mode = web_search_mode
         # Extra roots a stage may legitimately write to, beyond the run tree. A benchmark
         # workspace is one: its output contract points stages at paths outside runs/.
         self.artifact_roots = artifact_roots or []
+        # A veto-only second opinion from a different model family. Never overrides a
+        # refusal, so enabling it can only make the gate stricter.
+        self.cross_reviewer = cross_reviewer
         # Where a stage's machine-readable output may legitimately land outside the run
         # tree. The benchmark's read-only data/ is excluded on purpose: it is always
         # populated, so counting it would make the stage-03 gate vacuous.
@@ -307,6 +334,7 @@ class ResearchManager:
             codex_sandbox=getattr(self.operator, "codex_sandbox", None),
             output_format=output_format,
             walk=self._walk_settings,
+            web_search=self.web_search_mode,
         )
         ensure_run_manifest(paths)
         if not paths.user_input.exists():
@@ -372,11 +400,14 @@ class ResearchManager:
 
             graph_enter(paths, state, stage)
             self._jump_target_stage = None
+            self._jump_reason = ""
             approved = self._run_stage(paths, stage)
 
-            # `/back <stage>` and retry-exhaustion rollback are operator overrides.
-            # They outrank the router: a person redirecting the run is not a move
-            # the graph gets a vote on.
+            # Three things reach this seam: `/back <stage>`, a rollback after retry
+            # exhaustion, and a research round that decided to refine its design or
+            # change its hypothesis. All of them outrank the router — the move is
+            # already made by the time the walk sees it — and all of them are
+            # recorded on the route as the revisits they are.
             if self._jump_target_stage is not None:
                 target = self._jump_target_stage
                 graph_leave(
@@ -384,7 +415,7 @@ class ResearchManager:
                     state,
                     chose=target.slug,
                     kind="revisit",
-                    reason="Operator redirected the run.",
+                    reason=self._jump_reason or "The run was redirected to an earlier stage.",
                     default_choice="",
                     agent_directed=False,
                     score_total=None,
@@ -563,6 +594,7 @@ class ResearchManager:
             codex_sandbox=getattr(self.operator, "codex_sandbox", None),
             output_format=output_format,
             walk=self._walk_settings,
+            web_search=self.web_search_mode,
         )
         initialize_run_manifest(paths)
         write_artifact_index(paths)
@@ -1774,6 +1806,9 @@ class ResearchManager:
                 )
                 if stage.slug == "04_implementation":
                     self._freeze_preregistration(paths)
+                self._run_validity_review(paths, stage, stage_markdown)
+                if stage.number == ROUND_CLOSING_STAGE_NUMBER:
+                    self._close_round(paths, stage)
                 if stage.slug == "07_writing":
                     output_format = selected_output_format(paths)
                     if self._research_diagram:
@@ -1986,6 +2021,24 @@ class ResearchManager:
                 + format_preregistration_for_prompt(prereg)
                 + "\n"
             )
+        rounds_context = format_rounds_for_prompt(paths)
+        if rounds_context and stage.number >= 2:
+            stage_template = (
+                stage_template.rstrip()
+                + "\n\n# Earlier Research Rounds\n\n"
+                + rounds_context
+                + "\n"
+            )
+
+        findings_context = format_findings_for_prompt(paths, stage)
+        if findings_context:
+            stage_template = (
+                stage_template.rstrip()
+                + "\n\n# Adversarial Validity Findings (each must be answered)\n\n"
+                + findings_context
+                + "\n"
+            )
+
         outcomes_context = format_outcomes_for_prompt(paths) if stage.number >= 7 else ""
         if outcomes_context:
             stage_template = (
@@ -2084,7 +2137,128 @@ class ResearchManager:
         if decision.raw_response:
             log_body.append("raw_response_excerpt:\n" + truncate_text(decision.raw_response, max_chars=2000))
         append_log_entry(paths.logs, f"{stage.slug} attempt {attempt_no} reviewer_choice", "\n".join(log_body))
+        self._record_review_correction(
+            paths=paths, stage=stage, attempt_no=attempt_no, decision=decision, suggestions=suggestions
+        )
+
+        cross = self._apply_cross_review(
+            paths=paths, stage=stage, attempt_no=attempt_no, decision=decision,
+            stage_markdown=stage_markdown,
+        )
+        if cross is not None:
+            return cross
+
         return decision.choice, decision.feedback or None
+
+    def _apply_cross_review(
+        self,
+        *,
+        paths: RunPaths,
+        stage: StageSpec,
+        attempt_no: int,
+        decision: ReviewDecision,
+        stage_markdown: str,
+    ) -> tuple[str, str | None] | None:
+        """Let an independent model family veto an approval.
+
+        Returns a replacement decision when the audit refuses, or None to leave the
+        primary's decision standing. Only approvals are audited: a refusal already sends
+        the stage back, so a second opinion on it would change nothing.
+        """
+        if self.cross_reviewer is None or decision.choice != "5":
+            return None
+
+        self.ui.show_status("Cross-model reviewer is auditing the approval...", level="info")
+        verdict = self.cross_reviewer.audit(
+            paths=paths,
+            stage=stage,
+            stage_markdown=stage_markdown,
+            primary_reason=decision.reason,
+            primary_model=self.review_model,
+        )
+
+        append_log_entry(
+            paths.logs,
+            f"{stage.slug} attempt {attempt_no} cross_review",
+            "\n".join(
+                [
+                    f"model: {verdict.model or 'unavailable'}",
+                    f"agrees: {verdict.agrees}",
+                    f"unavailable: {verdict.unavailable}",
+                    f"reason: {verdict.reason}",
+                ]
+            ),
+        )
+
+        if verdict.unavailable:
+            # Not agreement — the audit did not happen. Said plainly so a run whose
+            # cross-review silently never ran cannot be mistaken for one that passed it.
+            self.ui.show_status(
+                f"Cross-model review did not run: {verdict.reason}", level="warn"
+            )
+            return None
+
+        if not verdict.vetoes:
+            self.ui.show_status(
+                f"Cross-model reviewer ({verdict.model}) agrees with the approval.", level="success"
+            )
+            return None
+
+        self.ui.show_status(
+            f"Cross-model reviewer ({verdict.model}) vetoed the approval: {verdict.reason}",
+            level="warn",
+        )
+        record_correction(
+            paths,
+            stage=stage,
+            attempt_no=attempt_no,
+            text=f"Cross-model review vetoed an approval of {stage.stage_title}: {verdict.reason}",
+            source="rollback",
+        )
+        feedback = (
+            "An independent reviewer from a different model family rejected the approval of "
+            "this stage. Address this before it can be approved again:\n"
+            f"{verdict.reason}"
+        )
+        return "4", feedback
+
+    def _record_review_correction(
+        self,
+        *,
+        paths: RunPaths,
+        stage: StageSpec,
+        attempt_no: int,
+        decision: ReviewDecision,
+        suggestions: list[str],
+    ) -> None:
+        """Promote a demanded correction into a standing rule for every later review.
+
+        Only refusals teach anything: an approval says the stage met the bar, which the
+        existing rules already encode. The text recorded is what the reviewer actually
+        asked for, so the rule is traceable to the decision that produced it.
+        """
+        if decision.choice not in {"1", "2", "3", "4"}:
+            return
+
+        if decision.choice in {"1", "2", "3"}:
+            index = int(decision.choice) - 1
+            text = suggestions[index] if index < len(suggestions) else ""
+        else:
+            text = decision.feedback or decision.reason
+
+        rule = record_correction(paths, stage=stage, attempt_no=attempt_no, text=text)
+        if rule is None:
+            return
+
+        append_log_entry(
+            paths.logs,
+            f"{stage.slug} attempt {attempt_no} review_rule_learned",
+            f"{rule.rule_id} ({rule.source}): {rule.text}",
+        )
+        self.ui.show_status(
+            f"Review policy learned {rule.rule_id}; {policy_summary(load_policy(paths))}.",
+            level="info",
+        )
 
     def _render_review_decision(self, decision: ReviewDecision) -> None:
         label_map = {
@@ -2372,6 +2546,24 @@ class ResearchManager:
         reason: str,
     ) -> None:
         rollback_to_stage(paths, target_stage, reason=reason)
+        # Carried so the graph path records why the run moved. Both callers reach
+        # here — a `/back` from the operator and a research round that decided to
+        # refine its design — and recording either as the other would make the
+        # route say a person intervened when the run redirected itself.
+        self._jump_reason = reason
+        # A rollback is the strongest evidence a review can produce: an approval that was
+        # already given turned out to be wrong. Recorded at higher weight than a routine
+        # refinement so later reviews treat it as such.
+        record_correction(
+            paths,
+            stage=current_stage,
+            attempt_no=0,
+            text=(
+                f"{current_stage.stage_title} was rolled back to {target_stage.stage_title}. "
+                f"Reason: {reason}"
+            ),
+            source="rollback",
+        )
         append_log_entry(
             paths.logs,
             f"{current_stage.slug} rollback_requested",
@@ -2495,6 +2687,124 @@ class ResearchManager:
         if manifest is None:
             raise RuntimeError(f"Could not load run manifest from {paths.run_manifest}")
         return format_manifest_status(manifest)
+
+    def _close_round(self, paths: RunPaths, stage: StageSpec) -> None:
+        """End the round and, if it asked for another and the budget allows, start one.
+
+        The decision is recorded whatever the budget is. A run that wanted
+        another round and could not have one should say so — the alternative is
+        a record indistinguishable from a run that converged.
+        """
+        rounds_so_far = len(load_rounds(paths))
+        pending = read_round_decision(paths)
+        decision = str((pending or {}).get("decision") or "").strip()
+        resume_slug = resume_stage_slug_for(decision)
+        budget_left = rounds_so_far + 1 < self.max_rounds
+        act = bool(resume_slug) and budget_left
+
+        entry = record_round(
+            paths,
+            acted_on=act or not resume_slug,
+            budget_note=(
+                ""
+                if act or not resume_slug
+                else f"round budget spent ({rounds_so_far + 1}/{self.max_rounds})"
+            ),
+        )
+        if entry is None:
+            return
+
+        append_log_entry(
+            paths.logs,
+            f"{stage.slug} round_closed",
+            (
+                f"Round {entry.number} decision: {entry.decision}"
+                + (" (negative result)" if entry.negative_result else "")
+                + f"\nVerdicts: {entry.hypothesis_verdicts or 'none recorded'}"
+                f"\nRationale: {entry.rationale}"
+                + (f"\nNot acted on: {entry.budget_note}" if entry.budget_note else "")
+            ),
+        )
+
+        if not resume_slug:
+            self.ui.show_status(
+                f"Round {entry.number} closed: {entry.decision}"
+                + (" (negative result)" if entry.negative_result else ""),
+                level="info" if entry.decision == "converged" else "warn",
+            )
+            return
+
+        if not budget_left:
+            self.ui.show_status(
+                f"Round {entry.number} wanted to {entry.decision}, but the round budget "
+                f"({self.max_rounds}) is spent. Continuing to writing with that on the record. "
+                "Raise --max-rounds to let the run iterate.",
+                level="warn",
+            )
+            return
+
+        target = next(item for item in STAGES if item.slug == resume_slug)
+        self.ui.show_status(
+            f"Round {entry.number} chose {entry.decision}. Starting round {entry.number + 1} "
+            f"from {target.stage_title}.",
+            level="warn",
+        )
+        self._rollback_and_jump(
+            paths=paths,
+            current_stage=stage,
+            target_stage=target,
+            reason=(
+                f"Round {entry.number} concluded {entry.decision}: {entry.rationale}"
+            ),
+        )
+
+    def _run_validity_review(self, paths: RunPaths, stage: StageSpec, stage_markdown: str) -> None:
+        """Attack the result once the stage that produced it is approved.
+
+        Separate from the approval gate on purpose: that one asks whether the
+        stage did its work, and an agent asked to do both jobs at once reliably
+        does the easier one. This has no authority to approve or reject — the
+        next stage simply has to answer what it raises.
+        """
+        from .validity_review import REVIEWED_STAGE_NUMBERS
+
+        if stage.number not in REVIEWED_STAGE_NUMBERS:
+            return
+        self.ui.show_status(
+            f"Adversarial validity review of {stage.stage_title}...", level="info"
+        )
+        try:
+            findings = ValidityReviewer(self.operator, ui=self.ui).review(
+                paths=paths, stage=stage, stage_markdown=stage_markdown
+            )
+        except Exception as exc:  # noqa: BLE001 - a failed critique must not lose the stage
+            append_log_entry(
+                paths.logs,
+                f"{stage.slug} validity_review_failed",
+                f"The adversarial validity review did not run: {exc}",
+            )
+            self.ui.show_status(
+                "Validity review did not run; the stage stands unchallenged.", level="warn"
+            )
+            return
+        append_log_entry(
+            paths.logs,
+            f"{stage.slug} validity_review",
+            (
+                f"Adversarial review raised {len(findings)} findings.\n"
+                + "\n".join(
+                    f"- {item.identifier} ({item.severity} {item.category}): {item.finding}"
+                    for item in findings
+                )
+            ),
+        )
+        if findings:
+            critical = sum(1 for item in findings if item.severity == "critical")
+            self.ui.show_status(
+                f"Validity review raised {len(findings)} findings ({critical} critical). "
+                "The next stage must answer each one.",
+                level="warn",
+            )
 
     def _freeze_preregistration(self, paths: RunPaths) -> None:
         """Fix the hypothesis set before any result exists.

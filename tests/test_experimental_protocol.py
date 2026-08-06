@@ -21,7 +21,11 @@ from src.experimental_protocol import (
     validate_outcome_statistics,
 )
 from src.utils import STAGES, build_run_paths, ensure_run_layout, validate_stage_artifacts, write_text
-from tests.prereg_support import write_experimental_protocol, write_validity_chain
+from tests.prereg_support import (
+    write_experimental_protocol,
+    write_round_decision,
+    write_validity_chain,
+)
 
 
 STAGE_04 = next(stage for stage in STAGES if stage.number == 4)
@@ -214,6 +218,7 @@ class StageGateWiringTest(ProtocolTestCase):
         write_text(self.paths.results_dir / "metrics.json", '{"acc": 0.9}')
         write_experimental_protocol(self.paths)
         write_validity_chain(self.paths)
+        write_round_decision(self.paths)
         problems = [
             p
             for p in validate_stage_artifacts(STAGE_06, self.paths)

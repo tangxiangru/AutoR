@@ -108,12 +108,18 @@ overnight job.
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--web-search {auto,gemini,native}` | `auto` | Which search path the operators use. `gemini` routes searches through the Gemini API's Google Search grounding via `tools/web_search.py`; `native` leaves the backend's own tool in charge; `auto` picks Gemini when it can actually run and falls back to native otherwise. |
+| `--web-search {auto,gemini,native}` | `auto`, or the recorded mode when resuming | Which search path the operators use. `gemini` routes searches through the Gemini API's Google Search grounding via `tools/web_search.py`; `native` leaves the backend's own tool in charge; `auto` picks Gemini when it can actually run and falls back to native otherwise. |
 
 Set `gemini` on deployments where the built-in `WebSearch` tool is disabled —
 notably **Claude Code on Vertex AI** — otherwise Stage 01 has no way to search
 and will either stall or fabricate citations. See
 [ResearchClawBench → Web search](researchclawbench.md#web-search-on-deployments-where-websearch-is-disabled).
+
+The mode is persisted in `run_config.json` and reconciled on resume, like every other
+backend selection. The **mode** is stored, never the resolved backend: `auto` is a
+question about the current environment, and freezing today's answer would make a
+resumed run assert something about the deployment that may no longer be true. A run
+recorded before this field existed reads as `auto`.
 
 #### What "can actually run" means
 
@@ -147,6 +153,22 @@ that runs the script need not be the same.
 The two modes differ in which Stage 07 prompt is loaded, which artifacts the
 stage gate requires, and whether a `paper_package/` bundle is produced after
 approval. See [Stage Contract](stage-contract.md#artifact-requirements).
+
+### Review panel
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--review-panel` | off | Replace the single reviewer agent with a deliberating panel: independent round, cross-examination on disagreement, then a chair synthesis. Implies `--approval-mode agent`. |
+| `--panel-roles ROLE...` | all five | Seat only these roles, in this order: `pi`, `domain`, `method`, `repro`, `skeptic`. The first seat chairs unless `pi` is present. An unknown name is an error. |
+| `--panel-rounds N` | `2` | Maximum deliberation rounds. Round 1 is always independent; later rounds run only on disagreement. |
+| `--panel-models ROLE=MODEL...` | — | Assign a model per seat, as `role=model` or `role=backend:model` (`pi=opus skeptic=codex:default`). Heterogeneity is the lever with the best evidence behind it. |
+| `--persona PATH` | — | Markdown description of the researcher the panel stands in for, injected into every seat so they hold one consistent bar. |
+
+A blocking objection from any member cannot be approved over — the chair's approval is
+converted to a refinement in code. Each run also writes
+`workspace/reviews/panel/panel_effect.json`, comparing the panel against its own single-pass
+baseline so it can report that it did not earn its cost. Full description, including the
+pre-registered evidence against multi-agent deliberation, in [Review Panel](review-panel.md).
 
 ### Stopping early
 
@@ -212,6 +234,27 @@ for the mechanism and the reasoning behind each refusal.
 | Flag | Default | Description |
 | --- | --- | --- |
 | `--research-diagram` | off | After Stage 07, generate a method illustration with the Gemini API and inject it into the report — `report.md` in markdown mode, `method.tex` in latex mode. Requires `pip install google-genai pyyaml` and a Gemini API key. If the SDK or key is missing, the diagram step prints a failure line and the run continues unaffected. See [Configuration → Diagram generation](configuration.md#diagram-generation-optional). |
+
+### Reliability
+
+The Gemini call retries and times out. Stage 01 issues dozens of searches over
+hours, and the SDK's defaults are one attempt and no timeout, so a single `429`
+killed a search outright and a hung connection could burn the whole
+`--stage-timeout` (4 hours by default).
+
+| | Value |
+| --- | --- |
+| Request timeout | 120 s |
+| Attempts | 5, exponential backoff from 2 s to 60 s, covering 408 / 429 / 5xx |
+
+Both come from the SDK's own `HttpOptions`; they were simply never switched on.
+An SDK too old to accept them degrades to a single attempt rather than failing.
+
+The optional `configs/diagram_config.yaml` is read defensively: it sits on the
+startup path of every run, `pyyaml` is optional, and the file is hand-edited. A
+missing package, an unreadable file, or malformed YAML prints a warning to
+stderr and reports no key, rather than raising out of `main()` before the banner.
+An API key in the environment short-circuits the file entirely.
 
 ### Exit codes
 

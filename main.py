@@ -5,12 +5,20 @@ import sys
 from pathlib import Path
 
 from src.approval_agent import AutomatedReviewer
+from src.review_panel import (
+    DEFAULT_PANEL,
+    ReviewPanel,
+    apply_model_assignments,
+    load_persona,
+    resolve_roles,
+)
 from src.intake import ResourceEntry, classify_resource, collect_resource_paths_from_ui
 from src.manager import ResearchManager
 from src.operator import ClaudeOperator
 from src.operator_codex import CodexOperator
 from src.operator_protocol import OperatorProtocol
 from src.terminal_ui import TerminalUI
+from src.cross_reviewer import resolve_cross_reviewer
 from src.web_search import (
     assess_search_readiness,
     resolve_web_search_context,
@@ -24,6 +32,7 @@ from src.utils import (
     DEFAULT_CODEX_SANDBOX,
     DEFAULT_OUTPUT_FORMAT,
     DEFAULT_VENUE,
+    WEB_SEARCH_MODE_CHOICES,
     OUTPUT_FORMAT_CLI_CHOICES,
     MAX_STAGE_ATTEMPTS,
     normalize_walk_settings,
@@ -32,6 +41,7 @@ from src.utils import (
     STAGES,
     build_run_paths,
     load_run_config,
+    normalize_web_search_mode,
     resolve_output_format,
     resolve_stage,
     resolve_venue_key,
@@ -108,6 +118,59 @@ def parse_args() -> argparse.Namespace:
              "exhausting their retry budget before the run aborts. Defaults to 3.",
     )
     parser.add_argument(
+        "--max-rounds",
+        type=int,
+        default=1,
+        help=(
+            "How many times Stages 03-06 may run. A round ends when Stage 06 declares "
+            "whether the run converged, needs a better design, needs a new hypothesis, or "
+            "should be abandoned. Defaults to 1, which keeps the single-pass behaviour; the "
+            "decision is recorded either way, so a one-round run still says whether it "
+            "converged or merely stopped. Raise it to let a refuted hypothesis lead to a "
+            "second round."
+        ),
+    )
+    parser.add_argument(
+        "--review-panel",
+        action="store_true",
+        help="Replace the single reviewer agent with a deliberating panel of role-differentiated "
+             "reviewers (PI, domain expert, methodologist, reproducibility engineer, adversarial "
+             "reviewer). They review independently, then cross-examine, then a chair synthesizes "
+             "one decision. A blocking objection cannot be approved over. Implies "
+             "--approval-mode agent.",
+    )
+    parser.add_argument(
+        "--panel-roles",
+        nargs="+",
+        metavar="ROLE",
+        help="Seat only these roles on the panel, in this order: "
+             + ", ".join(role.key for role in DEFAULT_PANEL)
+             + ". The first seat chairs unless the PI is present. Defaults to all five.",
+    )
+    parser.add_argument(
+        "--panel-models",
+        nargs="+",
+        metavar="ROLE=MODEL",
+        help="Assign a model per panel seat, as role=model or role=backend:model "
+             "(for example: pi=opus skeptic=codex:default). Seats left unassigned use the "
+             "reviewer default. Heterogeneity is the lever with the best evidence behind it: "
+             "five prompts against one model are five correlated reads wearing five hats.",
+    )
+    parser.add_argument(
+        "--panel-rounds",
+        type=int,
+        default=2,
+        help="Maximum deliberation rounds. Round 1 is always independent; later rounds are only "
+             "run when the panel disagreed. Defaults to 2.",
+    )
+    parser.add_argument(
+        "--persona",
+        metavar="PATH",
+        help="Path to a markdown description of the researcher the panel is standing in for "
+             "(their priorities, standards, risk tolerance). Injected into every panelist so the "
+             "simulated humans hold a consistent bar instead of improvising one per stage.",
+    )
+    parser.add_argument(
         "--max-attempts",
         type=int,
         default=MAX_STAGE_ATTEMPTS,
@@ -125,9 +188,24 @@ def parse_args() -> argparse.Namespace:
         help="Model alias or full model name for the automated reviewer backend. Defaults to the reviewer backend default.",
     )
     parser.add_argument(
-        "--web-search",
-        choices=["auto", "gemini", "native"],
+        "--cross-review",
+        choices=["auto", "gemini", "off"],
         default="auto",
+        help=(
+            "Independent second opinion on each approval, from a different model family. "
+            "The primary reviewer shares the executor's blind spots; a Gemini reviewer can "
+            "veto an approval it cannot defend, but can never override a refusal, so it "
+            "only makes the gate stricter. 'auto' enables it when a Gemini backend is "
+            "configured. Only meaningful with an agent approval gate."
+        ),
+    )
+    parser.add_argument(
+        "--cross-review-model",
+        help="Model for the cross-model reviewer. Defaults to gemini-3.1-pro-preview.",
+    )
+    parser.add_argument(
+        "--web-search",
+        choices=list(WEB_SEARCH_MODE_CHOICES),
         help=(
             "How operators should search the web. 'gemini' routes searches through the Gemini "
             "API's Google Search grounding via tools/web_search.py, which is required on "
@@ -368,7 +446,27 @@ def create_reviewer(
     fake_mode: bool,
     ui: TerminalUI,
     stage_timeout: int,
-) -> AutomatedReviewer:
+    panel_roles: list[str] | None = None,
+    panel_models: list[str] | None = None,
+    use_panel: bool = False,
+    persona_text: str = "",
+    deliberation_rounds: int = 2,
+):
+    """Build the approval gate: one reviewer, or a panel that deliberates first.
+
+    Both satisfy the same ``review_stage`` contract, so the manager never learns which it got.
+    """
+    if use_panel:
+        return ReviewPanel(
+            apply_model_assignments(resolve_roles(panel_roles), panel_models),
+            backend_name=backend_name,
+            model=model,
+            fake_mode=fake_mode,
+            ui=ui,
+            stage_timeout=stage_timeout,
+            persona_text=persona_text,
+            deliberation_rounds=deliberation_rounds,
+        )
     return AutomatedReviewer(
         backend_name,
         model=model,
@@ -394,10 +492,15 @@ def resolve_resume_run(runs_dir: Path, value: str) -> Path:
 def resolve_unattended(args: argparse.Namespace) -> bool:
     """Decide whether this invocation is allowed to block on terminal input.
 
-    `--full-auto` and `--approval-mode agent` both replace the human approval gate with a
-    reviewer agent, so neither has anyone left to answer a prompt.
+    `--full-auto`, `--approval-mode agent` and `--review-panel` all replace the human approval
+    gate with an agent, so none of them has anyone left to answer a prompt.
     """
-    return bool(args.unattended or args.full_auto or args.approval_mode == "agent")
+    return bool(
+        args.unattended
+        or args.full_auto
+        or getattr(args, "review_panel", False)
+        or args.approval_mode == "agent"
+    )
 
 
 def resolve_goal(args: argparse.Namespace, *, unattended: bool) -> str:
@@ -502,6 +605,22 @@ def record_into_archive(
             ui.show_status(f"Archive proposed `{proposal.variant_id}`: {proposal.note}", level="info")
     except OSError as exc:
         ui.show_status(f"Could not update the archive: {exc}", level="warn")
+def resolve_search_context(ui: TerminalUI, *, mode: str, operator: str, codex_sandbox: str) -> str | None:
+    """Decide the search path, announce it, and refuse a request that cannot work.
+
+    Called once per branch rather than once up front, because the answer depends on the
+    operator and sandbox -- and on resume those come from run_config, which is not read
+    until inside the branch.
+    """
+    readiness = assess_search_readiness(operator=operator, codex_sandbox=codex_sandbox)
+    notice, level = web_search_notice(mode, readiness=readiness)
+    ui.show_status(notice, level=level)
+    if mode == "gemini" and readiness.hard_blocker:
+        raise ValueError(
+            f"--web-search gemini cannot work here: {readiness.hard_blocker} "
+            "Fix it, or use --web-search auto to fall back to native search."
+        )
+    return resolve_web_search_context(mode, readiness=readiness)
 
 
 def main() -> int:
@@ -509,6 +628,7 @@ def main() -> int:
     repo_root = Path(__file__).resolve().parent
     runs_dir = repo_root / args.runs_dir
     unattended = resolve_unattended(args)
+    persona_text = load_persona(args.persona)
     ui = TerminalUI(interactive=not unattended)
 
     if args.archive_report:
@@ -519,23 +639,6 @@ def main() -> int:
         return 0
 
     ui.show_banner()
-
-    # Assessed against the operator this run will actually use, because the sandbox the
-    # search subprocess inherits is part of whether the tool can run at all. Resolved
-    # before the resume branch reads run_config, so a resumed run that switches backends
-    # re-derives it below.
-    readiness = assess_search_readiness(
-        operator=(args.operator or "claude"),
-        codex_sandbox=args.codex_sandbox,
-    )
-    web_search_context = resolve_web_search_context(args.web_search, readiness=readiness)
-    notice, level = web_search_notice(args.web_search, readiness=readiness)
-    ui.show_status(notice, level=level)
-    if args.web_search == "gemini" and readiness.hard_blocker:
-        raise ValueError(
-            f"--web-search gemini cannot work here: {readiness.hard_blocker} "
-            "Fix it, or use --web-search auto to fall back to native search."
-        )
 
     if args.resume_run:
         start_stage = resolve_stage(args.redo_stage)
@@ -562,7 +665,11 @@ def main() -> int:
         else:
             model = (existing_model if existing_model != "unknown" else None) or default_model_for_operator(operator_name)
         codex_sandbox = args.codex_sandbox or existing_config.get("codex_sandbox") or DEFAULT_CODEX_SANDBOX
-        approval_mode = "agent" if args.full_auto else (args.approval_mode or existing_config.get("approval_mode") or "manual")
+        approval_mode = (
+            "agent"
+            if (args.full_auto or args.review_panel)
+            else (args.approval_mode or existing_config.get("approval_mode") or "manual")
+        )
         if approval_mode == "agent":
             unattended = True
             ui.interactive = False
@@ -581,6 +688,10 @@ def main() -> int:
         walk = resolve_walk_settings(args, existing_config)
         archive = open_archive(args)
         graph, variant_id = resolve_graph(archive, walk["stage_graph"])
+        web_search_mode = normalize_web_search_mode(args.web_search or existing_config.get("web_search"))
+        web_search_context = resolve_search_context(
+            ui, mode=web_search_mode, operator=operator_name, codex_sandbox=codex_sandbox
+        )
         operator = create_operator(
             operator_name,
             model=model,
@@ -597,6 +708,11 @@ def main() -> int:
                 fake_mode=args.fake_operator,
                 ui=ui,
                 stage_timeout=args.stage_timeout,
+                use_panel=args.review_panel,
+                panel_roles=args.panel_roles,
+                panel_models=args.panel_models,
+                persona_text=persona_text,
+                deliberation_rounds=args.panel_rounds,
             )
         manager = ResearchManager(
             project_root=repo_root,
@@ -609,6 +725,7 @@ def main() -> int:
             review_model=review_model,
             unattended=unattended,
             max_auto_skips=args.max_auto_skips,
+            max_rounds=args.max_rounds,
             max_stage_attempts=args.max_attempts,
             web_search_context=web_search_context,
             stage_graph=graph,
@@ -616,6 +733,7 @@ def main() -> int:
             evolution=build_evolution_config(walk, args),
             graph_max_steps=args.graph_max_steps,
             graph_max_visits=args.graph_max_visits,
+            web_search_mode=web_search_mode,
         )
         completed = manager.resume_run(
             run_root,
@@ -632,11 +750,15 @@ def main() -> int:
     operator_name = (args.operator or "claude").strip().lower()
     model = args.model or default_model_for_operator(operator_name)
     codex_sandbox = args.codex_sandbox or DEFAULT_CODEX_SANDBOX
-    approval_mode = "agent" if args.full_auto else (args.approval_mode or "manual")
+    approval_mode = "agent" if (args.full_auto or args.review_panel) else (args.approval_mode or "manual")
     review_operator = (args.review_operator or operator_name).strip().lower()
     review_model = args.review_model or default_model_for_operator(review_operator)
     venue = resolve_venue_key(args.venue or DEFAULT_VENUE)
     output_format = resolve_output_format(args.output_format or DEFAULT_OUTPUT_FORMAT)
+    web_search_mode = normalize_web_search_mode(args.web_search)
+    web_search_context = resolve_search_context(
+        ui, mode=web_search_mode, operator=operator_name, codex_sandbox=codex_sandbox
+    )
     final_stage = resolve_stage(args.final_stage)
     walk = resolve_walk_settings(args)
     archive = open_archive(args)
@@ -657,6 +779,11 @@ def main() -> int:
             fake_mode=args.fake_operator,
             ui=ui,
             stage_timeout=args.stage_timeout,
+            use_panel=args.review_panel,
+            panel_roles=args.panel_roles,
+            panel_models=args.panel_models,
+            persona_text=persona_text,
+            deliberation_rounds=args.panel_rounds,
         )
     manager = ResearchManager(
         project_root=repo_root,
@@ -669,6 +796,7 @@ def main() -> int:
         review_model=review_model,
         unattended=unattended,
         max_auto_skips=args.max_auto_skips,
+        max_rounds=args.max_rounds,
         max_stage_attempts=args.max_attempts,
         web_search_context=web_search_context,
         stage_graph=graph,
@@ -676,6 +804,7 @@ def main() -> int:
         evolution=build_evolution_config(walk, args),
         graph_max_steps=args.graph_max_steps,
         graph_max_visits=args.graph_max_visits,
+        web_search_mode=web_search_mode,
     )
 
     goal = resolve_goal(args, unattended=unattended)

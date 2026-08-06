@@ -102,7 +102,10 @@ AutoR takes a different position: research is too important to hand over as a bl
 | Useful feature | **Automated experiment manifests** | Machine-readable experiment and result files make runs inspectable, comparable, and reusable downstream. |
 | Useful feature | **Citation verification and writing checks** | Writing expects citation verification, figure-link checks, and self-review artifacts before Stage 07 is considered complete. |
 | Useful feature | **Artifact indexing across stages** | `artifact_index.json` and related manifests help later stages find data, results, and figures without guessing from filenames. |
+| Useful feature | **Cross-model review veto** | When the reviewer approves, a different model family audits that approval and can send the stage back. A veto, never an override, so it can only tighten the gate. |
+| Useful feature | **Self-improving review policy** | Every correction the reviewer demands becomes a standing rule checked on all later stages, recorded in an auditable `review_policy.json` with the stage and attempt that produced it. |
 | Useful feature | **Resume, redo, and rollback controls** | Long research runs can continue in place, retry a stage, or roll downstream state back without starting over. |
+| Useful feature | **Deliberating review panel** | Instead of one reviewer agent at the approval gate, `--review-panel` seats a PI, domain expert, methodologist, reproducibility engineer and adversarial reviewer who review independently, cross-examine, then converge — and a blocking objection cannot be approved over. Each run measures the panel against its own single-pass baseline and reports when it did not earn its cost. |
 | Useful feature | **Two output formats** | Stage 07 writes a benchmark-ready markdown report (`report/report.md` + PNG figures) by default, or a venue-aware LaTeX paper package with a compiled PDF via `--output-format latex`. |
 
 In practice, that means AutoR is useful not only because of the high-level framing, but also because it handles real research chores: literature organization, experiment manifests, citation verification, artifact indexing, manuscript packaging, and recoverable long-running workflows.
@@ -293,6 +296,9 @@ AI handles execution load; humans steer the research when direction actually mat
 | Start with preloaded resources | `python main.py --goal "Your research goal here" --resources paper.pdf refs.bib data.csv` |
 | Run a local smoke test without a real agent backend | `python main.py --fake-operator --goal "Smoke test"` |
 | Run with the automated reviewer gate | `python main.py --full-auto --goal "Your research goal here"` |
+| Replace the single reviewer with a deliberating panel | `python main.py --review-panel --goal "..."` |
+| Give the panel a researcher persona to stand in for | `python main.py --review-panel --persona docs/persona-example.md --goal "..."` |
+| Seat the panel across different models | `python main.py --review-panel --panel-models pi=opus skeptic=codex:default --goal "..."` |
 | Choose the execution backend | `python main.py --operator claude` or `python main.py --operator codex` |
 | Choose the reviewer backend separately | `python main.py --full-auto --review-operator claude --review-model opus` |
 | Choose a Claude model | `python main.py --operator claude --model sonnet` or `python main.py --operator claude --model opus` |
@@ -540,6 +546,52 @@ flowchart TD
 
 The stage loop is controlled by AutoR, not by Claude.
 
+### Cross-model review
+
+The approval gate runs a coding agent with tools, so it can re-read a paper and re-execute
+an analysis before judging. But it is the same model family as the executor — usually the
+same model. Opus judging opus shares the blind spots that produced the work, which is
+exactly what a review is supposed to catch.
+
+So when the primary reviewer **approves**, a reviewer from a different model family reads
+the same evidence and decides whether that approval is defensible. It is a **veto, never an
+override**:
+
+- It only audits approvals. A refusal already sends the stage back.
+- It cannot approve anything the primary refused, so enabling it can only make the gate
+  stricter — which is why `--cross-review auto` turns it on whenever a Gemini backend is
+  configured.
+- An auditor that errors or returns unparseable output is recorded as *unavailable*, not as
+  agreement. Silence is never laundered into a passed audit.
+
+A cross-model veto is recorded as a standing rule, so a blind spot caught once is checked
+on every stage after it.
+
+### Self-improving review
+
+The approval gate does not just judge each stage — it **accumulates the corrections it
+demands and applies them to every stage after**. A reviewer that once insisted on a stated
+power analysis keeps insisting, so the same class of weakness cannot recur later in the run:
+
+```
+stage N review  ──demands a correction──▶  standing rule
+                                              │
+stage N+1 review  ◀──rule is now checked──────┘
+```
+
+Two properties keep this honest rather than decorative:
+
+- **It is auditable.** The policy is a plain artifact at `runs/<run_id>/review_policy.json`,
+  and every rule names the stage and attempt that produced it, so the claim can be checked
+  against the record instead of believed.
+- **It cannot inflate.** Rules are deduplicated on normalized text — casing, punctuation and
+  stage numbers collapse — and the set is bounded, so a reviewer restating one complaint
+  does not manufacture the appearance of learning.
+
+A rollback is recorded at higher weight than a routine refinement, because it is the
+strongest evidence a review can produce: an approval already given turned out to be wrong.
+Approvals teach nothing and are not recorded.
+
 ### Unattended runs
 
 `--full-auto` (or `--unattended`) removes the human entirely, which is what benchmark harnesses and overnight sweeps need:
@@ -742,6 +794,8 @@ File boundaries:
 - [src/bootstrap.py](src/bootstrap.py) and [src/project_bootstrap.py](src/project_bootstrap.py): `--paper-corpus` and `--project-root` scanning.
 - [src/approval_agent.py](src/approval_agent.py): The strict reviewer agent used by `--full-auto`.
 - [src/backend/](src/backend) and [src/frontend/](src/frontend): AutoR Studio service, HTTP layer, and the browser UI.
+- [src/research_rounds.py](src/research_rounds.py): Stages 03-06 as a repeatable round, so a refuted hypothesis leads to a second round instead of a dead end. Bounded by `--max-rounds`.
+- [src/validity_review.py](src/validity_review.py): The adversarial pass after Stages 05 and 06 — asks why the result is wrong, and requires the next stage to answer every objection.
 - [src/preregistration.py](src/preregistration.py): Freezes the hypotheses before the experiments, adjudicates each one at Stage 06, and traces each manuscript claim back to a supported hypothesis at Stage 07.
 - [src/prompts/](src/prompts): Per-stage prompt templates.
 - [src/skills/](src/skills) and [src/run_skills.py](src/run_skills.py): Agent skills installed into each run's `.claude/skills/`, loaded on demand rather than concatenated into every prompt.

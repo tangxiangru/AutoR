@@ -32,6 +32,13 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.approval_agent import AutomatedReviewer  # noqa: E402
+from src.review_panel import (
+    DEFAULT_PANEL,
+    ReviewPanel,
+    apply_model_assignments,
+    load_persona,
+    resolve_roles,
+)  # noqa: E402
 from src.manager import ResearchManager  # noqa: E402
 from src.operator import ClaudeOperator  # noqa: E402
 from src.operator_codex import CodexOperator  # noqa: E402
@@ -58,6 +65,7 @@ from src.utils import (  # noqa: E402
     resolve_stage,
     resolve_venue_key,
 )
+from src.cross_reviewer import resolve_cross_reviewer
 from src.web_search import (  # noqa: E402
     assess_search_readiness,
     resolve_web_search_context,
@@ -150,6 +158,42 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "that can cut a stage short.",
     )
     parser.add_argument(
+        "--review-panel",
+        action="store_true",
+        help="Replace the single reviewer agent with a deliberating panel of role-differentiated "
+             "reviewers ("
+             + ", ".join(role.key for role in DEFAULT_PANEL)
+             + "). They review independently, cross-examine, then a chair decides; a blocking "
+             "objection cannot be approved over.",
+    )
+    parser.add_argument(
+        "--panel-roles",
+        nargs="+",
+        metavar="ROLE",
+        help="Seat only these panel roles, in this order. Defaults to all of them.",
+    )
+    parser.add_argument(
+        "--panel-models",
+        nargs="+",
+        metavar="ROLE=MODEL",
+        help="Assign a model per panel seat, as role=model or role=backend:model "
+             "(for example: pi=opus skeptic=codex:default). Seats left unassigned use the "
+             "reviewer default. Heterogeneity is the lever with the best evidence behind it: "
+             "five prompts against one model are five correlated reads wearing five hats.",
+    )
+    parser.add_argument(
+        "--panel-rounds",
+        type=int,
+        default=2,
+        help="Maximum deliberation rounds. Later rounds run only on disagreement. Defaults to 2.",
+    )
+    parser.add_argument(
+        "--persona",
+        metavar="PATH",
+        help="Markdown description of the researcher the panel stands in for, injected into "
+             "every panelist so the simulated humans hold one consistent bar.",
+    )
+    parser.add_argument(
         "--max-attempts",
         type=int,
         default=DEFAULT_MAX_ATTEMPTS,
@@ -168,6 +212,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Run the intake stage. Off by default: the benchmark instructions are already "
              "a complete task specification, so intake only costs wall-clock time.",
+    )
+    parser.add_argument(
+        "--cross-review",
+        choices=["auto", "gemini", "off"],
+        default="auto",
+        help="Independent second opinion on each approval from a different model family. "
+             "Can veto an approval, never override a refusal.",
+    )
+    parser.add_argument(
+        "--cross-review-model",
+        help="Model for the cross-model reviewer. Defaults to gemini-3.1-pro-preview.",
     )
     parser.add_argument(
         "--web-search",
@@ -288,13 +343,25 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
     output_format = resolve_output_format(args.output_format)
     goal = build_benchmark_goal(workspace, instructions, output_format=output_format)
 
-    reviewer = AutomatedReviewer(
-        review_backend,
-        model=review_model,
-        fake_mode=args.fake_operator,
-        ui=ui,
-        stage_timeout=args.stage_timeout,
-    )
+    if args.review_panel:
+        reviewer = ReviewPanel(
+            apply_model_assignments(resolve_roles(args.panel_roles), args.panel_models),
+            backend_name=review_backend,
+            model=review_model,
+            fake_mode=args.fake_operator,
+            ui=ui,
+            stage_timeout=args.stage_timeout,
+            persona_text=load_persona(args.persona),
+            deliberation_rounds=args.panel_rounds,
+        )
+    else:
+        reviewer = AutomatedReviewer(
+            review_backend,
+            model=review_model,
+            fake_mode=args.fake_operator,
+            ui=ui,
+            stage_timeout=args.stage_timeout,
+        )
     manager = ResearchManager(
         project_root=REPO_ROOT,
         runs_dir=runs_dir_for(workspace),
@@ -308,9 +375,11 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
         max_auto_skips=args.max_auto_skips,
         max_stage_attempts=args.max_attempts,
         web_search_context=resolve_web_search_context(args.web_search, readiness=readiness),
+        web_search_mode=args.web_search,
         # Stages are told to keep code/, outputs/ and report/images/ up to date in the
         # benchmark workspace, so 'Files Produced' must resolve against it too.
         artifact_roots=[workspace],
+        cross_reviewer=resolve_cross_reviewer(args.cross_review, args.cross_review_model),
     )
 
     pipeline_completed = False
