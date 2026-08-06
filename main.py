@@ -18,6 +18,7 @@ from src.operator import ClaudeOperator
 from src.operator_codex import CodexOperator
 from src.operator_protocol import OperatorProtocol
 from src.terminal_ui import TerminalUI
+from src.cross_reviewer import resolve_cross_reviewer
 from src.web_search import (
     assess_search_readiness,
     resolve_web_search_context,
@@ -179,6 +180,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--review-model",
         help="Model alias or full model name for the automated reviewer backend. Defaults to the reviewer backend default.",
+    )
+    parser.add_argument(
+        "--cross-review",
+        choices=["auto", "gemini", "off"],
+        default="auto",
+        help=(
+            "Independent second opinion on each approval, from a different model family. "
+            "The primary reviewer shares the executor's blind spots; a Gemini reviewer can "
+            "veto an approval it cannot defend, but can never override a refusal, so it "
+            "only makes the gate stricter. 'auto' enables it when a Gemini backend is "
+            "configured. Only meaningful with an agent approval gate."
+        ),
+    )
+    parser.add_argument(
+        "--cross-review-model",
+        help="Model for the cross-model reviewer. Defaults to gemini-3.1-pro-preview.",
     )
     parser.add_argument(
         "--web-search",

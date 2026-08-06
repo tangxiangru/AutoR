@@ -97,6 +97,7 @@ AutoR takes a different position: research is too important to hand over as a bl
 | Useful feature | **Automated experiment manifests** | Machine-readable experiment and result files make runs inspectable, comparable, and reusable downstream. |
 | Useful feature | **Citation verification and writing checks** | Writing expects citation verification, figure-link checks, and self-review artifacts before Stage 07 is considered complete. |
 | Useful feature | **Artifact indexing across stages** | `artifact_index.json` and related manifests help later stages find data, results, and figures without guessing from filenames. |
+| Useful feature | **Cross-model review veto** | When the reviewer approves, a different model family audits that approval and can send the stage back. A veto, never an override, so it can only tighten the gate. |
 | Useful feature | **Self-improving review policy** | Every correction the reviewer demands becomes a standing rule checked on all later stages, recorded in an auditable `review_policy.json` with the stage and attempt that produced it. |
 | Useful feature | **Resume, redo, and rollback controls** | Long research runs can continue in place, retry a stage, or roll downstream state back without starting over. |
 | Useful feature | **Deliberating review panel** | Instead of one reviewer agent at the approval gate, `--review-panel` seats a PI, domain expert, methodologist, reproducibility engineer and adversarial reviewer who review independently, cross-examine, then converge — and a blocking objection cannot be approved over. Each run measures the panel against its own single-pass baseline and reports when it did not earn its cost. |
@@ -465,6 +466,27 @@ flowchart TD
 - Stages 01-08 use the standard six-action review menu: `1 / 2 / 3` continue with an AI refinement suggestion, `4` continues with custom feedback, `5` approves, and `6` aborts.
 
 The stage loop is controlled by AutoR, not by Claude.
+
+### Cross-model review
+
+The approval gate runs a coding agent with tools, so it can re-read a paper and re-execute
+an analysis before judging. But it is the same model family as the executor — usually the
+same model. Opus judging opus shares the blind spots that produced the work, which is
+exactly what a review is supposed to catch.
+
+So when the primary reviewer **approves**, a reviewer from a different model family reads
+the same evidence and decides whether that approval is defensible. It is a **veto, never an
+override**:
+
+- It only audits approvals. A refusal already sends the stage back.
+- It cannot approve anything the primary refused, so enabling it can only make the gate
+  stricter — which is why `--cross-review auto` turns it on whenever a Gemini backend is
+  configured.
+- An auditor that errors or returns unparseable output is recorded as *unavailable*, not as
+  agreement. Silence is never laundered into a passed audit.
+
+A cross-model veto is recorded as a standing rule, so a blind spot caught once is checked
+on every stage after it.
 
 ### Self-improving review
 
