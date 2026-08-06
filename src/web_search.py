@@ -41,6 +41,16 @@ DEFAULT_MAX_RESULTS = 10
 #: Seconds allowed for turning one grounding redirect into its canonical URL.
 URL_RESOLVE_TIMEOUT = 10
 
+#: Milliseconds allowed for one Gemini search call. Without a timeout a hung connection
+#: burns the whole --stage-timeout, which defaults to four hours.
+SEARCH_TIMEOUT_MS = 120_000
+
+#: Retry for the Gemini call. The SDK covers 408/429/5xx with exponential backoff, but
+#: only when asked; its default is a single attempt.
+SEARCH_RETRY_ATTEMPTS = 5
+SEARCH_RETRY_INITIAL_DELAY = 2.0
+SEARCH_RETRY_MAX_DELAY = 60.0
+
 #: How much of a resolved page to read looking for its <title>. Capped so a large or
 #: hostile page cannot turn one citation lookup into an unbounded download.
 TITLE_SCAN_BYTES = 65536
@@ -148,16 +158,39 @@ def resolve_gemini_api_key() -> str | None:
         if value:
             return value
 
-    if DIAGRAM_CONFIG_PATH.exists():
+    return _api_key_from_config_file()
+
+
+def _api_key_from_config_file() -> str | None:
+    """Read the optional diagram config, or report no key.
+
+    This resolver sits on the startup path of every run, so it must not be able to end
+    one. `pyyaml` is an optional dependency and the config is hand-edited: a missing
+    package or a stray tab used to raise out of `main()` before the banner printed. A key
+    you cannot read is a key you do not have -- but say so, because silently continuing
+    without a configured key is its own confusing failure.
+    """
+    if not DIAGRAM_CONFIG_PATH.exists():
+        return None
+    try:
         import yaml
 
         with open(DIAGRAM_CONFIG_PATH, "r", encoding="utf-8") as handle:
             config = yaml.safe_load(handle) or {}
-        api_keys = config.get("api_keys", {}) or {}
+        api_keys = (config.get("api_keys") if isinstance(config, dict) else None) or {}
         for key_name in ("google_api_key", "gemini_api_key"):
             value = (api_keys.get(key_name) or "").strip()
             if value:
                 return value
+    except ImportError:
+        print(
+            f"Warning: {DIAGRAM_CONFIG_PATH} exists but pyyaml is not installed, so no API "
+            "key could be read from it. Install pyyaml, or set GOOGLE_API_KEY / "
+            "GEMINI_API_KEY instead.",
+            file=sys.stderr,
+        )
+    except Exception as exc:  # noqa: BLE001 - a config we cannot parse is a config with no key
+        print(f"Warning: could not read {DIAGRAM_CONFIG_PATH}: {exc}", file=sys.stderr)
     return None
 
 
@@ -280,25 +313,57 @@ def resolve_backend(model: str | None = None) -> SearchBackend | None:
     return _api_key() or _vertex()
 
 
+def _http_options(types):
+    """Timeout and retry for the search call, or None on an SDK too old to take them.
+
+    Stage 01 issues dozens of searches over hours, and the SDK's defaults are one attempt
+    and no timeout: a single 429 killed a search outright, and a hung connection burned
+    the whole `--stage-timeout` (4 hours by default). The SDK ships both behaviours, they
+    were simply never switched on. `src/diagram_gen.py` hand-rolls the same five-attempt
+    backoff around the same API; using the built-in here also covers the timeout, which
+    the hand-rolled loop does not.
+    """
+    try:
+        return types.HttpOptions(
+            timeout=SEARCH_TIMEOUT_MS,
+            retry_options=types.HttpRetryOptions(
+                attempts=SEARCH_RETRY_ATTEMPTS,
+                initial_delay=SEARCH_RETRY_INITIAL_DELAY,
+                max_delay=SEARCH_RETRY_MAX_DELAY,
+            ),
+        )
+    except (AttributeError, TypeError):
+        # A pinned older SDK without HttpRetryOptions still works, just without retry.
+        return None
+
+
 def build_genai_client(backend: SearchBackend):
     """Construct a google-genai client for the chosen backend."""
     try:
         from google import genai
+        from google.genai import types
     except ImportError as exc:  # pragma: no cover - exercised only without the SDK
         raise WebSearchError(
             "The google-genai package is required for Gemini web search. "
             "Install it with: pip install google-genai"
         ) from exc
 
+    options = _http_options(types)
+    common = {"http_options": options} if options is not None else {}
+
     if backend.kind != "vertex":
-        return genai.Client(api_key=backend.api_key)
+        return genai.Client(api_key=backend.api_key, **common)
 
     # `enterprise` is the current spelling; `vertexai` is the older one. Accept either so a
     # pinned older SDK still works.
     try:
-        return genai.Client(enterprise=True, project=backend.project, location=backend.location)
+        return genai.Client(
+            enterprise=True, project=backend.project, location=backend.location, **common
+        )
     except TypeError:
-        return genai.Client(vertexai=True, project=backend.project, location=backend.location)
+        return genai.Client(
+            vertexai=True, project=backend.project, location=backend.location, **common
+        )
 
 
 def resolve_source(url: str, *, timeout: int = URL_RESOLVE_TIMEOUT) -> tuple[str, str | None]:

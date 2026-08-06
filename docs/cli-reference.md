@@ -208,6 +208,27 @@ Neither flag does anything without `--resume-run`.
 | --- | --- | --- |
 | `--research-diagram` | off | After Stage 07, generate a method illustration with the Gemini API and inject it into the report — `report.md` in markdown mode, `method.tex` in latex mode. Requires `pip install google-genai pyyaml` and a Gemini API key. If the SDK or key is missing, the diagram step prints a failure line and the run continues unaffected. See [Configuration → Diagram generation](configuration.md#diagram-generation-optional). |
 
+### Reliability
+
+The Gemini call retries and times out. Stage 01 issues dozens of searches over
+hours, and the SDK's defaults are one attempt and no timeout, so a single `429`
+killed a search outright and a hung connection could burn the whole
+`--stage-timeout` (4 hours by default).
+
+| | Value |
+| --- | --- |
+| Request timeout | 120 s |
+| Attempts | 5, exponential backoff from 2 s to 60 s, covering 408 / 429 / 5xx |
+
+Both come from the SDK's own `HttpOptions`; they were simply never switched on.
+An SDK too old to accept them degrades to a single attempt rather than failing.
+
+The optional `configs/diagram_config.yaml` is read defensively: it sits on the
+startup path of every run, `pyyaml` is optional, and the file is hand-edited. A
+missing package, an unreadable file, or malformed YAML prints a warning to
+stderr and reports no key, rather than raising out of `main()` before the banner.
+An API key in the environment short-circuits the file entirely.
+
 ### Exit codes
 
 | Code | Meaning |

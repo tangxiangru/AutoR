@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import builtins
+import contextlib
+import importlib.util
 import io
 import json
 import os
@@ -8,6 +11,7 @@ import sys
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from types import ModuleType
 from unittest.mock import patch
 
 import main as autor_main
@@ -38,6 +42,19 @@ from src.web_search import (
     resolve_gemini_api_key,
     resolve_search_model,
 )
+
+
+def _module_installed(name: str) -> bool:
+    """Whether an optional dependency is importable, without raising if it is not.
+
+    `find_spec` raises rather than returning None when a parent package is missing, so a
+    bare call here would fail at class-definition time on exactly the machines this guard
+    exists for.
+    """
+    try:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, AttributeError, ValueError):
+        return False
 
 
 class _Web:
@@ -949,7 +966,11 @@ class ExplicitGeminiRefusalTest(unittest.TestCase):
     """
 
     def _run_main(self, argv):
-        with patch.object(sys, "argv", ["main.py", *argv]):
+        # TerminalUI binds sys.stdout as a default argument at import time, so
+        # redirect_stdout cannot reach it; silence the banner at the source.
+        with patch.object(sys, "argv", ["main.py", *argv]), \
+             patch("src.terminal_ui.TerminalUI.show_banner"), \
+             patch("src.terminal_ui.TerminalUI.show_status"):
             with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
                 return autor_main.main()
 
@@ -1049,6 +1070,7 @@ class MainPassesTheOperatorToReadinessTest(unittest.TestCase):
             raise _Stop
 
         with patch("main.assess_search_readiness", side_effect=record), \
+             patch("src.terminal_ui.TerminalUI.show_banner"), \
              patch.object(sys, "argv", ["main.py", "--operator", "codex",
                                         "--codex-sandbox", "workspace-write",
                                         "--web-search", "native", "--goal", "x",
@@ -1073,6 +1095,7 @@ class MainPassesTheOperatorToReadinessTest(unittest.TestCase):
             raise _Stop
 
         with patch("main.assess_search_readiness", side_effect=record), \
+             patch("src.terminal_ui.TerminalUI.show_banner"), \
              patch.object(sys, "argv", ["main.py", "--web-search", "native", "--goal", "x",
                                         "--fake-operator", "--skip-intake"]):
             with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
@@ -1082,3 +1105,243 @@ class MainPassesTheOperatorToReadinessTest(unittest.TestCase):
                     pass
 
         self.assertEqual(captured.get("operator"), "claude")
+
+
+class ConfigFileReadTest(unittest.TestCase):
+    """The key resolver sits on the startup path of every run, so it must not end one.
+
+    `pyyaml` is optional and the config is hand-edited; a missing package or a stray tab
+    used to raise out of main() before the banner printed.
+
+    Driven through a stand-in `yaml` module, because pyyaml is not a dependency and is
+    absent in CI -- where a skip would hide every one of these. The one test that needs
+    the real parser says so.
+    """
+
+    @staticmethod
+    def _yaml_stub(result=None, error=None):
+        module = ModuleType("yaml")
+
+        def safe_load(_handle):
+            if error is not None:
+                raise error
+            return result
+
+        module.safe_load = safe_load
+        return module
+
+    def _resolve(self, *, yaml_module=None, open_error=None, contents="api_keys:\n"):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "diagram_config.yaml"
+            path.write_text(contents)
+            stack = [
+                patch.dict(os.environ, {}, clear=True),
+                patch("src.web_search.DIAGRAM_CONFIG_PATH", path),
+            ]
+            if yaml_module is not None:
+                stack.append(patch.dict(sys.modules, {"yaml": yaml_module}))
+            if open_error is not None:
+                stack.append(patch("builtins.open", side_effect=open_error))
+            errors = io.StringIO()
+            with contextlib.ExitStack() as exits:
+                for ctx in stack:
+                    exits.enter_context(ctx)
+                exits.enter_context(redirect_stderr(errors))
+                return resolve_gemini_api_key(), errors.getvalue()
+
+    def test_a_key_in_the_config_file_is_read(self) -> None:
+        key, errors = self._resolve(
+            yaml_module=self._yaml_stub({"api_keys": {"google_api_key": "from-file"}})
+        )
+        self.assertEqual(key, "from-file")
+        self.assertEqual(errors, "")
+
+    def test_the_second_key_name_is_also_accepted(self) -> None:
+        key, _ = self._resolve(
+            yaml_module=self._yaml_stub({"api_keys": {"gemini_api_key": "second"}})
+        )
+        self.assertEqual(key, "second")
+
+    def test_malformed_yaml_reports_no_key_instead_of_raising(self) -> None:
+        key, errors = self._resolve(
+            yaml_module=self._yaml_stub(error=ValueError("mapping values are not allowed here"))
+        )
+        self.assertIsNone(key)
+        self.assertIn("could not read", errors)
+        self.assertIn("mapping values", errors)
+
+    def test_a_config_that_is_not_a_mapping_is_handled_cleanly(self) -> None:
+        """Valid YAML of the wrong shape is not a parse failure, so it must not be
+        reported as one. Without the isinstance guard this still returns None -- by
+        raising AttributeError into the catch-all -- and the absence of a warning is the
+        only thing that tells the two apart."""
+        key, errors = self._resolve(yaml_module=self._yaml_stub(["just", "a", "list"]))
+        self.assertIsNone(key)
+        self.assertEqual(errors, "")
+
+    def test_an_empty_config_reports_no_key_quietly(self) -> None:
+        key, errors = self._resolve(yaml_module=self._yaml_stub(None))
+        self.assertIsNone(key)
+        self.assertEqual(errors, "")
+
+    def test_a_config_without_an_api_keys_block_reports_no_key_quietly(self) -> None:
+        key, errors = self._resolve(yaml_module=self._yaml_stub({"defaults": {"model_name": "x"}}))
+        self.assertIsNone(key)
+        self.assertEqual(errors, "")
+
+    def test_a_missing_pyyaml_reports_no_key_and_names_the_remedy(self) -> None:
+        real_import = builtins.__import__
+
+        def no_yaml(name, *args, **kwargs):
+            if name == "yaml":
+                raise ImportError("No module named 'yaml'")
+            return real_import(name, *args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "diagram_config.yaml"
+            path.write_text("api_keys:\n")
+            errors = io.StringIO()
+            with patch.dict(os.environ, {}, clear=True), \
+                 patch("src.web_search.DIAGRAM_CONFIG_PATH", path), \
+                 patch.dict(sys.modules, {}, clear=False), \
+                 patch("builtins.__import__", side_effect=no_yaml), \
+                 redirect_stderr(errors):
+                sys.modules.pop("yaml", None)
+                key = resolve_gemini_api_key()
+        self.assertIsNone(key)
+        self.assertIn("pyyaml is not installed", errors.getvalue())
+        self.assertIn("GEMINI_API_KEY", errors.getvalue())
+
+    def test_an_unreadable_config_reports_no_key(self) -> None:
+        key, errors = self._resolve(
+            yaml_module=self._yaml_stub({}), open_error=PermissionError("nope")
+        )
+        self.assertIsNone(key)
+        self.assertIn("could not read", errors)
+
+    def test_a_missing_config_file_is_silent(self) -> None:
+        with patch.dict(os.environ, {}, clear=True), \
+             patch("src.web_search.DIAGRAM_CONFIG_PATH", Path("/nonexistent/diagram.yaml")), \
+             redirect_stderr(io.StringIO()) as errors:
+            self.assertIsNone(resolve_gemini_api_key())
+        self.assertEqual(errors.getvalue(), "")
+
+    def test_an_environment_key_short_circuits_the_file_entirely(self) -> None:
+        """A broken config must not matter when the environment already answered."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "diagram_config.yaml"
+            path.write_text("{[not yaml\n")
+            with patch.dict(os.environ, {"GEMINI_API_KEY": "env-key"}, clear=True), \
+                 patch("src.web_search.DIAGRAM_CONFIG_PATH", path), \
+                 redirect_stderr(io.StringIO()) as errors:
+                self.assertEqual(resolve_gemini_api_key(), "env-key")
+            self.assertEqual(errors.getvalue(), "")
+
+    @unittest.skipUnless(
+        _module_installed("yaml"),
+        "pyyaml is not installed; the stand-in covers the rest of this class",
+    )
+    def test_the_real_parser_rejects_genuinely_malformed_yaml(self) -> None:
+        """The stand-in cannot tell us what real pyyaml actually raises."""
+        key, errors = self._resolve(contents="api_keys:\n\tgoogle_api_key: x\n  bad: [\n")
+        self.assertIsNone(key)
+        self.assertIn("could not read", errors)
+
+
+class SearchRetryAndTimeoutTest(unittest.TestCase):
+    """Stage 01 issues dozens of searches over hours; the SDK default is one attempt.
+
+    Driven through a stand-in `types` module rather than the real SDK, which is not a
+    dependency and is absent in CI -- the same reason a skip here would hide the whole
+    class. `test_the_real_sdk_accepts_these_options` is the one that needs it, and says so.
+    """
+
+    class _FakeTypes:
+        """Records what HttpOptions was asked for."""
+
+        class HttpRetryOptions:
+            def __init__(self, attempts, initial_delay, max_delay):
+                self.attempts = attempts
+                self.initial_delay = initial_delay
+                self.max_delay = max_delay
+
+        class HttpOptions:
+            def __init__(self, timeout, retry_options):
+                self.timeout = timeout
+                self.retry_options = retry_options
+
+    def _options(self):
+        return web_search_module._http_options(self._FakeTypes)
+
+    def test_a_timeout_and_retry_are_configured(self) -> None:
+        options = self._options()
+        self.assertIsNotNone(options)
+        self.assertEqual(options.timeout, web_search_module.SEARCH_TIMEOUT_MS)
+        self.assertEqual(options.retry_options.attempts, web_search_module.SEARCH_RETRY_ATTEMPTS)
+
+    def test_retry_is_more_than_the_sdk_default_of_one_attempt(self) -> None:
+        self.assertGreater(self._options().retry_options.attempts, 1)
+
+    def test_a_timeout_is_set_at_all(self) -> None:
+        """Without one, a hung connection burns the whole --stage-timeout."""
+        self.assertGreater(self._options().timeout, 0)
+
+    def test_the_backoff_grows(self) -> None:
+        retry = self._options().retry_options
+        self.assertGreater(retry.max_delay, retry.initial_delay)
+
+    def test_an_sdk_without_retry_options_degrades_instead_of_crashing(self) -> None:
+        class _OldTypes:
+            HttpOptions = object  # present, but no HttpRetryOptions
+
+        self.assertIsNone(web_search_module._http_options(_OldTypes))
+
+    def test_an_sdk_without_http_options_at_all_degrades(self) -> None:
+        self.assertIsNone(web_search_module._http_options(object()))
+
+    @unittest.skipIf(
+        not web_search_module.genai_sdk_available(),
+        "google-genai is not installed; the stand-in covers the rest of this class",
+    )
+    def test_the_real_sdk_accepts_these_options(self) -> None:
+        """The stand-in cannot catch a signature the real SDK would reject."""
+        from google.genai import types
+
+        options = web_search_module._http_options(types)
+        self.assertIsNotNone(options)
+        self.assertEqual(options.timeout, web_search_module.SEARCH_TIMEOUT_MS)
+        self.assertEqual(options.retry_options.attempts, web_search_module.SEARCH_RETRY_ATTEMPTS)
+
+    def _captured_client_kwargs(self, backend):
+        captured: dict[str, object] = {}
+
+        class _FakeClient:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+
+        fake_genai = ModuleType("google.genai")
+        fake_genai.Client = _FakeClient
+        fake_google = ModuleType("google")
+        fake_google.genai = fake_genai
+        with patch.dict(
+            sys.modules,
+            {"google": fake_google, "google.genai": fake_genai, "google.genai.types": self._FakeTypes},
+        ):
+            web_search_module.build_genai_client(backend)
+        return captured
+
+    def test_the_client_is_built_with_those_options(self) -> None:
+        captured = self._captured_client_kwargs(
+            web_search_module.SearchBackend(kind="api_key", model="m", api_key="k")
+        )
+        self.assertEqual(captured.get("api_key"), "k")
+        self.assertEqual(captured["http_options"].timeout, web_search_module.SEARCH_TIMEOUT_MS)
+
+    def test_the_vertex_client_gets_them_too(self) -> None:
+        captured = self._captured_client_kwargs(
+            web_search_module.SearchBackend(
+                kind="vertex", model="m", project="p", location="global"
+            )
+        )
+        self.assertEqual(captured.get("project"), "p")
+        self.assertEqual(captured["http_options"].timeout, web_search_module.SEARCH_TIMEOUT_MS)
