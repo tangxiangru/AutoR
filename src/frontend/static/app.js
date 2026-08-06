@@ -1669,14 +1669,30 @@ function renderPaperPreview() {
     return;
   }
 
-  elements.paperStatus.textContent = preview.pdf_available ? "PDF ready" : "TeX only";
-  elements.paperMeta.textContent = preview.pdf_relative_path || preview.tex_relative_path || "No manuscript files";
-  renderDefinitionList(elements.paperSummary, [
-    ["Main TeX", preview.tex_relative_path || "missing"],
-    ["Compiled PDF", preview.pdf_relative_path || "missing"],
-    ["Sections", String(preview.section_paths.length)],
-    ["Build log", preview.build_log_relative_path || "missing"],
-  ]);
+  // A markdown run has no PDF by design, so reporting "TeX only" for it would read as a
+  // failed build rather than the configured output format.
+  const isMarkdownRun = preview.output_format === "markdown";
+  if (isMarkdownRun) {
+    elements.paperStatus.textContent = preview.report_available ? "Report ready" : "No report yet";
+  } else {
+    elements.paperStatus.textContent = preview.pdf_available ? "PDF ready" : "TeX only";
+  }
+  elements.paperMeta.textContent =
+    (isMarkdownRun ? preview.report_relative_path : null) ||
+    preview.pdf_relative_path ||
+    preview.tex_relative_path ||
+    "No manuscript files";
+  renderDefinitionList(elements.paperSummary, isMarkdownRun
+    ? [
+        ["Output format", "markdown"],
+        ["Report", preview.report_relative_path || "missing"],
+      ]
+    : [
+        ["Main TeX", preview.tex_relative_path || "missing"],
+        ["Compiled PDF", preview.pdf_relative_path || "missing"],
+        ["Sections", String(preview.section_paths.length)],
+        ["Build log", preview.build_log_relative_path || "missing"],
+      ]);
 
   if (preview.section_paths.length) {
     elements.paperSections.innerHTML = preview.section_paths
@@ -1703,16 +1719,22 @@ function renderPaperPreview() {
           title="Compiled paper preview"
         ></iframe>
       `;
+    } else if (isMarkdownRun) {
+      renderEmpty(elements.paperFrameContainer, "This run produces a markdown report. The report source is shown below.");
     } else {
       renderEmpty(elements.paperFrameContainer, "No compiled PDF found yet. Main TeX and build logs can still be reviewed here.");
     }
     _paperRenderedKey.ref = pdfKey;
   }
 
-  if (preview.tex_content) {
-    renderCode(elements.paperTexPreview, preview.tex_content);
+  const manuscriptSource = isMarkdownRun ? preview.report_content : preview.tex_content;
+  if (manuscriptSource) {
+    renderCode(elements.paperTexPreview, manuscriptSource);
   } else {
-    renderEmpty(elements.paperTexPreview, "No manuscript source found.");
+    renderEmpty(
+      elements.paperTexPreview,
+      isMarkdownRun ? "No report.md found yet." : "No manuscript source found.",
+    );
   }
 
   if (preview.build_log_content) {

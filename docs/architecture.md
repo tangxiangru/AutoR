@@ -112,7 +112,7 @@ to a CLI directly; the operators never decide what stage runs next.
 | Module | Responsibility |
 | --- | --- |
 | [`src/platform/foundry.py`](../src/platform/foundry.py) | Post-approval packaging: paper package and release package. |
-| [`src/diagram_gen.py`](../src/diagram_gen.py) | Optional Gemini method-diagram generation and LaTeX injection. The only module with a third-party dependency. |
+| [`src/diagram_gen.py`](../src/diagram_gen.py) | Optional Gemini method-diagram generation, injected into `report.md` or `method.tex` depending on the run's output format. The only module with a third-party dependency. |
 | [`src/prompts/`](../src/prompts) | One markdown template per stage, plus intake and bootstrap templates. Editing these changes agent behaviour with no code change. |
 
 ### Studio

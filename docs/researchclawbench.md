@@ -64,29 +64,56 @@ fails loudly on the first run instead of hanging a benchmark job for hours.
 
 ### 2. Bridges the output contract
 
-AutoR produces a run tree with a LaTeX paper package; ResearchClawBench reads four paths
-inside the workspace. After the pipeline finishes — **whether or not it succeeded** — the
-adapter exports:
+Stage 07 runs in **markdown mode** by default (`--output-format markdown`), so the report
+the benchmark scores is the pipeline's own gate-checked deliverable rather than a
+translation of one. AutoR writes it to `workspace/report/report.md` in the run tree; the
+adapter copies it to the benchmark path. In `--output-format latex` Stage 07 produces the
+submission-oriented paper package instead and the report is synthesized afterwards.
+
+After the pipeline finishes — **whether or not it succeeded** — the adapter exports:
 
 | Benchmark path | Source |
 |:---|:---|
 | `report/report.md` | see below |
-| `report/images/*.png` | `workspace/figures`, `writing`, `results`, `artifacts` (PNG only) |
+| `report/images/*.png` | `workspace/report/images` first, then `figures`, `writing`, `results`, `artifacts` (PNG only) |
 | `code/` | `workspace/code` |
 | `outputs/` | `workspace/results` and `workspace/notes` |
 
-The report comes from the first of three paths that yields real content:
+Run-tree figures under `report/images/` keep their filenames, because those are the names
+`report.md` references. A same-named figure swept up from elsewhere is the one that gets
+qualified.
 
-1. **`agent`** — Stage 07 wrote `report/report.md` itself. The goal contract injected into
-   every stage prompt names the exact path, so this is the normal case.
-2. **`synthesized`** — one extra operator call converts the approved artifacts into the
-   benchmark's markdown format.
-3. **`fallback`** — pure-Python assembly from the approved stage summaries, with any
+The report comes from the first of four paths that yields real content:
+
+1. **`agent`** — something wrote `report/report.md` at the benchmark path directly. The goal
+   contract injected into every stage prompt names the exact path.
+2. **`stage`** — Stage 07 ran in markdown mode, so its gate-checked report already exists in
+   the run tree and is promoted verbatim. **This is the normal case.**
+3. **`synthesized`** — one extra operator call converts the approved artifacts into the
+   benchmark's markdown format. This is what a `latex` run uses.
+4. **`fallback`** — pure-Python assembly from the approved stage summaries, with any
    auto-skipped stages named explicitly.
 
 A partial report scores better than no report, so a crashed or incomplete pipeline still
 exports everything it produced. The exit code tracks whether a report reached the harness,
 not whether every stage was approved.
+
+#### What markdown mode changes inside the pipeline
+
+| | `markdown` (default) | `latex` |
+|:---|:---|:---|
+| Stage 07 prompt | `src/prompts/07_writing_markdown.md` | `src/prompts/07_writing.md` |
+| Deliverable | `workspace/report/report.md` | `main.tex` + `sections/*.tex` + compiled PDF |
+| Figures | `workspace/report/images/*.png`, referenced as `images/<name>.png` | `workspace/figures`, `\includegraphics` |
+| Triage artifact | `artifacts/report_review.json` | `artifacts/layout_review.json` |
+| Also required | `citation_verification.json`, `self_review.json` | same, plus `build_log.txt` and a `.bib` |
+| Post-approval | — | `writing/paper_package/` bundle |
+
+The markdown gates are not "a file exists". Stage 07 fails and retries if `report.md` is
+shorter than 1,200 characters, references no figures, still holds placeholder text, or
+carries a figure reference that is absolute, remote, unrenderable, or points at a file that
+is not there. A broken figure link is the expensive defect here: the judge reads the prose
+promising a figure and is shown nothing.
 
 ### 3. Streams progress
 
@@ -176,6 +203,10 @@ The search model defaults to `gemini-2.5-flash` and is overridable with
 --max-auto-skips N       Stages that may be auto-skipped before aborting. Default: 3.
 --intake                 Run the intake stage. Off by default: the benchmark instructions
                          are already a complete task specification.
+--output-format {markdown,md,latex,tex}
+                         Stage 07's deliverable. Default: markdown, which writes
+                         report/report.md directly. Use latex to produce the paper package
+                         and leave the report to the synthesis step.
 --web-search {auto,gemini,native}
 --no-synthesis           Skip the operator-backed report synthesis pass.
 --export-only            Re-export the latest run without re-running the pipeline. Use this

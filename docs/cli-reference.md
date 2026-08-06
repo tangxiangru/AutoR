@@ -114,6 +114,16 @@ notably **Claude Code on Vertex AI** — otherwise Stage 01 has no way to search
 and will either stall or fabricate citations. See
 [ResearchClawBench → Web search](researchclawbench.md#web-search-on-deployments-where-websearch-is-disabled).
 
+### Output format
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--output-format {markdown,md,latex,tex}` | `markdown` | Stage 07's deliverable. `markdown` writes `workspace/report/report.md` plus PNG figures under `workspace/report/images/`, which is the artifact automated research benchmarks score. `latex` keeps the submission-oriented paper package: `main.tex`, `sections/*.tex`, a bibliography, and a compiled PDF. Persisted in `run_config.json` and preserved on resume. |
+
+The two modes differ in which Stage 07 prompt is loaded, which artifacts the
+stage gate requires, and whether a `paper_package/` bundle is produced after
+approval. See [Stage Contract](stage-contract.md#artifact-requirements).
+
 ### Writing venue
 
 | Flag | Default | Description |
@@ -151,7 +161,7 @@ Neither flag does anything without `--resume-run`.
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--research-diagram` | off | After Stage 07, generate a method illustration with the Gemini API and inject it into the LaTeX paper. Requires `pip install google-genai pyyaml` and a Gemini API key. If the SDK or key is missing, the diagram step prints a failure line and the run continues unaffected. See [Configuration → Diagram generation](configuration.md#diagram-generation-optional). |
+| `--research-diagram` | off | After Stage 07, generate a method illustration with the Gemini API and inject it into the report — `report.md` in markdown mode, `method.tex` in latex mode. Requires `pip install google-genai pyyaml` and a Gemini API key. If the SDK or key is missing, the diagram step prints a failure line and the run continues unaffected. See [Configuration → Diagram generation](configuration.md#diagram-generation-optional). |
 
 ### Exit codes
 

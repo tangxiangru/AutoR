@@ -134,6 +134,29 @@ everything Stage 03, 05, and 06 required.
 | **05+** | At least one result file under `workspace/results/` with a suffix in `.json .jsonl .csv .tsv .parquet .npz .npy`. |
 | **05+** | `workspace/results/experiment_manifest.json` exists and is structurally valid. |
 | **06+** | At least one figure under `workspace/figures/` with a suffix in `.png .pdf .svg .jpg .jpeg`. |
+| **08+** | At least one file under `workspace/reviews/`. |
+
+Stage 07's requirements depend on the run's `output_format`.
+
+**`markdown` (the default):**
+
+| From stage | Requirement |
+| --- | --- |
+| **07+** | `workspace/report/report.md` exists and holds at least 1,200 characters. |
+| **07+** | It contains no placeholder text. |
+| **07+** | It references at least one figure, via `![...](...)` or `<img src="...">`. |
+| **07+** | Every figure reference is report-relative — not absolute, not a URL. |
+| **07+** | Every figure reference resolves to a file that exists under `workspace/report/`. |
+| **07+** | Every referenced figure is renderable: `.png .jpg .jpeg .gif .webp`. |
+| **07+** | At least one renderable image under `workspace/report/images/`. |
+| **07+** | `workspace/artifacts/citation_verification.json`, structurally valid. |
+| **07+** | `workspace/artifacts/self_review.json`. |
+| **07+** | `workspace/artifacts/report_review.json`, structurally valid. |
+
+**`latex`:**
+
+| From stage | Requirement |
+| --- | --- |
 | **07+** | `workspace/writing/main.tex` exists **and** matches the selected venue (see [venue matching](#venue-matching)). |
 | **07+** | A `.bib` file under `workspace/writing/`, or an inline bibliography. |
 | **07+** | At least one `.tex` file under `workspace/writing/sections/`. |
@@ -142,7 +165,6 @@ everything Stage 03, 05, and 06 required.
 | **07+** | `workspace/artifacts/citation_verification.json`, structurally valid. |
 | **07+** | `workspace/artifacts/self_review.json`. |
 | **07+** | `workspace/artifacts/layout_review.json`, structurally valid. |
-| **08+** | At least one file under `workspace/reviews/`. |
 
 The schemas of the validated JSON files are in
 [Run Artifacts](run-artifacts.md).
@@ -158,7 +180,8 @@ owns to be at least that new.
 | --- | --- |
 | `03_study_design` | at least one file under `workspace/data/` |
 | `06_analysis` | at least one file under `workspace/figures/` |
-| `07_writing` | `main.tex`, `build_log.txt`, `citation_verification.json`, `self_review.json`, `layout_review.json`, a PDF, and at least one `sections/*.tex` |
+| `07_writing` (markdown) | `report/report.md`, `citation_verification.json`, `self_review.json`, `report_review.json` |
+| `07_writing` (latex) | `main.tex`, `build_log.txt`, `citation_verification.json`, `self_review.json`, `layout_review.json`, a PDF, and at least one `sections/*.tex` |
 | `08_dissemination` | at least one file under `workspace/reviews/` |
 
 This is what stops a re-run from being credited with the previous attempt's

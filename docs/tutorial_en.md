@@ -643,7 +643,7 @@ In practice, that is **1 intake stage + 8 formal research stages = 9 stages**.
 | `04_implementation` | Builds real code, configs, data-prep scripts, and sanity checks. | Do not approve skeletons; require runnable scripts, commands, configs, and logs. |
 | `05_experimentation` | Runs the planned experiments and writes machine-readable results. | Distinguish smoke tests from real experiments; require baselines, repeats, result files, and failure records. |
 | `06_analysis` | Interprets results, creates figures, analyzes failures, and explains mechanisms. | Do not accept metric narration only; require plots, failure cases, ablation interpretation, and boundaries. |
-| `07_writing` | Produces venue-aware paper sources, BibTeX, a compiled PDF, and citation checks. | Verify that every major claim is backed by experiments, figures, or literature. |
+| `07_writing` | Produces the final deliverable: a markdown report with embedded figures by default, or venue-aware LaTeX sources and a compiled PDF with `--output-format latex`. | Verify that every major claim is backed by experiments, figures, or literature. |
 | `08_dissemination` | Builds review, release, readiness, reproduction, and presentation materials. | Confirm the run can be inspected, reproduced, and shown to others, not just read as a paper. |
 
 The shape of every stage is similar:
@@ -763,7 +763,7 @@ If you are unsure whether a stage should be approved, use the table below.
 | `04_implementation` | real code, configs, data prep, sanity checks | it only writes skeleton code or pseudocode | "Do not stop at a skeleton. Make the minimum runnable path real, including scripts, configs, data prep, and sanity checks." |
 | `05_experimentation` | machine-readable result files, baseline comparisons, repeated runs, failure records | it runs only a demo or a tiny subset once | "The current experiment looks like a smoke test. Add formal runs, baseline comparisons, repetition, and machine-readable result files." |
 | `06_analysis` | real figures, error analysis, failure cases, ablation interpretation, mechanism-level conclusions | it only repeats the best metric | "Do not stop at metric narration. Explain why the method works, where it fails, which factors matter, and support that with figures and tables." |
-| `07_writing` | LaTeX, BibTeX, a compilable PDF, citation verification, and a structurally complete draft | it has only markdown, or a weak PDF with unsupported claims | "Do not stop at paper-shaped output. Make sure every core claim is backed by experiments or literature, and complete citation verification." |
+| `07_writing` | A report whose every figure reference resolves and whose every claim carries a number (or, in `latex` mode, LaTeX, BibTeX, and a compilable PDF) | it is paper-shaped but thin: captions with no figure, adjectives with no measurement, unsupported claims | "Do not stop at paper-shaped output. Make sure every core claim is backed by experiments or literature, and complete citation verification." |
 | `08_dissemination` | review materials, release/package materials, outward-facing deliverables | it stops at the paper and ignores release/readiness | "Add release and review materials so the run can be checked, reproduced, and shown to others." |
 
 One especially practical lesson:

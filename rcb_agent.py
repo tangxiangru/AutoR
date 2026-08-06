@@ -46,7 +46,13 @@ from src.rcb import (  # noqa: E402
     runs_dir_for,
 )
 from src.terminal_ui import TerminalUI  # noqa: E402
-from src.utils import DEFAULT_VENUE, resolve_venue_key  # noqa: E402
+from src.utils import (  # noqa: E402
+    DEFAULT_OUTPUT_FORMAT,
+    DEFAULT_VENUE,
+    OUTPUT_FORMAT_CLI_CHOICES,
+    resolve_output_format,
+    resolve_venue_key,
+)
 from src.web_search import resolve_web_search_context, web_search_notice  # noqa: E402
 
 
@@ -98,6 +104,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--venue",
         default=DEFAULT_VENUE,
         help=f"Venue profile for Stage 07 writing. Defaults to {DEFAULT_VENUE}.",
+    )
+    parser.add_argument(
+        "--output-format",
+        choices=list(OUTPUT_FORMAT_CLI_CHOICES),
+        default=DEFAULT_OUTPUT_FORMAT,
+        help="Deliverable Stage 07 produces. 'markdown' writes report/report.md directly, which "
+             "is the file the benchmark scores; 'latex' produces the paper package instead and "
+             "leaves the report to the export step. "
+             f"Defaults to {DEFAULT_OUTPUT_FORMAT}.",
     )
     parser.add_argument(
         "--stage-timeout",
@@ -181,6 +196,7 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
             "agent": "autor",
             "model": model,
             "review_model": review_model,
+            "output_format": resolve_output_format(args.output_format),
             "workspace": str(workspace),
         }
     )
@@ -221,7 +237,8 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
         prompt_file=args.prompt_file,
         workspace=workspace,
     )
-    goal = build_benchmark_goal(workspace, instructions)
+    output_format = resolve_output_format(args.output_format)
+    goal = build_benchmark_goal(workspace, instructions, output_format=output_format)
 
     reviewer = AutomatedReviewer(
         review_backend,
@@ -250,6 +267,7 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
             goal,
             venue=resolve_venue_key(args.venue),
             skip_intake=not args.intake,
+            output_format=output_format,
         )
     except Exception:  # noqa: BLE001 - a crashed pipeline must still export what it produced
         emit_event({"type": "error", "where": "pipeline", "traceback": traceback.format_exc()})

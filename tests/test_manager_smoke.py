@@ -20,14 +20,40 @@ from src.utils import (
     OperatorResult,
     approved_stage_summaries,
     build_run_paths,
+    load_run_config,
     read_text,
     relative_to_run,
+    selected_output_format,
     write_attempt_count,
     write_text,
 )
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _smoke_markdown_report() -> str:
+    """A report long enough to clear the markdown Stage 07 gates, with a resolving figure."""
+    body = (
+        "Smoke-test prose describing the methodology, the measured accuracy of 0.90 on the "
+        "held-out split, and the discussion that follows from it. "
+    )
+    return (
+        "# Smoke Research Report\n\n"
+        "## Abstract\n\n"
+        f"{body}\n\n"
+        "## Methodology\n\n"
+        f"{body * 6}\n\n"
+        "## Results\n\n"
+        f"{body * 6}\n\n"
+        "![Held-out accuracy across folds.](images/accuracy.png)\n\n"
+        "## Discussion\n\n"
+        f"{body * 6}\n\n"
+        "## Limitations\n\n"
+        f"{body}\n"
+    )
+
+
 STAGE_01 = next(stage for stage in STAGES if stage.slug == "01_literature_survey")
 STAGE_05 = next(stage for stage in STAGES if stage.slug == "05_experimentation")
 STAGE_06 = next(stage for stage in STAGES if stage.slug == "06_analysis")
@@ -216,24 +242,42 @@ class ScriptedSmokeOperator:
             produced.append(relative_to_run(figure_path, paths.run_root))
 
         if stage.number >= 7:
-            sections_dir = paths.writing_dir / "sections"
-            sections_dir.mkdir(parents=True, exist_ok=True)
-            write_text(
-                paths.writing_dir / "main.tex",
-                (
-                    "% AutoR venue: neurips_2025\n"
-                    "\\documentclass{article}\n"
-                    "\\usepackage{neurips_2023}\n"
-                    "\\begin{document}\n"
-                    "\\input{sections/introduction}\n"
-                    "\\end{document}\n"
-                ),
-            )
-            write_text(paths.writing_dir / "references.bib", "@article{smoke2026, title={Smoke}, year={2026}}\n")
-            write_text(sections_dir / "introduction.tex", "\\section{Introduction}\nSmoke content.\n")
-            write_text(sections_dir / "method.tex", "\\section{Method}\nSmoke content.\n")
-            (paths.artifacts_dir / "paper.pdf").write_bytes(b"%PDF-1.4 smoke paper")
-            write_text(paths.artifacts_dir / "build_log.txt", "Final status: SUCCESS\n")
+            if selected_output_format(paths) == "markdown":
+                figure_path = paths.report_images_dir / "accuracy.png"
+                figure_path.parent.mkdir(parents=True, exist_ok=True)
+                figure_path.write_bytes(b"\x89PNG smoke image data")
+                write_text(paths.report_file, _smoke_markdown_report())
+                produced.extend(
+                    [
+                        relative_to_run(paths.report_file, paths.run_root),
+                        relative_to_run(figure_path, paths.run_root),
+                    ]
+                )
+            else:
+                sections_dir = paths.writing_dir / "sections"
+                sections_dir.mkdir(parents=True, exist_ok=True)
+                write_text(
+                    paths.writing_dir / "main.tex",
+                    (
+                        "% AutoR venue: neurips_2025\n"
+                        "\\documentclass{article}\n"
+                        "\\usepackage{neurips_2023}\n"
+                        "\\begin{document}\n"
+                        "\\input{sections/introduction}\n"
+                        "\\end{document}\n"
+                    ),
+                )
+                write_text(paths.writing_dir / "references.bib", "@article{smoke2026, title={Smoke}, year={2026}}\n")
+                write_text(sections_dir / "introduction.tex", "\\section{Introduction}\nSmoke content.\n")
+                write_text(sections_dir / "method.tex", "\\section{Method}\nSmoke content.\n")
+                (paths.artifacts_dir / "paper.pdf").write_bytes(b"%PDF-1.4 smoke paper")
+                write_text(paths.artifacts_dir / "build_log.txt", "Final status: SUCCESS\n")
+                produced.extend(
+                    [
+                        relative_to_run(paths.writing_dir / "main.tex", paths.run_root),
+                        relative_to_run(paths.artifacts_dir / "paper.pdf", paths.run_root),
+                    ]
+                )
             write_text(
                 paths.artifacts_dir / "citation_verification.json",
                 json.dumps(
@@ -254,12 +298,6 @@ class ScriptedSmokeOperator:
             write_text(
                 paths.artifacts_dir / "self_review.json",
                 json.dumps({"overall_score": 8.5, "final_verdict": "ready", "rounds": 1}),
-            )
-            produced.extend(
-                [
-                    relative_to_run(paths.writing_dir / "main.tex", paths.run_root),
-                    relative_to_run(paths.artifacts_dir / "paper.pdf", paths.run_root),
-                ]
             )
 
         if stage.number >= 8:
@@ -530,7 +568,11 @@ class ManagerSmokeTests(unittest.TestCase):
             runs_dir, operator, manager = self._build_manager(tmp_dir)
 
             with self._auto_approve_intake(manager), patch.object(manager, "_ask_choice", return_value="5"):
-                success = manager.run("Smoke-test the end-to-end AutoR flow.", venue="neurips_2025")
+                success = manager.run(
+                    "Smoke-test the end-to-end AutoR flow.",
+                    venue="neurips_2025",
+                    output_format="latex",
+                )
 
             self.assertTrue(success)
             run_root = self._run_roots(runs_dir)[0]
@@ -539,6 +581,31 @@ class ManagerSmokeTests(unittest.TestCase):
             self.assertTrue((paths.artifacts_dir / "paper_package" / "paper.pdf").exists())
             self.assertTrue((paths.artifacts_dir / "release_package" / "artifact_bundle_manifest.json").exists())
             self.assertTrue(paths.stage_file(STAGE_06).exists())
+
+    def test_manager_run_in_markdown_mode_produces_the_scored_report(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            runs_dir, _operator, manager = self._build_manager(tmp_dir)
+
+            with self._auto_approve_intake(manager), patch.object(manager, "_ask_choice", return_value="5"):
+                success = manager.run("Smoke-test the markdown deliverable.", venue="neurips_2025")
+
+            self.assertTrue(success)
+            paths = build_run_paths(self._run_roots(runs_dir)[0])
+
+            self.assertEqual(load_run_config(paths)["output_format"], "markdown")
+            self.assertTrue(paths.report_file.exists())
+            report = read_text(paths.report_file)
+            self.assertIn("![Held-out accuracy across folds.](images/accuracy.png)", report)
+            self.assertTrue((paths.report_images_dir / "accuracy.png").exists())
+
+            review = json.loads((paths.artifacts_dir / "report_review.json").read_text(encoding="utf-8"))
+            self.assertEqual(review["overall_status"], "clean")
+            self.assertEqual(review["referenced_image_count"], 1)
+
+            # The LaTeX submission bundle is not produced, and no PDF is claimed anywhere.
+            self.assertFalse((paths.artifacts_dir / "paper_package" / "paper.pdf").exists())
+            self.assertFalse((paths.writing_dir / "main.tex").exists())
+            self.assertFalse((paths.artifacts_dir / "layout_review.json").exists())
 
     def test_intake_first_pass_collects_clarifications_then_final_review(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

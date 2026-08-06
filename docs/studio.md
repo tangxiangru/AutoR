@@ -81,7 +81,9 @@ browser.
 
 ### Paper
 
-The compiled PDF, the LaTeX sources, and the build log, side by side.
+For a markdown run, the `report.md` source. For a LaTeX run, the compiled PDF,
+the LaTeX sources, and the build log, side by side. The preview payload carries
+`output_format` so the panel does not report a markdown run as a failed build.
 
 ### Versions
 
@@ -189,7 +191,7 @@ Both static handlers reject paths that escape their root with `400`.
 | Method | Path | Returns |
 | --- | --- | --- |
 | `GET` | `/api/runs/{run_id}/paper` | Preview: `tex_relative_path`, `tex_content`, `section_paths`, `pdf_relative_path`, `pdf_available`, `build_log_relative_path`, `build_log_content`. |
-| `GET` | `/api/runs/{run_id}/paper/pdf` | The compiled PDF as `application/pdf`. |
+| `GET` | `/api/runs/{run_id}/paper/pdf` | The compiled PDF as `application/pdf`. `404` for a markdown run, which has no PDF by design — read `report_content` from the preview endpoint instead. |
 
 ### Files
 

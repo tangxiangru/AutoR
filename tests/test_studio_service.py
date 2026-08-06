@@ -101,8 +101,22 @@ class StudioServiceTest(unittest.TestCase):
         self.assertIn("# Stage 01: Literature Survey", markdown)
         self.assertIn("## Key Results", markdown)
 
+    def test_get_paper_preview_reports_markdown_runs_as_markdown(self) -> None:
+        run_id = self._create_markdown_report_run("20260409_303030")
+
+        preview = self.service.get_paper_preview(run_id)
+
+        self.assertEqual(preview.output_format, "markdown")
+        self.assertTrue(preview.report_available)
+        self.assertEqual(preview.report_relative_path, "workspace/report/report.md")
+        self.assertIn("## Results", preview.report_content)
+        # A markdown run has no PDF by design; the panel must not read as a failed build.
+        self.assertFalse(preview.pdf_available)
+
     def test_get_paper_preview_returns_pdf_and_manuscript_sources(self) -> None:
         preview = self.service.get_paper_preview(self.writing_run_id)
+        self.assertEqual(preview.output_format, "latex")
+        self.assertFalse(preview.report_available)
 
         self.assertEqual(preview.run_id, self.writing_run_id)
         self.assertTrue(preview.pdf_available)
@@ -199,11 +213,25 @@ class StudioServiceTest(unittest.TestCase):
         mark_stage_human_review_manifest(paths, STAGE_05, 2, ["workspace/results/results.json"])
         return run_id
 
+    def _create_markdown_report_run(self, run_id: str) -> str:
+        run_root = self.runs_dir / run_id
+        paths = build_run_paths(run_root)
+        ensure_run_layout(paths)
+        initialize_run_config(paths, model="sonnet", venue="neurips_2025", output_format="markdown")
+        initialize_run_manifest(paths)
+        write_text(paths.user_input, "Evaluate a markdown report run.")
+        (paths.report_images_dir / "accuracy.png").write_bytes(b"\x89PNG fake")
+        write_text(
+            paths.report_file,
+            "# Report\n\n## Results\n\nAccuracy 0.873.\n\n![Accuracy](images/accuracy.png)\n",
+        )
+        return run_id
+
     def _create_writing_run(self, run_id: str) -> str:
         run_root = self.runs_dir / run_id
         paths = build_run_paths(run_root)
         ensure_run_layout(paths)
-        initialize_run_config(paths, model="sonnet", venue="neurips_2025")
+        initialize_run_config(paths, model="sonnet", venue="neurips_2025", output_format="latex")
         initialize_run_manifest(paths)
         write_text(paths.user_input, "Evaluate a writing branch run.")
 
