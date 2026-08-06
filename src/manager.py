@@ -15,6 +15,7 @@ from .bootstrap import (
     scan_corpus,
 )
 from .approval_agent import AutomatedReviewer, ReviewDecision
+from .review_policy import load_policy, policy_summary, record_correction
 from .project_bootstrap import (
     format_project_context_for_prompt,
     format_project_scan_for_prompt,
@@ -1848,7 +1849,48 @@ class ResearchManager:
         if decision.raw_response:
             log_body.append("raw_response_excerpt:\n" + truncate_text(decision.raw_response, max_chars=2000))
         append_log_entry(paths.logs, f"{stage.slug} attempt {attempt_no} reviewer_choice", "\n".join(log_body))
+        self._record_review_correction(
+            paths=paths, stage=stage, attempt_no=attempt_no, decision=decision, suggestions=suggestions
+        )
         return decision.choice, decision.feedback or None
+
+    def _record_review_correction(
+        self,
+        *,
+        paths: RunPaths,
+        stage: StageSpec,
+        attempt_no: int,
+        decision: ReviewDecision,
+        suggestions: list[str],
+    ) -> None:
+        """Promote a demanded correction into a standing rule for every later review.
+
+        Only refusals teach anything: an approval says the stage met the bar, which the
+        existing rules already encode. The text recorded is what the reviewer actually
+        asked for, so the rule is traceable to the decision that produced it.
+        """
+        if decision.choice not in {"1", "2", "3", "4"}:
+            return
+
+        if decision.choice in {"1", "2", "3"}:
+            index = int(decision.choice) - 1
+            text = suggestions[index] if index < len(suggestions) else ""
+        else:
+            text = decision.feedback or decision.reason
+
+        rule = record_correction(paths, stage=stage, attempt_no=attempt_no, text=text)
+        if rule is None:
+            return
+
+        append_log_entry(
+            paths.logs,
+            f"{stage.slug} attempt {attempt_no} review_rule_learned",
+            f"{rule.rule_id} ({rule.source}): {rule.text}",
+        )
+        self.ui.show_status(
+            f"Review policy learned {rule.rule_id}; {policy_summary(load_policy(paths))}.",
+            level="info",
+        )
 
     def _render_review_decision(self, decision: ReviewDecision) -> None:
         label_map = {
@@ -2136,6 +2178,19 @@ class ResearchManager:
         reason: str,
     ) -> None:
         rollback_to_stage(paths, target_stage, reason=reason)
+        # A rollback is the strongest evidence a review can produce: an approval that was
+        # already given turned out to be wrong. Recorded at higher weight than a routine
+        # refinement so later reviews treat it as such.
+        record_correction(
+            paths,
+            stage=current_stage,
+            attempt_no=0,
+            text=(
+                f"{current_stage.stage_title} was rolled back to {target_stage.stage_title}. "
+                f"Reason: {reason}"
+            ),
+            source="rollback",
+        )
         append_log_entry(
             paths.logs,
             f"{current_stage.slug} rollback_requested",

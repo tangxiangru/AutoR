@@ -97,6 +97,7 @@ AutoR takes a different position: research is too important to hand over as a bl
 | Useful feature | **Automated experiment manifests** | Machine-readable experiment and result files make runs inspectable, comparable, and reusable downstream. |
 | Useful feature | **Citation verification and writing checks** | Writing expects citation verification, figure-link checks, and self-review artifacts before Stage 07 is considered complete. |
 | Useful feature | **Artifact indexing across stages** | `artifact_index.json` and related manifests help later stages find data, results, and figures without guessing from filenames. |
+| Useful feature | **Self-improving review policy** | Every correction the reviewer demands becomes a standing rule checked on all later stages, recorded in an auditable `review_policy.json` with the stage and attempt that produced it. |
 | Useful feature | **Resume, redo, and rollback controls** | Long research runs can continue in place, retry a stage, or roll downstream state back without starting over. |
 | Useful feature | **Deliberating review panel** | Instead of one reviewer agent at the approval gate, `--review-panel` seats a PI, domain expert, methodologist, reproducibility engineer and adversarial reviewer who review independently, cross-examine, then converge — and a blocking objection cannot be approved over. |
 | Useful feature | **Two output formats** | Stage 07 writes a benchmark-ready markdown report (`report/report.md` + PNG figures) by default, or a venue-aware LaTeX paper package with a compiled PDF via `--output-format latex`. |
@@ -463,6 +464,31 @@ flowchart TD
 - Stages 01-08 use the standard six-action review menu: `1 / 2 / 3` continue with an AI refinement suggestion, `4` continues with custom feedback, `5` approves, and `6` aborts.
 
 The stage loop is controlled by AutoR, not by Claude.
+
+### Self-improving review
+
+The approval gate does not just judge each stage — it **accumulates the corrections it
+demands and applies them to every stage after**. A reviewer that once insisted on a stated
+power analysis keeps insisting, so the same class of weakness cannot recur later in the run:
+
+```
+stage N review  ──demands a correction──▶  standing rule
+                                              │
+stage N+1 review  ◀──rule is now checked──────┘
+```
+
+Two properties keep this honest rather than decorative:
+
+- **It is auditable.** The policy is a plain artifact at `runs/<run_id>/review_policy.json`,
+  and every rule names the stage and attempt that produced it, so the claim can be checked
+  against the record instead of believed.
+- **It cannot inflate.** Rules are deduplicated on normalized text — casing, punctuation and
+  stage numbers collapse — and the set is bounded, so a reviewer restating one complaint
+  does not manufacture the appearance of learning.
+
+A rollback is recorded at higher weight than a routine refinement, because it is the
+strongest evidence a review can produce: an approval already given turned out to be wrong.
+Approvals teach nothing and are not recorded.
 
 ### Unattended runs
 
