@@ -157,6 +157,33 @@ def parse_args() -> argparse.Namespace:
              "five prompts against one model are five correlated reads wearing five hats.",
     )
     parser.add_argument(
+        "--ideation-panel",
+        action="store_true",
+        help="Widen Stage 02's hypotheses with a panel of proposers working from distinct "
+             "lenses (mechanism, contrarian, adjacent field, null/artifact, regime). They "
+             "propose blind to each other; candidates are deduplicated, scored on novelty, "
+             "feasibility and relevance, and handed to the stage as material to choose from. "
+             "It decides nothing.",
+    )
+    parser.add_argument(
+        "--ideation-lenses",
+        nargs="+",
+        metavar="LENS",
+        help="Seat only these ideation lenses. Defaults to all five.",
+    )
+    parser.add_argument(
+        "--ideation-models",
+        nargs="+",
+        metavar="LENS=MODEL",
+        help="Assign a model per ideation lens, as lens=model or lens=backend:model.",
+    )
+    parser.add_argument(
+        "--ideas-per-proposer",
+        type=int,
+        default=2,
+        help="Candidate hypotheses each proposer may return. Defaults to 2.",
+    )
+    parser.add_argument(
         "--panel-rounds",
         type=int,
         default=2,
@@ -632,6 +659,24 @@ def resolve_search_context(ui: TerminalUI, *, mode: str, operator: str, codex_sa
     return resolve_web_search_context(mode, readiness=readiness)
 
 
+
+def create_ideation_panel(args, *, backend_name: str, model: str, ui: TerminalUI):
+    """Build the Stage 02 proposer panel, or None when it is not requested."""
+    if not getattr(args, "ideation_panel", False):
+        return None
+    from src.ideation_panel import IdeationPanel, apply_lens_models, resolve_lenses
+
+    return IdeationPanel(
+        apply_lens_models(resolve_lenses(args.ideation_lenses), args.ideation_models),
+        backend_name=backend_name,
+        model=model,
+        fake_mode=args.fake_operator,
+        ui=ui,
+        stage_timeout=args.stage_timeout,
+        ideas_per_proposer=args.ideas_per_proposer,
+    )
+
+
 def main() -> int:
     args = parse_args()
     repo_root = Path(__file__).resolve().parent
@@ -745,6 +790,9 @@ def main() -> int:
             graph_max_visits=args.graph_max_visits,
             web_search_mode=web_search_mode,
         )
+        manager.ideation_panel = create_ideation_panel(
+            args, backend_name=review_operator, model=review_model, ui=ui
+        )
         completed = manager.resume_run(
             run_root,
             start_stage=start_stage or rollback_stage,
@@ -816,6 +864,10 @@ def main() -> int:
         graph_max_steps=args.graph_max_steps,
         graph_max_visits=args.graph_max_visits,
         web_search_mode=web_search_mode,
+    )
+
+    manager.ideation_panel = create_ideation_panel(
+        args, backend_name=review_operator, model=review_model, ui=ui
     )
 
     goal = resolve_goal(args, unattended=unattended)

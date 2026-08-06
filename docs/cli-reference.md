@@ -196,6 +196,18 @@ converted to a refinement in code. Each run also writes
 baseline so it can report that it did not earn its cost. Full description, including the
 pre-registered evidence against multi-agent deliberation, in [Review Panel](review-panel.md).
 
+### Ideation panel
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--ideation-panel` | off | Widen Stage 02's hypotheses with proposers working from distinct lenses. Candidates are deduplicated, scored, and injected as material. It decides nothing. |
+| `--ideation-lenses LENS...` | all five | Seat only these lenses: `mechanism`, `contrarian`, `adjacent`, `null`, `regime`. |
+| `--ideation-models LENS=MODEL...` | - | Assign a model per lens, as `lens=model` or `lens=backend:model`. |
+| `--ideas-per-proposer N` | `2` | Candidates each proposer may return. |
+
+The pool records how much the proposers beyond the first actually added, so a run can report
+that it widened nothing. Full description in [Ideation Panel](ideation-panel.md).
+
 ### Stopping early
 
 | Flag | Default | Description |

@@ -93,6 +93,7 @@ from .stage_graph import (
 from .diagram_gen import post_writing_diagram_hook
 from .terminal_ui import TerminalUI
 from .platform.foundry import generate_paper_package, generate_release_package
+from .ideation_panel import IdeationPanel, format_pool_for_prompt, record_idea_pool
 from .writing_manifest import (
     build_writing_manifest,
     format_manifest_for_prompt,
@@ -189,6 +190,7 @@ class ResearchManager:
         self._redo_start_stage: StageSpec | None = None
         self._research_diagram: bool = False
         self._final_stage: StageSpec | None = None
+        self.ideation_panel: IdeationPanel | None = None
         self._jump_target_stage: StageSpec | None = None
         self.unattended = unattended
         self.max_auto_skips = max_auto_skips
@@ -550,6 +552,23 @@ class ResearchManager:
                 return None
             current = stage_for_slug(move.target)
         return current
+
+    def _build_idea_pool(self, paths: RunPaths, stage: StageSpec, attempt_no: int) -> str:
+        """Widen Stage 02's candidate pool before it writes anything.
+
+        Best-effort: a panel that cannot be reached must not stop the stage from generating
+        hypotheses the ordinary way, because the pool is material rather than a dependency.
+        """
+        assert self.ideation_panel is not None
+        try:
+            pool = self.ideation_panel.build_pool(paths=paths, stage=stage, attempt_no=attempt_no)
+        except Exception as exc:  # noqa: BLE001 - the stage proceeds without the pool
+            append_log_entry(paths.logs, f"{stage.slug} idea_pool_failed", str(exc))
+            self.ui.show_status(f"Ideation panel failed: {exc}", level="warn")
+            return "The ideation panel did not run. Generate hypotheses as usual.\n"
+
+        record_idea_pool(paths, pool, stage, attempt_no)
+        return format_pool_for_prompt(pool)
 
     def _generate_writing_review(self, paths: RunPaths) -> dict[str, object]:
         """Produce the Stage 07 triage artifact that matches this run's output format.
@@ -1965,6 +1984,13 @@ class ResearchManager:
                     + format_resources_for_intake_prompt(ctx.resources)
                     + "\n"
                 )
+        if stage.slug == "02_hypothesis_generation" and self.ideation_panel is not None:
+            stage_template = (
+                stage_template.rstrip()
+                + "\n\n## Candidate Hypothesis Pool\n\n"
+                + self._build_idea_pool(paths, stage, attempt_no)
+                + "\n"
+            )
         if stage.slug == "07_writing":
             manifest = build_writing_manifest(paths)
             stage_template = (
