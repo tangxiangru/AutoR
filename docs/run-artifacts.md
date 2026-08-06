@@ -826,6 +826,21 @@ Required: non-empty string `overall_status`; booleans `pdf_available` and
 Validated by `validate_layout_review` in
 [`src/writing_manifest.py`](../src/writing_manifest.py).
 
+### `workspace/reviews/comment_ledger.json`
+
+Written when a reviewer anchors its objections to quoted passages. One entry per review round,
+each holding the comments raised and — once the revision arrives — what happened to them.
+
+| Field | Meaning |
+| --- | --- |
+| `comments_addressed` | Quoted passages that actually changed. |
+| `comments_left_untouched` | Passages that did not, carried into the next round. |
+| `comments_quoting_absent_text` | Comments whose quote was not in the draft; dropped rather than sent on. |
+| `lines_changed_on_target` / `lines_changed_as_collateral` | Whether the revision stayed local. |
+| `collateral_ratio` | 0.0 for a targeted patch; 0.5 and up means the stage was rewritten, not patched. |
+
+See [Anchored Review Comments](stage-comments.md).
+
 ### `workspace/notes/idea_pool.json`
 
 Written only when `--ideation-panel` is active. The Stage 02 candidate pool, with every

@@ -14,6 +14,7 @@ detail behind it.
 | Understand what a run leaves on disk | [Run Artifacts](run-artifacts.md) |
 | Know exactly what a stage must produce to be accepted | [Stage Contract](stage-contract.md) |
 | Replace the reviewer agent with a panel that argues before it decides | [Review Panel](review-panel.md) |
+| Send back one passage instead of the whole stage | [Anchored Review Comments](stage-comments.md) |
 | Widen Stage 02's hypotheses with a panel that proposes instead of deciding | [Ideation Panel](ideation-panel.md) |
 | Configure venues, backends, sandboxes, or API keys | [Configuration](configuration.md) |
 | Use or script the browser UI | [Studio Guide & HTTP API](studio.md) |
