@@ -63,16 +63,37 @@ class ExperimentManifest:
         )
 
 
+#: Workspace-relative paths that record the run's scientific bookkeeping rather
+#: than its experimental output. Excluded from the experiment bundle so the
+#: counts mean what they say.
+RECORD_ARTIFACTS = frozenset(
+    {
+        "results/experiment_manifest.json",
+        "results/hypothesis_outcomes.json",
+        "notes/hypothesis_manifest.json",
+        "notes/preregistration.json",
+    }
+)
+
+
 def write_experiment_manifest(paths: RunPaths) -> ExperimentManifest:
     existing = load_experiment_manifest(paths.experiment_manifest)
     artifact_index = write_artifact_index(paths)
+    # Records *about* the science are not experiment artifacts. The manifest is
+    # a bundle summary of what the experiment produced; counting the
+    # preregistration among the notes would make the bundle look larger for
+    # having declared its hypotheses.
     result_artifacts = [
         artifact
         for artifact in indexed_artifacts_for_category(artifact_index, "results")
-        if artifact.get("rel_path") != "results/experiment_manifest.json"
+        if artifact.get("rel_path") not in RECORD_ARTIFACTS
     ]
     code_artifacts = _list_relative_files(paths.code_dir, paths.workspace_root)
-    note_artifacts = _list_relative_files(paths.notes_dir, paths.workspace_root)
+    note_artifacts = [
+        item
+        for item in _list_relative_files(paths.notes_dir, paths.workspace_root)
+        if item not in RECORD_ARTIFACTS
+    ]
     manifest = ExperimentManifest(
         generated_at=datetime.now().isoformat(timespec="seconds"),
         ready_for_analysis=bool(result_artifacts),

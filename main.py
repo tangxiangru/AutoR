@@ -11,7 +11,11 @@ from src.operator import ClaudeOperator
 from src.operator_codex import CodexOperator
 from src.operator_protocol import OperatorProtocol
 from src.terminal_ui import TerminalUI
-from src.web_search import resolve_web_search_context, web_search_notice
+from src.web_search import (
+    assess_search_readiness,
+    resolve_web_search_context,
+    web_search_notice,
+)
 from src.utils import (
     CODEX_SANDBOX_CHOICES,
     DEFAULT_CODEX_SANDBOX,
@@ -337,11 +341,25 @@ def main() -> int:
     repo_root = Path(__file__).resolve().parent
     runs_dir = repo_root / args.runs_dir
     unattended = resolve_unattended(args)
-    web_search_context = resolve_web_search_context(args.web_search)
     ui = TerminalUI(interactive=not unattended)
     ui.show_banner()
-    notice, level = web_search_notice(args.web_search)
+
+    # Assessed against the operator this run will actually use, because the sandbox the
+    # search subprocess inherits is part of whether the tool can run at all. Resolved
+    # before the resume branch reads run_config, so a resumed run that switches backends
+    # re-derives it below.
+    readiness = assess_search_readiness(
+        operator=(args.operator or "claude"),
+        codex_sandbox=args.codex_sandbox,
+    )
+    web_search_context = resolve_web_search_context(args.web_search, readiness=readiness)
+    notice, level = web_search_notice(args.web_search, readiness=readiness)
     ui.show_status(notice, level=level)
+    if args.web_search == "gemini" and readiness.hard_blocker:
+        raise ValueError(
+            f"--web-search gemini cannot work here: {readiness.hard_blocker} "
+            "Fix it, or use --web-search auto to fall back to native search."
+        )
 
     if args.resume_run:
         start_stage = resolve_stage(args.redo_stage)

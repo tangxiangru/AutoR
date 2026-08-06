@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tests.prereg_support import write_validity_chain
 from src.experiment_manifest import write_experiment_manifest
 from src.utils import (
     DEFAULT_VENUE,
@@ -44,6 +45,7 @@ class WritingPipelineTests(unittest.TestCase):
         ensure_run_config(paths, model="sonnet", venue=DEFAULT_VENUE, output_format="latex")
         write_text(paths.data_dir / "design.json", '{"task":"test"}')
         write_text(paths.results_dir / "metrics.json", '{"accuracy": 0.9}')
+        write_validity_chain(paths, evidence="results/metrics.json")
         (paths.figures_dir / "accuracy.png").write_bytes(b"\x89PNG fake image data")
         return run_root, paths
 

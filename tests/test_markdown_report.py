@@ -12,6 +12,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tests.prereg_support import write_validity_chain
 from src.experiment_manifest import write_experiment_manifest
 from src.rcb import export_run
 from src.diagram_gen import inject_diagram_into_markdown
@@ -187,6 +188,7 @@ class MarkdownStage07GateTests(unittest.TestCase):
         ensure_run_config(paths, model="sonnet", venue=DEFAULT_VENUE, output_format="markdown")
         write_text(paths.data_dir / "design.json", '{"task":"test"}')
         write_text(paths.results_dir / "metrics.json", '{"accuracy": 0.873}')
+        write_validity_chain(paths, evidence="results/metrics.json")
         (paths.figures_dir / "accuracy.png").write_bytes(b"\x89PNG fake image data")
         write_experiment_manifest(paths)
         return paths
