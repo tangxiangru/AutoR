@@ -13,6 +13,7 @@ detail behind it.
 | Run AutoR unattended, or benchmark it on ResearchClawBench | [ResearchClawBench](researchclawbench.md) |
 | Understand what a run leaves on disk | [Run Artifacts](run-artifacts.md) |
 | Know exactly what a stage must produce to be accepted | [Stage Contract](stage-contract.md) |
+| Replace the reviewer agent with a panel that argues before it decides | [Review Panel](review-panel.md) |
 | Configure venues, backends, sandboxes, or API keys | [Configuration](configuration.md) |
 | Use or script the browser UI | [Studio Guide & HTTP API](studio.md) |
 | Understand how the code is organized | [Architecture](architecture.md) |
