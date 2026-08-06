@@ -29,6 +29,17 @@ component that must not be able to weaken them — the cheapest way to raise mea
 fitness across an archive would be to stop checking whether hypotheses were
 adjudicated before writing up.
 
+**Exploit and explore are separate proposers.** :meth:`Archive.propose_variant`
+reads believable payoffs, and a payoff is only believable once runs have both
+taken an edge and skipped it. That makes it structurally unable to reach an edge
+nothing has taken: no takers, so no evidence either way, so never preferred, so
+never taken. The backward edges the graph exists for are the ones that start
+unpreferred, so they are the ones the loop strands.
+:meth:`Archive.propose_exploration` is the entry into that blind spot — it buys a
+trial for one never-taken edge, and nothing more. An explored edge that does not
+pay is deprioritised again by the ordinary proposer as soon as its payoff becomes
+believable, so exploration cannot ratchet anything in on its own.
+
 **Promotion needs the improvement to replay.** DGM promotes on a benchmark delta.
 A rigour score on a research run is noisier than a SWE-bench pass rate, so a
 variant here stays unpromoted until it has been observed ``min_observations``
@@ -251,18 +262,27 @@ def _mean(values: Sequence[float]) -> float:
     return sum(values) / len(values) if values else 0.0
 
 
-def edge_payoffs(records: Iterable[RunRecord]) -> dict[str, EdgePayoff]:
+def edge_payoffs(
+    records: Iterable[RunRecord],
+    known_edges: Iterable[str] | None = None,
+) -> dict[str, EdgePayoff]:
     """For each edge, runs that took it against runs that were at the same node and did not.
 
     The comparison is against *runs that reached the source*, not against every run
     in the archive. Comparing "took 06→05" against the whole archive would credit
     the edge with the difference between runs that got as far as Stage 06 and runs
     that did not, which has nothing to do with the edge.
+
+    ``known_edges`` is the topology's declared edge set. Without it the candidate
+    edges are only those some run already took, so an edge nothing has ever taken
+    is not merely unbelievable — it is invisible, and cannot be reasoned about at
+    all. Passing the declared set makes it appear with ``taken_runs == 0``, which
+    is what :meth:`Archive.unexplored_edges` needs in order to notice it.
     """
     usable = [record for record in records if record.rubric_version == RUBRIC_VERSION]
     payoffs: dict[str, EdgePayoff] = {}
 
-    edges = {edge for record in usable for edge in record.edges}
+    edges = {edge for record in usable for edge in record.edges} | set(known_edges or ())
     for edge in sorted(edges):
         source = edge.split("->", 1)[0]
         reached = [
@@ -477,6 +497,91 @@ class Archive:
                 f"{best.taken_mean:.3f} over {best.taken_runs} run(s) against "
                 f"{best.skipped_mean:.3f} over {best.skipped_runs} that reached the same node "
                 f"and did not ({best.delta:+.3f})."
+            ),
+            promoted=False,
+            created_at=_now(),
+        )
+        existing = self.variants()
+        if any(item.variant_id == variant.variant_id for item in existing):
+            return None
+        self._save_variants([*existing, variant])
+        return variant
+
+    def unexplored_edges(self, graph: StageGraph) -> list[str]:
+        """Declared edges no archived run has ever taken, in priority order.
+
+        These are the archive's blind spot. :func:`edge_payoffs` compares runs that
+        took an edge against runs that did not, so an edge with no takers yields no
+        evidence in either direction, and :meth:`propose_variant` — which only reads
+        believable payoffs — can never reach it. Left alone the arrangement is a
+        closed loop: never taken, so never evidenced, so never preferred, so never
+        taken. The backward edges the graph exists for are exactly the ones that
+        start unpreferred, so exactly the ones the loop strands.
+        """
+        declared = [f"{edge.source}->{edge.target}" for edge in graph.edges]
+        taken = {edge for record in self.runs() for edge in record.edges}
+        by_priority = {f"{edge.source}->{edge.target}": edge.priority for edge in graph.edges}
+        return sorted(
+            (edge for edge in declared if edge not in taken),
+            key=lambda edge: (by_priority.get(edge, 0), edge),
+        )
+
+    def propose_exploration(self, *, graph: StageGraph | None = None) -> Variant | None:
+        """Derive a child that makes one never-taken edge preferable enough to try.
+
+        The counterpart to :meth:`propose_variant`. That one exploits evidence; this
+        one is how the evidence comes to exist. Both produce the same kind of
+        ``Variant``, promoted on the same replay conditions, so exploration buys a
+        trial and never a conclusion — an explored edge that does not pay is
+        deprioritised again by the ordinary proposer once its payoff is believable.
+
+        Deliberately conservative:
+
+        * **One edge, one step.** Same attributability rule the exploit proposer
+          follows. A variant that opens three unexplored edges at once cannot be told
+          apart from one that got lucky on a single edge.
+        * **Only when the archive is worth trusting.** With fewer than
+          ``min_observations`` runs the incumbent is barely evidenced either, and
+          deviating from it is noise rather than exploration.
+        * **Never a guard.** It moves a priority. An edge whose guard fails stays
+          inadmissible and is never taken however preferred it is, which is what
+          keeps the correctness argument in :mod:`src.stage_graph` intact.
+        """
+        parent = self.incumbent()
+        base_graph = graph or StageGraph.named(parent.topology)
+        if len(self.runs()) < self.min_observations:
+            return None
+
+        # Priority 0 is already the default move out of its node. An edge that
+        # preferred and still untaken is not waiting on the prior — its guard is
+        # closed, or the node is never reached — and nudging it changes nothing.
+        # So exploration only has something to offer edges that lost the ordering.
+        by_priority = {f"{e.source}->{e.target}": e.priority for e in base_graph.edges}
+        candidates = [
+            edge for edge in self.unexplored_edges(base_graph) if by_priority.get(edge, 0) > 0
+        ]
+        if not candidates:
+            return None
+
+        edge_key = candidates[0]
+        source, target = edge_key.split("->", 1)
+        current = by_priority[edge_key]
+
+        priorities = dict(parent.edge_priority)
+        priorities[edge_key] = max(0, current - 1)
+        if priorities == parent.edge_priority:
+            return None
+
+        variant = Variant(
+            variant_id=_variant_id(parent, edge_key, priorities[edge_key]),
+            topology=parent.topology,
+            edge_priority=priorities,
+            parent_id=parent.variant_id,
+            generation=parent.generation + 1,
+            note=(
+                f"`{edge_key}` preferred one step to explore it: no archived run has "
+                f"taken it, so it has no payoff in either direction and the ordinary "
+                f"proposer cannot reach it. Exploratory — it buys a trial, not a verdict."
             ),
             promoted=False,
             created_at=_now(),
