@@ -161,10 +161,14 @@ approval. See [Stage Contract](stage-contract.md#artifact-requirements).
 | `--review-panel` | off | Replace the single reviewer agent with a deliberating panel: independent round, cross-examination on disagreement, then a chair synthesis. Implies `--approval-mode agent`. |
 | `--panel-roles ROLE...` | all five | Seat only these roles, in this order: `pi`, `domain`, `method`, `repro`, `skeptic`. The first seat chairs unless `pi` is present. An unknown name is an error. |
 | `--panel-rounds N` | `2` | Maximum deliberation rounds. Round 1 is always independent; later rounds run only on disagreement. |
+| `--panel-models ROLE=MODEL...` | — | Assign a model per seat, as `role=model` or `role=backend:model` (`pi=opus skeptic=codex:default`). Heterogeneity is the lever with the best evidence behind it. |
 | `--persona PATH` | — | Markdown description of the researcher the panel stands in for, injected into every seat so they hold one consistent bar. |
 
 A blocking objection from any member cannot be approved over — the chair's approval is
-converted to a refinement in code. Full description in [Review Panel](review-panel.md).
+converted to a refinement in code. Each run also writes
+`workspace/reviews/panel/panel_effect.json`, comparing the panel against its own single-pass
+baseline so it can report that it did not earn its cost. Full description, including the
+pre-registered evidence against multi-agent deliberation, in [Review Panel](review-panel.md).
 
 ### Stopping early
 

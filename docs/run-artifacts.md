@@ -741,6 +741,27 @@ Required: non-empty string `overall_status`; booleans `pdf_available` and
 Validated by `validate_layout_review` in
 [`src/writing_manifest.py`](../src/writing_manifest.py).
 
+### `workspace/reviews/panel/`
+
+Written only when `--review-panel` is active. Per gate, `<stage>_attempt_NN.json` and a
+readable `.md` hold every position from every round, including dissent that lost and any
+chair override.
+
+Alongside them, `panel_effect.json` accumulates the panel against its own single-pass
+baseline — the chair's round-1 verdict, which is one model, one call, no peer input:
+
+| Field | Meaning |
+| --- | --- |
+| `gates_reviewed` | Gates the panel has judged this run. |
+| `gates_where_the_panel_changed_the_decision` | How often deliberation reached a different decision than the baseline. **If this stays 0, the panel is not earning its cost.** |
+| `gates_where_round_1_disagreed` | How often the seats were not already unanimous. |
+| `chair_overrides` | Approvals converted to refinements by a blocking objection. |
+| `cost_multiple` | Reviewer calls spent per single-pass call. |
+| `verdict` | One plain sentence, written to be unflattering when that is the truth. |
+
+See [Review Panel](review-panel.md) for the pre-registered evidence this measurement exists
+to answer.
+
 ### `workspace/artifacts/self_review.json`
 
 Required to exist at Stage 07+. Its contents are not schema-validated, so its

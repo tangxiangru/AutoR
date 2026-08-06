@@ -16,6 +16,41 @@ python rcb_agent.py --review-panel          # benchmark runs
 
 ---
 
+## Does this actually help? Read this first
+
+There is a pre-registered result that argues it may not.
+
+Havranek and Irsova (2026, [arXiv:2607.14713](https://arxiv.org/abs/2607.14713)) had the
+authors of 44 economics meta-analyses rank three identity-masked AI reports on their own
+paper. A plain **single pass beat both multi-agent tools** — mean rank 1.59 against 2.25 and
+2.16, Holm-adjusted p = 0.005 and 0.026 — and the multi-agent tools were the study authors'
+own, pre-registered to win. The most elaborate arm spent about thirty times the tokens and
+ranked 0.57 places worse. The mechanism the authors report is the one that should worry
+anyone building a panel: the reports "tended to raise much the same points."
+
+Two further findings from that paper bear directly on this feature:
+
+- **An AI judge is not a substitute for the intended user.** Author–judge rank correlation was
+  0.14, indistinguishable from zero. Had the external judge ranked the arms instead of the
+  authors, it would have crowned the most expensive tool and *reversed* the finding.
+- **AI judges systematically undervalue human review.** Authors placed their real journal
+  referee report first 71% of the time and never last; the AI judges placed it last on 92–100%
+  of papers. A panel simulating humans is built out of exactly the judges that got this wrong.
+
+So the panel is not offered here as an established improvement. It is offered with an
+instrument attached that can say it did not help — see [Measuring whether it
+helped](#measuring-whether-it-helped).
+
+What the evidence does support is *heterogeneity over deliberation*. Both that paper and
+AgentPanel ([arXiv:2608.03283](https://arxiv.org/abs/2608.03283)) cite Zhang et al. (2025),
+"Stop overvaluing multi-agent debate — we must rethink evaluation and embrace model
+heterogeneity." AgentPanel's own gains over centralized debate are concentrated in
+*feasibility* (5.08 vs 4.08 on LiveIdeaBench; 0.28 vs 0.11 and 0.31 vs 0.04 on IdeaBench),
+not originality, and come from a pool of 20+ heterogeneous model backends with agents free to
+**abstain** and with **deliberately uneven exposure** to each other's output. Those three
+levers — different models, permitted silence, withheld context — are the ones implemented
+here.
+
 ## Why a panel rather than a longer prompt
 
 Asking one reviewer to "consider multiple perspectives" produces one voice listing
@@ -64,6 +99,76 @@ deliberate about, and a second round would only invite the panel to talk itself 
 agreement it already reached.
 
 Raise or lower the ceiling with `--panel-rounds N`.
+
+## Measuring whether it helped
+
+Every panel run contains its own control arm for free: **the chair's round-1 verdict is a
+single pass** — one model, one call, no peer input. Recording it costs nothing and answers the
+only question that matters about this feature.
+
+`workspace/reviews/panel/panel_effect.json` accumulates the comparison across the run:
+
+```json
+{
+  "summary": {
+    "gates_reviewed": 8,
+    "gates_where_the_panel_changed_the_decision": 0,
+    "gates_where_round_1_disagreed": 1,
+    "chair_overrides": 0,
+    "cost_multiple": 5.0,
+    "verdict": "The panel reached the same decision as its own single-pass baseline at all 8 gate(s), at 5.0x the reviewer cost. On this run it did not earn that cost; consider --panel-roles with fewer seats, or dropping the panel."
+  },
+  "gates": [ ... ]
+}
+```
+
+That verdict line is written to be unflattering when that is the truth. A feature that can
+only report its own success is not measured, and the literature above is what happens when
+builders grade their own tools without a baseline.
+
+The same line is appended to the run log at each gate, so a long run surfaces the answer
+without anyone opening a JSON file.
+
+## Abstention
+
+A seat may return `{"decision":"abstain"}` when it has nothing substantive to add. An
+abstention is **not** disagreement — the room can still be unanimous — but it is also not
+agreement, and a panel where every seat abstains reaches the chair rather than passing as
+consensus.
+
+This exists because of the null above. Forcing five seats to produce a verdict on every gate
+is precisely how five reviewers come to raise much the same points. A seat with nothing to say
+is better silent than padding.
+
+## Uneven exposure
+
+Round two does not show every seat the same thing.
+
+- Most seats see the other positions, **anonymised as "Reviewer A/B/C"**. The substance
+  survives; the attribution does not, so a methodologist weighs an objection on its evidence
+  rather than deferring to it because the chair signed it. This is what the cross-model audit
+  tool in the study above does.
+- The **adversarial reviewer sees nothing**. Its entire value is that its read is not
+  downstream of the room's, so it is asked to hold or revise from the artifacts alone.
+
+Per-seat exposure is a `PanelRole` field (`full`, `objections`, `none`). Uniform full exposure
+turns the second round into a convergence machine, which is the failure mode that makes
+deliberation look like agreement.
+
+## Model heterogeneity
+
+`--panel-models pi=opus skeptic=codex:default method=sonnet`
+
+Assign a model, or a backend and model, per seat. Seats left unassigned use the reviewer
+default.
+
+This is the lever with the best evidence behind it. Errors idiosyncratic to one model survive
+when that model checks its own work and correlate less across families than within them — the
+reason the cross-model audit tool in the study above deliberately used two families. Five
+prompts against one model are five correlated reads wearing five hats.
+
+The panel record says so plainly: `homogeneous_panel: true` when every seat shares one
+backend and model, alongside `distinct_backends` and `distinct_models`.
 
 ## The blocking rule
 
@@ -127,7 +232,12 @@ most), or by `--panel-rounds 1` to skip cross-examination.
 ## Limits worth knowing
 
 - **Correlated seats.** Five prompts against one model are less independent than they look.
-  Mixed backends are the real fix; distinct mandates are a partial one.
+  `--panel-models` is the real fix; distinct mandates are a partial one, and the panel record
+  flags a homogeneous roster rather than letting it pass as five opinions.
+- **The null is real and this feature has not refuted it.** The measurement above is an
+  instrument, not a result. If your runs report `changed_decision: 0` across every gate, the
+  honest reading is that the single pass was enough for your work, and the panel should be
+  turned off.
 - **The panel reviews summaries, not the world.** Members are told to open artifacts, and the
   reproducibility seat exists to enforce that, but a determined stage summary can still
   describe a file more favourably than the file reads.

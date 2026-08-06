@@ -5,7 +5,13 @@ import sys
 from pathlib import Path
 
 from src.approval_agent import AutomatedReviewer
-from src.review_panel import DEFAULT_PANEL, ReviewPanel, load_persona, resolve_roles
+from src.review_panel import (
+    DEFAULT_PANEL,
+    ReviewPanel,
+    apply_model_assignments,
+    load_persona,
+    resolve_roles,
+)
 from src.intake import ResourceEntry, classify_resource, collect_resource_paths_from_ui
 from src.manager import ResearchManager
 from src.operator import ClaudeOperator
@@ -120,6 +126,15 @@ def parse_args() -> argparse.Namespace:
         help="Seat only these roles on the panel, in this order: "
              + ", ".join(role.key for role in DEFAULT_PANEL)
              + ". The first seat chairs unless the PI is present. Defaults to all five.",
+    )
+    parser.add_argument(
+        "--panel-models",
+        nargs="+",
+        metavar="ROLE=MODEL",
+        help="Assign a model per panel seat, as role=model or role=backend:model "
+             "(for example: pi=opus skeptic=codex:default). Seats left unassigned use the "
+             "reviewer default. Heterogeneity is the lever with the best evidence behind it: "
+             "five prompts against one model are five correlated reads wearing five hats.",
     )
     parser.add_argument(
         "--panel-rounds",
@@ -275,6 +290,7 @@ def create_reviewer(
     ui: TerminalUI,
     stage_timeout: int,
     panel_roles: list[str] | None = None,
+    panel_models: list[str] | None = None,
     use_panel: bool = False,
     persona_text: str = "",
     deliberation_rounds: int = 2,
@@ -285,7 +301,7 @@ def create_reviewer(
     """
     if use_panel:
         return ReviewPanel(
-            resolve_roles(panel_roles),
+            apply_model_assignments(resolve_roles(panel_roles), panel_models),
             backend_name=backend_name,
             model=model,
             fake_mode=fake_mode,
@@ -487,6 +503,7 @@ def main() -> int:
                 stage_timeout=args.stage_timeout,
                 use_panel=args.review_panel,
                 panel_roles=args.panel_roles,
+                panel_models=args.panel_models,
                 persona_text=persona_text,
                 deliberation_rounds=args.panel_rounds,
             )
@@ -546,6 +563,7 @@ def main() -> int:
             stage_timeout=args.stage_timeout,
             use_panel=args.review_panel,
             panel_roles=args.panel_roles,
+            panel_models=args.panel_models,
             persona_text=persona_text,
             deliberation_rounds=args.panel_rounds,
         )

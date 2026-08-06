@@ -16,6 +16,8 @@ from pathlib import Path
 from src.approval_agent import ReviewDecision
 from src.review_panel import (
     DEFAULT_PANEL,
+    PANEL_EFFECT_FILENAME,
+    apply_model_assignments,
     PanelRole,
     ReviewPanel,
     load_persona,
@@ -228,11 +230,73 @@ class DeliberationTests(unittest.TestCase):
         harness.review()
 
         second_round = [p for p in prompts if "cross-examination" in p]
-        self.assertEqual(len(second_round), len(DEFAULT_PANEL))
+        # Every seat but the adversarial reviewer, which is deliberately kept independent.
+        self.assertEqual(len(second_round), len(DEFAULT_PANEL) - 1)
         self.assertTrue(any("No baseline anywhere." in p for p in second_round))
         # A member is not shown its own verdict as somebody else's position.
         methodologist = next(p for p in second_round if "You are the **Methodologist**" in p)
         self.assertIn("Your own round-1 position", methodologist)
+
+    def test_peer_positions_are_anonymised_in_cross_examination(self) -> None:
+        prompts: list[str] = []
+        script = {
+            "pi": [_verdict_json("approve"), _verdict_json("approve")],
+            "domain": [_verdict_json("approve"), _verdict_json("approve")],
+            "method": [_verdict_json("custom_feedback", reason="No baseline anywhere."),
+                       _verdict_json("approve")],
+            "repro": [_verdict_json("approve"), _verdict_json("approve")],
+            "skeptic": [_verdict_json("approve"), _verdict_json("approve")],
+            "__chair__": [_verdict_json("approve")],
+        }
+        harness = _ScriptedPanel(self, script)
+        original = harness.panel._build_member_prompt
+
+        def capture(**kwargs):
+            prompt = original(**kwargs)
+            prompts.append(prompt)
+            return prompt
+
+        harness.panel._build_member_prompt = capture
+        harness.review()
+
+        peer_views = [p for p in prompts if "cross-examination" in p]
+        for prompt in peer_views:
+            # The substance survives; the attribution does not, so an objection is weighed on
+            # its evidence rather than deferred to because the chair signed it.
+            body = prompt.split("cross-examination", 1)[1].split("## Review Policy", 1)[0]
+            self.assertIn("Reviewer A", body)
+            self.assertNotIn("**Principal Investigator** ->", body)
+        self.assertTrue(any("No baseline anywhere." in p for p in peer_views))
+
+    def test_the_adversarial_seat_is_never_shown_the_room(self) -> None:
+        prompts: list[str] = []
+        script = {
+            "pi": [_verdict_json("approve"), _verdict_json("approve")],
+            "domain": [_verdict_json("approve"), _verdict_json("approve")],
+            "method": [_verdict_json("custom_feedback", reason="No baseline."),
+                       _verdict_json("approve")],
+            "repro": [_verdict_json("approve"), _verdict_json("approve")],
+            "skeptic": [_verdict_json("approve"), _verdict_json("approve")],
+            "__chair__": [_verdict_json("approve")],
+        }
+        harness = _ScriptedPanel(self, script)
+        original = harness.panel._build_member_prompt
+
+        def capture(**kwargs):
+            prompt = original(**kwargs)
+            prompts.append(prompt)
+            return prompt
+
+        harness.panel._build_member_prompt = capture
+        harness.review()
+
+        skeptic_round2 = [
+            p for p in prompts
+            if "You are the **Adversarial Reviewer**" in p and "Round 2" in p
+        ]
+        self.assertEqual(len(skeptic_round2), 1)
+        self.assertIn("deliberately **not** being shown", skeptic_round2[0])
+        self.assertNotIn("No baseline.", skeptic_round2[0])
 
 
 class BlockingObjectionTests(unittest.TestCase):
@@ -483,3 +547,159 @@ class DropInContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PanelEffectTests(unittest.TestCase):
+    """The panel must be able to report, in its own artifacts, that it did not help.
+
+    A pre-registered comparison of two multi-agent feedback tools against a plain single pass
+    found the single pass preferred, by the tools' own builders' measurement. A panel that
+    cannot be shown to change a decision is that null wearing a costume, so the run records
+    the comparison whether or not it flatters the feature.
+    """
+
+    def _effect(self, harness) -> dict:
+        path = harness.paths.reviews_dir / "panel" / PANEL_EFFECT_FILENAME
+        return json.loads(read_text(path))
+
+    def test_a_unanimous_panel_reports_that_it_bought_nothing(self) -> None:
+        script = {role.key: [_verdict_json("approve")] for role in DEFAULT_PANEL}
+        harness = _ScriptedPanel(self, script)
+        harness.review()
+
+        summary = self._effect(harness)["summary"]
+        self.assertEqual(summary["gates_reviewed"], 1)
+        self.assertEqual(summary["gates_where_the_panel_changed_the_decision"], 0)
+        self.assertEqual(summary["cost_multiple"], 5.0)
+        self.assertIn("did not earn that cost", summary["verdict"])
+
+    def test_a_panel_that_overturns_the_chair_reports_the_change(self) -> None:
+        script = {
+            "pi": [_verdict_json("approve"), _verdict_json("approve")],
+            "domain": [_verdict_json("approve"), _verdict_json("approve")],
+            "method": [_verdict_json("approve"), _verdict_json("approve")],
+            "repro": [
+                _verdict_json("custom_feedback", blocking=True, reason="metrics.json absent."),
+                _verdict_json("custom_feedback", blocking=True, reason="metrics.json absent."),
+            ],
+            "skeptic": [_verdict_json("approve"), _verdict_json("approve")],
+            "__chair__": [_verdict_json("approve")],
+        }
+        harness = _ScriptedPanel(self, script)
+        harness.review()
+
+        summary = self._effect(harness)["summary"]
+        self.assertEqual(summary["gates_where_the_panel_changed_the_decision"], 1)
+        self.assertEqual(summary["gates_where_round_1_disagreed"], 1)
+        self.assertEqual(summary["chair_overrides"], 1)
+        self.assertIn("changed the decision at 1 of 1", summary["verdict"])
+
+    def test_the_baseline_is_the_chairs_own_round_one_verdict(self) -> None:
+        # One model, one call, no peer input: every panel run contains its control arm free.
+        script = {
+            "pi": [_verdict_json("suggestion_2"), _verdict_json("suggestion_2")],
+            "domain": [_verdict_json("approve"), _verdict_json("approve")],
+            "method": [_verdict_json("approve"), _verdict_json("approve")],
+            "repro": [_verdict_json("approve"), _verdict_json("approve")],
+            "skeptic": [_verdict_json("approve"), _verdict_json("approve")],
+            "__chair__": [_verdict_json("approve")],
+        }
+        harness = _ScriptedPanel(self, script)
+        harness.review()
+
+        gate = self._effect(harness)["gates"][0]
+        self.assertEqual(gate["solo_choice"], "2")
+        self.assertEqual(gate["panel_choice"], "5")
+        self.assertTrue(gate["changed_decision"])
+
+    def test_gates_accumulate_across_the_run(self) -> None:
+        script = {role.key: [_verdict_json("approve")] * 3 for role in DEFAULT_PANEL}
+        harness = _ScriptedPanel(self, script)
+        for stage in STAGES[:3]:
+            harness.panel.review_stage(
+                paths=harness.paths, stage=stage, attempt_no=1,
+                stage_markdown="# S\n\n## Key Results\n\nx\n", suggestions=SUGGESTIONS,
+            )
+        self.assertEqual(self._effect(harness)["summary"]["gates_reviewed"], 3)
+
+    def test_re_reviewing_one_attempt_replaces_rather_than_double_counts(self) -> None:
+        script = {role.key: [_verdict_json("approve")] * 2 for role in DEFAULT_PANEL}
+        harness = _ScriptedPanel(self, script)
+        harness.review(attempt_no=1)
+        harness.review(attempt_no=1)
+        self.assertEqual(self._effect(harness)["summary"]["gates_reviewed"], 1)
+
+    def test_a_corrupt_effect_file_does_not_break_the_gate(self) -> None:
+        script = {role.key: [_verdict_json("approve")] for role in DEFAULT_PANEL}
+        harness = _ScriptedPanel(self, script)
+        path = harness.paths.reviews_dir / "panel" / PANEL_EFFECT_FILENAME
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_text(path, "{ not json")
+        self.assertEqual(harness.review().choice, "5")
+        self.assertEqual(self._effect(harness)["summary"]["gates_reviewed"], 1)
+
+
+class AbstentionTests(unittest.TestCase):
+    def test_a_seat_with_nothing_to_add_may_abstain(self) -> None:
+        script = {role.key: [_verdict_json("approve")] for role in DEFAULT_PANEL}
+        script["domain"] = ['{"decision":"abstain","reason":"no field claim in this stage"}']
+        harness = _ScriptedPanel(self, script)
+
+        decision = harness.review()
+
+        # An abstention is not disagreement, so the room is still unanimous and approves.
+        self.assertEqual(decision.choice, "5")
+        self.assertEqual(harness.rounds_for("__chair__"), 0)
+        record = harness.record()
+        self.assertTrue(record["rounds"][0][1]["abstained"])
+        self.assertEqual(record["effect"]["abstentions"], 1)
+
+    def test_an_all_abstaining_panel_is_not_treated_as_approval(self) -> None:
+        script = {role.key: ['{"decision":"abstain","reason":"nothing"}'] * 2 for role in DEFAULT_PANEL}
+        script["__chair__"] = [_verdict_json("custom_feedback", feedback="Nobody reviewed this.")]
+        harness = _ScriptedPanel(self, script)
+
+        decision = harness.review()
+
+        # Silence from every seat must reach the chair rather than pass as consensus.
+        self.assertGreater(harness.rounds_for("__chair__"), 0)
+        self.assertEqual(decision.choice, "4")
+
+
+class HeterogeneityTests(unittest.TestCase):
+    def test_assignments_set_backend_and_model_per_seat(self) -> None:
+        roles = apply_model_assignments(DEFAULT_PANEL, ["pi=opus", "skeptic=codex:default"])
+        by_key = {role.key: role for role in roles}
+        self.assertEqual((by_key["pi"].backend, by_key["pi"].model), (None, "opus"))
+        self.assertEqual((by_key["skeptic"].backend, by_key["skeptic"].model), ("codex", "default"))
+        self.assertIsNone(by_key["method"].model)
+
+    def test_no_assignments_leaves_the_roster_untouched(self) -> None:
+        self.assertEqual(apply_model_assignments(DEFAULT_PANEL, None), DEFAULT_PANEL)
+        self.assertEqual(apply_model_assignments(DEFAULT_PANEL, []), DEFAULT_PANEL)
+
+    def test_a_malformed_or_unknown_assignment_is_refused(self) -> None:
+        for bad in ("pi", "pi=", "nobody=opus"):
+            with self.assertRaises(ValueError, msg=bad):
+                apply_model_assignments(DEFAULT_PANEL, [bad])
+
+    def test_the_record_says_when_every_seat_shares_one_model(self) -> None:
+        script = {role.key: [_verdict_json("approve")] for role in DEFAULT_PANEL}
+        harness = _ScriptedPanel(self, script)
+        harness.review()
+        record = harness.record()
+        # Five prompts against one model are five correlated reads; the record admits it.
+        self.assertTrue(record["homogeneous_panel"])
+        self.assertEqual(record["distinct_models"], ["sonnet"])
+
+    def test_a_mixed_panel_is_recorded_as_heterogeneous(self) -> None:
+        roles = apply_model_assignments(resolve_roles(["pi", "skeptic"]), ["skeptic=opus"])
+        harness = _ScriptedPanel(
+            self,
+            {"pi": [_verdict_json("approve")], "skeptic": [_verdict_json("approve")]},
+            roles=roles,
+        )
+        harness.review()
+        record = harness.record()
+        self.assertFalse(record["homogeneous_panel"])
+        self.assertEqual(record["distinct_models"], ["opus", "sonnet"])
