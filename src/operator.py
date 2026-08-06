@@ -39,6 +39,7 @@ class ClaudeOperator:
         output_stream: TextIO = sys.stdout,
         ui: TerminalUI | None = None,
         stage_timeout: int = 14400,
+        web_search_mcp: bool = False,
     ) -> None:
         self.command = command
         self.model = model
@@ -46,6 +47,11 @@ class ClaudeOperator:
         self.output_stream = output_stream
         self.ui = ui or TerminalUI(output_stream=output_stream)
         self.stage_timeout = stage_timeout
+        # Whether to hand the agent a real `web_search` tool over MCP. Claude Code on
+        # Vertex has the built-in WebSearch disabled, and a tool in the tool list is both
+        # more reliably reached for than a prompt paragraph and legible in the trace as a
+        # named call rather than an opaque shell command.
+        self.web_search_mcp = web_search_mcp
 
     def run_stage(
         self,
@@ -1431,10 +1437,29 @@ Original stderr:
         tools: str | None = None,
     ) -> tuple[list[str], Path, str | None]:
         return (
-            self._build_cli_command(prompt_path, session_id, resume=resume, tools=tools),
+            self._build_cli_command(
+                prompt_path,
+                session_id,
+                resume=resume,
+                tools=tools,
+                mcp_config=self._mcp_config_path(paths),
+            ),
             paths.run_root,
             None,
         )
+
+    def _mcp_config_path(self, paths: RunPaths) -> Path | None:
+        """Materialize the search server's config inside the run, or None if unused.
+
+        Written into `operator_state/` rather than a temp file so it sits with the prompts
+        and session IDs: a run should be able to say what tools its agent was given, not
+        only what it was told.
+        """
+        if not self.web_search_mcp:
+            return None
+        from .web_search import write_mcp_config
+
+        return write_mcp_config(paths.operator_state_dir / "mcp_config.json")
 
     def _build_cli_command(
         self,
@@ -1443,6 +1468,7 @@ Original stderr:
         *,
         resume: bool,
         tools: str | None = None,
+        mcp_config: Path | None = None,
     ) -> list[str]:
         command = [
             self.command,
@@ -1452,6 +1478,10 @@ Original stderr:
             "bypassPermissions",
             "--dangerously-skip-permissions",
         ]
+        if mcp_config is not None:
+            # Not --strict-mcp-config: that would also drop whatever servers the user has
+            # configured for their own environment, which is not AutoR's call to make.
+            command.extend(["--mcp-config", str(mcp_config)])
         if tools:
             command.extend(["--tools", tools])
         if resume:

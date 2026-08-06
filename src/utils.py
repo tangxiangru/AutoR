@@ -89,6 +89,11 @@ class RunPaths:
     bootstrap_dir: Path
     profile_dir: Path
     intake_context: Path
+    #: Every candidate draft, its measured score, the champion, the Pareto frontier
+    #: and the improvement ledger. Outside ``workspace/`` on purpose: it is a record
+    #: of how the run reached its answer, not part of the answer, and a benchmark
+    #: export that swept it up would ship the losing drafts alongside the report.
+    evolution_dir: Path
     #: Where the operator's agent CLI looks for project skills. The operator is
     #: invoked with ``cwd=run_root``, so this is the run's own ``.claude/skills``
     #: and not the AutoR checkout's.
@@ -265,6 +270,7 @@ def build_run_paths(run_root: Path) -> RunPaths:
         bootstrap_dir=workspace_root / "bootstrap",
         profile_dir=workspace_root / "profile",
         intake_context=run_root / "intake_context.json",
+        evolution_dir=run_root / "evolution",
     )
 
 
@@ -340,6 +346,73 @@ def normalize_codex_sandbox(value: Any) -> str:
     return DEFAULT_CODEX_SANDBOX
 
 
+#: How the run moves between stages. ``linear`` is the historical sequence, one
+#: edge out of each node. ``adaptive`` adds the backward moves and lets the run
+#: return to an earlier stage when a later one shows it has to.
+#:
+#: Adaptive is the default because the failure it prevents is the expensive one: a
+#: run that reaches Stage 06, discovers the design cannot answer the question, and
+#: writes it up anyway because there was nowhere else to go. `--stage-graph linear`
+#: restores the strict sequence.
+DEFAULT_STAGE_GRAPH = "adaptive"
+STAGE_GRAPH_CHOICES = ("linear", "adaptive")
+
+#: Who picks the edge. ``off`` always takes the graph's default, which on a linear
+#: topology is the only one. ``auto`` asks the backend wherever more than one move
+#: is live; ``agent`` asks at every node.
+#:
+#: ``auto`` is the default: it asks only where the answer can differ, so a linear
+#: run never pays for it, and an adaptive run pays a short prompt at the handful of
+#: nodes with a real choice. The stage that just ran is the only party that knows
+#: whether its results decided anything, and not asking it throws that away.
+DEFAULT_ROUTING_MODE = "auto"
+ROUTING_MODE_CHOICES = ("off", "auto", "agent")
+
+#: Polish rounds per stage. See :class:`src.evolution.EvolutionConfig` — this is the
+#: half that costs backend calls, and it is bounded further by a headroom check, so
+#: a stage the rubric has nothing to say about spends none of it.
+DEFAULT_EVOLVE_ROUNDS = 2
+
+#: Whether every valid draft is scored and the champion ratchet runs. Free: the
+#: rubric reads the run off disk and never calls a backend. Persisted alongside the
+#: rounds budget so a resumed run keeps the arrangement it started under.
+DEFAULT_EVOLVE_MEASURE = True
+
+#: Whether the cross-run archive is allowed to change the topology a run uses, as
+#: opposed to merely recording what the run did.
+#:
+#: Off by default, and the split is the point. Recording is free and builds the only
+#: dataset that could ever justify a change. Steering means a run silently uses a
+#: different topology from the one the operator asked for, and "the harness quietly
+#: rerouted itself on run 47" is not a surprise a research tool gets to spring on
+#: someone. Turn it on deliberately, once the archive has something to say.
+DEFAULT_ARCHIVE_STEER = False
+
+
+def normalize_walk_settings(source: "Mapping[str, Any]") -> dict[str, Any]:
+    """Normalise the three settings that describe how a run walks its stages.
+
+    One definition, called from every run-config reader and writer. The config
+    functions each restate the whole field list, so a fourth setting added by hand
+    in five places is a setting that will eventually be preserved on resume by four
+    of them.
+    """
+    graph = str(source.get("stage_graph") or "").strip().lower()
+    routing = str(source.get("routing_mode") or "").strip().lower()
+    rounds = source.get("evolve_rounds")
+    try:
+        rounds_value = max(0, int(rounds))
+    except (TypeError, ValueError):
+        rounds_value = DEFAULT_EVOLVE_ROUNDS
+    measure = source.get("evolve_measure")
+    steer = source.get("archive_steer")
+    return {
+        "stage_graph": graph if graph in STAGE_GRAPH_CHOICES else DEFAULT_STAGE_GRAPH,
+        "routing_mode": routing if routing in ROUTING_MODE_CHOICES else DEFAULT_ROUTING_MODE,
+        "evolve_rounds": rounds_value,
+        "evolve_measure": DEFAULT_EVOLVE_MEASURE if measure is None else bool(measure),
+        "archive_steer": DEFAULT_ARCHIVE_STEER if steer is None else bool(steer),
+    }
 WEB_SEARCH_MODE_CHOICES = ("auto", "gemini", "native")
 DEFAULT_WEB_SEARCH_MODE = "auto"
 
@@ -367,6 +440,7 @@ def default_run_config() -> dict[str, Any]:
         "review_operator": "claude",
         "review_model": "sonnet",
         "codex_sandbox": DEFAULT_CODEX_SANDBOX,
+        **normalize_walk_settings({}),
         "web_search": DEFAULT_WEB_SEARCH_MODE,
     }
 
@@ -381,6 +455,7 @@ def initialize_run_config(
     review_model: str | None = None,
     codex_sandbox: str | None = None,
     output_format: str | None = None,
+    walk: "Mapping[str, Any] | None" = None,
     web_search: str | None = None,
 ) -> dict[str, Any]:
     normalized_operator = operator.strip().lower() if operator.strip() else "claude"
@@ -402,6 +477,7 @@ def initialize_run_config(
             or ("default" if normalized_review_operator == "codex" else "sonnet")
         ),
         "codex_sandbox": normalize_codex_sandbox(codex_sandbox),
+        **normalize_walk_settings(walk or {}),
         "web_search": normalize_web_search_mode(web_search),
         "created_at": datetime.now().isoformat(timespec="seconds"),
     }
@@ -447,6 +523,7 @@ def load_run_config(paths: RunPaths) -> dict[str, Any]:
             else ("default" if normalized_review_operator == "codex" else "sonnet")
         ),
         "codex_sandbox": normalize_codex_sandbox(codex_sandbox),
+        **normalize_walk_settings(payload),
         "web_search": normalize_web_search_mode(payload.get("web_search")),
     }
     created_at = payload.get("created_at")
@@ -472,6 +549,7 @@ def save_run_config(paths: RunPaths, config: dict[str, Any]) -> None:
             or ("default" if normalized_review_operator == "codex" else "sonnet")
         ),
         "codex_sandbox": normalize_codex_sandbox(config.get("codex_sandbox")),
+        **normalize_walk_settings(config),
         "web_search": normalize_web_search_mode(config.get("web_search")),
     }
     created_at = config.get("created_at")
@@ -492,6 +570,7 @@ def ensure_run_config(
     review_model: str | None = None,
     codex_sandbox: str | None = None,
     output_format: str | None = None,
+    walk: "Mapping[str, Any] | None" = None,
     web_search: str | None = None,
 ) -> dict[str, Any]:
     current = load_run_config(paths)
@@ -508,6 +587,10 @@ def ensure_run_config(
             "default" if effective_review_operator == "codex" else "sonnet"
         ),
         "codex_sandbox": normalize_codex_sandbox(codex_sandbox or current.get("codex_sandbox")),
+        # An explicit setting wins; otherwise the run keeps what it was started
+        # with, which is what makes `--resume-run` continue the same walk rather
+        # than silently reverting an adaptive run to the linear default.
+        **normalize_walk_settings({**current, **(walk or {})}),
         "web_search": normalize_web_search_mode(web_search or current.get("web_search")),
         "created_at": current.get("created_at") or datetime.now().isoformat(timespec="seconds"),
     }
@@ -679,6 +762,7 @@ def build_prompt(
     revision_feedback: str | None = None,
     intake_context_text: str | None = None,
     web_search_context: str | None = None,
+    obligations_context: str | None = None,
 ) -> str:
     sections = [
         "# Stage Instructions",
@@ -705,6 +789,10 @@ def build_prompt(
         "# Original User Request",
         user_request.strip(),
     ]
+    if obligations_context:
+        sections.extend(["# Obligations Carried Forward", obligations_context.strip()])
+    if obligations_context:
+        sections.extend(["# Obligations Carried Forward", obligations_context.strip()])
     if web_search_context:
         sections.extend(["# Web Search Capability", web_search_context.strip()])
     if intake_context_text:
@@ -744,6 +832,7 @@ def build_continuation_prompt(
     attempt_no: int = 1,
     previous_validation_errors: list[str] | None = None,
     web_search_context: str | None = None,
+    obligations_context: str | None = None,
 ) -> str:
     current_draft = paths.stage_tmp_file(stage)
     current_final = paths.stage_file(stage)
@@ -1820,6 +1909,31 @@ def _has_recent_files_with_suffixes(directory: Path, suffixes: set[str], cutoff_
 
 def _count_non_markdown_files(directory: Path) -> int:
     return sum(1 for path in _existing_files(directory) if path.suffix.lower() not in {".md", ".txt"})
+
+
+def _polish_count_path(paths: RunPaths, stage: StageSpec) -> Path:
+    return paths.operator_state_dir / f"{stage.slug}.polish_count.txt"
+
+
+def read_polish_count(paths: RunPaths, stage: StageSpec) -> int:
+    """Improvement rounds this stage has spent, across every entry into it.
+
+    Persisted for the same reason the attempt count is: a stage can be entered more
+    than once — a resume, a rollback, a graph revisit — and the attempt number keeps
+    counting up across all of them. Subtracting a per-entry polish counter from a
+    run-wide attempt number would under-report retries on the second visit, which is
+    exactly the number the fake-pipeline gate reads to notice an artifact gate that
+    fake mode cannot clear.
+    """
+    path = _polish_count_path(paths, stage)
+    if not path.exists():
+        return 0
+    text = read_text(path).strip()
+    return int(text) if text.isdigit() else 0
+
+
+def write_polish_count(paths: RunPaths, stage: StageSpec, count: int) -> None:
+    write_text(_polish_count_path(paths, stage), str(count))
 
 
 def read_attempt_count(paths: RunPaths, stage: StageSpec) -> int:

@@ -20,6 +20,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from src.evolution import EvolutionConfig
 from src.manager import ResearchManager
 from src.research_rounds import (
     DECISIONS,
@@ -259,6 +260,12 @@ class ManagerLoopTest(unittest.TestCase):
             operator=operator,
             output_stream=io.StringIO(),
             max_rounds=max_rounds,
+            # Improvement rounds off: these tests count operator invocations to
+            # measure the retry, session-reuse and round mechanics, and a polish
+            # round is an invocation that is none of those. Measuring stays on, so
+            # the ratchet is still exercised; `tests/test_graph_walk.py` is where
+            # the rounds themselves are tested.
+            evolution=EvolutionConfig(rounds=0),
         )
         return operator, manager
 

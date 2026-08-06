@@ -65,6 +65,7 @@ from src.utils import (  # noqa: E402
     resolve_stage,
     resolve_venue_key,
 )
+from src.cross_reviewer import resolve_cross_reviewer
 from src.web_search import (  # noqa: E402
     assess_search_readiness,
     resolve_web_search_context,
@@ -181,6 +182,33 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "five prompts against one model are five correlated reads wearing five hats.",
     )
     parser.add_argument(
+        "--ideation-panel",
+        action="store_true",
+        help="Widen Stage 02's hypotheses with a panel of proposers working from distinct "
+             "lenses (mechanism, contrarian, adjacent field, null/artifact, regime). They "
+             "propose blind to each other; candidates are deduplicated, scored on novelty, "
+             "feasibility and relevance, and handed to the stage as material to choose from. "
+             "It decides nothing.",
+    )
+    parser.add_argument(
+        "--ideation-lenses",
+        nargs="+",
+        metavar="LENS",
+        help="Seat only these ideation lenses. Defaults to all five.",
+    )
+    parser.add_argument(
+        "--ideation-models",
+        nargs="+",
+        metavar="LENS=MODEL",
+        help="Assign a model per ideation lens, as lens=model or lens=backend:model.",
+    )
+    parser.add_argument(
+        "--ideas-per-proposer",
+        type=int,
+        default=2,
+        help="Candidate hypotheses each proposer may return. Defaults to 2.",
+    )
+    parser.add_argument(
         "--panel-rounds",
         type=int,
         default=2,
@@ -213,6 +241,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "a complete task specification, so intake only costs wall-clock time.",
     )
     parser.add_argument(
+        "--cross-review",
+        choices=["auto", "gemini", "off"],
+        default="auto",
+        help="Independent second opinion on each approval from a different model family. "
+             "Can veto an approval, never override a refusal.",
+    )
+    parser.add_argument(
+        "--cross-review-model",
+        help="Model for the cross-model reviewer. Defaults to gemini-3.1-pro-preview.",
+    )
+    parser.add_argument(
         "--web-search",
         choices=["auto", "gemini", "native"],
         default="auto",
@@ -243,7 +282,16 @@ def default_model_for(backend: str) -> str:
     return "default" if backend == "codex" else "sonnet"
 
 
-def create_operator(backend: str, *, model: str, codex_sandbox: str, fake_mode: bool, ui: TerminalUI, stage_timeout: int):
+def create_operator(
+    backend: str,
+    *,
+    model: str,
+    codex_sandbox: str,
+    fake_mode: bool,
+    ui: TerminalUI,
+    stage_timeout: int,
+    web_search_mcp: bool = False,
+):
     if backend == "codex":
         return CodexOperator(
             model=model,
@@ -252,7 +300,13 @@ def create_operator(backend: str, *, model: str, codex_sandbox: str, fake_mode: 
             ui=ui,
             stage_timeout=stage_timeout,
         )
-    return ClaudeOperator(model=model, fake_mode=fake_mode, ui=ui, stage_timeout=stage_timeout)
+    return ClaudeOperator(
+        model=model,
+        fake_mode=fake_mode,
+        ui=ui,
+        stage_timeout=stage_timeout,
+        web_search_mcp=web_search_mcp,
+    )
 
 
 def run(args: argparse.Namespace) -> BenchmarkResult:
@@ -296,6 +350,7 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
             "Fix it, or use --web-search auto to fall back to native search."
         )
 
+    web_search_context = resolve_web_search_context(args.web_search, readiness=readiness)
     operator = create_operator(
         operator_backend,
         model=model,
@@ -303,6 +358,7 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
         fake_mode=args.fake_operator,
         ui=ui,
         stage_timeout=args.stage_timeout,
+        web_search_mcp=web_search_context is not None,
     )
     synthesizer = None if args.no_synthesis else ReportSynthesizer(operator)
 
@@ -362,12 +418,26 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
         unattended=True,
         max_auto_skips=args.max_auto_skips,
         max_stage_attempts=args.max_attempts,
-        web_search_context=resolve_web_search_context(args.web_search, readiness=readiness),
+        web_search_context=web_search_context,
         web_search_mode=args.web_search,
         # Stages are told to keep code/, outputs/ and report/images/ up to date in the
         # benchmark workspace, so 'Files Produced' must resolve against it too.
         artifact_roots=[workspace],
+        cross_reviewer=resolve_cross_reviewer(args.cross_review, args.cross_review_model),
     )
+
+    if args.ideation_panel:
+        from src.ideation_panel import IdeationPanel, apply_lens_models, resolve_lenses
+
+        manager.ideation_panel = IdeationPanel(
+            apply_lens_models(resolve_lenses(args.ideation_lenses), args.ideation_models),
+            backend_name=review_backend,
+            model=review_model,
+            fake_mode=args.fake_operator,
+            ui=ui,
+            stage_timeout=args.stage_timeout,
+            ideas_per_proposer=args.ideas_per_proposer,
+        )
 
     pipeline_completed = False
     try:

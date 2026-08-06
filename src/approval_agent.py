@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from .operator import ClaudeOperator
+from .obligations import format_for_review_prompt, load_ledger
 from .review_policy import format_policy_for_prompt, load_policy
 from .operator_codex import CodexOperator
 from .terminal_ui import TerminalUI
@@ -43,6 +44,51 @@ DECISION_TO_CHOICE = {
 }
 
 
+def _try_load_json(text: str) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def extract_json_payload(raw_response: str) -> dict[str, Any] | None:
+    """Recover a JSON object from whatever a backend actually printed.
+
+    Shared with :mod:`src.router`, which asks a backend for a decision on the same
+    terms. Two copies of this would drift on the day one backend starts wrapping
+    its output differently, and the copy that was not updated would silently fall
+    back to its refusal path instead of reading a decision that was right there.
+    """
+    candidate = raw_response.strip()
+    if not candidate:
+        return None
+
+    direct = _try_load_json(candidate)
+    if direct is not None:
+        return direct
+
+    fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", candidate, flags=re.DOTALL)
+    if fence_match:
+        fenced = _try_load_json(fence_match.group(1))
+        if fenced is not None:
+            return fenced
+
+    brace_match = re.search(r"(\{.*\})", candidate, flags=re.DOTALL)
+    if brace_match:
+        extracted = _try_load_json(brace_match.group(1))
+        if extracted is not None:
+            return extracted
+
+    fragments = extract_stream_text_fragments(candidate)
+    for fragment in reversed(fragments):
+        extracted = _try_load_json(fragment)
+        if extracted is not None:
+            return extracted
+
+    return None
+
+
 @dataclass(frozen=True)
 class ReviewDecision:
     choice: str
@@ -50,6 +96,11 @@ class ReviewDecision:
     reason: str = ""
     feedback: str = ""
     raw_response: str = ""
+    #: What a later stage still owes, attached when approving. This is where most of a
+    #: review's value lives: an approval used to discard everything the reviewer noticed.
+    carry_forward: list[Any] = field(default_factory=list)
+    #: Inherited obligation ids this stage actually discharged.
+    discharged: list[str] = field(default_factory=list)
 
 
 class AutomatedReviewer:
@@ -212,9 +263,19 @@ class AutomatedReviewer:
             "- Otherwise choose custom_feedback and write concrete reviewer instructions.\n"
             "- Use abort only if the run is blocked badly enough that automatic continuation would be irresponsible.\n\n"
             "Return JSON only, with no prose outside the JSON object:\n"
-            '{"decision":"approve|suggestion_1|suggestion_2|suggestion_3|custom_feedback|abort","feedback":"","reason":""}\n\n'
+            '{"decision":"approve|suggestion_1|suggestion_2|suggestion_3|custom_feedback|abort",'
+            '"feedback":"","reason":"",'
+            '"carry_forward":[{"obligation":"","target_stage":""}],"discharged":[]}\n\n'
             "Rules for JSON fields:\n"
             "- `decision` is required.\n"
+            "- `carry_forward` is how you approve without letting go. When you approve but "
+            "something still needs doing, record it here instead of only mentioning it in "
+            "`reason`: each entry is injected into the prompt of the stage it targets and "
+            "into that stage's review, so it will actually be checked. `target_stage` is a "
+            "stage slug or number and may be omitted to mean 'any later stage'. Use it for "
+            "real debts, not for wishes.\n"
+            "- `discharged` lists the ids of inherited obligations this stage genuinely met. "
+            "Discharge on work present in this stage, never on a promise or a restatement.\n"
             "- `feedback` must be non-empty when `decision` is `custom_feedback`.\n"
             "- `reason` should be concise and specific.\n\n"
             "# Run Context\n\n"
@@ -229,6 +290,7 @@ class AutomatedReviewer:
             f"- stage draft under review: `{paths.stage_tmp_file(stage).resolve()}`\n"
             f"- approved stage path: `{paths.stage_file(stage).resolve()}`\n\n"
             + self._standing_rules_block(paths)
+            + self._obligations_block(paths, stage)
             + "# Suggested Refinements\n\n"
             f"1. {suggestions[0]}\n"
             f"2. {suggestions[1]}\n"
@@ -248,6 +310,13 @@ class AutomatedReviewer:
             "# Recent Log Excerpt\n\n"
             f"{self._read_excerpt(paths.logs, max_chars=5000, tail=True)}\n"
         )
+
+    def _obligations_block(self, paths: RunPaths, stage: StageSpec) -> str:
+        """Ask this review whether the debts it inherited were actually paid."""
+        rendered = format_for_review_prompt(load_ledger(paths), stage)
+        if not rendered:
+            return ""
+        return "# Inherited Obligations\n\n" + rendered + "\n\n"
 
     def _standing_rules_block(self, paths: RunPaths) -> str:
         """Render the rules earlier reviews produced, so this review inherits them.
@@ -297,49 +366,23 @@ class AutomatedReviewer:
         if choice == "4" and not feedback:
             feedback = reason or "The stage is not ready. Revise it with concrete, artifact-backed improvements before continuing."
 
+        carry_forward = payload.get("carry_forward")
+        discharged = payload.get("discharged")
         return ReviewDecision(
             choice=choice,
             decision_token=token,
             reason=reason,
             feedback=feedback,
             raw_response=raw_response,
+            carry_forward=list(carry_forward) if isinstance(carry_forward, list) else [],
+            discharged=[str(item) for item in discharged] if isinstance(discharged, list) else [],
         )
 
     def _extract_json_payload(self, raw_response: str) -> dict[str, Any] | None:
-        candidate = raw_response.strip()
-        if not candidate:
-            return None
-
-        direct = self._try_load_json(candidate)
-        if direct is not None:
-            return direct
-
-        fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", candidate, flags=re.DOTALL)
-        if fence_match:
-            fenced = self._try_load_json(fence_match.group(1))
-            if fenced is not None:
-                return fenced
-
-        brace_match = re.search(r"(\{.*\})", candidate, flags=re.DOTALL)
-        if brace_match:
-            extracted = self._try_load_json(brace_match.group(1))
-            if extracted is not None:
-                return extracted
-
-        fragments = extract_stream_text_fragments(candidate)
-        for fragment in reversed(fragments):
-            extracted = self._try_load_json(fragment)
-            if extracted is not None:
-                return extracted
-
-        return None
+        return extract_json_payload(raw_response)
 
     def _try_load_json(self, text: str) -> dict[str, Any] | None:
-        try:
-            payload = json.loads(text)
-        except json.JSONDecodeError:
-            return None
-        return payload if isinstance(payload, dict) else None
+        return _try_load_json(text)
 
     def _normalize_decision_token(self, value: Any) -> str:
         if not isinstance(value, str):

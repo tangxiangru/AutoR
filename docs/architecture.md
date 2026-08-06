@@ -117,6 +117,7 @@ to a CLI directly; the operators never decide what stage runs next.
 | --- | --- |
 | [`src/platform/foundry.py`](../src/platform/foundry.py) | Post-approval packaging: paper package and release package. |
 | [`src/diagram_gen.py`](../src/diagram_gen.py) | Optional Gemini method-diagram generation, injected into `report.md` or `method.tex` depending on the run's output format. The only module with a third-party dependency. |
+| [`src/mcp_web_search.py`](../src/mcp_web_search.py) | An MCP server exposing Gemini search as a real `web_search` tool, so the capability sits where the disabled built-in used to: in the tool list, and in the trace as a named call. Stdlib JSON-RPC over stdio. |
 | [`src/prompts/`](../src/prompts) | One markdown template per stage, plus intake and bootstrap templates. Editing these changes agent behaviour with no code change. |
 | [`src/skills/`](../src/skills) | Agent skills, installed into each run's `.claude/skills/` by [`src/run_skills.py`](../src/run_skills.py). Pull-based counterpart to the prompt templates: loaded only when the model judges one relevant. The install path is load-bearing — the operator runs with `cwd=run_root`, so skills left in the AutoR checkout are never discovered. |
 

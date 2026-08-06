@@ -17,7 +17,7 @@ runs/<run_id>/
 ├── .claude/skills/             # agent skills, installed from src/skills/ (this is the operator's cwd)
 ├── user_input.txt              # the original research goal, verbatim
 ├── memory.md                   # approved cross-stage memory (the only shared context)
-├── run_config.json             # backend, model, venue, approval mode, sandbox
+├── run_config.json             # backend, model, venue, approval mode, sandbox, stage graph
 ├── run_manifest.json           # stage lifecycle state — the machine-readable source of truth
 ├── artifact_index.json         # index over workspace/{data,results,figures}
 ├── intake_context.json         # Stage 00 Q&A, ingested resources, refined goal
@@ -26,6 +26,7 @@ runs/<run_id>/
 ├── prompt_cache/               # the exact prompt sent for every attempt
 ├── operator_state/             # per-stage session IDs, attempt state, start markers
 ├── handoff/                    # compressed per-stage handoff summaries
+├── evolution/                  # stage graph route, rubric scores, champions, candidates (--evolve / --stage-graph)
 ├── stages/                     # stage summaries: <slug>.tmp.md draft, <slug>.md approved
 ├── notebook/                   # Studio Notebook session and transcript (Studio runs only)
 ├── sessions/                   # Studio trace events per stage (Studio runs only)
@@ -83,6 +84,11 @@ The settings the run was started with, so a resume reproduces them.
   "review_operator": "claude",
   "review_model": "sonnet",
   "codex_sandbox": "workspace-write",
+  "stage_graph": "adaptive",
+  "routing_mode": "auto",
+  "evolve_rounds": 2,
+  "evolve_measure": true,
+  "archive_steer": false,
   "web_search": "auto",
   "created_at": "2026-03-30T10:12:22"
 }
@@ -98,6 +104,11 @@ The settings the run was started with, so a resume reproduces them.
 | `review_operator` | `claude` or `codex`; defaults to `operator`. |
 | `review_model` | Reviewer model; defaults to `sonnet` (Claude) or `default` (Codex). |
 | `codex_sandbox` | `read-only`, `workspace-write`, or `danger-full-access`. |
+| `stage_graph` | `adaptive` (default) or `linear`. See [Recursive Self-Improvement](self-improvement.md). |
+| `routing_mode` | `auto` (default), `agent`, or `off`. Who chooses the move out of a completed stage. |
+| `evolve_measure` | Whether every valid draft is scored and the champion ratchet runs. `true` by default; costs no backend call. |
+| `evolve_rounds` | Improvement rounds per stage; `2` by default, `0` measures without polishing. |
+| `archive_steer` | Whether the cross-run archive may choose this run's topology, as opposed to only recording what it did. `false` by default. |
 | `web_search` | `auto`, `gemini`, or `native`. The mode, not the resolved backend. Absent in runs created before it existed, and read as `auto`. |
 | `created_at` | ISO-8601 to the second. Preserved across rewrites. |
 
@@ -334,6 +345,25 @@ At most the four most recent handoffs before the current stage are injected
 into a prompt, and the `Decision Ledger` section is stripped from that
 injection — the ledger is kept on disk for audit, not spent on context. This
 is what keeps long runs from growing their prompts without bound.
+
+### `evolution/`
+
+Written only when `--evolve` or a non-linear `--stage-graph` is in use. Outside
+`workspace/` on purpose: this records *how* the run reached its answer, not part of
+the answer, and a benchmark export that swept it up would ship the losing drafts
+alongside the report.
+
+| Path | Contents |
+| --- | --- |
+| `stage_graph.json` | Every visit: the stage, when it was entered and left, the move chosen out of it, its kind, the stated reason, what AutoR would have chosen, whether the agent chose it, and the rubric total at the time. |
+| `improvement_ledger.jsonl` | One row per measured round: stage, attempt, per-criterion scores, delta against the champion, the verdict (`first`, `promoted`, `frontier`, `regressed`, `directed`, `verdict_drift`), whether the draft was reverted, and the verdict digest. |
+| `routing_refusals.jsonl` | Every agent routing choice AutoR refused, why, and which edge it fell back to. |
+| `summary.json` | The settled champion score per stage. This is what the cross-run archive reads. |
+| `<stage_slug>/champion.md` · `champion.json` | The best-scoring draft of that stage and its score. |
+| `<stage_slug>/frontier.json` | Non-dominated candidates, kept for merge rounds. |
+| `<stage_slug>/candidates/attempt_NN.md` · `.json` | Every candidate measured, **including the ones that lost**. A discarded draft is the only evidence that the ratchet discarded anything. |
+
+See [Recursive Self-Improvement](self-improvement.md).
 
 ### `workspace/`
 
@@ -795,6 +825,20 @@ Required: non-empty string `overall_status`; booleans `pdf_available` and
 
 Validated by `validate_layout_review` in
 [`src/writing_manifest.py`](../src/writing_manifest.py).
+
+### `workspace/notes/idea_pool.json`
+
+Written only when `--ideation-panel` is active. The Stage 02 candidate pool, with every
+proposal, which ones were folded in as restatements, their novelty/feasibility/relevance
+scores, and an `effect` block.
+
+`effect` answers two separate questions. Before Stage 02 is approved it can only report
+whether the panel **widened** anything (`added_by_other_proposers`); afterwards it also
+reports whether anything was **used** (`adopted`, `adopted_from_other_proposers`,
+`adoption_measured`). Its `verdict` is one sentence, written to be unflattering when that is
+the truth. A readable `idea_pool.md` sits beside it.
+
+See [Ideation Panel](ideation-panel.md).
 
 ### `workspace/reviews/panel/`
 

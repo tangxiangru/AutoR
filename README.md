@@ -81,7 +81,8 @@ AutoR takes a different position: research is too important to hand over as a bl
 | Execution model | A coding agent as the execution layer, AutoR as the research control loop |
 | Control model | Human approval by default, with an optional strict reviewer-agent gate for unattended runs |
 | Research unit | A reproducible run under `runs/<run_id>/` |
-| Workflow shape | 9-stage workflow: optional intake plus eight formal research stages |
+| Workflow shape | Nine stages as a **directed graph** the run navigates; the linear sequence is one path through it |
+| Improvement | On by default: drafts are measured and ratcheted, so a stage can only get better — and the score is blind to what the run concluded |
 | Quality bar | Artifact-backed outputs, not markdown-only summaries |
 | Recovery | Resume, redo-stage, rollback-stage, stage-local continuation |
 
@@ -90,6 +91,10 @@ AutoR takes a different position: research is too important to hand over as a bl
 | Layer | Highlight | What AutoR actually does |
 | --- | --- | --- |
 | Big idea | **Human-centered research execution** | AutoR is not an autonomous scientist. AI handles execution; humans retain approval and direction at every stage boundary. |
+| Big idea | **The stages are a graph, not a list** | Analysis that exposes a design flaw can send the run back to Stage 03 instead of writing up around it. AutoR computes which moves are open by checking artifacts on disk; the agent chooses among those and says why. [Details](docs/self-improvement.md) |
+| Big idea | **Improvement that is measured, not hoped for** | A refinement round is scored against a rigour rubric read off disk. The best-scoring draft is what gets promoted; a round that scores worse is reverted. A stage can only improve. |
+| Big idea | **Self-improvement that cannot p-hack** | The fitness function is blind to what the run concluded — a refuted hypothesis with clean evidence outscores a supported one resting on an assertion — and any round that moves a hypothesis verdict is rejected outright. |
+| Big idea | **The harness learns across runs** | An optional archive compares each graph edge against runs that reached the same node and did not take it, and reorders which move is preferred. It can never open a guarded edge. |
 | Big idea | **Research loop over agent loop** | The system manages stage progression, validation, repair, recovery, and human checkpoints above the lower-level agent execution loop. |
 | Big idea | **Every run is a reproducible research artifact** | Each run leaves behind prompts, logs, approved summaries, code, data, figures, writing sources, and packaged outputs under `runs/<run_id>/`. |
 | Big idea | **Verifiable outputs, not paper-shaped theater** | The workflow is judged by inspectable artifacts and human approval, not by whether a generated document merely looks polished. |
@@ -97,9 +102,12 @@ AutoR takes a different position: research is too important to hand over as a bl
 | Useful feature | **Automated experiment manifests** | Machine-readable experiment and result files make runs inspectable, comparable, and reusable downstream. |
 | Useful feature | **Citation verification and writing checks** | Writing expects citation verification, figure-link checks, and self-review artifacts before Stage 07 is considered complete. |
 | Useful feature | **Artifact indexing across stages** | `artifact_index.json` and related manifests help later stages find data, results, and figures without guessing from filenames. |
+| Useful feature | **Obligations carried forward** | An approving reviewer records what a later stage still owes; the debt is injected into that stage and its review, and only a reviewer can discharge it. |
+| Useful feature | **Cross-model review veto** | When the reviewer approves, a different model family audits that approval and can send the stage back. A veto, never an override, so it can only tighten the gate. |
 | Useful feature | **Self-improving review policy** | Every correction the reviewer demands becomes a standing rule checked on all later stages, recorded in an auditable `review_policy.json` with the stage and attempt that produced it. |
 | Useful feature | **Resume, redo, and rollback controls** | Long research runs can continue in place, retry a stage, or roll downstream state back without starting over. |
 | Useful feature | **Deliberating review panel** | Instead of one reviewer agent at the approval gate, `--review-panel` seats a PI, domain expert, methodologist, reproducibility engineer and adversarial reviewer who review independently, cross-examine, then converge — and a blocking objection cannot be approved over. Each run measures the panel against its own single-pass baseline and reports when it did not earn its cost. |
+| Useful feature | **Divergent ideation panel** | `--ideation-panel` widens Stage 02 with proposers working from distinct lenses - mechanism, contrarian, adjacent field, null/artifact, regime - deduplicated and scored into a candidate pool the stage chooses from. It decides nothing, and reports when the extra proposers added nothing. |
 | Useful feature | **Two output formats** | Stage 07 writes a benchmark-ready markdown report (`report/report.md` + PNG figures) by default, or a venue-aware LaTeX paper package with a compiled PDF via `--output-format latex`. |
 
 In practice, that means AutoR is useful not only because of the high-level framing, but also because it handles real research chores: literature organization, experiment manifests, citation verification, artifact indexing, manuscript packaging, and recoverable long-running workflows.
@@ -135,6 +143,7 @@ It is:
 
 Latest mainline updates:
 
+- **2026-08-06**: **Recursive self-improvement is now the default.** The nine stages are a **directed graph** the run navigates: an analysis that exposes a design flaw can send the run back to Stage 03 instead of writing up around it, and the move into Stage 07 stays closed until every hypothesis carries a verdict. The stage that just ran chooses the next move, among the ones AutoR's guards leave open. Every valid draft is scored against a rigour rubric read off disk and held to a champion ratchet, so the draft that gets promoted is the best one the run produced rather than the last one — that half costs nothing, because the rubric never calls a backend. Two improvement rounds per stage are budgeted on top, and a stage the rubric has nothing to say about spends none of them. A round that scores worse is reverted; a round that changes a hypothesis verdict is rejected outright. Each finished run records its route and measured fitness in a cross-run archive, which compares every graph edge against runs that reached the same node and did not take it. Opt out with `--stage-graph linear`, `--routing off`, `--no-evolve`, `--no-archive`. See [Recursive Self-Improvement](docs/self-improvement.md).
 - **2026-06-02**: Added a configurable Codex sandbox mode. Codex-backed runs still default to `workspace-write`, but users who intentionally need remote GPU or SSH execution can now opt into `--codex-sandbox danger-full-access`; the setting is persisted in `run_config.json` and preserved on resume.
 - **2026-05-10**: Refined the terminal-first run experience. Stage 00 now uses a dedicated clarification flow: the first intake pass asks the user questions one by one with selectable options, custom answers, and skip; the revised intake brief then uses a compact refine / approve / abort menu instead of showing the normal suggestion template. The terminal UI also keeps colored frames on wrapped body rows, handles long lines and wide characters more reliably, and the Codex backend now uses the current `--sandbox workspace-write` execution flag instead of the deprecated Codex CLI `--full-auto` flag.
 - **2026-04-20**: Added an optional `--full-auto` approval mode. The execution loop is unchanged, but the manual approval gate can now be replaced by a strict simulated reviewer agent backed by Claude or Codex, with reviewer settings persisted in `run_config.json`.
@@ -292,6 +301,7 @@ AI handles execution load; humans steer the research when direction actually mat
 | Replace the single reviewer with a deliberating panel | `python main.py --review-panel --goal "..."` |
 | Give the panel a researcher persona to stand in for | `python main.py --review-panel --persona docs/persona-example.md --goal "..."` |
 | Seat the panel across different models | `python main.py --review-panel --panel-models pi=opus skeptic=codex:default --goal "..."` |
+| Widen Stage 02's hypotheses with a proposer panel | `python main.py --ideation-panel --goal "..."` |
 | Choose the execution backend | `python main.py --operator claude` or `python main.py --operator codex` |
 | Choose the reviewer backend separately | `python main.py --full-auto --review-operator claude --review-model opus` |
 | Choose a Claude model | `python main.py --operator claude --model sonnet` or `python main.py --operator claude --model opus` |
@@ -322,6 +332,25 @@ If `--venue` is omitted, AutoR defaults to `neurips_2025`.
 For Codex-backed runs, AutoR defaults to `--codex-sandbox workspace-write`. If a verified remote experiment needs SSH or external GPU access, use `--codex-sandbox danger-full-access` intentionally. This grants the Codex backend unrestricted local/remote execution ability, so it should not be the default for untrusted tasks.
 
 Valid stage identifiers include `03`, `3`, and `03_study_design`.
+
+```bash
+# Self-improvement is on by default. This run navigates the stage graph, scores
+# every draft, keeps the best, and records its route in ~/.autor/archive.
+python main.py --goal "..."
+
+# What the archive has learned across runs so far.
+python main.py --archive-report
+
+# Spend more on improvement, or none at all.
+python main.py --goal "..." --evolve-rounds 4
+python main.py --goal "..." --evolve-rounds 0     # measure and ratchet, no extra passes
+
+# Opt out entirely: the strict 01-through-08 sequence, last draft wins.
+python main.py --goal "..." --stage-graph linear --routing off --no-evolve --no-archive
+
+# Let the archive pick the topology, once it has something to say.
+python main.py --goal "..." --archive-steer
+```
 
 ### Studio (browser UI)
 
@@ -438,6 +467,84 @@ flowchart TD
     H8 -- Abort --> X
 ```
 
+### The Stage Graph
+
+The nine stages are nodes in a directed graph, and that graph is what a run walks
+by default. Forward edges advance; backward edges exist for the conditions that
+actually occur in research. `--stage-graph linear` restores the strict sequence,
+which is the same graph with the backward edges removed.
+
+```mermaid
+flowchart LR
+    S1[01 Literature] --> S2[02 Hypotheses]
+    S2 --> S3[03 Design]
+    S3 --> S4[04 Implementation]
+    S4 --> S5[05 Experiments]
+    S5 --> S6[06 Analysis]
+    S6 -->|guard: every hypothesis adjudicated| S7[07 Writing]
+    S7 --> S8[08 Dissemination]
+    S8 --> Z([finish])
+
+    S4 -.->|not executable as specified| S3
+    S5 -.->|comparison cannot distinguish| S3
+    S5 -.->|implementation is at fault| S4
+    S6 -.->|results insufficient to decide| S5
+    S6 -.->|confound the results cannot repair| S3
+    S6 -.->|evidence refutes, and points somewhere| S2
+    S7 -.->|claim has no analysis behind it| S6
+    S7 -.->|needs a result never produced| S5
+    S8 -.->|deliverable is not what a reader needs| S7
+```
+
+Solid edges advance, dotted edges go back. The move into Stage 07 is guarded: the
+hypotheses have to be frozen and every one of them adjudicated before anything can
+be written up. That check is over artifacts on disk, so it is not something an
+agent can argue its way past — a gated edge is simply not on the menu it chooses
+from.
+
+**A backward move is only ever a deliberate choice.** The default is always the
+forward edge, and when a guard has closed it the default advances anyway and lets
+the stage's own validation — unchanged, and still refusing a Stage 07 that writes
+up unadjudicated hypotheses — be the gate it always was. A guard is a routing
+preference; the gate is the gate. So a refusal, a routing failure, or a run nobody
+is steering all come out as the linear pipeline rather than as a stall, and going
+back is something the run does on purpose or not at all.
+
+Two budgets bound the walk: `--graph-max-visits` per stage and `--graph-max-steps`
+overall.
+
+### Self-Improvement Rounds
+
+Every valid stage draft is measured against a rigour rubric read off disk — do the
+paths it names resolve, do the numbers it reports appear in a results file, did it
+produce artifacts during *this* execution, is the decision ledger four different
+things rather than one sentence four times.
+
+**Measuring is free and always on.** The rubric reads the run off disk and never
+calls a backend, so the property it buys costs nothing: the draft that gets
+promoted is the best one the run produced, not the last one. That is the half that
+was missing before — AutoR could iterate, but "later" was the only ordering it had,
+so a refinement that dropped a resolving reference was promoted on exactly the same
+terms as one that fixed something.
+
+**Improvement rounds are the half that costs**, and they are budgeted separately
+from `--max-attempts`, which bounds a stage that is *failing* rather than one being
+improved. Two per stage by default, and a stage whose rubric has no shortfall worth
+acting on spends none of them — a round aimed at a criterion already at full marks
+produces churn, so AutoR does not buy one. `--evolve-rounds 0` measures without
+polishing; `--no-evolve` restores the old behaviour entirely.
+
+A round that scores worse is reverted, so a stage can only improve. A round that
+changes a hypothesis verdict is rejected outright, whatever it scored — the rubric
+is blind to what the run concluded, which removes the incentive, and the drift
+check removes the possibility.
+
+A revision a *human* asked for always stands, whatever it measures. The ratchet
+governs AutoR's own rounds, not the direction it is given.
+
+Full mechanism, and the reasoning behind each refusal, in
+[docs/self-improvement.md](docs/self-improvement.md).
+
 ### Stage Attempt Loop
 
 ```mermaid
@@ -465,6 +572,80 @@ flowchart TD
 - Stages 01-08 use the standard six-action review menu: `1 / 2 / 3` continue with an AI refinement suggestion, `4` continues with custom feedback, `5` approves, and `6` aborts.
 
 The stage loop is controlled by AutoR, not by Claude.
+
+### The graph learns which moves pay — including ones it has never made
+
+The stages are a directed graph, and an archive across runs learns which edges are
+worth preferring. That learning had a blind spot with no exit: payoffs compare runs
+that *took* an edge against runs that did not, so an edge nothing has ever taken has
+no evidence in either direction, is never proposed, is never preferred, and is
+therefore never taken. The backward edges — the reason the graph exists at all —
+start unpreferred, so they are exactly the ones the loop stranded.
+
+So there are two proposers, not one:
+
+| | reads | produces |
+|:---|:---|:---|
+| **exploit** | believable payoffs | prefer an edge that has been paying |
+| **explore** | edges with *zero* observations | buy one trial for an edge never tried |
+
+Exploration buys a trial, never a verdict. An explored edge that does not pay is
+deprioritised again by the ordinary proposer once its payoff becomes believable, so
+exploration cannot ratchet anything in by itself. And like every variant it only
+reorders preferences: it never opens a guarded edge, adds one, or removes one — the
+guards are the correctness argument for letting an agent route at all, and the
+component that learns from outcomes is precisely the one that must not be able to
+weaken them.
+
+### Obligations carried forward
+
+The reviewer's insight used to be captured only when it refused. But most stages are
+approved, and an approval discarded everything the reviewer noticed — which is where most
+of the review actually lives. A real reviewer approving a literature survey says "fine, but
+you owe me a power analysis at design time", and then checks.
+
+An approving reviewer can now attach **obligations** to a later stage. Each is injected into
+that stage's prompt *and* into its review, so the reviewer who inherits one is asked whether
+it was met:
+
+```
+approval ──obligation──▶ later stage prompt ──▶ that stage's review ──▶ discharged
+                                                          │
+                                                 not met ─┴──▶ refusal
+```
+
+Recorded in `runs/<run_id>/obligations.json`. Three rules keep it from becoming theatre:
+
+- **Only a reviewer may discharge one.** The stage that owes it cannot mark its own
+  homework — it can do the work and say so, and a reviewer decides.
+- **Deferral is counted, never silent.** A stage may push an obligation later, but it stays
+  open and its deferral count is shown to every subsequent reviewer, so "carried forward"
+  cannot quietly become "dropped".
+- **Bounded and deduplicated**, so a reviewer restating itself cannot manufacture rigour.
+
+Together with the two mechanisms below, refusals teach rules, approvals set debts, and a
+different model family can veto either.
+
+### Cross-model review
+
+The approval gate runs a coding agent with tools, so it can re-read a paper and re-execute
+an analysis before judging. But it is the same model family as the executor — usually the
+same model. Opus judging opus shares the blind spots that produced the work, which is
+exactly what a review is supposed to catch.
+
+So when the primary reviewer **approves**, a reviewer from a different model family reads
+the same evidence and decides whether that approval is defensible. It is a **veto, never an
+override**:
+
+- It only audits approvals. A refusal already sends the stage back.
+- It cannot approve anything the primary refused, so enabling it can only make the gate
+  stricter — which is why `--cross-review auto` turns it on whenever a Gemini backend is
+  configured.
+- An auditor that errors or returns unparseable output is recorded as *unavailable*, not as
+  agreement. Silence is never laundered into a passed audit.
+
+A cross-model veto is recorded as a standing rule, so a blind spot caught once is checked
+on every stage after it.
 
 ### Self-improving review
 
@@ -786,6 +967,13 @@ A run with only markdown notes does not pass validation.
 
 - optional intake stage and resource ingestion
 - 9-stage workflow: optional intake plus eight formal research stages
+- the stages as a navigable directed graph, with guarded backward moves (default)
+- agent-chosen routing constrained to the moves the guards leave open (default)
+- an outcome-blind rigour rubric and a champion ratchet on every draft (default)
+- measured improvement rounds, budgeted and skipped where there is no headroom
+- verdict-drift rejection, so an improvement round cannot move a finding
+- a cross-run archive of routes and edge payoffs, recording by default and
+  steering only when asked
 - mandatory human approval after every stage
 - Claude Code or Codex as the execution layer
 - Stage 00 clarification Q&A plus a compact intake approval flow
@@ -828,6 +1016,7 @@ The [docs/](docs/) directory is the reference documentation. This README is the 
 | [Run Artifacts](docs/run-artifacts.md) | The run directory, file by file, and the schema of every machine-readable artifact. |
 | [Stage Contract](docs/stage-contract.md) | Exactly what a stage must produce to be accepted, as the code enforces it. |
 | [Studio Guide & API](docs/studio.md) | The browser workspace and its complete HTTP API. |
+| [Recursive Self-Improvement](docs/self-improvement.md) | The stage graph, routing, the rigour rubric and the champion ratchet, the cross-run archive — and the constraint that keeps a scored loop from becoming an automated p-hacker. |
 | [ResearchClawBench](docs/researchclawbench.md) | Running with no human in the loop: unattended execution, the benchmark adapter and its output contract, and Gemini-backed web search. |
 | [ResearchClawBench Landscape](docs/researchclawbench-landscape.md) | How EvoScientist, ARIS Codex and MIRA actually score on the benchmark, which reported numbers reproduce, and the baseline any result must be quoted against. |
 
@@ -862,6 +1051,7 @@ The most valuable next steps are the ones that make AutoR more like a real resea
 
 Implemented milestone:
 
+- ~~Recursive self-improvement.~~ The stages are a directed graph the run navigates, stage drafts are measured and ratcheted so a stage can only improve, and an optional archive learns which moves pay across runs. Implemented in `src/stage_graph.py`, `src/router.py`, `src/rubric.py`, `src/evolution.py`, `src/pareto.py` and `src/archive.py`; see [docs/self-improvement.md](docs/self-improvement.md).
 - ~~Stage-local continuation sessions.~~ Keep one Claude conversation per stage, reuse it for `1/2/3/4` refinement, and fall back to a fresh session only when resume fails. This is now implemented in the operator and manager flow.
 - ~~Artifact-level validation for non-toy outputs.~~ Enforce machine-readable data, result files, figures, LaTeX sources, PDF output, and review artifacts at the right stages. This is now part of the workflow validation path.
 

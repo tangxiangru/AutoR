@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 import shutil
 import sys
@@ -15,6 +16,15 @@ from .bootstrap import (
     scan_corpus,
 )
 from .approval_agent import AutomatedReviewer, ReviewDecision
+from .cross_reviewer import GeminiCrossReviewer
+from .obligations import (
+    discharge_obligations,
+    format_for_stage_prompt,
+    ledger_summary,
+    load_ledger,
+    note_deferrals,
+    record_obligations,
+)
 from .review_policy import load_policy, policy_summary, record_correction
 from .project_bootstrap import (
     format_project_context_for_prompt,
@@ -77,9 +87,29 @@ from .manifest import (
     update_manifest_run_status,
 )
 from .operator_protocol import OperatorProtocol
+from .evolution import EvolutionConfig, EvolutionController
+from .router import StageRouter, format_decision
+from .stage_graph import (
+    FINISH as GRAPH_FINISH,
+    GraphState,
+    StageGraph,
+    enter as graph_enter,
+    format_route,
+    leave as graph_leave,
+    load_graph_state,
+    save_graph_state,
+    stage_for_slug,
+)
 from .diagram_gen import post_writing_diagram_hook
 from .terminal_ui import TerminalUI
 from .platform.foundry import generate_paper_package, generate_release_package
+from .ideation_panel import (
+    IdeationPanel,
+    format_pool_for_prompt,
+    load_idea_pool,
+    measure_adoption,
+    record_idea_pool,
+)
 from .writing_manifest import (
     build_writing_manifest,
     format_manifest_for_prompt,
@@ -88,6 +118,8 @@ from .writing_manifest import (
 )
 from .utils import (
     DEFAULT_REFINEMENT_SUGGESTIONS,
+    DEFAULT_ROUTING_MODE,
+    DEFAULT_STAGE_GRAPH,
     FIXED_STAGE_OPTIONS,
     INTAKE_STAGE,
     MAX_STAGE_ATTEMPTS,
@@ -120,6 +152,7 @@ from .utils import (
     strip_markdown_section,
     parse_refinement_suggestions,
     read_attempt_count,
+    read_polish_count,
     read_text,
     required_stage_output_template,
     selected_output_format,
@@ -127,6 +160,7 @@ from .utils import (
     validate_stage_artifacts,
     validate_stage_markdown,
     write_attempt_count,
+    write_polish_count,
     write_stage_handoff,
     write_text,
 )
@@ -151,6 +185,13 @@ class ResearchManager:
         web_search_context: str | None = None,
         web_search_mode: str | None = None,
         artifact_roots: list[Path] | None = None,
+        stage_graph: StageGraph | None = None,
+        routing_mode: str = DEFAULT_ROUTING_MODE,
+        evolution: EvolutionConfig | None = None,
+        graph_max_steps: int | None = None,
+        graph_max_visits: int | None = None,
+        archive_steer: bool = False,
+        cross_reviewer: GeminiCrossReviewer | None = None,
     ) -> None:
         self.project_root = project_root
         self.runs_dir = runs_dir
@@ -165,9 +206,12 @@ class ResearchManager:
             self.approval_mode = "manual"
         self.review_operator = review_operator or getattr(reviewer, "backend_name", getattr(operator, "backend_name", "claude"))
         self.review_model = review_model or getattr(reviewer, "model", getattr(operator, "model", "unknown"))
+        self.last_run_paths: RunPaths | None = None
+        self._jump_reason: str = ""
         self._redo_start_stage: StageSpec | None = None
         self._research_diagram: bool = False
         self._final_stage: StageSpec | None = None
+        self.ideation_panel: IdeationPanel | None = None
         self._jump_target_stage: StageSpec | None = None
         self.unattended = unattended
         self.max_auto_skips = max_auto_skips
@@ -188,6 +232,9 @@ class ResearchManager:
         # Extra roots a stage may legitimately write to, beyond the run tree. A benchmark
         # workspace is one: its output contract points stages at paths outside runs/.
         self.artifact_roots = artifact_roots or []
+        # A veto-only second opinion from a different model family. Never overrides a
+        # refusal, so enabling it can only make the gate stricter.
+        self.cross_reviewer = cross_reviewer
         # Where a stage's machine-readable output may legitimately land outside the run
         # tree. The benchmark's read-only data/ is excluded on purpose: it is always
         # populated, so counting it would make the stage-03 gate vacuous.
@@ -195,6 +242,54 @@ class ResearchManager:
             "data": [root / "outputs" for root in self.artifact_roots],
             "results": [root / "outputs" for root in self.artifact_roots],
             "figures": [root / "report" / "images" for root in self.artifact_roots],
+        }
+        # The stages are a graph. A caller that names no topology gets the adaptive
+        # one, which can go back when a later stage shows an earlier one was wrong.
+        # `StageGraph.linear()` is still a real graph through the same walk, so the
+        # strict sequence keeps being exercised by every test of either.
+        self.stage_graph = stage_graph or StageGraph.named(DEFAULT_STAGE_GRAPH)
+        self.graph_max_steps = graph_max_steps
+        self.graph_max_visits = graph_max_visits
+        self.router = StageRouter(
+            operator=operator,
+            mode=routing_mode,
+            fake_mode=bool(getattr(operator, "fake_mode", False)),
+        )
+        # Measuring is on unless a caller turns it off: scoring a draft and running
+        # the ratchet spends no backend call, and the property it buys — the draft
+        # that gets promoted is the best one the run produced rather than the last
+        # one — is the whole reason any of this exists.
+        requested_evolution = evolution if evolution is not None else EvolutionConfig()
+        # A fake operator cannot improve anything: it emits the same scripted draft
+        # whatever the directive says, so every round would be bought, measured as a
+        # regression and reverted. Applied here rather than at the CLI so the number
+        # the operator *asked* for is what reaches run_config.json — zeroing it there
+        # would mean resuming a fake run with a real backend silently inherited a
+        # budget of nothing.
+        evolution_config = (
+            replace(requested_evolution, rounds=0)
+            if getattr(operator, "fake_mode", False)
+            else requested_evolution
+        )
+        self.evolution = (
+            EvolutionController(
+                evolution_config,
+                artifact_dirs=self.artifact_dirs,
+                artifact_roots=self.artifact_roots,
+            )
+            if evolution_config.enabled
+            else None
+        )
+        # What gets written into run_config.json, so `--resume-run` continues the
+        # same walk. Derived from the manager's own settings rather than re-read
+        # from the CLI: the two would otherwise disagree whenever a caller built a
+        # manager directly, and the run would resume as something it never was.
+        self._walk_settings = {
+            "stage_graph": self.stage_graph.name,
+            "routing_mode": self.router.mode,
+            "evolve_rounds": requested_evolution.rounds if requested_evolution.measure else 0,
+            "evolve_measure": requested_evolution.measure,
+            "archive_steer": archive_steer,
         }
 
     def run(
@@ -278,6 +373,7 @@ class ResearchManager:
             review_model=self.review_model,
             codex_sandbox=getattr(self.operator, "codex_sandbox", None),
             output_format=output_format,
+            walk=self._walk_settings,
             web_search=self.web_search_mode,
         )
         ensure_run_manifest(paths)
@@ -312,18 +408,61 @@ class ResearchManager:
         return self._run_from_paths(paths, start_stage=start_stage)
 
     def _run_from_paths(self, paths: RunPaths, start_stage: StageSpec | None = None) -> bool:
-        stages_to_run = self._select_stages_for_run(paths, start_stage)
-        stage_index = 0
+        """Walk the stage graph until it reaches ``finish`` or nothing is open.
 
-        while stage_index < len(stages_to_run):
-            stage = stages_to_run[stage_index]
+        The default topology has one edge out of every node, so this reproduces the
+        old sequential walk exactly; ``--stage-graph adaptive`` adds the backward
+        moves. Both go through this loop rather than through a linear path and a
+        graph path, because a second walk implementation is a second place for the
+        approval, abort and resume semantics to be subtly different.
+        """
+        # Exposed so a caller that owns an archive can find the run it just drove
+        # without re-deriving the run id from the runs directory, which would pick
+        # the wrong one whenever two runs start in the same second.
+        self.last_run_paths = paths
+        entry = self._graph_entry_stage(paths, start_stage)
+        if entry is None:
+            return self._complete_run(paths)
+
+        state = load_graph_state(
+            paths, max_steps=self.graph_max_steps, max_visits=self.graph_max_visits
+        )
+        stage: StageSpec | None = entry
+
+        while stage is not None:
+            if state.steps >= state.max_steps:
+                state.halted_because = (
+                    f"the run reached the {state.max_steps}-step limit for this graph"
+                )
+                save_graph_state(paths, state)
+                self.ui.show_status(state.halted_because, level="warn")
+                break
+
+            graph_enter(paths, state, stage)
             self._jump_target_stage = None
+            self._jump_reason = ""
             approved = self._run_stage(paths, stage)
+
+            # Three things reach this seam: `/back <stage>`, a rollback after retry
+            # exhaustion, and a research round that decided to refine its design or
+            # change its hypothesis. All of them outrank the router — the move is
+            # already made by the time the walk sees it — and all of them are
+            # recorded on the route as the revisits they are.
             if self._jump_target_stage is not None:
                 target = self._jump_target_stage
-                stages_to_run = self._select_stages_for_run(paths, target)
-                stage_index = 0
+                graph_leave(
+                    paths,
+                    state,
+                    chose=target.slug,
+                    kind="revisit",
+                    reason=self._jump_reason or "The run was redirected to an earlier stage.",
+                    default_choice="",
+                    agent_directed=False,
+                    score_total=None,
+                )
+                stage = target
                 continue
+
             if not approved:
                 append_log_entry(
                     paths.logs,
@@ -336,11 +475,22 @@ class ResearchManager:
                     last_event="run.cancelled",
                     current_stage_slug=stage.slug,
                 )
+                save_graph_state(paths, state)
                 self._print("Run aborted.")
                 return False
-            stage_index += 1
 
-        append_log_entry(paths.logs, "run_complete", "All stages approved.")
+            stage = self._advance_from(paths, state, stage)
+
+        save_graph_state(paths, state)
+        return self._complete_run(paths, state=state)
+
+    def _complete_run(self, paths: RunPaths, state: "GraphState | None" = None) -> bool:
+        route = format_route(state) if state is not None else ""
+        append_log_entry(
+            paths.logs,
+            "run_complete",
+            "All stages approved." + (f"\nRoute: {route}" if route else ""),
+        )
         update_manifest_run_status(
             paths,
             run_status="completed",
@@ -348,8 +498,130 @@ class ResearchManager:
             current_stage_slug=None,
             completed_at=datetime.now().isoformat(timespec="seconds"),
         )
+        if route and self.stage_graph.name != "linear":
+            self.ui.show_status(f"Route taken: {route}", level="info")
         self._print("All stages approved. Run complete.")
         return True
+
+    def _graph_entry_stage(self, paths: RunPaths, start_stage: StageSpec | None) -> StageSpec | None:
+        """Where the walk starts: the requested stage, or the first unsettled one."""
+        pending = self._select_stages_for_run(paths, start_stage)
+        return pending[0] if pending else None
+
+    def _advance_from(
+        self,
+        paths: RunPaths,
+        state: "GraphState",
+        stage: StageSpec,
+    ) -> StageSpec | None:
+        """Choose and take the edge out of an approved stage."""
+        score = None
+        if self.evolution is not None:
+            score = self.evolution.finalize_stage(paths, stage)
+
+        decision = self.router.choose(
+            paths=paths,
+            stage=stage,
+            graph=self.stage_graph,
+            state=state,
+            score=score,
+            final_stage=self._final_stage,
+        )
+        graph_leave(
+            paths,
+            state,
+            chose=decision.target,
+            kind=decision.kind,
+            reason=decision.reason,
+            default_choice=decision.default_target,
+            agent_directed=decision.agent_directed,
+            score_total=score.total if score is not None else None,
+        )
+        if decision.agent_directed or decision.refusal:
+            self.ui.show_status(format_decision(decision), level="info")
+
+        if decision.finished:
+            return None
+
+        target = stage_for_slug(decision.target)
+        if target is None:
+            return None
+
+        if decision.kind == "revisit":
+            # Re-entering a stage invalidates everything downstream of it. The
+            # manifest already knows how to say so; skipping this would leave a
+            # later stage's approved summary in memory describing work that the
+            # revisit is about to replace.
+            self._print(self._format_rollback_preview(paths, target))
+            rollback_to_stage(
+                paths,
+                target,
+                reason=f"Graph revisit from {stage.slug}: {decision.reason}",
+            )
+            return target
+
+        return self._skip_settled(paths, state, target)
+
+    def _skip_settled(
+        self,
+        paths: RunPaths,
+        state: "GraphState",
+        target: StageSpec,
+    ) -> StageSpec | None:
+        """Follow advance edges past stages a resumed run already settled.
+
+        `--resume-run` used to get this from `_select_stages_for_run` filtering the
+        list up front. A graph walk decides one move at a time, so the same rule has
+        to be applied at the move: an advance edge into an already-approved stage
+        moves through it rather than running it again.
+        """
+        seen: set[str] = set()
+        current: StageSpec | None = target
+        while current is not None and current.slug not in seen:
+            seen.add(current.slug)
+            manifest = ensure_run_manifest(paths)
+            entry = next((item for item in manifest.stages if item.slug == current.slug), None)
+            if entry is None or not entry.settled:
+                return current
+            move = self.stage_graph.default_move(
+                paths, current.slug, state, final_stage=self._final_stage
+            )
+            if move is None or move.target == GRAPH_FINISH:
+                return None
+            current = stage_for_slug(move.target)
+        return current
+
+    def _build_idea_pool(self, paths: RunPaths, stage: StageSpec, attempt_no: int) -> str:
+        """Widen Stage 02's candidate pool before it writes anything.
+
+        Best-effort: a panel that cannot be reached must not stop the stage from generating
+        hypotheses the ordinary way, because the pool is material rather than a dependency.
+        """
+        assert self.ideation_panel is not None
+        try:
+            pool = self.ideation_panel.build_pool(paths=paths, stage=stage, attempt_no=attempt_no)
+        except Exception as exc:  # noqa: BLE001 - the stage proceeds without the pool
+            append_log_entry(paths.logs, f"{stage.slug} idea_pool_failed", str(exc))
+            self.ui.show_status(f"Ideation panel failed: {exc}", level="warn")
+            return "The ideation panel did not run. Generate hypotheses as usual.\n"
+
+        record_idea_pool(paths, pool, stage, attempt_no)
+        return format_pool_for_prompt(pool)
+
+    def _measure_pool_adoption(self, paths: RunPaths, stage: StageSpec, stage_markdown: str) -> None:
+        """Record which pooled hypotheses the approved stage actually built on.
+
+        Runs whether or not this run seated an ideation panel — a pool written by an earlier
+        resumed attempt still deserves its outcome measured. Best-effort throughout: the
+        stage is already approved, and nothing here may unapprove it.
+        """
+        try:
+            pool = load_idea_pool(paths)
+            if pool is None or not pool.distinct:
+                return
+            record_idea_pool(paths, measure_adoption(pool, stage_markdown), stage, 0)
+        except Exception as exc:  # noqa: BLE001 - measurement must not disturb an approval
+            append_log_entry(paths.logs, f"{stage.slug} idea_pool_adoption_failed", str(exc))
 
     def _generate_writing_review(self, paths: RunPaths) -> dict[str, object]:
         """Produce the Stage 07 triage artifact that matches this run's output format.
@@ -393,6 +665,7 @@ class ResearchManager:
             review_model=self.review_model,
             codex_sandbox=getattr(self.operator, "codex_sandbox", None),
             output_format=output_format,
+            walk=self._walk_settings,
             web_search=self.web_search_mode,
         )
         initialize_run_manifest(paths)
@@ -406,6 +679,8 @@ class ResearchManager:
                 f"Model: {config['model']}\n"
                 f"Venue: {config['venue']}\n"
                 f"Output format: {config['output_format']}\n"
+                f"Stage graph: {config['stage_graph']} (routing: {config['routing_mode']}, "
+                f"evolve rounds: {config['evolve_rounds']})\n"
                 f"Approval mode: {config['approval_mode']}\n"
                 f"Review backend: {config['review_operator']}\n"
                 f"Review model: {config['review_model']}\n"
@@ -1202,6 +1477,20 @@ class ResearchManager:
     def _run_stage(self, paths: RunPaths, stage: StageSpec) -> bool:
         attempt_no = read_attempt_count(paths, stage) + 1
         loop_attempts = 0
+        # Polish rounds are AutoR improving work that already passed validation, so
+        # they are counted separately from `--max-attempts`, which bounds a stage
+        # that is *failing*. Charging them to the same budget would make a stage
+        # that is being made better look like one that is thrashing, and would
+        # leave nothing for the repair path if a later round did break something.
+        #
+        # Read from disk rather than started at zero: the attempt number is run-wide
+        # and a stage can be entered more than once, so a per-entry counter would
+        # under-report retries on the second visit.
+        polish_rounds = read_polish_count(paths, stage)
+        entry_polish_rounds = polish_rounds
+        is_polish_round = False
+        if self.evolution is not None:
+            self.evolution.begin_stage(paths, stage)
         revision_feedback: str | None = None
         continue_session = False
         last_validation_errors: list[str] = []
@@ -1240,7 +1529,7 @@ class ResearchManager:
                 pass
 
         while True:
-            if loop_attempts >= self.max_stage_attempts:
+            if loop_attempts - (polish_rounds - entry_polish_rounds) >= self.max_stage_attempts:
                 error = (
                     f"Exceeded {self.max_stage_attempts} attempts in the current stage run. "
                     f"Last validation errors: {'; '.join(last_validation_errors) or 'None recorded.'}"
@@ -1262,7 +1551,14 @@ class ResearchManager:
                     last_validation_errors=last_validation_errors,
                 )
             loop_attempts += 1
-            mark_stage_running_manifest(paths, stage, attempt_no)
+            # The manifest's `attempt_count` means "how many tries did this stage
+            # need" — a diagnostic for a gate the operator could not clear, and what
+            # `test_no_stage_needed_a_retry` reads to notice a new artifact gate that
+            # fake mode was never taught to satisfy. A polish round is not a try that
+            # failed, so it does not count here; the improvement ledger owns that
+            # accounting. Feeding both numbers into one field would leave neither
+            # question answerable.
+            mark_stage_running_manifest(paths, stage, attempt_no - polish_rounds)
             write_attempt_count(paths, stage, attempt_no)
             self._print(f"\nRunning {stage.stage_title} (attempt {attempt_no})...")
             prompt = self._build_stage_prompt(paths, stage, revision_feedback, continue_session,
@@ -1473,10 +1769,45 @@ class ResearchManager:
                 result = repair_result
 
             stage_markdown = read_text(result.stage_file_path)
+
+            # The draft is valid. Measure it, and decide whether it may stand.
+            if self.evolution is not None and self.evolution.config.applies_to(stage):
+                outcome = self.evolution.consider(
+                    paths=paths,
+                    stage=stage,
+                    attempt_no=attempt_no,
+                    draft_path=result.stage_file_path,
+                    is_polish_round=is_polish_round,
+                )
+                if outcome.reverted:
+                    # `consider` wrote the champion back over the draft; everything
+                    # downstream — review, promotion, handoff — has to read the
+                    # draft that is now on disk rather than the one that lost.
+                    stage_markdown = read_text(result.stage_file_path)
+                self.ui.show_status(
+                    f"{stage.stage_title} attempt {attempt_no}: {outcome.note} "
+                    f"[{outcome.score.total:.3f}]",
+                    level="success" if outcome.improved else "info",
+                )
+                if self.evolution.should_continue(paths, stage):
+                    directive = self.evolution.next_directive(paths, stage)
+                    if directive:
+                        self.evolution.begin_round(paths, stage)
+                        polish_rounds += 1
+                        write_polish_count(paths, stage, polish_rounds)
+                        is_polish_round = True
+                        revision_feedback = directive
+                        continue_session = True
+                        attempt_no += 1
+                        continue
+
+            # Anything from here is a human or reviewer decision, so the next
+            # attempt it produces is directed rather than self-initiated.
+            is_polish_round = False
             mark_stage_human_review_manifest(
                 paths,
                 stage,
-                attempt_no,
+                attempt_no - polish_rounds,
                 self._stage_file_paths(stage_markdown),
             )
             append_log_entry(
@@ -1557,9 +1888,11 @@ class ResearchManager:
                 mark_stage_approved_manifest(
                     paths,
                     stage,
-                    attempt_no,
+                    attempt_no - polish_rounds,
                     self._stage_file_paths(stage_markdown),
                 )
+                if stage.slug == "02_hypothesis_generation":
+                    self._measure_pool_adoption(paths, stage, stage_markdown)
                 if stage.slug == "04_implementation":
                     self._freeze_preregistration(paths)
                 self._run_validity_review(paths, stage, stage_markdown)
@@ -1726,6 +2059,13 @@ class ResearchManager:
                     + format_resources_for_intake_prompt(ctx.resources)
                     + "\n"
                 )
+        if stage.slug == "02_hypothesis_generation" and self.ideation_panel is not None:
+            stage_template = (
+                stage_template.rstrip()
+                + "\n\n## Candidate Hypothesis Pool\n\n"
+                + self._build_idea_pool(paths, stage, attempt_no)
+                + "\n"
+            )
         if stage.slug == "07_writing":
             manifest = build_writing_manifest(paths)
             stage_template = (
@@ -1827,6 +2167,7 @@ class ResearchManager:
                 attempt_no=attempt_no,
                 previous_validation_errors=previous_validation_errors,
                 web_search_context=self.web_search_context,
+                obligations_context=format_for_stage_prompt(load_ledger(paths), stage),
             )
 
         user_request = read_text(paths.user_input)
@@ -1834,6 +2175,7 @@ class ResearchManager:
             stage, stage_template, user_request, approved_memory, handoff_context, revision_feedback,
             intake_context_text=intake_context_text,
             web_search_context=self.web_search_context,
+            obligations_context=format_for_stage_prompt(load_ledger(paths), stage),
         )
 
     def _display_stage_output(self, stage: StageSpec, markdown: str) -> None:
@@ -1901,7 +2243,139 @@ class ResearchManager:
         self._record_review_correction(
             paths=paths, stage=stage, attempt_no=attempt_no, decision=decision, suggestions=suggestions
         )
+        self._settle_obligations(paths=paths, stage=stage, attempt_no=attempt_no, decision=decision)
+
+        cross = self._apply_cross_review(
+            paths=paths, stage=stage, attempt_no=attempt_no, decision=decision,
+            stage_markdown=stage_markdown,
+        )
+        if cross is not None:
+            return cross
+
         return decision.choice, decision.feedback or None
+
+    def _settle_obligations(
+        self,
+        *,
+        paths: RunPaths,
+        stage: StageSpec,
+        attempt_no: int,
+        decision: ReviewDecision,
+    ) -> None:
+        """Close the obligations this stage met, and record the ones it created.
+
+        Discharges are applied first: an approval that both settles an inherited debt and
+        raises a new one should not have the new one immediately counted as deferred.
+        Deferral is only recorded on approval, because a refused stage gets another attempt
+        at the same obligations and has not deferred anything yet.
+        """
+        closed = discharge_obligations(
+            paths, stage=stage, obligation_ids=decision.discharged, note=decision.reason
+        )
+        for obligation in closed:
+            append_log_entry(
+                paths.logs,
+                f"{stage.slug} attempt {attempt_no} obligation_discharged",
+                f"{obligation.obligation_id}: {obligation.text}",
+            )
+
+        approved = decision.choice == "5"
+        if approved:
+            deferred = note_deferrals(paths, stage=stage)
+            if deferred:
+                append_log_entry(
+                    paths.logs,
+                    f"{stage.slug} attempt {attempt_no} obligations_deferred",
+                    f"{deferred} obligation(s) carried past this stage without being discharged.",
+                )
+
+        added = record_obligations(paths, stage=stage, entries=decision.carry_forward)
+        for obligation in added:
+            target = obligation.target_stage or "any later stage"
+            append_log_entry(
+                paths.logs,
+                f"{stage.slug} attempt {attempt_no} obligation_recorded",
+                f"{obligation.obligation_id} -> {target}: {obligation.text}",
+            )
+
+        if closed or added:
+            self.ui.show_status(
+                f"Obligations: +{len(added)} new, {len(closed)} discharged; "
+                f"{ledger_summary(load_ledger(paths))}.",
+                level="info",
+            )
+
+    def _apply_cross_review(
+        self,
+        *,
+        paths: RunPaths,
+        stage: StageSpec,
+        attempt_no: int,
+        decision: ReviewDecision,
+        stage_markdown: str,
+    ) -> tuple[str, str | None] | None:
+        """Let an independent model family veto an approval.
+
+        Returns a replacement decision when the audit refuses, or None to leave the
+        primary's decision standing. Only approvals are audited: a refusal already sends
+        the stage back, so a second opinion on it would change nothing.
+        """
+        if self.cross_reviewer is None or decision.choice != "5":
+            return None
+
+        self.ui.show_status("Cross-model reviewer is auditing the approval...", level="info")
+        verdict = self.cross_reviewer.audit(
+            paths=paths,
+            stage=stage,
+            stage_markdown=stage_markdown,
+            primary_reason=decision.reason,
+            primary_model=self.review_model,
+        )
+
+        append_log_entry(
+            paths.logs,
+            f"{stage.slug} attempt {attempt_no} cross_review",
+            "\n".join(
+                [
+                    f"model: {verdict.model or 'unavailable'}",
+                    f"agrees: {verdict.agrees}",
+                    f"unavailable: {verdict.unavailable}",
+                    f"reason: {verdict.reason}",
+                ]
+            ),
+        )
+
+        if verdict.unavailable:
+            # Not agreement — the audit did not happen. Said plainly so a run whose
+            # cross-review silently never ran cannot be mistaken for one that passed it.
+            self.ui.show_status(
+                f"Cross-model review did not run: {verdict.reason}", level="warn"
+            )
+            return None
+
+        if not verdict.vetoes:
+            self.ui.show_status(
+                f"Cross-model reviewer ({verdict.model}) agrees with the approval.", level="success"
+            )
+            return None
+
+        self.ui.show_status(
+            f"Cross-model reviewer ({verdict.model}) vetoed the approval: {verdict.reason}",
+            level="warn",
+        )
+        record_correction(
+            paths,
+            stage=stage,
+            attempt_no=attempt_no,
+            text=f"Cross-model review vetoed an approval of {stage.stage_title}: {verdict.reason}",
+            source="rollback",
+        )
+        feedback = (
+            "An independent reviewer from a different model family rejected the approval of "
+            "this stage. Address this before it can be approved again:\n"
+            f"{verdict.reason}"
+        )
+        return "4", feedback
 
     def _record_review_correction(
         self,
@@ -2227,6 +2701,11 @@ class ResearchManager:
         reason: str,
     ) -> None:
         rollback_to_stage(paths, target_stage, reason=reason)
+        # Carried so the graph path records why the run moved. Both callers reach
+        # here — a `/back` from the operator and a research round that decided to
+        # refine its design — and recording either as the other would make the
+        # route say a person intervened when the run redirected itself.
+        self._jump_reason = reason
         # A rollback is the strongest evidence a review can produce: an approval that was
         # already given turned out to be wrong. Recorded at higher weight than a routine
         # refinement so later reviews treat it as such.

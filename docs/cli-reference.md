@@ -121,6 +121,32 @@ question about the current environment, and freezing today's answer would make a
 resumed run assert something about the deployment that may no longer be true. A run
 recorded before this field existed reads as `auto`.
 
+#### How the agent reaches it
+
+With `--operator claude`, search is handed over as a **real MCP tool**,
+`mcp__autor-search__web_search`, not as a prompt paragraph asking the agent to
+remember to run a script. AutoR adds `--mcp-config` pointing at a config it writes
+to `operator_state/mcp_config.json` inside the run, so the run records what tools
+its agent was given, not only what it was told.
+
+Two things follow from it being a tool rather than an instruction:
+
+- **The model reaches for it.** A tool in the tool list competes far better than a
+  paragraph in a long prompt.
+- **Every search is legible in the trace.** `logs_raw.jsonl` shows a named call with
+  structured arguments, instead of an opaque shell command indistinguishable from
+  the hundreds of others a stage runs.
+
+A failed or ungrounded search comes back as an MCP tool *error* rather than a
+protocol error, so the model can read the reason and retry instead of the call
+simply ending.
+
+`--strict-mcp-config` is deliberately **not** passed: that would also drop whatever
+MCP servers you have configured for your own environment.
+
+`--operator codex` gets the shell command instead, which remains the documented
+fallback and is what `tools/web_search.py` is for.
+
 #### What "can actually run" means
 
 Injecting the search block tells every stage prompt that the built-in `WebSearch`
@@ -170,6 +196,18 @@ converted to a refinement in code. Each run also writes
 baseline so it can report that it did not earn its cost. Full description, including the
 pre-registered evidence against multi-agent deliberation, in [Review Panel](review-panel.md).
 
+### Ideation panel
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--ideation-panel` | off | Widen Stage 02's hypotheses with proposers working from distinct lenses. Candidates are deduplicated, scored, and injected as material. It decides nothing. |
+| `--ideation-lenses LENS...` | all five | Seat only these lenses: `mechanism`, `contrarian`, `adjacent`, `null`, `regime`. |
+| `--ideation-models LENS=MODEL...` | - | Assign a model per lens, as `lens=model` or `lens=backend:model`. |
+| `--ideas-per-proposer N` | `2` | Candidates each proposer may return. |
+
+The pool records how much the proposers beyond the first actually added, so a run can report
+that it widened nothing. Full description in [Ideation Panel](ideation-panel.md).
+
 ### Stopping early
 
 | Flag | Default | Description |
@@ -211,6 +249,25 @@ Neither flag does anything without `--resume-run`.
 | `--skip-intake` | off | Skip Stage 00. **Also implied automatically when stdin is not a TTY**, which is why piped and CI invocations never block on the intake prompt. |
 | `--project-root PATH` | — | Scan an existing project repository, infer how far it has already progressed, and recommend a re-entry stage. Use this instead of starting from zero on work you already have. |
 | `--paper-corpus PATH` | — | Scan a directory of your own prior papers (PDF, LaTeX, BibTeX, notes) to build a researcher profile — topics, citation neighborhood, and writing style — that seeds downstream stages. |
+
+### Stage graph and self-improvement
+
+On by default. See [Recursive Self-Improvement](self-improvement.md) for the
+mechanism and the reasoning behind each refusal.
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--stage-graph {linear,adaptive}` | `adaptive` | How the run moves between stages. `adaptive` is the eight stages as a directed graph with backward moves: an analysis that exposes a design flaw sends the run back to Stage 03 instead of writing up around it, and the move into Stage 07 stays closed until every hypothesis carries a verdict. `linear` restores the strict sequence — the same graph with the backward edges removed. Preserved on resume. |
+| `--routing {off,auto,agent}` | `auto` | Who chooses the move out of a completed stage. `auto` asks the backend only where more than one move is live, so a linear run never pays for it. `agent` asks at every node; `off` always takes the graph's default edge. AutoR decides which moves are available by evaluating guards against artifacts on disk; the backend only chooses among those, and a choice outside the menu falls back to the forward edge. Preserved on resume. |
+| `--graph-max-steps N` | `20` | Stage executions allowed in one walk. Only bites in adaptive mode; a linear walk cannot exceed eight. |
+| `--graph-max-visits N` | `3` | Times one stage may be entered. A revisit is a productive move; the fourth entry into the same stage is a loop. |
+| `--evolve` / `--no-evolve` | on | Score every valid draft against a rigour rubric read off disk and run the champion ratchet: the best-scoring draft is promoted, not the last one, and a self-initiated round that scores worse is reverted. Costs nothing — the rubric never calls a backend. `--no-evolve` restores the old behaviour, where whichever draft came last was promoted. Preserved on resume. |
+| `--evolve-rounds N` | `2` | Improvement rounds per stage beyond the first draft. This is the half that costs backend calls. A stage whose rubric has no shortfall worth acting on spends none of them, and a `--fake-operator` run spends none at all. Budgeted separately from `--max-attempts`, which bounds a stage that is failing rather than one being improved. `0` measures without polishing. Preserved on resume. |
+| `--evolve-stages STAGE [...]` | all | Restrict improvement rounds to these stage slugs or numbers, e.g. `06_analysis` or `5 6 7`. |
+| `--archive PATH` | `~/.autor/archive` | Where the cross-run archive lives. Each finished run records its route and measured fitness, and each edge is compared against runs that reached the same node and did not take it. Recording only. |
+| `--no-archive` | off | Do not record this run in the archive. |
+| `--archive-steer` / `--no-archive-steer` | **off** | Let the archive choose the topology this run uses, rather than only recording what it did. A run silently using a different topology from the one asked for is not a surprise a research tool gets to spring on anyone; turn this on once `--archive-report` shows the archive has something to say. A learned prior only reorders which move is preferred — it can never open a guarded edge. Preserved on resume. |
+| `--archive-report` | off | Print what the archive has learned, and exit. |
 
 ### Optional enhancements
 

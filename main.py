@@ -18,19 +18,33 @@ from src.operator import ClaudeOperator
 from src.operator_codex import CodexOperator
 from src.operator_protocol import OperatorProtocol
 from src.terminal_ui import TerminalUI
+from src.cross_reviewer import resolve_cross_reviewer
 from src.web_search import (
     assess_search_readiness,
     resolve_web_search_context,
     web_search_notice,
 )
+from src.archive import Archive, resolve_graph
+
+#: Where the cross-run archive lives when nobody says otherwise. Under the user's
+#: home rather than the checkout: it outlives any one clone, and an archive inside
+#: the repo would be wiped by the next fresh clone that was supposed to inherit it.
+DEFAULT_ARCHIVE_DIR = "~/.autor/archive"
+from src.evolution import DEFAULT_ROUNDS, EvolutionConfig
+from src.stage_graph import DEFAULT_MAX_STEPS, DEFAULT_MAX_VISITS
 from src.utils import (
     CODEX_SANDBOX_CHOICES,
+    DEFAULT_ROUTING_MODE,
+    DEFAULT_STAGE_GRAPH,
     DEFAULT_CODEX_SANDBOX,
     DEFAULT_OUTPUT_FORMAT,
     DEFAULT_VENUE,
     WEB_SEARCH_MODE_CHOICES,
     OUTPUT_FORMAT_CLI_CHOICES,
     MAX_STAGE_ATTEMPTS,
+    normalize_walk_settings,
+    ROUTING_MODE_CHOICES,
+    STAGE_GRAPH_CHOICES,
     STAGES,
     build_run_paths,
     load_run_config,
@@ -150,6 +164,33 @@ def parse_args() -> argparse.Namespace:
              "five prompts against one model are five correlated reads wearing five hats.",
     )
     parser.add_argument(
+        "--ideation-panel",
+        action="store_true",
+        help="Widen Stage 02's hypotheses with a panel of proposers working from distinct "
+             "lenses (mechanism, contrarian, adjacent field, null/artifact, regime). They "
+             "propose blind to each other; candidates are deduplicated, scored on novelty, "
+             "feasibility and relevance, and handed to the stage as material to choose from. "
+             "It decides nothing.",
+    )
+    parser.add_argument(
+        "--ideation-lenses",
+        nargs="+",
+        metavar="LENS",
+        help="Seat only these ideation lenses. Defaults to all five.",
+    )
+    parser.add_argument(
+        "--ideation-models",
+        nargs="+",
+        metavar="LENS=MODEL",
+        help="Assign a model per ideation lens, as lens=model or lens=backend:model.",
+    )
+    parser.add_argument(
+        "--ideas-per-proposer",
+        type=int,
+        default=2,
+        help="Candidate hypotheses each proposer may return. Defaults to 2.",
+    )
+    parser.add_argument(
         "--panel-rounds",
         type=int,
         default=2,
@@ -179,6 +220,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--review-model",
         help="Model alias or full model name for the automated reviewer backend. Defaults to the reviewer backend default.",
+    )
+    parser.add_argument(
+        "--cross-review",
+        choices=["auto", "gemini", "off"],
+        default="auto",
+        help=(
+            "Independent second opinion on each approval, from a different model family. "
+            "The primary reviewer shares the executor's blind spots; a Gemini reviewer can "
+            "veto an approval it cannot defend, but can never override a refusal, so it "
+            "only makes the gate stricter. 'auto' enables it when a Gemini backend is "
+            "configured. Only meaningful with an agent approval gate."
+        ),
+    )
+    parser.add_argument(
+        "--cross-review-model",
+        help="Model for the cross-model reviewer. Defaults to gemini-3.1-pro-preview.",
     )
     parser.add_argument(
         "--web-search",
@@ -263,12 +320,165 @@ def parse_args() -> argparse.Namespace:
              "AutoR will analyze them to build a researcher profile that seeds downstream stages.",
     )
     parser.add_argument(
+        "--stage-graph",
+        choices=list(STAGE_GRAPH_CHOICES),
+        help=(
+            f"How the run moves between stages. Defaults to '{DEFAULT_STAGE_GRAPH}', which is the "
+            "eight stages as a directed graph with backward moves: an analysis that exposes a "
+            "design flaw sends the run back to Stage 03 instead of writing up around it, and the "
+            "move into Stage 07 is closed until every hypothesis has a verdict. 'linear' restores "
+            "the strict 01-through-08 sequence. Preserved when resuming."
+        ),
+    )
+    parser.add_argument(
+        "--routing",
+        choices=list(ROUTING_MODE_CHOICES),
+        help=(
+            f"Who chooses the move out of a completed stage. Defaults to '{DEFAULT_ROUTING_MODE}', "
+            "which asks the backend only where more than one move is available - never on a "
+            "linear graph, and at a handful of nodes on an adaptive one. 'agent' asks at every "
+            "node; 'off' always takes the graph's default edge. AutoR decides which moves are "
+            "available by evaluating each edge's guard against the artifacts on disk; the backend "
+            "only chooses among those. Preserved when resuming."
+        ),
+    )
+    parser.add_argument(
+        "--graph-max-steps",
+        type=int,
+        help=(
+            f"Stage executions allowed in one graph walk before the run stops. Defaults to "
+            f"{DEFAULT_MAX_STEPS}. Only bites in adaptive mode; a linear walk cannot exceed "
+            "eight."
+        ),
+    )
+    parser.add_argument(
+        "--graph-max-visits",
+        type=int,
+        help=(
+            f"Times one stage may be entered. Defaults to {DEFAULT_MAX_VISITS}. A revisit is a "
+            "productive move; the fourth entry into the same stage is a loop."
+        ),
+    )
+    parser.add_argument(
+        "--evolve",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Score every valid stage draft against a rigour rubric read off disk and run the "
+            "champion ratchet: the best-scoring draft is what gets promoted, not the last one, "
+            "and a self-initiated round that scores worse is reverted. On by default because it "
+            "costs nothing - the rubric reads the run off disk and never calls a backend. The "
+            "score is blind to what the run concluded, and a round that changes a hypothesis "
+            "verdict is rejected outright. --no-evolve restores the old behaviour, where "
+            "whichever draft came last was the one promoted."
+        ),
+    )
+    parser.add_argument(
+        "--evolve-rounds",
+        type=int,
+        help=(
+            "Improvement rounds per stage, beyond the first draft. This is the half that costs "
+            f"backend calls, so it is the number to turn down; defaults to {DEFAULT_ROUNDS}. A "
+            "stage whose rubric has no shortfall worth acting on spends none of them. Budgeted "
+            "separately from --max-attempts, which bounds a stage that is failing rather than "
+            "one being improved. Zero measures without polishing. Preserved when resuming."
+        ),
+    )
+    parser.add_argument(
+        "--evolve-stages",
+        nargs="+",
+        metavar="STAGE",
+        help=(
+            "Restrict improvement rounds to these stage slugs or numbers (for example "
+            "'06_analysis' or '5 6 7'). Defaults to every stage."
+        ),
+    )
+    parser.add_argument(
+        "--archive",
+        metavar="PATH",
+        help=(
+            "Directory holding the cross-run topology archive. Defaults to "
+            f"'{DEFAULT_ARCHIVE_DIR}'. Each finished run records its route and measured fitness "
+            "there, and each graph edge is compared against runs that reached the same node and "
+            "did not take it. Recording only: the archive does not change the topology a run "
+            "uses unless --archive-steer says so."
+        ),
+    )
+    parser.add_argument(
+        "--no-archive",
+        action="store_true",
+        help="Do not record this run in the cross-run archive.",
+    )
+    parser.add_argument(
+        "--archive-steer",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Let the archive choose the topology this run uses, instead of only recording what "
+            "the run did. Off by default: a run silently using a different topology from the one "
+            "asked for is not a surprise a research tool gets to spring on anyone. Turn it on "
+            "once --archive-report shows the archive has something to say. A learned prior only "
+            "reorders which move is preferred; it can never open a guarded edge. Preserved when "
+            "resuming."
+        ),
+    )
+    parser.add_argument(
+        "--archive-report",
+        action="store_true",
+        help="Print what the archive at --archive has learned so far, and exit.",
+    )
+    parser.add_argument(
         "--stage-timeout",
         type=int,
         default=14400,
         help="Maximum seconds per stage attempt before timeout. Defaults to 14400 (4 hours).",
     )
     return parser.parse_args()
+
+
+def resolve_walk_settings(args: argparse.Namespace, existing: dict | None = None) -> dict:
+    """CLI flags over the resumed run's settings over the defaults.
+
+    Every one of these is checked for *presence* rather than read for its value,
+    because a flag that was not passed must not overwrite what the run was started
+    with: `--stage-graph` defaults to None here, not to the global default, so
+    resuming a linear run without repeating the flag keeps it linear even though a
+    fresh run would be adaptive.
+    """
+    current = dict(existing or {})
+    if args.stage_graph:
+        current["stage_graph"] = args.stage_graph
+    if args.routing:
+        current["routing_mode"] = args.routing
+    if args.evolve is not None:
+        current["evolve_measure"] = bool(args.evolve)
+        if not args.evolve:
+            # Polishing without measuring is not a state that means anything: the
+            # rounds are steered by the score, and there would be nothing to steer
+            # them with.
+            current["evolve_rounds"] = 0
+    if args.evolve_rounds is not None:
+        current["evolve_rounds"] = max(0, args.evolve_rounds)
+        if args.evolve_rounds > 0:
+            current["evolve_measure"] = True
+    if args.archive_steer is not None:
+        current["archive_steer"] = bool(args.archive_steer)
+    return normalize_walk_settings(current)
+
+
+def build_evolution_config(walk: dict, args: argparse.Namespace) -> EvolutionConfig:
+    stages: tuple[str, ...] = ()
+    if args.evolve_stages:
+        resolved = [resolve_stage(value) for value in args.evolve_stages]
+        unknown = [value for value, stage in zip(args.evolve_stages, resolved) if stage is None]
+        if unknown:
+            raise ValueError("--evolve-stages does not recognise: " + ", ".join(unknown))
+        stages = tuple(stage.slug for stage in resolved if stage is not None)
+    return EvolutionConfig(
+        measure=bool(walk["evolve_measure"]),
+        rounds=int(walk["evolve_rounds"]),
+        stages=stages,
+    )
 
 
 def default_model_for_operator(operator_name: str) -> str:
@@ -283,8 +493,11 @@ def create_operator(
     fake_mode: bool,
     ui: TerminalUI,
     stage_timeout: int,
+    web_search_mcp: bool = False,
 ) -> OperatorProtocol:
     if operator_name == "codex":
+        # Codex reaches search through the CLI script instead: it takes no --mcp-config
+        # here, and its sandbox is the separate question documented in the CLI reference.
         return CodexOperator(
             model=model,
             codex_sandbox=codex_sandbox,
@@ -292,7 +505,13 @@ def create_operator(
             ui=ui,
             stage_timeout=stage_timeout,
         )
-    return ClaudeOperator(model=model, fake_mode=fake_mode, ui=ui, stage_timeout=stage_timeout)
+    return ClaudeOperator(
+        model=model,
+        fake_mode=fake_mode,
+        ui=ui,
+        stage_timeout=stage_timeout,
+        web_search_mcp=web_search_mcp,
+    )
 
 
 def create_reviewer(
@@ -422,6 +641,54 @@ def _build_resource_entries(paths: list[str]) -> list[ResourceEntry]:
     return entries
 
 
+def open_archive(args: argparse.Namespace) -> Archive | None:
+    """The archive this invocation records into, or ``None`` if it was declined.
+
+    Recording is on by default and costs nothing but a line of JSON, because the
+    archive is the only thing that could ever justify a change to the topology and
+    it cannot be built retroactively. Whether it is allowed to *act* on what it
+    records is a separate question, answered by `--archive-steer`.
+    """
+    if args.no_archive:
+        return None
+    return Archive(Path(args.archive or DEFAULT_ARCHIVE_DIR).expanduser().resolve())
+
+
+def record_into_archive(
+    archive: Archive | None,
+    manager: ResearchManager,
+    variant_id: str,
+    ui: TerminalUI,
+) -> None:
+    """Fold a finished run into the archive, and let it propose and promote.
+
+    Recording is best-effort on purpose. An archive is a research aid; a failure to
+    write one must not turn a completed run into a failed command, because the run
+    already produced everything the operator asked for.
+    """
+    if archive is None or manager.last_run_paths is None:
+        return
+    try:
+        record = archive.record_run(manager.last_run_paths, variant_id=variant_id)
+        if record is None:
+            ui.show_status(
+                "Nothing was recorded in the archive: this run has no measured stages. "
+                "Drop --no-evolve so stages are scored.",
+                level="warn",
+            )
+            return
+        ui.show_status(
+            f"Archived {record.run_id} under variant `{variant_id}` "
+            f"(mean fitness {record.mean_fitness:.3f}, route: {record.route or 'n/a'}).",
+            level="info",
+        )
+        if archive.promote(variant_id):
+            ui.show_status(f"Variant `{variant_id}` has replayed its improvement and is promoted.", level="success")
+        proposal = archive.propose_variant()
+        if proposal is not None:
+            ui.show_status(f"Archive proposed `{proposal.variant_id}`: {proposal.note}", level="info")
+    except OSError as exc:
+        ui.show_status(f"Could not update the archive: {exc}", level="warn")
 def resolve_search_context(ui: TerminalUI, *, mode: str, operator: str, codex_sandbox: str) -> str | None:
     """Decide the search path, announce it, and refuse a request that cannot work.
 
@@ -440,6 +707,24 @@ def resolve_search_context(ui: TerminalUI, *, mode: str, operator: str, codex_sa
     return resolve_web_search_context(mode, readiness=readiness)
 
 
+
+def create_ideation_panel(args, *, backend_name: str, model: str, ui: TerminalUI):
+    """Build the Stage 02 proposer panel, or None when it is not requested."""
+    if not getattr(args, "ideation_panel", False):
+        return None
+    from src.ideation_panel import IdeationPanel, apply_lens_models, resolve_lenses
+
+    return IdeationPanel(
+        apply_lens_models(resolve_lenses(args.ideation_lenses), args.ideation_models),
+        backend_name=backend_name,
+        model=model,
+        fake_mode=args.fake_operator,
+        ui=ui,
+        stage_timeout=args.stage_timeout,
+        ideas_per_proposer=args.ideas_per_proposer,
+    )
+
+
 def main() -> int:
     args = parse_args()
     repo_root = Path(__file__).resolve().parent
@@ -447,6 +732,14 @@ def main() -> int:
     unattended = resolve_unattended(args)
     persona_text = load_persona(args.persona)
     ui = TerminalUI(interactive=not unattended)
+
+    if args.archive_report:
+        archive = open_archive(args)
+        if archive is None:
+            raise ValueError("--archive-report needs --archive PATH to say which archive to read.")
+        print(archive.report())
+        return 0
+
     ui.show_banner()
 
     if args.resume_run:
@@ -494,6 +787,11 @@ def main() -> int:
             ) or default_model_for_operator(review_operator)
         venue = resolve_venue_key(args.venue or existing_config["venue"])
         output_format = resolve_output_format(args.output_format or existing_config.get("output_format"))
+        walk = resolve_walk_settings(args, existing_config)
+        archive = open_archive(args)
+        graph, variant_id = resolve_graph(
+            archive if walk["archive_steer"] else None, walk["stage_graph"]
+        )
         web_search_mode = normalize_web_search_mode(args.web_search or existing_config.get("web_search"))
         web_search_context = resolve_search_context(
             ui, mode=web_search_mode, operator=operator_name, codex_sandbox=codex_sandbox
@@ -505,6 +803,7 @@ def main() -> int:
             fake_mode=args.fake_operator,
             ui=ui,
             stage_timeout=args.stage_timeout,
+            web_search_mcp=web_search_context is not None,
         )
         reviewer = None
         if approval_mode == "agent":
@@ -534,9 +833,18 @@ def main() -> int:
             max_rounds=args.max_rounds,
             max_stage_attempts=args.max_attempts,
             web_search_context=web_search_context,
+            stage_graph=graph,
+            routing_mode=walk["routing_mode"],
+            evolution=build_evolution_config(walk, args),
+            graph_max_steps=args.graph_max_steps,
+            graph_max_visits=args.graph_max_visits,
+            archive_steer=bool(walk["archive_steer"]),
             web_search_mode=web_search_mode,
         )
-        return 0 if manager.resume_run(
+        manager.ideation_panel = create_ideation_panel(
+            args, backend_name=review_operator, model=review_model, ui=ui
+        )
+        completed = manager.resume_run(
             run_root,
             start_stage=start_stage or rollback_stage,
             venue=venue,
@@ -544,7 +852,9 @@ def main() -> int:
             research_diagram=args.research_diagram,
             output_format=output_format,
             final_stage=final_stage,
-        ) else 1
+        )
+        record_into_archive(archive, manager, variant_id, ui)
+        return 0 if completed else 1
 
     operator_name = (args.operator or "claude").strip().lower()
     model = args.model or default_model_for_operator(operator_name)
@@ -559,6 +869,11 @@ def main() -> int:
         ui, mode=web_search_mode, operator=operator_name, codex_sandbox=codex_sandbox
     )
     final_stage = resolve_stage(args.final_stage)
+    walk = resolve_walk_settings(args)
+    archive = open_archive(args)
+    graph, variant_id = resolve_graph(
+        archive if walk["archive_steer"] else None, walk["stage_graph"]
+    )
     operator = create_operator(
         operator_name,
         model=model,
@@ -566,6 +881,7 @@ def main() -> int:
         fake_mode=args.fake_operator,
         ui=ui,
         stage_timeout=args.stage_timeout,
+        web_search_mcp=web_search_context is not None,
     )
     reviewer = None
     if approval_mode == "agent":
@@ -595,7 +911,17 @@ def main() -> int:
         max_rounds=args.max_rounds,
         max_stage_attempts=args.max_attempts,
         web_search_context=web_search_context,
+        stage_graph=graph,
+        routing_mode=walk["routing_mode"],
+        evolution=build_evolution_config(walk, args),
+        graph_max_steps=args.graph_max_steps,
+        graph_max_visits=args.graph_max_visits,
+        archive_steer=bool(walk["archive_steer"]),
         web_search_mode=web_search_mode,
+    )
+
+    manager.ideation_panel = create_ideation_panel(
+        args, backend_name=review_operator, model=review_model, ui=ui
     )
 
     goal = resolve_goal(args, unattended=unattended)
@@ -613,7 +939,7 @@ def main() -> int:
     project_root_arg = Path(args.project_root).expanduser().resolve() if args.project_root else None
     paper_corpus = Path(args.paper_corpus).expanduser().resolve() if args.paper_corpus else None
 
-    return 0 if manager.run(
+    completed = manager.run(
         goal,
         venue=venue,
         resources=resources or None,
@@ -623,7 +949,9 @@ def main() -> int:
         paper_corpus=paper_corpus,
         output_format=output_format,
         final_stage=final_stage,
-    ) else 1
+    )
+    record_into_archive(archive, manager, variant_id, ui)
+    return 0 if completed else 1
 
 
 if __name__ == "__main__":
