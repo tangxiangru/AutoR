@@ -84,6 +84,12 @@ GROUNDING_REDIRECT_HOST = "vertexaisearch.cloud.google.com"
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DIAGRAM_CONFIG_PATH = REPO_ROOT / "configs" / "diagram_config.yaml"
 WEB_SEARCH_SCRIPT = REPO_ROOT / "tools" / "web_search.py"
+MCP_SERVER_MODULE = "src.mcp_web_search"
+
+#: The MCP server name, and therefore the prefix Claude Code gives its tools:
+#: ``mcp__autor-search__web_search``.
+MCP_SERVER_NAME = "autor-search"
+MCP_TOOL_NAME = f"mcp__{MCP_SERVER_NAME}__web_search"
 
 
 class WebSearchError(RuntimeError):
@@ -749,20 +755,59 @@ def web_search_notice(
     )
 
 
+def build_mcp_config(*, repo_root: Path | None = None) -> dict[str, object]:
+    """The `--mcp-config` payload that hands the agent a real `web_search` tool.
+
+    Launched with AutoR's own interpreter and PYTHONPATH so the child resolves
+    `src.web_search` and its credentials exactly the way the parent already verified,
+    rather than depending on whatever `python3` the agent's PATH happens to find.
+    """
+    root = (repo_root or REPO_ROOT).resolve()
+    return {
+        "mcpServers": {
+            MCP_SERVER_NAME: {
+                "command": sys.executable or "python3",
+                "args": ["-m", MCP_SERVER_MODULE],
+                "env": {"PYTHONPATH": str(root)},
+                "cwd": str(root),
+            }
+        }
+    }
+
+
+def write_mcp_config(destination: Path, *, repo_root: Path | None = None) -> Path:
+    """Write the MCP config into the run, where it is auditable alongside the prompts."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(
+        json.dumps(build_mcp_config(repo_root=repo_root), indent=2) + "\n", encoding="utf-8"
+    )
+    return destination
+
+
 def build_web_search_prompt_section(
     *,
     script_path: Path | None = None,
     model: str | None = None,
+    mcp: bool = True,
 ) -> str:
     """Build the prompt block that redirects operators away from the native search tool."""
     resolved_script = (script_path or WEB_SEARCH_SCRIPT).resolve()
     interpreter = search_command_prefix()
+    tool_paragraph = (
+        f"**Use the `{MCP_TOOL_NAME}` tool.** It takes `query` and an optional "
+        "`max_results`, and is the replacement for the disabled built-in. Prefer it over "
+        "the shell command below: a failed or ungrounded search comes back marked as an "
+        "error, so you can tell 'nothing citable was found' from 'the search worked'.\n\n"
+        if mcp
+        else ""
+    )
     backend = resolve_backend(model)
     provider = backend.describe() if backend else f"Gemini ({resolve_search_model(model)})"
     return (
         "The built-in `WebSearch` tool is **disabled** in this deployment. Calling it will "
         "fail or silently return nothing, so do not rely on it.\n\n"
-        "Use this Gemini-backed replacement instead, through a shell command:\n\n"
+        f"{tool_paragraph}"
+        "The same search is also available as a shell command:\n\n"
         "```bash\n"
         f'{interpreter} "{resolved_script}" "your search query here"\n'
         f'{interpreter} "{resolved_script}" "your search query here" --json --max-results 8\n'

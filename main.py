@@ -300,8 +300,11 @@ def create_operator(
     fake_mode: bool,
     ui: TerminalUI,
     stage_timeout: int,
+    web_search_mcp: bool = False,
 ) -> OperatorProtocol:
     if operator_name == "codex":
+        # Codex reaches search through the CLI script instead: it takes no --mcp-config
+        # here, and its sandbox is the separate question documented in the CLI reference.
         return CodexOperator(
             model=model,
             codex_sandbox=codex_sandbox,
@@ -309,7 +312,13 @@ def create_operator(
             ui=ui,
             stage_timeout=stage_timeout,
         )
-    return ClaudeOperator(model=model, fake_mode=fake_mode, ui=ui, stage_timeout=stage_timeout)
+    return ClaudeOperator(
+        model=model,
+        fake_mode=fake_mode,
+        ui=ui,
+        stage_timeout=stage_timeout,
+        web_search_mcp=web_search_mcp,
+    )
 
 
 def create_reviewer(
@@ -522,6 +531,7 @@ def main() -> int:
             fake_mode=args.fake_operator,
             ui=ui,
             stage_timeout=args.stage_timeout,
+            web_search_mcp=web_search_context is not None,
         )
         reviewer = None
         if approval_mode == "agent":
@@ -583,6 +593,7 @@ def main() -> int:
         fake_mode=args.fake_operator,
         ui=ui,
         stage_timeout=args.stage_timeout,
+        web_search_mcp=web_search_context is not None,
     )
     reviewer = None
     if approval_mode == "agent":

@@ -255,7 +255,16 @@ def default_model_for(backend: str) -> str:
     return "default" if backend == "codex" else "sonnet"
 
 
-def create_operator(backend: str, *, model: str, codex_sandbox: str, fake_mode: bool, ui: TerminalUI, stage_timeout: int):
+def create_operator(
+    backend: str,
+    *,
+    model: str,
+    codex_sandbox: str,
+    fake_mode: bool,
+    ui: TerminalUI,
+    stage_timeout: int,
+    web_search_mcp: bool = False,
+):
     if backend == "codex":
         return CodexOperator(
             model=model,
@@ -264,7 +273,13 @@ def create_operator(backend: str, *, model: str, codex_sandbox: str, fake_mode: 
             ui=ui,
             stage_timeout=stage_timeout,
         )
-    return ClaudeOperator(model=model, fake_mode=fake_mode, ui=ui, stage_timeout=stage_timeout)
+    return ClaudeOperator(
+        model=model,
+        fake_mode=fake_mode,
+        ui=ui,
+        stage_timeout=stage_timeout,
+        web_search_mcp=web_search_mcp,
+    )
 
 
 def run(args: argparse.Namespace) -> BenchmarkResult:
@@ -308,6 +323,7 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
             "Fix it, or use --web-search auto to fall back to native search."
         )
 
+    web_search_context = resolve_web_search_context(args.web_search, readiness=readiness)
     operator = create_operator(
         operator_backend,
         model=model,
@@ -315,6 +331,7 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
         fake_mode=args.fake_operator,
         ui=ui,
         stage_timeout=args.stage_timeout,
+        web_search_mcp=web_search_context is not None,
     )
     synthesizer = None if args.no_synthesis else ReportSynthesizer(operator)
 
@@ -374,7 +391,7 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
         unattended=True,
         max_auto_skips=args.max_auto_skips,
         max_stage_attempts=args.max_attempts,
-        web_search_context=resolve_web_search_context(args.web_search, readiness=readiness),
+        web_search_context=web_search_context,
         web_search_mode=args.web_search,
         # Stages are told to keep code/, outputs/ and report/images/ up to date in the
         # benchmark workspace, so 'Files Produced' must resolve against it too.
