@@ -325,7 +325,36 @@ def _recorded_duration(workspace: Path, started_at: float) -> int:
             existing = {}
         if isinstance(existing, dict) and existing.get("duration_seconds"):
             return int(existing["duration_seconds"])
+
+    # A run killed by a signal never recorded its own duration, so fall back to how
+    # long the run tree was being written for. Reporting this export's few seconds
+    # instead would put a multi-hour run on the leaderboard at zero cost, since cost
+    # per task is derived from duration.
+    measured = _run_tree_duration(workspace)
+    if measured is not None:
+        return measured
     return round(time.monotonic() - started_at)
+
+
+def _run_tree_duration(workspace: Path) -> int | None:
+    """Wall-clock span of the AutoR run tree, from oldest to newest file.
+
+    An estimate, and deliberately a conservative one: it cannot see time spent before
+    the first file was written or after the last. Better than zero, and never larger
+    than the truth.
+    """
+    runs_root = runs_dir_for(workspace)
+    if not runs_root.exists():
+        return None
+    stamps = [
+        path.stat().st_mtime
+        for path in runs_root.rglob("*")
+        if path.is_file()
+    ]
+    if len(stamps) < 2:
+        return None
+    span = round(max(stamps) - min(stamps))
+    return span if span > 0 else None
 
 
 def run(args: argparse.Namespace) -> BenchmarkResult:
