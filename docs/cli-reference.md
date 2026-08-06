@@ -319,7 +319,7 @@ python tools/web_search.py QUERY... [--json] [--model MODEL] [--max-results N]
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--json` | off | Emit `{query, model, backend, answer, results[]}` instead of markdown. |
+| `--json` | off | Emit `{query, model, backend, answer, grounded, citable_source_count, results[]}` instead of markdown, each result being `{title, url, citable, supported_claims[]}`. |
 | `--model MODEL` | `gemini-2.5-flash` (API key) / `gemini-3.6-flash` (Vertex) | Overridable with `AUTOR_WEB_SEARCH_MODEL` or `GEMINI_MODEL`. |
 | `--max-results N` | `10` | Maximum number of grounded sources to report. |
 | `--no-resolve-urls` | off | Leave Vertex grounding redirects unresolved. Faster, but the source URLs are opaque stubs that cannot be cited. |
@@ -333,4 +333,26 @@ Two backends are supported and auto-detected:
   location from `AUTOR_VERTEX_LOCATION` or `GOOGLE_CLOUD_LOCATION` (default `global`).
 
 An explicit API key wins; `AUTOR_WEB_SEARCH_BACKEND=vertex|api_key` forces the choice.
-Exits `1` with the reason on stderr when a search cannot be performed.
+
+### Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | The search returned at least one citable source. |
+| `2` | The search completed but nothing citable came back — an answer with no resolvable source behind it. Retry with a different query; do not cite the answer. |
+| `1` | The search could not be performed at all. The reason is on stderr. |
+
+`2` is distinct from `1` on purpose: an ungrounded answer is not a broken tool, but
+exiting `0` for it would make it indistinguishable from a real result to anything
+reading only `$?`. The same signal is the `grounded` field in `--json`.
+
+### `supported_claims` is not page text
+
+Each result carries `supported_claims`: sentences from **Gemini's own answer** that the
+source was cited in support of. Grounding asserts that a source supports a claim; it
+never asserts that the page contains that sentence. The markdown renders them as a
+labelled bullet list rather than a blockquote for exactly this reason — a blockquote
+under a source link reads as a quotation, which is how a real paper acquires a sentence
+it never contained.
+
+To quote a source, fetch it and quote what it says.

@@ -17,12 +17,15 @@ Command line usage::
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import os
+import re
 import sys
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
+from urllib.parse import urlsplit
 
 
 DEFAULT_SEARCH_MODEL = "gemini-2.5-flash"
@@ -35,6 +38,12 @@ DEFAULT_MAX_RESULTS = 10
 
 #: Seconds allowed for turning one grounding redirect into its canonical URL.
 URL_RESOLVE_TIMEOUT = 10
+
+#: How much of a resolved page to read looking for its <title>. Capped so a large or
+#: hostile page cannot turn one citation lookup into an unbounded download.
+TITLE_SCAN_BYTES = 65536
+
+_HTML_TITLE_RE = re.compile(rb"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 
 #: Environment variables consulted for the Gemini API key, in priority order.
 API_KEY_ENV_VARS = ("GOOGLE_API_KEY", "GEMINI_API_KEY")
@@ -73,7 +82,23 @@ class WebSearchError(RuntimeError):
 class SearchResult:
     title: str
     url: str
-    snippet: str = ""
+    #: Sentences from Gemini's *own* answer that this source was cited in support of.
+    #: Grounding asserts that the source supports the claim, never that the page contains
+    #: the sentence, so these must never be presented as quotations from the page.
+    supported_claims: list[str] = field(default_factory=list)
+
+    @property
+    def citable(self) -> bool:
+        """False when the URL is still a grounding stub with no usable target."""
+        return not is_unresolved_redirect(self.url)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "title": self.title,
+            "url": self.url,
+            "citable": self.citable,
+            "supported_claims": list(self.supported_claims),
+        }
 
 
 @dataclass(frozen=True)
@@ -84,13 +109,29 @@ class WebSearchResponse:
     backend: str = "api_key"
     results: list[SearchResult] = field(default_factory=list)
 
+    @property
+    def citable_source_count(self) -> int:
+        return sum(1 for result in self.results if result.citable)
+
+    @property
+    def grounded(self) -> bool:
+        """Whether anything here can actually be cited.
+
+        An answer with no citable source is the failure this whole module exists to
+        prevent, so it is a first-class field rather than a line of prose only the
+        markdown renderer emits.
+        """
+        return self.citable_source_count > 0
+
     def to_dict(self) -> dict[str, object]:
         return {
             "query": self.query,
             "model": self.model,
             "backend": self.backend,
             "answer": self.answer,
-            "results": [asdict(result) for result in self.results],
+            "grounded": self.grounded,
+            "citable_source_count": self.citable_source_count,
+            "results": [result.to_dict() for result in self.results],
         }
 
 
@@ -232,39 +273,78 @@ def build_genai_client(backend: SearchBackend):
         return genai.Client(vertexai=True, project=backend.project, location=backend.location)
 
 
-def resolve_source_url(url: str, *, timeout: int = URL_RESOLVE_TIMEOUT) -> str:
-    """Follow a grounding redirect to its canonical URL, best-effort.
+def resolve_source(url: str, *, timeout: int = URL_RESOLVE_TIMEOUT) -> tuple[str, str | None]:
+    """Follow a grounding redirect to its canonical URL and page title, best-effort.
 
     Vertex hands back opaque redirect stubs instead of source URLs. An agent told to cite
     only what the tool returned would otherwise be citing
     `vertexaisearch.cloud.google.com/...`, which is useless in a bibliography. On any
     failure the original URL is returned unchanged rather than dropping the source.
+
+    The page title comes free-ish: following the redirect is already a GET, and grounding
+    labels every source with a bare domain, so reading the first `TITLE_SCAN_BYTES` of the
+    body is what turns "arxiv.org" into something a reader can identify.
     """
     if GROUNDING_REDIRECT_HOST not in url:
-        return url
+        return url, None
     try:
         import urllib.request
 
         request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
-            return response.url or url
+            resolved = response.url or url
+            return resolved, _extract_html_title(response.read(TITLE_SCAN_BYTES))
     except Exception:  # noqa: BLE001 - a citation we cannot canonicalize is still a citation
-        return url
+        return url, None
+
+
+def resolve_source_url(url: str, *, timeout: int = URL_RESOLVE_TIMEOUT) -> str:
+    """Follow a grounding redirect to its canonical URL, discarding the page title."""
+    return resolve_source(url, timeout=timeout)[0]
+
+
+def _extract_html_title(head: bytes) -> str | None:
+    match = _HTML_TITLE_RE.search(head)
+    if match is None:
+        return None
+    title = " ".join(html.unescape(match.group(1).decode("utf-8", "replace")).split())
+    return title[:200] or None
+
+
+def _looks_like_bare_domain(title: str, url: str) -> bool:
+    """Whether a grounding title carries no more information than the URL already does."""
+    candidate = title.strip().lower()
+    if not candidate or candidate == url.strip().lower():
+        return True
+    host = urlsplit(url).netloc.lower()
+    host = host[4:] if host.startswith("www.") else host
+    return bool(host) and candidate in {host, f"www.{host}"}
+
+
+def best_title(grounding_title: str, page_title: str | None, url: str) -> str:
+    """Prefer the page's own title when grounding only supplied a bare domain."""
+    if page_title and _looks_like_bare_domain(grounding_title, url):
+        return page_title
+    return grounding_title
 
 
 def dedupe_by_url(results: "Iterable[SearchResult]") -> list[SearchResult]:
-    """Collapse results sharing a URL, keeping the first and the longest snippet.
+    """Collapse results sharing a URL, unioning the claims each copy was cited for.
 
     Two distinct grounding redirects routinely resolve to the same page, so deduplication
-    has to happen after resolution as well as before it.
+    has to happen after resolution as well as before it. Claims are unioned rather than
+    chosen between: keeping only one would silently narrow what the source was cited for,
+    and picking by length would pair one chunk's title with another chunk's claim.
     """
     by_url: dict[str, SearchResult] = {}
     for result in results:
         existing = by_url.get(result.url)
         if existing is None:
             by_url[result.url] = result
-        elif len(result.snippet) > len(existing.snippet):
-            by_url[result.url] = SearchResult(existing.title, existing.url, result.snippet)
+            continue
+        merged = list(existing.supported_claims)
+        merged.extend(claim for claim in result.supported_claims if claim not in merged)
+        by_url[result.url] = SearchResult(existing.title, existing.url, merged)
     return list(by_url.values())
 
 
@@ -316,10 +396,7 @@ def gemini_web_search(
 
     results = extract_search_results(response, max_results=max_results)
     if resolve_urls:
-        results = dedupe_by_url(
-            SearchResult(title=r.title, url=resolve_source_url(r.url), snippet=r.snippet)
-            for r in results
-        )
+        results = dedupe_by_url(_resolved(result) for result in results)
 
     return WebSearchResponse(
         query=query,
@@ -327,6 +404,16 @@ def gemini_web_search(
         backend=backend.kind,
         answer=(getattr(response, "text", "") or "").strip(),
         results=results,
+    )
+
+
+def _resolved(result: SearchResult) -> SearchResult:
+    """Turn one grounding stub into a citable source, keeping its claims."""
+    url, page_title = resolve_source(result.url)
+    return SearchResult(
+        title=best_title(result.title, page_title, url),
+        url=url,
+        supported_claims=result.supported_claims,
     )
 
 
@@ -345,8 +432,10 @@ def extract_search_results(response: object, *, max_results: int = DEFAULT_MAX_R
         if metadata is None:
             continue
 
-        snippets = _snippets_by_chunk_index(metadata)
+        claims = _claims_by_chunk_index(metadata)
         for index, chunk in enumerate(getattr(metadata, "grounding_chunks", None) or []):
+            if len(results) >= max_results:
+                return results
             web = getattr(chunk, "web", None)
             if web is None:
                 continue
@@ -358,26 +447,31 @@ def extract_search_results(response: object, *, max_results: int = DEFAULT_MAX_R
                 SearchResult(
                     title=(getattr(web, "title", "") or url).strip(),
                     url=url,
-                    snippet=snippets.get(index, ""),
+                    supported_claims=claims.get(index, []),
                 )
             )
-            if len(results) >= max_results:
-                return results
 
     return results
 
 
-def _snippets_by_chunk_index(metadata: object) -> dict[int, str]:
-    """Map each grounding chunk index to the answer text it supports."""
-    snippets: dict[int, str] = {}
+def _claims_by_chunk_index(metadata: object) -> dict[int, list[str]]:
+    """Map each grounding chunk index to the answer sentences it was cited in support of.
+
+    These are Gemini's own words, not text from the source page. Every distinct claim is
+    kept rather than only the first: a source cited for three statements should not appear
+    to stand behind whichever one happened to come back first.
+    """
+    claims: dict[int, list[str]] = {}
     for support in getattr(metadata, "grounding_supports", None) or []:
         segment = getattr(support, "segment", None)
         text = (getattr(segment, "text", "") or "").strip()
         if not text:
             continue
         for chunk_index in getattr(support, "grounding_chunk_indices", None) or []:
-            snippets.setdefault(chunk_index, text)
-    return snippets
+            bucket = claims.setdefault(chunk_index, [])
+            if text not in bucket:
+                bucket.append(text)
+    return claims
 
 
 def is_unresolved_redirect(url: str) -> bool:
@@ -393,12 +487,26 @@ def format_response_markdown(response: WebSearchResponse) -> str:
     lines.append("")
     if not response.results:
         lines.append("_No grounded sources were returned. Treat the answer as unverified._")
-    else:
-        for index, result in enumerate(response.results, start=1):
-            suffix = " — **unresolved redirect, not citable**" if is_unresolved_redirect(result.url) else ""
-            lines.append(f"{index}. [{result.title}]({result.url}){suffix}")
-            if result.snippet:
-                lines.append(f"   > {result.snippet}")
+        return "\n".join(lines).rstrip() + "\n"
+
+    if not response.grounded:
+        lines.append(
+            "_No source resolved to a citable URL. Treat the answer as unverified._"
+        )
+        lines.append("")
+
+    for index, result in enumerate(response.results, start=1):
+        suffix = "" if result.citable else " — **unresolved redirect, not citable**"
+        lines.append(f"{index}. [{result.title}]({result.url}){suffix}")
+        if result.supported_claims:
+            # Deliberately a bullet list and not a blockquote: these sentences are the
+            # model's, and a blockquote under a hyperlink reads as a quotation from the
+            # page, which is how a real source acquires a claim it never made.
+            lines.append(
+                "   Cited in support of these statements from the answer above "
+                "(Gemini's wording, not text from the page):"
+            )
+            lines.extend(f"   - {claim}" for claim in result.supported_claims)
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -472,15 +580,24 @@ def build_web_search_prompt_section(
         "```\n\n"
         f"- It performs a real, grounded Google search through {provider} "
         "and prints a synthesised answer plus the source URLs it is grounded in.\n"
-        "- Default output is markdown; `--json` gives `{query, model, answer, results[]}` for parsing.\n"
-        "- It exits non-zero and prints the reason on failure. If a search fails, retry with a "
-        "different query rather than fabricating citations.\n"
+        "- Default output is markdown; `--json` gives "
+        "`{query, model, backend, answer, grounded, citable_source_count, results[]}`, "
+        "each result being `{title, url, citable, supported_claims[]}`.\n"
+        "- Exit codes: `0` the search returned at least one citable source, `2` it "
+        "completed but nothing citable came back, `1` it failed outright. On `1` or `2`, "
+        "retry with a different query rather than fabricating citations. Check `grounded` "
+        "in the JSON for the same signal.\n"
+        "- **`supported_claims` is not text from the source page.** It is the model's own "
+        "wording from the answer above, listing what each source was cited in support of. "
+        "Grounding asserts that a source supports a claim, never that the page contains "
+        "that sentence. Never transcribe it as a quotation, and never attribute its "
+        "wording to the source's authors.\n"
         "- Fetching a **known** URL still works normally with `WebFetch` or `curl`. Only the "
-        "search step needs this tool.\n"
+        "search step needs this tool. To quote a source, fetch it and quote what it says.\n"
         "- Every citation you record must come from a URL this tool actually returned. Never "
         "invent a reference, DOI, or arXiv identifier.\n"
-        "- A source marked **unresolved redirect** has no usable URL. Treat its content as a "
-        "lead to verify, not as a citable reference."
+        "- A source marked **unresolved redirect**, or `\"citable\": false` in JSON, has no "
+        "usable URL. Treat its content as a lead to verify, not as a citable reference."
     )
 
 
@@ -535,6 +652,17 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(response.to_dict(), indent=2, ensure_ascii=False))
     else:
         print(format_response_markdown(response), end="")
+
+    if not response.grounded:
+        # Distinct from 1 (the search failed) so the caller can tell "nothing citable came
+        # back, try another query" from "the tool is broken". Exiting 0 here would let an
+        # ungrounded answer look like a successful search to anything reading only $?.
+        print(
+            "web_search: the search returned no citable source; treat the answer as "
+            "unverified and retry with a different query.",
+            file=sys.stderr,
+        )
+        return 2
     return 0
 
 

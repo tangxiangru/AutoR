@@ -5,18 +5,21 @@ import json
 import os
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
 import main as autor_main
+from src import web_search as web_search_module
 from src.utils import STAGES, build_prompt
 from src.web_search import (
     DEFAULT_SEARCH_MODEL,
     DEFAULT_VERTEX_LOCATION,
     DEFAULT_VERTEX_SEARCH_MODEL,
+    best_title,
     dedupe_by_url,
     is_unresolved_redirect,
+    resolve_source,
     resolve_backend,
     resolve_source_url,
     vertex_credentials_available,
@@ -125,9 +128,9 @@ class ExtractResultsTest(unittest.TestCase):
         results = extract_search_results(response)
 
         self.assertEqual(len(results), 2)
-        self.assertEqual(results[0], SearchResult("Paper A", "https://example.org/a", "Key finding."))
+        self.assertEqual(results[0], SearchResult("Paper A", "https://example.org/a", ["Key finding."]))
         self.assertEqual(results[1].title, "https://example.org/b")
-        self.assertEqual(results[1].snippet, "")
+        self.assertEqual(results[1].supported_claims, [])
 
     def test_duplicate_urls_are_collapsed(self) -> None:
         chunk = _Chunk(_Web("https://example.org/a", "A"))
@@ -155,13 +158,50 @@ class FormatTest(unittest.TestCase):
             query="q",
             model="gemini-x",
             answer="The answer.",
-            results=[SearchResult("Paper A", "https://example.org/a", "Snippet.")],
+            results=[SearchResult("Paper A", "https://example.org/a", ["A claim."])],
         )
         text = format_response_markdown(response)
         self.assertIn("# Web Search: q", text)
         self.assertIn("The answer.", text)
         self.assertIn("[Paper A](https://example.org/a)", text)
-        self.assertIn("> Snippet.", text)
+        self.assertIn("- A claim.", text)
+
+    def test_a_supported_claim_is_never_rendered_as_a_quotation(self) -> None:
+        """A blockquote under a source link reads as "this page says this". It does not.
+
+        `supported_claims` is Gemini's own wording; grounding only asserts that the source
+        supports the claim. Rendering it as a quotation is how a real paper acquires a
+        sentence it never contained.
+        """
+        text = format_response_markdown(
+            WebSearchResponse(
+                query="q",
+                model="m",
+                answer="The answer.",
+                results=[SearchResult("Paper A", "https://example.org/a", ["A claim."])],
+            )
+        )
+        self.assertNotIn("> A claim.", text)
+        self.assertIn("not text from the page", text)
+
+    def test_every_claim_a_source_was_cited_for_is_shown(self) -> None:
+        text = format_response_markdown(
+            WebSearchResponse(
+                query="q",
+                model="m",
+                answer="a",
+                results=[SearchResult("A", "https://a", ["First claim.", "Second claim."])],
+            )
+        )
+        self.assertIn("- First claim.", text)
+        self.assertIn("- Second claim.", text)
+
+    def test_results_that_are_all_unresolved_are_flagged_as_unverified(self) -> None:
+        stub = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/ABC"
+        text = format_response_markdown(
+            WebSearchResponse("q", "m", "a", "vertex", [SearchResult("x", stub)])
+        )
+        self.assertIn("unverified", text)
 
     def test_no_sources_is_flagged_as_unverified(self) -> None:
         text = format_response_markdown(WebSearchResponse("q", "m", "answer", []))
@@ -203,14 +243,14 @@ class CliTest(unittest.TestCase):
             return WebSearchResponse(query, "m", "a", [])
 
         with patch("src.web_search.gemini_web_search", side_effect=fake_search):
-            with redirect_stdout(io.StringIO()):
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
                 web_search_main(["black", "hole", "superradiance"])
 
         self.assertEqual(captured["query"], "black hole superradiance")
 
     def test_a_failed_search_exits_nonzero(self) -> None:
         with patch("src.web_search.gemini_web_search", side_effect=WebSearchError("no key")):
-            with redirect_stdout(io.StringIO()):
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
                 self.assertEqual(web_search_main(["q"]), 1)
 
 
@@ -423,11 +463,20 @@ class DedupeByUrlTest(unittest.TestCase):
     def test_two_redirects_resolving_to_one_page_collapse(self) -> None:
         """Dedup has to happen after resolution: distinct stubs reach the same source."""
         merged = dedupe_by_url([
-            SearchResult("github.com", "https://github.com/a", ""),
-            SearchResult("github.com", "https://github.com/a", "a longer snippet"),
+            SearchResult("github.com", "https://github.com/a", []),
+            SearchResult("github.com", "https://github.com/a", ["a claim"]),
         ])
         self.assertEqual(len(merged), 1)
-        self.assertEqual(merged[0].snippet, "a longer snippet")
+        self.assertEqual(merged[0].supported_claims, ["a claim"])
+
+    def test_merging_unions_the_claims_rather_than_choosing_between_them(self) -> None:
+        """Keeping only one copy's claims would narrow what the source was cited for."""
+        merged = dedupe_by_url([
+            SearchResult("A", "https://a", ["first", "shared"]),
+            SearchResult("A", "https://a", ["shared", "second"]),
+        ])
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0].supported_claims, ["first", "shared", "second"])
 
     def test_distinct_urls_are_preserved_in_order(self) -> None:
         merged = dedupe_by_url([
@@ -462,3 +511,258 @@ class NoBackendTest(unittest.TestCase):
         message = str(caught.exception)
         self.assertIn("GEMINI_API_KEY", message)
         self.assertIn("application-default", message)
+
+
+class SupportedClaimProvenanceTest(unittest.TestCase):
+    """One GroundingSupport routinely cites several chunks for one generated sentence.
+
+    That is the mechanism by which a model-authored claim gets attached to a source that
+    never made it, so the shape is pinned here rather than assumed.
+    """
+
+    def test_one_support_citing_two_chunks_reaches_both_results(self) -> None:
+        response = _Response([
+            _Candidate(
+                _Metadata(
+                    [_Chunk(_Web("https://arxiv.org/abs/1", "arxiv.org")),
+                     _Chunk(_Web("https://blog.example/x", "blog.example"))],
+                    [_Support("Retrieval cuts hallucination by 40%.", [0, 1])],
+                )
+            )
+        ])
+
+        results = extract_search_results(response)
+
+        self.assertEqual(len(results), 2)
+        for result in results:
+            self.assertEqual(result.supported_claims, ["Retrieval cuts hallucination by 40%."])
+
+    def test_two_supports_on_one_chunk_are_both_kept(self) -> None:
+        response = _Response([
+            _Candidate(
+                _Metadata(
+                    [_Chunk(_Web("https://a", "a"))],
+                    [_Support("First, generic.", [0]), _Support("Second, specific.", [0])],
+                )
+            )
+        ])
+
+        self.assertEqual(
+            extract_search_results(response)[0].supported_claims,
+            ["First, generic.", "Second, specific."],
+        )
+
+    def test_a_repeated_claim_is_not_duplicated(self) -> None:
+        response = _Response([
+            _Candidate(
+                _Metadata(
+                    [_Chunk(_Web("https://a", "a"))],
+                    [_Support("Same.", [0]), _Support("Same.", [0])],
+                )
+            )
+        ])
+        self.assertEqual(extract_search_results(response)[0].supported_claims, ["Same."])
+
+
+class CitabilityInJsonTest(unittest.TestCase):
+    """The prompt tells the agent to parse --json, so every judgement has to survive there.
+
+    A groundedness signal that exists only in the markdown renderer is invisible to the
+    consumer the tool actually advertises.
+    """
+
+    STUB = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/ABC"
+
+    def test_a_citable_result_marks_the_response_grounded(self) -> None:
+        payload = WebSearchResponse(
+            "q", "m", "a", "vertex", [SearchResult("A", "https://arxiv.org/abs/1")]
+        ).to_dict()
+        self.assertTrue(payload["grounded"])
+        self.assertEqual(payload["citable_source_count"], 1)
+        self.assertTrue(payload["results"][0]["citable"])
+
+    def test_an_unresolved_stub_is_not_citable_and_not_grounded(self) -> None:
+        payload = WebSearchResponse(
+            "q", "m", "a", "vertex", [SearchResult("A", self.STUB)]
+        ).to_dict()
+        self.assertFalse(payload["grounded"])
+        self.assertEqual(payload["citable_source_count"], 0)
+        self.assertFalse(payload["results"][0]["citable"])
+
+    def test_an_answer_with_no_sources_is_not_grounded(self) -> None:
+        self.assertFalse(WebSearchResponse("q", "m", "an answer").to_dict()["grounded"])
+
+    def test_the_json_key_does_not_call_model_output_a_snippet(self) -> None:
+        payload = WebSearchResponse(
+            "q", "m", "a", "vertex", [SearchResult("A", "https://a", ["claim"])]
+        ).to_dict()
+        self.assertNotIn("snippet", payload["results"][0])
+        self.assertEqual(payload["results"][0]["supported_claims"], ["claim"])
+
+    def test_the_prompt_advertises_the_schema_it_actually_emits(self) -> None:
+        section = build_web_search_prompt_section()
+        payload = WebSearchResponse(
+            "q", "m", "a", "vertex", [SearchResult("A", "https://a", ["c"])]
+        ).to_dict()
+        for key in payload:
+            self.assertIn(key, section, f"--json emits {key!r} but the prompt never mentions it")
+        for key in payload["results"][0]:
+            self.assertIn(key, section, f"a result carries {key!r} but the prompt never mentions it")
+
+    def test_the_prompt_warns_that_claims_are_not_page_text(self) -> None:
+        section = build_web_search_prompt_section()
+        self.assertIn("not text from the source page", section)
+        self.assertIn("Never transcribe it as a quotation", section)
+
+
+class UngroundedExitCodeTest(unittest.TestCase):
+    """Exiting 0 on an ungrounded answer lets it look like a successful search to `$?`."""
+
+    def _run(self, response, argv):
+        buffer, errors = io.StringIO(), io.StringIO()
+        with patch("src.web_search.gemini_web_search", return_value=response):
+            with redirect_stdout(buffer), redirect_stderr(errors):
+                code = web_search_main(argv)
+        return code, buffer.getvalue(), errors.getvalue()
+
+    def test_a_grounded_answer_exits_zero(self) -> None:
+        code, _, _ = self._run(
+            WebSearchResponse("q", "m", "a", "vertex", [SearchResult("A", "https://arxiv.org/1")]),
+            ["q"],
+        )
+        self.assertEqual(code, 0)
+
+    def test_an_ungrounded_answer_exits_two_and_says_why(self) -> None:
+        code, _, errors = self._run(WebSearchResponse("q", "m", "an answer"), ["q"])
+        self.assertEqual(code, 2)
+        self.assertIn("no citable source", errors)
+
+    def test_the_ungrounded_exit_code_is_distinct_from_outright_failure(self) -> None:
+        with patch("src.web_search.gemini_web_search", side_effect=WebSearchError("boom")):
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                self.assertEqual(web_search_main(["q"]), 1)
+
+    def test_the_prompt_documents_every_exit_code_main_can_return(self) -> None:
+        section = build_web_search_prompt_section()
+        for code in ("`0`", "`1`", "`2`"):
+            self.assertIn(code, section)
+
+
+class MaxResultsFloorTest(unittest.TestCase):
+    def test_a_non_positive_cap_returns_nothing_rather_than_one(self) -> None:
+        chunks = [_Chunk(_Web(f"https://example.org/{i}")) for i in range(3)]
+        response = _Response([_Candidate(_Metadata(chunks))])
+        for cap in (-5, -1, 0):
+            with self.subTest(max_results=cap):
+                self.assertEqual(extract_search_results(response, max_results=cap), [])
+
+    def test_a_positive_cap_is_still_honoured_exactly(self) -> None:
+        chunks = [_Chunk(_Web(f"https://example.org/{i}")) for i in range(10)]
+        response = _Response([_Candidate(_Metadata(chunks))])
+        for cap in (1, 3, 9):
+            with self.subTest(max_results=cap):
+                self.assertEqual(len(extract_search_results(response, max_results=cap)), cap)
+
+    def test_the_cap_holds_across_several_candidates(self) -> None:
+        response = _Response([
+            _Candidate(_Metadata([_Chunk(_Web("https://a")), _Chunk(_Web("https://b"))])),
+            _Candidate(_Metadata([_Chunk(_Web("https://c")), _Chunk(_Web("https://d"))])),
+        ])
+        self.assertEqual(len(extract_search_results(response, max_results=3)), 3)
+
+
+class SourceTitleTest(unittest.TestCase):
+    """Grounding labels every source with a bare domain, which identifies nothing."""
+
+    def test_a_page_title_replaces_a_bare_domain(self) -> None:
+        self.assertEqual(
+            best_title("arxiv.org", "Attention Is All You Need", "https://arxiv.org/abs/1706.03762"),
+            "Attention Is All You Need",
+        )
+
+    def test_a_www_prefixed_domain_is_still_a_bare_domain(self) -> None:
+        self.assertEqual(best_title("nature.com", "A paper", "https://www.nature.com/x"), "A paper")
+
+    def test_a_real_grounding_title_is_kept_over_the_page_title(self) -> None:
+        self.assertEqual(
+            best_title("Attention Is All You Need", "arXiv.org e-Print archive", "https://arxiv.org/abs/1"),
+            "Attention Is All You Need",
+        )
+
+    def test_no_page_title_leaves_the_domain_in_place(self) -> None:
+        self.assertEqual(best_title("arxiv.org", None, "https://arxiv.org/abs/1"), "arxiv.org")
+
+    def test_a_title_equal_to_the_url_counts_as_bare(self) -> None:
+        self.assertEqual(best_title("https://a/b", "Real Title", "https://a/b"), "Real Title")
+
+
+class ResolveSourceTest(unittest.TestCase):
+    STUB = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/ABC"
+
+    class _FakeResponse:
+        def __init__(self, url: str, body: bytes) -> None:
+            self.url = url
+            self._body = body
+
+        def read(self, size: int = -1) -> bytes:
+            return self._body[:size] if size and size > 0 else self._body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc) -> bool:
+            return False
+
+    def test_a_redirect_yields_both_the_target_and_its_title(self) -> None:
+        page = b"<html><head><title>  Attention Is\nAll You Need </title></head>"
+        with patch(
+            "urllib.request.urlopen",
+            return_value=self._FakeResponse("https://arxiv.org/abs/1706.03762", page),
+        ):
+            url, title = resolve_source(self.STUB)
+        self.assertEqual(url, "https://arxiv.org/abs/1706.03762")
+        self.assertEqual(title, "Attention Is All You Need")
+
+    def test_html_entities_in_a_title_are_unescaped(self) -> None:
+        with patch(
+            "urllib.request.urlopen",
+            return_value=self._FakeResponse("https://a/b", b"<title>A &amp; B</title>"),
+        ):
+            self.assertEqual(resolve_source(self.STUB)[1], "A & B")
+
+    def test_a_runaway_title_is_truncated(self) -> None:
+        """The title goes into a prompt, so an unbounded one is an unbounded token cost."""
+        page = b"<title>" + b"x" * 5000 + b"</title>"
+        with patch("urllib.request.urlopen", return_value=self._FakeResponse("https://a", page)):
+            title = resolve_source(self.STUB)[1]
+        self.assertEqual(len(title), 200)
+
+    def test_a_page_with_no_title_resolves_the_url_anyway(self) -> None:
+        with patch(
+            "urllib.request.urlopen",
+            return_value=self._FakeResponse("https://a/b", b"<html><body>x</body></html>"),
+        ):
+            self.assertEqual(resolve_source(self.STUB), ("https://a/b", None))
+
+    def test_a_failed_resolution_reports_no_title_and_keeps_the_stub(self) -> None:
+        with patch("urllib.request.urlopen", side_effect=OSError("boom")):
+            self.assertEqual(resolve_source(self.STUB), (self.STUB, None))
+
+    def test_a_non_redirect_is_not_fetched(self) -> None:
+        with patch("urllib.request.urlopen", side_effect=AssertionError("should not be called")):
+            self.assertEqual(resolve_source("https://arxiv.org/abs/1"), ("https://arxiv.org/abs/1", None))
+
+    def test_the_body_read_is_capped(self) -> None:
+        """An unbounded read turns one citation lookup into an arbitrary download."""
+        seen: dict[str, int] = {}
+        response = self._FakeResponse("https://a", b"<title>t</title>")
+        original_read = response.read
+
+        def recording_read(size: int = -1) -> bytes:
+            seen["size"] = size
+            return original_read(size)
+
+        response.read = recording_read  # type: ignore[method-assign]
+        with patch("urllib.request.urlopen", return_value=response):
+            resolve_source(self.STUB)
+        self.assertEqual(seen["size"], web_search_module.TITLE_SCAN_BYTES)
