@@ -1628,6 +1628,69 @@ def _extract_path_references(text: str) -> list[str]:
     return paths
 
 
+#: Characters that make a "Files Produced" entry a pattern rather than a literal path.
+PATTERN_CHARS = ("*", "?", "[", "{")
+
+
+def expand_braces(pattern: str) -> list[str]:
+    """Expand ``a{b,c}d`` into ``[abd, acd]``, recursively.
+
+    A stage that produced four files naturally writes
+    ``text/paper_00{0,1,2,3}.txt`` rather than four lines. :mod:`glob` does not
+    understand braces, so without this the entry is treated as one literal
+    filename that cannot exist.
+    """
+    open_at = pattern.find("{")
+    if open_at == -1:
+        return [pattern]
+
+    depth = 0
+    for index in range(open_at, len(pattern)):
+        if pattern[index] == "{":
+            depth += 1
+        elif pattern[index] == "}":
+            depth -= 1
+            if depth == 0:
+                close_at = index
+                break
+    else:
+        return [pattern]  # unbalanced; treat literally rather than guessing
+
+    prefix, body, suffix = pattern[:open_at], pattern[open_at + 1:close_at], pattern[close_at + 1:]
+    options, depth, current = [], 0, ""
+    for char in body:
+        if char == "," and depth == 0:
+            options.append(current)
+            current = ""
+            continue
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+        current += char
+    options.append(current)
+
+    expanded: list[str] = []
+    for option in options:
+        for tail in expand_braces(suffix):
+            expanded.extend(expand_braces(prefix + option + tail))
+    return expanded
+
+
+def _pattern_matches_under(root: Path, pattern: str) -> bool:
+    """True when at least one real file matches *pattern* beneath *root*."""
+    for candidate in expand_braces(pattern):
+        if any(char in candidate for char in ("*", "?", "[")):
+            try:
+                if any(root.glob(candidate)):
+                    return True
+            except (OSError, ValueError, IndexError):
+                continue
+        elif (root / candidate).exists():
+            return True
+    return False
+
+
 def _listed_file_exists(
     run_root: Path,
     listed_path: str,
@@ -1653,25 +1716,37 @@ def _listed_file_exists(
        that complies and then lists ``outputs/metrics.csv`` is describing a
        real file the first two roots cannot see.
 
+    An entry containing ``*``, ``?``, ``[`` or ``{`` is treated as a **pattern**
+    rather than a literal name, and matches when at least one real file matches
+    it. A stage that produced four papers writes
+    ``text/paper_00{0,1,2,3}.txt`` or ``text/paper_00*.txt`` rather than four
+    lines; read literally, those are filenames that cannot exist, and the stage
+    is failed for artifacts it genuinely produced. A pattern matching nothing
+    still fails, so the gate keeps its teeth.
+
     We accept all of them. Absolute paths are honored as-is. Each fallback is
     strictly additive — every path that validated before still validates — so
     existing CLI runs are not affected.
     """
     candidate = Path(listed_path)
+    is_pattern = any(char in listed_path for char in PATTERN_CHARS)
     try:
         if candidate.is_absolute():
-            return candidate.exists()
-        # 1. Run-root-relative (canonical AutoR form)
-        via_root = run_root / candidate
-        if via_root.exists():
-            return True
-        # 2. Workspace-relative fallback
-        via_workspace = run_root / "workspace" / candidate
-        if via_workspace.exists():
-            return True
-        # 3. Extra artifact roots (for example a benchmark workspace)
-        for root in extra_roots or ():
-            if (root / candidate).exists():
+            if not is_pattern:
+                return candidate.exists()
+            anchor = Path(candidate.anchor)
+            return _pattern_matches_under(anchor, str(candidate.relative_to(anchor)))
+
+        roots = [
+            run_root,                    # 1. Run-root-relative (canonical AutoR form)
+            run_root / "workspace",      # 2. Workspace-relative fallback
+            *(extra_roots or ()),        # 3. Extra artifact roots (e.g. a benchmark workspace)
+        ]
+        for root in roots:
+            if is_pattern:
+                if _pattern_matches_under(root, listed_path):
+                    return True
+            elif (root / candidate).exists():
                 return True
     except OSError:
         return False
