@@ -24,7 +24,14 @@ from src.rcb import (
     resolve_instructions,
     runs_dir_for,
 )
-from src.utils import STAGES, build_run_paths, ensure_run_layout, read_text, write_text
+from src.utils import (
+    STAGES,
+    build_run_paths,
+    ensure_run_layout,
+    read_text,
+    validate_stage_markdown,
+    write_text,
+)
 
 
 PNG_BYTES = bytes.fromhex(
@@ -433,3 +440,67 @@ class RunMetaTest(ExportTestBase):
             status="failed", duration_seconds=5, model="opus",
         )
         self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["status"], "failed")
+
+
+class BenchmarkArtifactRootTest(unittest.TestCase):
+    """A stage that writes where the benchmark contract told it to must still validate.
+
+    The contract points stages at `<workspace>/outputs/` and `<workspace>/report/images/`,
+    which live outside the run tree. Before extra roots existed, a compliant stage failed
+    `Files Produced` validation and burned its whole retry budget on every task.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.workspace = Path(self._tmp.name) / "Physics_003_20260806_034828"
+        self.workspace.mkdir()
+        ensure_workspace_layout(self.workspace)
+        self.paths = build_run_paths(runs_dir_for(self.workspace) / "20260806_034835")
+        ensure_run_layout(self.paths)
+
+    def _markdown(self, listed: str) -> str:
+        return (
+            "# Stage 01: Literature Survey\n\n"
+            "## Objective\no\n\n## Previously Approved Stage Summaries\nn\n\n"
+            "## What I Did\nw\n\n## Key Results\nk\n\n"
+            f"## Files Produced\n- `{listed}`\n\n"
+            "## Decision Ledger\nOpen Questions: -\nLocked Decisions: -\n"
+            "Assumptions: -\nRejected Alternatives: -\n\n"
+            "## Suggestions for Refinement\n1. a\n2. b\n3. c\n\n"
+            "## Your Options\n1. a\n2. b\n3. c\n4. d\n5. e\n6. f\n"
+        )
+
+    def _missing_file_problems(self, markdown, roots):
+        return [
+            p for p in validate_stage_markdown(
+                markdown, stage=STAGES[0], paths=self.paths, artifact_roots=roots
+            )
+            if "references missing file" in p
+        ]
+
+    def test_a_benchmark_workspace_file_validates_when_the_root_is_supplied(self) -> None:
+        (self.workspace / "outputs" / "metrics.csv").write_text("a,b\n", encoding="utf-8")
+        markdown = self._markdown("outputs/metrics.csv")
+        self.assertEqual(self._missing_file_problems(markdown, [self.workspace]), [])
+
+    def test_the_same_file_fails_without_the_extra_root(self) -> None:
+        """Proves the extra root is what fixes it, not something else in the fixture."""
+        (self.workspace / "outputs" / "metrics.csv").write_text("a,b\n", encoding="utf-8")
+        markdown = self._markdown("outputs/metrics.csv")
+        self.assertEqual(len(self._missing_file_problems(markdown, None)), 1)
+
+    def test_a_genuinely_missing_file_still_fails_with_the_root_supplied(self) -> None:
+        """The extra root must not turn the gate off."""
+        markdown = self._markdown("outputs/never_written.csv")
+        self.assertEqual(len(self._missing_file_problems(markdown, [self.workspace])), 1)
+
+    def test_run_tree_paths_still_validate(self) -> None:
+        write_text(self.paths.code_dir / "run.py", "print(1)\n")
+        markdown = self._markdown("workspace/code/run.py")
+        self.assertEqual(self._missing_file_problems(markdown, [self.workspace]), [])
+
+    def test_a_report_image_at_the_benchmark_path_validates(self) -> None:
+        (self.workspace / "report" / "images" / "fig1.png").write_bytes(PNG_BYTES)
+        markdown = self._markdown("report/images/fig1.png")
+        self.assertEqual(self._missing_file_problems(markdown, [self.workspace]), [])

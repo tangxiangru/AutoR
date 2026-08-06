@@ -277,6 +277,9 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
         unattended=True,
         max_auto_skips=args.max_auto_skips,
         web_search_context=resolve_web_search_context(args.web_search),
+        # Stages are told to keep code/, outputs/ and report/images/ up to date in the
+        # benchmark workspace, so 'Files Produced' must resolve against it too.
+        artifact_roots=[workspace],
     )
 
     pipeline_completed = False

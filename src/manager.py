@@ -128,6 +128,7 @@ class ResearchManager:
         unattended: bool = False,
         max_auto_skips: int = 3,
         web_search_context: str | None = None,
+        artifact_roots: list[Path] | None = None,
     ) -> None:
         self.project_root = project_root
         self.runs_dir = runs_dir
@@ -150,6 +151,9 @@ class ResearchManager:
         self.max_auto_skips = max_auto_skips
         self.auto_skipped_stages: list[str] = []
         self.web_search_context = web_search_context
+        # Extra roots a stage may legitimately write to, beyond the run tree. A benchmark
+        # workspace is one: its output contract points stages at paths outside runs/.
+        self.artifact_roots = artifact_roots or []
 
     def run(
         self,
@@ -1305,7 +1309,7 @@ class ResearchManager:
                 write_hypothesis_manifest(paths, stage_markdown)
             if stage.slug == "07_writing":
                 self._generate_writing_review(paths)
-            validation_errors = validate_stage_markdown(stage_markdown, stage=stage, paths=paths) + validate_stage_artifacts(stage, paths)
+            validation_errors = validate_stage_markdown(stage_markdown, stage=stage, paths=paths, artifact_roots=self.artifact_roots) + validate_stage_artifacts(stage, paths)
             if validation_errors:
                 mark_stage_failed_manifest(paths, stage, "; ".join(validation_errors))
                 self._print(
@@ -1359,7 +1363,7 @@ class ResearchManager:
                     write_hypothesis_manifest(paths, stage_markdown)
                 if stage.slug == "07_writing":
                     self._generate_writing_review(paths)
-                validation_errors = validate_stage_markdown(stage_markdown, stage=stage, paths=paths) + validate_stage_artifacts(stage, paths)
+                validation_errors = validate_stage_markdown(stage_markdown, stage=stage, paths=paths, artifact_roots=self.artifact_roots) + validate_stage_artifacts(stage, paths)
                 if validation_errors:
                     self.ui.show_status(
                         f"Repair output for {stage.stage_title} is still incomplete. Normalizing locally...",
@@ -1390,7 +1394,7 @@ class ResearchManager:
                     stage_markdown = read_text(repair_result.stage_file_path)
                     if stage.slug == "02_hypothesis_generation":
                         write_hypothesis_manifest(paths, stage_markdown)
-                    validation_errors = validate_stage_markdown(stage_markdown, stage=stage, paths=paths) + validate_stage_artifacts(stage, paths)
+                    validation_errors = validate_stage_markdown(stage_markdown, stage=stage, paths=paths, artifact_roots=self.artifact_roots) + validate_stage_artifacts(stage, paths)
                     if validation_errors:
                         append_log_entry(
                             paths.logs,
