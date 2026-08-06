@@ -209,13 +209,33 @@ def _guard_round_abandoned(paths: RunPaths, state: "GraphState") -> GuardResult:
     """
     from .research_rounds import latest_round
 
+    # Scoped to *this visit*, not to the run.
+    #
+    # `research_rounds.json` is run-global and nothing invalidates it — a rollback
+    # does not touch it, and `_skip_stage` never closes a round at all. Read
+    # globally, an abandonment recorded once would govern every later arrival at
+    # Stage 06 forever: an operator who disagreed, rolled back to Stage 03 and
+    # re-ran into a Stage 06 that exhausted its retries would find the walk
+    # terminating on a decision that visit never made — and, because a live
+    # conditional terminal preempts every other move, with no way for the agent to
+    # go anywhere else either.
+    #
+    # Every other guard here reads stage artifacts, which a rollback invalidates.
+    # This one reads a ledger, so the scoping has to be explicit: the closing round
+    # is stamped on the `Visit`, and the guard asks whether *this* traversal closed
+    # a round that concluded abandon.
+    visit = state.path[-1] if state.path else None
+    closed = visit.closed_round if visit is not None else 0
+    if not closed:
+        return GuardResult(False, "this visit closed no research round")
+
     final = latest_round(paths)
-    if final is not None and final.decision == "abandon":
+    if final is not None and final.number == closed and final.decision == "abandon":
         return GuardResult(
             True,
             f"round {final.number} concluded the question cannot be answered: {final.rationale}",
         )
-    return GuardResult(False, "no closed round has concluded `abandon`")
+    return GuardResult(False, f"round {closed} did not conclude `abandon`")
 
 
 def _guard_has_hypotheses(paths: RunPaths, state: "GraphState") -> GuardResult:
@@ -297,13 +317,12 @@ _ADVANCE_GUARDS = {
 }
 
 
-#: Forward edges are priority 0 everywhere except out of Stage 06, where the
-#: abandonment terminal sits at 0 and writing up sits behind it. Priority only
-#: separates *live* forward moves, so on every ordinary run — where the terminal's
-#: guard is shut — Stage 06 still advances to writing exactly as before. It matters
-#: in the one case it exists for: a round that concluded the question cannot be
-#: answered stops, rather than writing up the answer it does not have.
-_ADVANCE_PRIORITIES = {"07_writing": 1}
+#: Per-target overrides for the forward priority. Empty, and it should stay that
+#: way unless something can be shown to depend on it: a live conditional terminal
+#: preempts every other move at its node, so priority never decides between a
+#: terminal and an advance, and every node has exactly one advance. An entry here
+#: that changes no behaviour is a constant a reader will assume is load-bearing.
+_ADVANCE_PRIORITIES: dict[str, int] = {}
 
 #: Terminals other than "the run produced what it set out to produce". Carried by
 #: both topologies: refusing to write up an abandoned round is a correctness
@@ -443,6 +462,10 @@ class Visit:
     #: and an estimator that counted them as decisions where nothing else was on
     #: offer would be reading an operator's intervention as evidence about an edge.
     bypassed: bool = False
+    #: The research round this visit closed, if it closed one. Zero otherwise.
+    #: What makes the abandonment guard a statement about this traversal rather than
+    #: about the run's whole history.
+    closed_round: int = 0
     #: Filled in when the run leaves. An unfinished visit is the record of where a
     #: run was interrupted, which is what a resume needs.
     left_at: str = ""
@@ -471,6 +494,7 @@ class Visit:
             "offered": list(self.offered),
             "blocked": dict(self.blocked),
             "bypassed": self.bypassed,
+            "closed_round": self.closed_round,
         }
 
     @classmethod
@@ -494,6 +518,7 @@ class Visit:
                 str(k): str(v) for k, v in (payload.get("blocked") or {}).items() if str(k)
             },
             bypassed=bool(payload.get("bypassed")),
+            closed_round=int(payload.get("closed_round") or 0),
         )
 
 
@@ -566,8 +591,10 @@ def save_graph_state(paths: RunPaths, state: GraphState) -> None:
 #: through it: a guard is a statement about the *research* and can be overridden as
 #: a last resort, while a budget is a statement about the *run* and cannot.
 #: ``concluded`` is neither — the run has already decided to stop, and the move is
-#: not unavailable so much as moot.
-BLOCK_KINDS = ("guard", "visits", "steps", "concluded")
+#: not unavailable so much as moot. ``pruned`` is the caller's own ``--final-stage``:
+#: not a fact about the research at all, and the one kind that means the walk is
+#: finished rather than stuck.
+BLOCK_KINDS = ("guard", "visits", "steps", "concluded", "pruned")
 
 
 @dataclass(frozen=True)
@@ -646,9 +673,26 @@ class StageGraph:
         """
         results: list[Move] = []
         for edge in self.out_edges(slug):
+            # `--final-stage` used to drop the edge from the list entirely. That made
+            # the node look like one with no forward move at all, and `default_move`
+            # fell through to the backward edges — so on the adaptive topology, which
+            # is the default, `--final-stage 07` sent the run back to Stage 06 and
+            # kept going until a budget stopped it. Measured at every final stage:
+            # 05 -> 04, 06 -> 05, 07 -> 06, all revisits. Recorded as a block instead,
+            # the node still has its forward move and the walk can see that the
+            # reason it cannot be taken is the caller's, not the research's.
             if final_stage is not None and edge.target != FINISH:
                 target_stage = stage_for_slug(edge.target)
                 if target_stage is not None and target_stage.number > final_stage.number:
+                    results.append(
+                        Move(
+                            edge,
+                            GuardResult(True, "not evaluated"),
+                            f"`{edge.target}` is past the requested final stage "
+                            f"`{final_stage.slug}`",
+                            "pruned",
+                        )
+                    )
                     continue
 
             guard = edge.guard_fn()(paths, state)
@@ -704,9 +748,9 @@ class StageGraph:
         if live_forward:
             return min(live_forward, key=by_rank)
 
-        # A budget said stop. Unlike a guard, that is not a statement about the
-        # research and there is nothing to route around.
-        if any(move.blocked_kind in {"steps", "visits"} for move in forward):
+        # A budget said stop, or the caller did. Unlike a guard, neither is a
+        # statement about the research, and there is nothing to route around.
+        if any(move.blocked_kind in {"steps", "visits", "pruned"} for move in forward):
             return None
 
         # Forward is shut by a guard, and the default does **not** go back.

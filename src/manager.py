@@ -58,6 +58,7 @@ from .research_rounds import (
     ROUND_CLOSING_STAGE_NUMBER,
     Round,
     latest_round,
+    unreopened_abandonment,
     read_round_decision,
     format_round_status,
     format_rounds_for_prompt,
@@ -224,6 +225,11 @@ class ResearchManager:
         self.review_model = review_model or getattr(reviewer, "model", getattr(operator, "model", "unknown"))
         self.last_run_paths: RunPaths | None = None
         self._jump_reason: str = ""
+        #: The round `_close_round` just closed, carried from `_run_stage` to
+        #: `_advance_from` so it can be stamped on the visit. The abandonment guard
+        #: reads the visit rather than the run-global ledger, so this is what scopes
+        #: it to the traversal that actually made the decision.
+        self._closed_round: int = 0
         self._redo_start_stage: StageSpec | None = None
         self._research_diagram: bool = False
         self._final_stage: StageSpec | None = None
@@ -463,6 +469,7 @@ class ResearchManager:
             graph_enter(paths, state, stage)
             self._jump_target_stage = None
             self._jump_reason = ""
+            self._closed_round = 0
             approved = self._run_stage(paths, stage)
 
             # Three things reach this seam: `/back <stage>`, a rollback after retry
@@ -510,10 +517,25 @@ class ResearchManager:
         save_graph_state(paths, state)
         return self._complete_run(paths, state=state)
 
-    def _run_was_abandoned(self, paths: RunPaths) -> "Round | None":
-        """The closed round that concluded the question cannot be answered, if any."""
+    def _run_was_abandoned(
+        self, paths: RunPaths, state: "GraphState | None" = None
+    ) -> "Round | None":
+        """The round this walk stopped on, if it stopped because of an abandonment.
+
+        Asks the walk rather than the ledger. A run whose first round abandoned and
+        which an operator then rolled back and finished has an abandonment in its
+        history and is not an abandoned run, and the status it ends with decides how
+        every downstream reader treats it.
+        """
+        if state is None or not state.path:
+            return None
+        last = state.path[-1]
+        if last.chose != GRAPH_FINISH or not last.closed_round:
+            return None
         final = latest_round(paths)
-        return final if final is not None and final.decision == "abandon" else None
+        if final is not None and final.number == last.closed_round and final.decision == "abandon":
+            return final
+        return None
 
     def _complete_run(self, paths: RunPaths, state: "GraphState | None" = None) -> bool:
         route = format_route(state) if state is not None else ""
@@ -523,7 +545,7 @@ class ResearchManager:
         # `completed` and `cancelled` are both wrong, and `cancelled` is the worse
         # of the two: it is what an abort writes, so the honest outcome would be
         # indistinguishable from a crash in every downstream reader.
-        abandoned = self._run_was_abandoned(paths)
+        abandoned = self._run_was_abandoned(paths, state)
         if abandoned is not None:
             append_log_entry(
                 paths.logs,
@@ -566,7 +588,23 @@ class ResearchManager:
         return True
 
     def _graph_entry_stage(self, paths: RunPaths, start_stage: StageSpec | None) -> StageSpec | None:
-        """Where the walk starts: the requested stage, or the first unsettled one."""
+        """Where the walk starts: the requested stage, or the first unsettled one.
+
+        An abandoned run has no entry. It stopped at Stage 06 by design, so Stages 07
+        and 08 are unsettled and would otherwise be picked as the resume point —
+        `--resume-run` would drive straight into the stage the terminal exists to
+        avoid, and burn its whole retry budget against a gate that refuses it. The
+        abandonment has to be overruled on the record before the run continues.
+        """
+        standing = unreopened_abandonment(paths)
+        if standing is not None and start_stage is None:
+            self.ui.show_status(
+                f"Round {standing.number} concluded the question cannot be answered: "
+                f"{standing.rationale} Nothing to resume. To continue anyway, roll back "
+                "explicitly, or record a round that reopens it.",
+                level="warn",
+            )
+            return None
         pending = self._select_stages_for_run(paths, start_stage)
         return pending[0] if pending else None
 
@@ -580,6 +618,11 @@ class ResearchManager:
         score = None
         if self.evolution is not None:
             score = self.evolution.finalize_stage(paths, stage)
+
+        # Before the guards are evaluated: the abandonment terminal asks the visit,
+        # not the ledger.
+        if state.path:
+            state.path[-1].closed_round = self._closed_round
 
         decision = self.router.choose(
             paths=paths,
@@ -3089,6 +3132,7 @@ class ResearchManager:
         )
         if entry is None:
             return
+        self._closed_round = entry.number
 
         append_log_entry(
             paths.logs,
