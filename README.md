@@ -837,11 +837,3 @@ python -m unittest discover -s tests -p "test_*.py"
 ```
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request, and [docs/development.md](docs/development.md) before changing code. Security issues go through [SECURITY.md](SECURITY.md), not a public issue.
-
-## 🌍 Community
-
-Join the project community channels:
-
-| Discord | WeChat | WhatsApp |
-| --- | --- | --- |
-| <img src="assets/discord.jpg" alt="Discord QR" width="180" /> | <img src="assets/wechat.jpg" alt="WeChat QR" width="180" /> | <img src="assets/whatsapp.jpg" alt="WhatsApp QR" width="180" /> |
