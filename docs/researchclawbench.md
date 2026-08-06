@@ -159,7 +159,17 @@ carries a figure reference that is absolute, remote, unrenderable, or points at 
 is not there, or publishes more than five figures. A broken figure link is the expensive
 defect here: the judge reads the prose promising a figure and is shown nothing.
 
-### 3. Streams progress
+### 3. Spends the time it is given
+
+Neither the UI runner nor the batch CLI puts a timeout on the agent subprocess — the
+`max_runtime_seconds` in the shipped configs is a ResearchHarness-internal setting, not
+something the harness enforces. Nothing outside AutoR will stop a run, so the adapter's own
+ceilings are the only ones that bind, and they are set for quality rather than thrift:
+`--stage-timeout 14400` and `--max-attempts 8`. Every retry re-runs the stage with its
+validation errors attached, and an exhausted stage is auto-skipped, which is the expensive
+outcome.
+
+### 4. Streams progress
 
 `rcb_agent.py` writes JSON lines to stdout, which the harness captures into
 `_agent_output.jsonl`. The first line carries the model name so the run browser can display
@@ -233,9 +243,22 @@ Both `main.py` and `rcb_agent.py` take `--web-search`:
 
 | Value | Behaviour |
 |:---|:---|
-| `auto` (default) | Gemini when a key is configured, native search otherwise |
-| `gemini` | Always Gemini. Use this where `WebSearch` is blocked. |
+| `auto` (default) | Gemini when it can actually run, native search otherwise |
+| `gemini` | Always Gemini. Use this where `WebSearch` is blocked. Refuses to start if Gemini provably cannot work. |
 | `native` | Leave the backend's own search tool in charge |
+
+**"Can actually run" is three checks, not one.** A credential is not a working
+search tool. `google-genai` has to be importable by the interpreter that will run the
+script — it is not a default dependency, and the Vertex probe uses `google.auth`, a
+different distribution that can be installed without it. And the sandbox has to permit
+egress: `--operator codex` with `read-only` or `workspace-write` (the default) restricts
+outbound network access, so the search subprocess cannot reach Gemini at all. `auto` falls
+back to native on any of them and names the blocker at startup; `--web-search gemini`
+refuses to start on the first two, and warns on the third because it is inferred from the
+requested mode rather than observed.
+
+The advertised command names AutoR's own interpreter rather than a bare `python3`, so the
+interpreter checked for the SDK is the one that runs the script.
 
 When Gemini search is active, a `# Web Search Capability` block is injected into every stage
 prompt telling the operator that `WebSearch` is disabled, how to call the replacement, and
@@ -259,8 +282,11 @@ The search model defaults to `gemini-2.5-flash` and is overridable with
 --review-operator {claude,codex}  Reviewer backend. Default: the execution backend.
 --review-model NAME             Reviewer model. Default: the backend default.
 
---stage-timeout SECONDS  Per stage attempt. Default: 3600, lower than AutoR's interactive
-                         default because benchmark runs are wall-clock bound.
+--stage-timeout SECONDS  Per stage attempt. Default: 14400. The harness enforces no wall
+                         clock of its own, so this is the only thing that can cut a stage
+                         short.
+--max-attempts N         Attempts per stage before it is auto-skipped. Default: 8, higher
+                         than the interactive default because a skipped stage costs score.
 --max-auto-skips N       Stages that may be auto-skipped before aborting. Default: 3.
 --intake                 Run the intake stage. Off by default: the benchmark instructions
                          are already a complete task specification.

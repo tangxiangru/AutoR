@@ -11,13 +11,18 @@ from src.operator import ClaudeOperator
 from src.operator_codex import CodexOperator
 from src.operator_protocol import OperatorProtocol
 from src.terminal_ui import TerminalUI
-from src.web_search import resolve_web_search_context, web_search_notice
+from src.web_search import (
+    assess_search_readiness,
+    resolve_web_search_context,
+    web_search_notice,
+)
 from src.utils import (
     CODEX_SANDBOX_CHOICES,
     DEFAULT_CODEX_SANDBOX,
     DEFAULT_OUTPUT_FORMAT,
     DEFAULT_VENUE,
     OUTPUT_FORMAT_CLI_CHOICES,
+    MAX_STAGE_ATTEMPTS,
     STAGES,
     build_run_paths,
     load_run_config,
@@ -95,6 +100,14 @@ def parse_args() -> argparse.Namespace:
         default=3,
         help="In unattended mode, the maximum number of stages that may be auto-skipped after "
              "exhausting their retry budget before the run aborts. Defaults to 3.",
+    )
+    parser.add_argument(
+        "--max-attempts",
+        type=int,
+        default=MAX_STAGE_ATTEMPTS,
+        help="Attempts allowed per stage before AutoR escalates or auto-skips. Each retry "
+             "re-runs the stage with the previous attempt's validation errors attached. "
+             f"Defaults to {MAX_STAGE_ATTEMPTS}.",
     )
     parser.add_argument(
         "--review-operator",
@@ -328,11 +341,25 @@ def main() -> int:
     repo_root = Path(__file__).resolve().parent
     runs_dir = repo_root / args.runs_dir
     unattended = resolve_unattended(args)
-    web_search_context = resolve_web_search_context(args.web_search)
     ui = TerminalUI(interactive=not unattended)
     ui.show_banner()
-    notice, level = web_search_notice(args.web_search)
+
+    # Assessed against the operator this run will actually use, because the sandbox the
+    # search subprocess inherits is part of whether the tool can run at all. Resolved
+    # before the resume branch reads run_config, so a resumed run that switches backends
+    # re-derives it below.
+    readiness = assess_search_readiness(
+        operator=(args.operator or "claude"),
+        codex_sandbox=args.codex_sandbox,
+    )
+    web_search_context = resolve_web_search_context(args.web_search, readiness=readiness)
+    notice, level = web_search_notice(args.web_search, readiness=readiness)
     ui.show_status(notice, level=level)
+    if args.web_search == "gemini" and readiness.hard_blocker:
+        raise ValueError(
+            f"--web-search gemini cannot work here: {readiness.hard_blocker} "
+            "Fix it, or use --web-search auto to fall back to native search."
+        )
 
     if args.resume_run:
         start_stage = resolve_stage(args.redo_stage)
@@ -403,6 +430,7 @@ def main() -> int:
             review_model=review_model,
             unattended=unattended,
             max_auto_skips=args.max_auto_skips,
+            max_stage_attempts=args.max_attempts,
             web_search_context=web_search_context,
         )
         return 0 if manager.resume_run(
@@ -452,6 +480,7 @@ def main() -> int:
         review_model=review_model,
         unattended=unattended,
         max_auto_skips=args.max_auto_skips,
+        max_stage_attempts=args.max_attempts,
         web_search_context=web_search_context,
     )
 

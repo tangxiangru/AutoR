@@ -807,8 +807,8 @@ class ManagerSmokeTests(unittest.TestCase):
             manager.ui.input_stream = DummyTTY()
             manager.ui.read_single_line = MagicMock(return_value="1")
 
-            with patch("src.manager.MAX_STAGE_ATTEMPTS", 0):
-                approved = manager._run_stage(paths, STAGE_01)
+            manager.max_stage_attempts = 0
+            approved = manager._run_stage(paths, STAGE_01)
 
             self.assertTrue(approved)
             stage_markdown = read_text(paths.stage_file(STAGE_01))

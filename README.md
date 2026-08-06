@@ -302,6 +302,7 @@ AI handles execution load; humans steer the research when direction actually mat
 | Seed the run from your own prior papers | `python main.py --paper-corpus ~/papers --goal "..."` |
 | Store runs on another disk | `python main.py --runs-dir /mnt/big-disk/runs --goal "..."` |
 | Raise the per-attempt ceiling for long training runs | `python main.py --stage-timeout 43200 --goal "..."` |
+| Give a stubborn stage more retries | `python main.py --max-attempts 10 --goal "..."` |
 | Skip the intake stage | `python main.py --skip-intake --goal "..."` |
 | Add a generated method diagram to the paper | `python main.py --research-diagram --goal "..."` |
 | Search the web where the agent's own `WebSearch` is disabled | `python main.py --web-search gemini --goal "..."` |

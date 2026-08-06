@@ -4,6 +4,7 @@ import io
 import json
 import os
 import tempfile
+import sys
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -16,6 +17,7 @@ from src.web_search import (
     DEFAULT_SEARCH_MODEL,
     DEFAULT_VERTEX_LOCATION,
     DEFAULT_VERTEX_SEARCH_MODEL,
+    assess_search_readiness,
     best_title,
     dedupe_by_url,
     is_unresolved_redirect,
@@ -283,6 +285,16 @@ class PromptSectionTest(unittest.TestCase):
 
 
 class WebSearchNoticeTest(unittest.TestCase):
+    @staticmethod
+    def _sdk(available: bool = True):
+        """State the SDK assumption explicitly.
+
+        Credentials alone no longer mean `auto` injects: `google-genai` also has to be
+        importable, and it is not installed in CI. Without this, these tests pass on a dev
+        box and fail in CI for a reason that has nothing to do with what they check.
+        """
+        return patch("src.web_search.genai_sdk_available", return_value=available)
+
     """The notice exists so a silent fallback cannot hide a dead Stage 01."""
 
     def _no_key(self):
@@ -296,7 +308,7 @@ class WebSearchNoticeTest(unittest.TestCase):
         self.assertIn("GEMINI_API_KEY", message)
 
     def test_auto_with_a_key_is_informational(self) -> None:
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "k"}, clear=True):
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "k"}, clear=True), self._sdk():
             message, level = web_search_notice("auto")
         self.assertEqual(level, "info")
         self.assertIn("Gemini", message)
@@ -336,6 +348,16 @@ class WebSearchNoticeTest(unittest.TestCase):
 
 
 class WebSearchModeTest(unittest.TestCase):
+    @staticmethod
+    def _sdk(available: bool = True):
+        """State the SDK assumption explicitly.
+
+        Credentials alone no longer mean `auto` injects: `google-genai` also has to be
+        importable, and it is not installed in CI. Without this, these tests pass on a dev
+        box and fail in CI for a reason that has nothing to do with what they check.
+        """
+        return patch("src.web_search.genai_sdk_available", return_value=available)
+
     def test_native_never_injects(self) -> None:
         with patch.dict(os.environ, {"GOOGLE_API_KEY": "k"}, clear=True):
             self.assertIsNone(autor_main.resolve_web_search_context("native"))
@@ -351,7 +373,7 @@ class WebSearchModeTest(unittest.TestCase):
                 self.assertIsNone(autor_main.resolve_web_search_context("auto"))
 
     def test_auto_uses_gemini_when_a_key_exists(self) -> None:
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "k"}, clear=True):
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "k"}, clear=True), self._sdk():
             self.assertIsNotNone(autor_main.resolve_web_search_context("auto"))
 
     def test_the_rcb_adapter_resolves_the_same_way(self) -> None:
@@ -369,6 +391,16 @@ if __name__ == "__main__":
 
 
 class VertexBackendTest(unittest.TestCase):
+    @staticmethod
+    def _sdk(available: bool = True):
+        """State the SDK assumption explicitly.
+
+        Credentials alone no longer mean `auto` injects: `google-genai` also has to be
+        importable, and it is not installed in CI. Without this, these tests pass on a dev
+        box and fail in CI for a reason that has nothing to do with what they check.
+        """
+        return patch("src.web_search.genai_sdk_available", return_value=available)
+
     """Vertex AI is the path that matters on deployments where WebSearch is disabled."""
 
     def _no_key(self):
@@ -421,7 +453,7 @@ class VertexBackendTest(unittest.TestCase):
             self.assertEqual(resolve_backend("gemini-x").model, "gemini-x")
 
     def test_the_notice_reports_vertex_rather_than_warning(self) -> None:
-        with patch.dict(os.environ, {"GOOGLE_CLOUD_PROJECT": "p1"}, clear=True), self._no_key(), self._adc(True):
+        with patch.dict(os.environ, {"GOOGLE_CLOUD_PROJECT": "p1"}, clear=True), self._no_key(), self._adc(True), self._sdk():
             message, level = web_search_notice("auto")
         self.assertEqual(level, "info")
         self.assertIn("Vertex AI", message)
@@ -429,7 +461,7 @@ class VertexBackendTest(unittest.TestCase):
 
     def test_auto_injects_the_prompt_block_on_a_vertex_only_box(self) -> None:
         """The regression this whole path exists for: no API key, but search does work."""
-        with patch.dict(os.environ, {"GOOGLE_CLOUD_PROJECT": "p1"}, clear=True), self._no_key(), self._adc(True):
+        with patch.dict(os.environ, {"GOOGLE_CLOUD_PROJECT": "p1"}, clear=True), self._no_key(), self._adc(True), self._sdk():
             self.assertIsNotNone(resolve_web_search_context("auto"))
 
     def test_credentials_probe_never_returns_a_token(self) -> None:
@@ -766,3 +798,287 @@ class ResolveSourceTest(unittest.TestCase):
         with patch("urllib.request.urlopen", return_value=response):
             resolve_source(self.STUB)
         self.assertEqual(seen["size"], web_search_module.TITLE_SCAN_BYTES)
+
+
+class SearchReadinessTest(unittest.TestCase):
+    """Credentials alone are not a promise that the tool can run.
+
+    The prompt block tells the operator "the built-in WebSearch tool is disabled, use this
+    script instead". Three further things have to be true for that to be honest.
+    """
+
+    KEY = {"GEMINI_API_KEY": "k"}
+
+    def _readiness(self, *, env=None, sdk=True, **kwargs):
+        with patch.dict(os.environ, env if env is not None else self.KEY, clear=True), \
+             patch("src.web_search.DIAGRAM_CONFIG_PATH", Path("/nonexistent/diagram.yaml")), \
+             patch("src.web_search.genai_sdk_available", return_value=sdk):
+            return assess_search_readiness(**kwargs)
+
+    def test_a_key_and_the_sdk_and_no_sandbox_is_usable(self) -> None:
+        readiness = self._readiness()
+        self.assertTrue(readiness.usable)
+        self.assertIsNone(readiness.blocker)
+        self.assertIsNone(readiness.hard_blocker)
+
+    def test_a_missing_sdk_blocks_even_with_a_key(self) -> None:
+        """google-genai is not a default dependency, and the Vertex probe uses google.auth
+        — a different distribution that can be installed without it."""
+        readiness = self._readiness(sdk=False)
+        self.assertFalse(readiness.usable)
+        self.assertIn("google-genai", readiness.blocker)
+        self.assertIn("pip install google-genai", readiness.hard_blocker)
+
+    def test_no_credentials_blocks(self) -> None:
+        with patch("src.web_search.vertex_credentials_available", return_value=False):
+            readiness = self._readiness(env={})
+        self.assertFalse(readiness.usable)
+        self.assertIn("no Gemini backend", readiness.blocker)
+
+    def test_the_missing_backend_is_reported_before_the_missing_sdk(self) -> None:
+        with patch("src.web_search.vertex_credentials_available", return_value=False):
+            readiness = self._readiness(env={}, sdk=False)
+        self.assertIn("no Gemini backend", readiness.blocker)
+
+    def test_a_network_restricted_codex_sandbox_blocks(self) -> None:
+        for sandbox in ("read-only", "workspace-write"):
+            with self.subTest(sandbox=sandbox):
+                readiness = self._readiness(operator="codex", codex_sandbox=sandbox)
+                self.assertFalse(readiness.usable)
+                self.assertIn("Codex sandbox", readiness.blocker)
+                self.assertIn(sandbox, readiness.blocker)
+
+    def test_the_codex_default_sandbox_is_the_restricted_one(self) -> None:
+        """Passing no --codex-sandbox is the common case, and its default blocks egress."""
+        self.assertIn("workspace-write", self._readiness(operator="codex").blocker)
+
+    def test_full_access_codex_is_not_blocked(self) -> None:
+        readiness = self._readiness(operator="codex", codex_sandbox="danger-full-access")
+        self.assertTrue(readiness.usable)
+
+    def test_claude_is_never_sandbox_blocked(self) -> None:
+        readiness = self._readiness(operator="claude", codex_sandbox="workspace-write")
+        self.assertTrue(readiness.usable)
+
+    def test_the_sandbox_blocker_is_not_hard_enough_to_abort_a_run(self) -> None:
+        """It is inferred from the requested mode, not observed, so it warns rather than
+        failing a run that might actually have worked."""
+        readiness = self._readiness(operator="codex", codex_sandbox="workspace-write")
+        self.assertIsNotNone(readiness.blocker)
+        self.assertIsNone(readiness.hard_blocker)
+
+    def test_every_blocker_names_a_remedy(self) -> None:
+        cases = [
+            self._readiness(sdk=False),
+            self._readiness(operator="codex", codex_sandbox="workspace-write"),
+        ]
+        with patch("src.web_search.vertex_credentials_available", return_value=False):
+            cases.append(self._readiness(env={}))
+        for readiness in cases:
+            with self.subTest(blocker=readiness.blocker):
+                self.assertRegex(readiness.blocker, r"Set |Install |Use |pip install|--")
+
+
+class ReadinessDrivesTheDecisionTest(unittest.TestCase):
+    USABLE = web_search_module.SearchReadiness(
+        backend=web_search_module.SearchBackend(kind="api_key", model="m", api_key="k"),
+        sdk_available=True,
+    )
+    NO_SDK = web_search_module.SearchReadiness(
+        backend=web_search_module.SearchBackend(kind="api_key", model="m", api_key="k"),
+        sdk_available=False,
+    )
+    SANDBOXED = web_search_module.SearchReadiness(
+        backend=web_search_module.SearchBackend(kind="api_key", model="m", api_key="k"),
+        sdk_available=True,
+        sandbox_blocker="the Codex sandbox `workspace-write` restricts outbound network access.",
+    )
+
+    def test_auto_falls_back_when_the_sdk_is_missing(self) -> None:
+        self.assertIsNone(resolve_web_search_context("auto", readiness=self.NO_SDK))
+
+    def test_auto_falls_back_when_the_sandbox_blocks_egress(self) -> None:
+        self.assertIsNone(resolve_web_search_context("auto", readiness=self.SANDBOXED))
+
+    def test_auto_injects_when_everything_checks_out(self) -> None:
+        self.assertIsNotNone(resolve_web_search_context("auto", readiness=self.USABLE))
+
+    def test_native_never_injects(self) -> None:
+        for readiness in (self.USABLE, self.NO_SDK, self.SANDBOXED):
+            self.assertIsNone(resolve_web_search_context("native", readiness=readiness))
+
+    def test_the_notice_names_the_specific_blocker_not_just_the_key(self) -> None:
+        message, level = web_search_notice("auto", readiness=self.NO_SDK)
+        self.assertEqual(level, "warn")
+        self.assertIn("google-genai", message)
+
+    def test_an_explicit_gemini_request_reports_the_blocker_at_error_level(self) -> None:
+        message, level = web_search_notice("gemini", readiness=self.NO_SDK)
+        self.assertEqual(level, "error")
+        self.assertIn("google-genai", message)
+
+    def test_a_usable_backend_is_reported_at_info_level(self) -> None:
+        for mode in ("auto", "gemini"):
+            message, level = web_search_notice(mode, readiness=self.USABLE)
+            self.assertEqual(level, "info")
+            self.assertIn("Gemini API", message)
+
+
+class AdvertisedInterpreterTest(unittest.TestCase):
+    def test_the_section_names_this_interpreter_not_a_bare_python3(self) -> None:
+        """`python3` is whatever the agent's PATH resolves it to, which need not be the
+        interpreter whose site-packages we checked for google-genai."""
+        section = build_web_search_prompt_section()
+        self.assertIn(sys.executable, section)
+
+    def test_an_interpreter_path_with_spaces_is_quoted(self) -> None:
+        with patch.object(web_search_module.sys, "executable", "/opt/my env/bin/python"):
+            section = build_web_search_prompt_section()
+        self.assertIn("'/opt/my env/bin/python'", section)
+
+    def test_it_falls_back_to_python3_when_the_interpreter_is_unknown(self) -> None:
+        with patch.object(web_search_module.sys, "executable", ""):
+            self.assertEqual(web_search_module.search_command_prefix(), "python3")
+
+
+class ExplicitGeminiRefusalTest(unittest.TestCase):
+    """`--web-search gemini` plus a certain blocker is a configuration error.
+
+    Continuing means every stage prompt asserts a working search tool that fails on first
+    use, and Stage 01 spends its retry budget before falling back to memory.
+    """
+
+    def _run_main(self, argv):
+        with patch.object(sys, "argv", ["main.py", *argv]):
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                return autor_main.main()
+
+    def test_a_keyless_explicit_gemini_run_is_refused(self) -> None:
+        with patch.dict(os.environ, {}, clear=True), \
+             patch("src.web_search.DIAGRAM_CONFIG_PATH", Path("/nonexistent/diagram.yaml")), \
+             patch("src.web_search.vertex_credentials_available", return_value=False):
+            with self.assertRaises(ValueError) as caught:
+                self._run_main(["--web-search", "gemini", "--goal", "x", "--fake-operator"])
+        self.assertIn("--web-search gemini cannot work here", str(caught.exception))
+        self.assertIn("no Gemini backend", str(caught.exception))
+
+    def test_the_refusal_names_a_way_out(self) -> None:
+        with patch.dict(os.environ, {}, clear=True), \
+             patch("src.web_search.DIAGRAM_CONFIG_PATH", Path("/nonexistent/diagram.yaml")), \
+             patch("src.web_search.vertex_credentials_available", return_value=False):
+            with self.assertRaises(ValueError) as caught:
+                self._run_main(["--web-search", "gemini", "--goal", "x", "--fake-operator"])
+        self.assertIn("--web-search auto", str(caught.exception))
+
+    def test_auto_is_not_refused_without_credentials(self) -> None:
+        """auto degrading to native is the designed path and must never abort."""
+        with patch.dict(os.environ, {}, clear=True), \
+             patch("src.web_search.DIAGRAM_CONFIG_PATH", Path("/nonexistent/diagram.yaml")), \
+             patch("src.web_search.vertex_credentials_available", return_value=False):
+            readiness = assess_search_readiness()
+            self.assertIsNone(resolve_web_search_context("auto", readiness=readiness))
+            self.assertIsNotNone(readiness.hard_blocker)
+
+    def test_a_sandbox_blocker_alone_does_not_refuse_the_run(self) -> None:
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "k"}, clear=True), \
+             patch("src.web_search.genai_sdk_available", return_value=True):
+            readiness = assess_search_readiness(operator="codex", codex_sandbox="workspace-write")
+        self.assertIsNone(readiness.hard_blocker)
+
+
+class GenaiSdkProbeTest(unittest.TestCase):
+    """The probe itself, not a patched stand-in for it.
+
+    Every other readiness test patches `genai_sdk_available`, which would leave the real
+    function free to always answer True.
+    """
+
+    def test_it_reports_the_sdk_missing_when_it_cannot_be_found(self) -> None:
+        with patch("importlib.util.find_spec", return_value=None) as find_spec:
+            self.assertFalse(web_search_module.genai_sdk_available())
+        find_spec.assert_called_once_with("google.genai")
+
+    def test_it_reports_the_sdk_present_when_it_can(self) -> None:
+        with patch("importlib.util.find_spec", return_value=object()):
+            self.assertTrue(web_search_module.genai_sdk_available())
+
+    def test_a_missing_parent_package_reports_absent_rather_than_raising(self) -> None:
+        """`find_spec("google.genai")` imports `google` to search it, so on a machine with
+        no `google` namespace at all it raises ModuleNotFoundError -- precisely the case
+        this probe exists to detect. Letting that escape takes down every entry point,
+        which is how CI caught it."""
+        with patch("importlib.util.find_spec", side_effect=ModuleNotFoundError("No module named 'google'")):
+            self.assertFalse(web_search_module.genai_sdk_available())
+
+    def test_other_import_failures_also_report_absent(self) -> None:
+        for error in (ImportError("broken"), ValueError("__spec__ is None"), AttributeError("x")):
+            with self.subTest(error=type(error).__name__):
+                with patch("importlib.util.find_spec", side_effect=error):
+                    self.assertFalse(web_search_module.genai_sdk_available())
+
+    def test_it_probes_google_genai_and_not_google_auth(self) -> None:
+        """`google-auth` is a separate distribution and can be installed without
+        `google-genai`, so probing it would answer the wrong question."""
+        seen: list[str] = []
+
+        def record(name):
+            seen.append(name)
+            return None
+
+        with patch("importlib.util.find_spec", side_effect=record):
+            web_search_module.genai_sdk_available()
+        self.assertEqual(seen, ["google.genai"])
+
+
+class MainPassesTheOperatorToReadinessTest(unittest.TestCase):
+    """The sandbox is only knowable from the operator, so the gate has to be told which one.
+
+    `main.py` resolves the search context before the resume branch reads `run_config`, so
+    the flag is the only source, and passing None here would silently drop the whole
+    sandbox check on every Codex run.
+    """
+
+    def test_the_operator_and_sandbox_flags_reach_the_assessment(self) -> None:
+        captured: dict[str, object] = {}
+
+        class _Stop(BaseException):
+            """Abort main() at the assessment; running the pipeline is not the point."""
+
+        def record(**kwargs):
+            captured.update(kwargs)
+            raise _Stop
+
+        with patch("main.assess_search_readiness", side_effect=record), \
+             patch.object(sys, "argv", ["main.py", "--operator", "codex",
+                                        "--codex-sandbox", "workspace-write",
+                                        "--web-search", "native", "--goal", "x",
+                                        "--fake-operator", "--skip-intake"]):
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                try:
+                    autor_main.main()
+                except _Stop:
+                    pass
+
+        self.assertEqual(captured.get("operator"), "codex")
+        self.assertEqual(captured.get("codex_sandbox"), "workspace-write")
+
+    def test_it_defaults_to_claude_rather_than_none(self) -> None:
+        captured: dict[str, object] = {}
+
+        class _Stop(BaseException):
+            """Abort main() at the assessment; running the pipeline is not the point."""
+
+        def record(**kwargs):
+            captured.update(kwargs)
+            raise _Stop
+
+        with patch("main.assess_search_readiness", side_effect=record), \
+             patch.object(sys, "argv", ["main.py", "--web-search", "native", "--goal", "x",
+                                        "--fake-operator", "--skip-intake"]):
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                try:
+                    autor_main.main()
+                except _Stop:
+                    pass
+
+        self.assertEqual(captured.get("operator"), "claude")

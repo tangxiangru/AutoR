@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE_REGISTRY_PATH = REPO_ROOT / "templates" / "registry.yaml"
@@ -886,6 +886,7 @@ def validate_stage_markdown(
     markdown: str,
     stage: StageSpec | None = None,
     paths: RunPaths | None = None,
+    artifact_roots: "Sequence[Path] | None" = None,
 ) -> list[str]:
     problems: list[str] = []
 
@@ -913,7 +914,7 @@ def validate_stage_markdown(
                 missing_files = [
                     file_ref
                     for file_ref in listed_files
-                    if not _listed_file_exists(paths.run_root, file_ref)
+                    if not _listed_file_exists(paths.run_root, file_ref, artifact_roots)
                 ]
                 if missing_files:
                     problems.append(
@@ -1592,7 +1593,11 @@ def _extract_path_references(text: str) -> list[str]:
     return paths
 
 
-def _listed_file_exists(run_root: Path, listed_path: str) -> bool:
+def _listed_file_exists(
+    run_root: Path,
+    listed_path: str,
+    extra_roots: "Sequence[Path] | None" = None,
+) -> bool:
     """Check whether a file referenced in a stage's "Files Produced" section
     actually exists on disk.
 
@@ -1606,10 +1611,16 @@ def _listed_file_exists(run_root: Path, listed_path: str) -> bool:
        inside the workspace, since the project's "current directory" while
        the stage runs is effectively ``workspace/``.
 
-    We accept both. Absolute paths are honored as-is. Adding the
-    workspace-relative fallback is strictly additive — every path that
-    validated before still validates — so existing CLI runs are not
-    affected.
+    3. **Relative to an extra artifact root** — a run may legitimately write
+       outside the run tree. A ResearchClawBench run is told to keep
+       ``code/``, ``outputs/`` and ``report/images/`` up to date inside the
+       *benchmark workspace*, which is the parent of the run root, so a stage
+       that complies and then lists ``outputs/metrics.csv`` is describing a
+       real file the first two roots cannot see.
+
+    We accept all of them. Absolute paths are honored as-is. Each fallback is
+    strictly additive — every path that validated before still validates — so
+    existing CLI runs are not affected.
     """
     candidate = Path(listed_path)
     try:
@@ -1623,6 +1634,10 @@ def _listed_file_exists(run_root: Path, listed_path: str) -> bool:
         via_workspace = run_root / "workspace" / candidate
         if via_workspace.exists():
             return True
+        # 3. Extra artifact roots (for example a benchmark workspace)
+        for root in extra_roots or ():
+            if (root / candidate).exists():
+                return True
     except OSError:
         return False
     return False
