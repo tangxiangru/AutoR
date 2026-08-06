@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tests.prereg_support import write_validity_chain
 from src.experiment_manifest import (
     format_experiment_manifest_for_prompt,
     load_experiment_manifest,
@@ -30,6 +31,7 @@ class ExperimentManifestTests(unittest.TestCase):
         write_text(paths.code_dir / "train.py", "print('train')\n")
         write_text(paths.notes_dir / "experiment_note.md", "# Note\n")
         write_text(paths.results_dir / "scores.csv", "step,score\n1,0.7\n2,0.8\n")
+        write_validity_chain(paths, evidence="results/scores.csv")
 
         manifest = write_experiment_manifest(paths)
         self.assertTrue(manifest.ready_for_analysis)
@@ -52,6 +54,7 @@ class ExperimentManifestTests(unittest.TestCase):
         paths = self._build_paths()
         write_text(paths.data_dir / "design.json", '{"task":"demo"}')
         write_text(paths.results_dir / "scores.csv", "step,score\n1,0.7\n")
+        write_validity_chain(paths, evidence="results/scores.csv")
 
         problems = validate_stage_artifacts(STAGE_05, paths)
         self.assertTrue(any("experiment_manifest.json" in problem for problem in problems))

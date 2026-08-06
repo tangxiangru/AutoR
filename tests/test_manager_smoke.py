@@ -215,6 +215,38 @@ class ScriptedSmokeOperator:
         write_text(note_path, f"# Smoke Note\n\nStage: {stage.slug}\nInvocation: {invocation}\n")
         produced.append(relative_to_run(note_path, paths.run_root))
 
+        if stage.number >= 3 and not paths.hypothesis_manifest.exists():
+            # What the prompt's "Missing Hypotheses" block asks for: a run
+            # adopted from an existing project still has to say what it tests.
+            write_text(
+                paths.hypothesis_manifest,
+                json.dumps(
+                    {
+                        "generated_at": "2026-04-08T00:00:00",
+                        "theoretical_propositions": [
+                            {"id": "T1", "type": "theoretical",
+                             "statement": "The adopted project targets long-context reasoning."}
+                        ],
+                        "empirical_hypotheses": [
+                            {
+                                "id": "H1",
+                                "type": "empirical",
+                                "statement": "Retrieval improves long-context benchmark accuracy by at least 8 points.",
+                                "decision_rule": (
+                                    "supported if retrieval-on exceeds retrieval-off by more than 8 "
+                                    "accuracy points on the held-out split; refuted otherwise."
+                                ),
+                            }
+                        ],
+                        "paper_claims": [
+                            {"id": "C1", "type": "paper_claim",
+                             "statement": "Retrieval is a practical long-context fix."}
+                        ],
+                    }
+                ),
+            )
+            produced.append(relative_to_run(paths.hypothesis_manifest, paths.run_root))
+
         if stage.number >= 3:
             data_path = paths.data_dir / "study_design.json"
             write_text(
@@ -235,6 +267,50 @@ class ScriptedSmokeOperator:
                 json.dumps({"stage": stage.slug, "invocation": invocation, "accuracy": 0.9}),
             )
             produced.append(relative_to_run(result_path, paths.run_root))
+
+        if stage.number >= 6:
+            from src.preregistration import load_preregistration
+
+            prereg = load_preregistration(paths)
+            if prereg is not None:
+                write_text(
+                    paths.hypothesis_outcomes,
+                    json.dumps(
+                        {
+                            "generated_at": "2026-04-08T00:00:00",
+                            "preregistration_digest": prereg.digest,
+                            "outcomes": [
+                                {
+                                    "id": identifier,
+                                    "verdict": "supported",
+                                    "rationale": "Smoke adjudication against the frozen decision rule.",
+                                    "evidence": ["results/metrics.json"],
+                                }
+                                for identifier in prereg.adjudicated_ids
+                            ],
+                            "exploratory_findings": [],
+                        }
+                    ),
+                )
+                produced.append(relative_to_run(paths.hypothesis_outcomes, paths.run_root))
+
+        if stage.number >= 7:
+            write_text(
+                paths.claim_provenance,
+                json.dumps(
+                    {
+                        "claims": [
+                            {
+                                "claim": "Retrieval improves long-context benchmark accuracy.",
+                                "status": "confirmatory",
+                                "hypothesis_id": "H1",
+                                "evidence": ["results/metrics.json"],
+                            }
+                        ]
+                    }
+                ),
+            )
+            produced.append(relative_to_run(paths.claim_provenance, paths.run_root))
 
         if stage.number >= 6:
             figure_path = paths.figures_dir / "accuracy.png"
@@ -347,6 +423,8 @@ class ScriptedSmokeOperator:
                 "### Empirical Hypotheses\n"
                 "- **H1**: Retrieval will improve long-context benchmark accuracy by at least 8 points.\n"
                 "  - Depends on: T1\n"
+                "  - Decision rule: supported if retrieval-on exceeds retrieval-off by more than 8 "
+                "accuracy points on the held-out split; refuted otherwise.\n"
                 "  - Verification: Compare retrieval-on vs retrieval-off conditions.\n\n"
                 "### Paper Claims (Provisional)\n"
                 "- **C1**: Retrieval is a practical fix for long-context reasoning failures.\n"

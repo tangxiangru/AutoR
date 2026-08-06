@@ -38,7 +38,7 @@ runs/<run_id>/
     ├── writing/                # LaTeX sources, sections/, bibliography, tables (latex mode)
     ├── figures/                # plots and paper figures
     ├── artifacts/              # compiled PDFs, build_log.txt, review JSON, deliverables
-    ├── notes/                  # supporting notes, hypothesis_manifest.json
+    ├── notes/                  # supporting notes, hypothesis_manifest.json, preregistration.json
     ├── reviews/                # readiness, critique, dissemination material
     ├── bootstrap/              # --paper-corpus / --project-root scan output
     └── profile/                # derived researcher profile
@@ -346,7 +346,7 @@ is what keeps long runs from growing their prompts without bound.
 | `writing/` | `main.tex`, `sections/*.tex`, `.bib`, tables | Stage 07+ (latex mode) |
 | `artifacts/` | compiled PDF, `build_log.txt`, review JSON, packaged deliverables | Stage 07+ |
 | `reviews/` | readiness checklists, threats to validity, critique notes | Stage 08+ |
-| `notes/` | supporting notes, `hypothesis_manifest.json` | — |
+| `notes/` | supporting notes, `hypothesis_manifest.json`, `preregistration.json` | — |
 | `bootstrap/` | `--paper-corpus` / `--project-root` scan output | — |
 | `profile/` | derived researcher profile and style notes | — |
 
@@ -436,6 +436,7 @@ Parsed out of the Stage 02 summary's typed subsections.
       "derived_from": "",
       "depends_on": "",
       "verification_needed": "",
+      "decision_rule": "",
       "status": ""
     }
   ],
@@ -443,6 +444,102 @@ Parsed out of the Stage 02 summary's typed subsections.
   "paper_claims": []
 }
 ```
+
+Every empirical hypothesis must carry a `decision_rule` — what result would count
+as support, and what would count as refutation — stated before any experiment
+runs. A hypothesis with no decision rule cannot come out negative, which makes
+"falsifiable" a word rather than a property, and Stage 05 refuses the run.
+
+### `workspace/notes/preregistration.json`
+
+The hypothesis set, frozen. Written when Stage 04 is approved — design settled,
+code written, nothing measured — and again lazily at the start of Stage 05 for
+runs that arrive by resume, `--redo-stage`, or a `--project-root` bootstrap.
+
+```json
+{
+  "frozen_at": "2026-03-30T14:02:55",
+  "frozen_before_stage": "05_experimentation",
+  "source_digest": "b897fe8c...",
+  "digest": "3bf263f5...",
+  "hypotheses": [
+    {"id": "H1", "type": "empirical", "statement": "...", "decision_rule": "...", "verification": "..."}
+  ],
+  "amendments": []
+}
+```
+
+`source_digest` hashes the statements and decision rules in
+`hypothesis_manifest.json`, deliberately ignoring the timestamp and the
+self-declared `status`. From Stage 06 on, a manifest whose digest no longer
+matches — a hypothesis edited after results existed — fails validation unless
+an amendment is on record.
+
+Hypotheses may be revised. A rollback to Stage 02 is a legitimate reason, and
+re-running Stage 02 appends an `amendments` entry carrying the reason and the
+superseded digest. What is refused is a revision with no record of having
+happened, because that is indistinguishable from a hypothesis written to fit
+the result.
+
+Validated by `validate_preregistration` in
+[`src/preregistration.py`](../src/preregistration.py).
+
+### `workspace/results/hypothesis_outcomes.json`
+
+Stage 06's verdict on every preregistered hypothesis.
+
+```json
+{
+  "generated_at": "2026-03-30T18:11:02",
+  "preregistration_digest": "3bf263f5...",
+  "outcomes": [
+    {
+      "id": "H1",
+      "verdict": "refuted",
+      "rationale": "the gap was 2 points, below the rule's 8",
+      "evidence": ["results/main_metrics.json"]
+    }
+  ],
+  "exploratory_findings": [{"statement": "...", "evidence": ["results/..."]}]
+}
+```
+
+- Every preregistered empirical hypothesis needs exactly one entry. A hypothesis
+  the experiments never reached is `not_tested`; omitting it is refused, because
+  silence about an inconvenient hypothesis is the cheapest way to hide a
+  refutation.
+- `supported` and `refuted` must cite at least one evidence path that exists.
+- `refuted` is a complete, successful analysis. Nothing in the pipeline pushes
+  toward a positive result.
+- Findings the data suggested but the run did not predict belong in
+  `exploratory_findings`, never in `outcomes`.
+
+Validated by `validate_hypothesis_outcomes`.
+
+### `workspace/artifacts/claim_provenance.json`
+
+Stage 07's map from each claim in the manuscript to what established it.
+
+```json
+{
+  "claims": [
+    {
+      "claim": "the sentence as it appears in the manuscript",
+      "status": "confirmatory",
+      "hypothesis_id": "H1",
+      "evidence": ["results/main_metrics.json"]
+    }
+  ]
+}
+```
+
+A `confirmatory` claim requires a hypothesis whose verdict is `supported` — the
+run predicted it in advance and the evidence bore it out. Everything else is
+`exploratory`: permitted, often the most interesting part of a run, but it has
+to say so. A post-hoc finding presented as a confirmed prediction is the exact
+failure preregistration exists to prevent.
+
+Validated by `validate_claim_provenance`.
 
 Written by [`src/hypothesis_manifest.py`](../src/hypothesis_manifest.py).
 

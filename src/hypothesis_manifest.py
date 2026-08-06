@@ -16,6 +16,11 @@ class HypothesisEntry:
     derived_from: str = ""
     depends_on: str = ""
     verification_needed: str = ""
+    #: What result would count as support, and what would count as refutation.
+    #: Required for empirical hypotheses: a hypothesis with no decision rule
+    #: cannot come out negative, which makes "falsifiable" a word rather than a
+    #: property.
+    decision_rule: str = ""
     status: str = ""
 
     def to_dict(self) -> dict[str, str]:
@@ -26,6 +31,7 @@ class HypothesisEntry:
             "derived_from": self.derived_from,
             "depends_on": self.depends_on,
             "verification_needed": self.verification_needed,
+            "decision_rule": self.decision_rule,
             "status": self.status,
         }
 
@@ -38,6 +44,7 @@ class HypothesisEntry:
             derived_from=str(payload.get("derived_from") or "").strip(),
             depends_on=str(payload.get("depends_on") or "").strip(),
             verification_needed=str(payload.get("verification_needed") or "").strip(),
+            decision_rule=str(payload.get("decision_rule") or "").strip(),
             status=str(payload.get("status") or "").strip(),
         )
 
@@ -134,6 +141,8 @@ def format_hypothesis_manifest_for_prompt(manifest: HypothesisManifest) -> str:
                 lines.append(f"  - Derived from: {item.derived_from}")
             if item.depends_on:
                 lines.append(f"  - Depends on: {item.depends_on}")
+            if item.decision_rule:
+                lines.append(f"  - Decision rule: {item.decision_rule}")
             if item.verification_needed:
                 lines.append(f"  - Verification: {item.verification_needed}")
             if item.status:
@@ -174,6 +183,8 @@ def _parse_section(section_text: str, claim_type: str) -> list[HypothesisEntry]:
                 current["depends_on"] = value
             elif label == "verification":
                 current["verification_needed"] = value
+            elif label in ("decision rule", "decision-rule"):
+                current["decision_rule"] = value
             elif label == "status":
                 current["status"] = value
 
@@ -191,5 +202,6 @@ def _entry_from_state(state: dict[str, str], claim_type: str) -> HypothesisEntry
         derived_from=state.get("derived_from", ""),
         depends_on=state.get("depends_on", ""),
         verification_needed=state.get("verification_needed", ""),
+        decision_rule=state.get("decision_rule", ""),
         status=state.get("status", ""),
     )

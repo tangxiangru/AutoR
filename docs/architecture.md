@@ -97,6 +97,7 @@ to a CLI directly; the operators never decide what stage runs next.
 | [`src/experiment_manifest.py`](../src/experiment_manifest.py) | Builds and validates `results/experiment_manifest.json` as a view over the artifact index. |
 | [`src/evidence_ledger.py`](../src/evidence_ledger.py) | Validates the Stage 01 `sources.json`/`claims.json` pair and the Stage 07 `citation_verification.json`. |
 | [`src/hypothesis_manifest.py`](../src/hypothesis_manifest.py) | Parses Stage 02's typed `T*`/`H*`/`C*` identifiers into `hypothesis_manifest.json`. |
+| [`src/preregistration.py`](../src/preregistration.py) | Freezes the hypothesis set before results exist, adjudicates every frozen hypothesis at Stage 06, and traces every manuscript claim back to a supported one at Stage 07. The one part of the pipeline that gates on whether a claim is warranted rather than on whether a file exists. |
 | [`src/writing_manifest.py`](../src/writing_manifest.py) | Stage 07 support: writing manifest, figure/result scanning, layout review generation and validation. |
 
 ### Inputs
@@ -285,6 +286,7 @@ Ordered by how much of the system you have to understand first.
 | Craft guidance an agent can pull mid-stage | a new `src/skills/<name>/SKILL.md` | none |
 | The set of target venues | `templates/registry.yaml` | none |
 | What a stage must produce | `validate_stage_artifacts` in `src/utils.py` | small |
+| What counts as a warranted claim | `src/preregistration.py` | small |
 | The summary contract | `REQUIRED_STAGE_HEADINGS` + `validate_stage_markdown` | small |
 | The stage list | `STAGES` in `src/utils.py`, plus a new prompt template | moderate |
 | The execution backend | implement `OperatorProtocol`, or subclass `ClaudeOperator` | moderate |

@@ -13,6 +13,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tests.prereg_support import write_validity_chain
 from src.rcb import (
     JUDGE_IMAGE_SUFFIXES,
     build_benchmark_goal,
@@ -76,6 +77,7 @@ class FigureBudgetTests(unittest.TestCase):
     def test_images_in_results_never_reach_outputs(self) -> None:
         paths, workspace = self._run_and_workspace()
         (paths.results_dir / "metrics.json").write_text('{"acc": 0.87}')
+        write_validity_chain(paths, evidence="results/metrics.json")
         (paths.results_dir / "loss_curve.png").write_bytes(b"\x89PNG junk")
         (paths.results_dir / "diagram.svg").write_bytes(b"<svg/>")
         (paths.report_images_dir / "main.png").write_bytes(b"\x89PNG main")
@@ -84,7 +86,12 @@ class FigureBudgetTests(unittest.TestCase):
         export_run(paths=paths, workspace=workspace, pipeline_completed=True)
 
         exported = sorted(p.name for p in (workspace / "outputs").rglob("*") if p.is_file())
-        self.assertEqual(exported, ["metrics.json"])
+        # The adjudication records travel with the results: a judge that can see
+        # the numbers should also be able to see which hypothesis they settle.
+        self.assertEqual(
+            exported,
+            ["hypothesis_manifest.json", "hypothesis_outcomes.json", "metrics.json", "preregistration.json"],
+        )
         # outputs/ is swept before report/, so an image there would take a judge slot.
         self.assertEqual(
             [p for p in _judge_visible_images(workspace) if p.parent.name == "outputs"], []
@@ -206,6 +213,7 @@ class FigureBudgetGateTests(unittest.TestCase):
             ),
         )
         write_text(paths.artifacts_dir / "self_review.json", json.dumps({"overall_score": 8}))
+        write_validity_chain(paths, evidence="results/metrics.json")
         generate_report_review(paths)
 
     def test_a_run_within_budget_passes(self) -> None:
