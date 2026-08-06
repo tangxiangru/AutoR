@@ -155,6 +155,3 @@ Be respectful and factual. See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 For security issues, do **not** open a public issue — follow
 [SECURITY.md](SECURITY.md).
-
-Community channels (Discord, WeChat, WhatsApp) are linked from the
-[README](README.md#-community).
