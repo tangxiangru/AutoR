@@ -124,6 +124,10 @@ what rollback rewrites. Written by [`src/manifest.py`](../src/manifest.py).
       "title": "Stage 01: Literature Survey",
       "status": "approved",
       "approved": true,
+      "skipped": false,
+      "skip_kind": null,
+      "skip_reason": null,
+      "settled": true,
       "dirty": false,
       "stale": false,
       "attempt_count": 2,
@@ -145,15 +149,21 @@ what rollback rewrites. Written by [`src/manifest.py`](../src/manifest.py).
 `failed`, `cancelled`.
 
 **Stage `status`** — one of `not_started`, `pending`, `running`,
-`human_review`, `approved`, `completed`, `failed`, `cancelled`.
+`human_review`, `approved`, `skipped`, `completed`, `failed`, `cancelled`.
 
 **Stage flags:**
 
 | Flag | Meaning |
 | --- | --- |
-| `approved` | You (or the reviewer agent) accepted this stage. |
+| `approved` | You (or the reviewer agent) accepted this stage's work. |
+| `skipped` | The stage was promoted without its work being done. `skip_kind` is `human` (you ran `/skip`, or chose to skip after retries ran out) or `auto` (an unattended run exhausted the retry budget with nobody in the loop). `skip_reason` says which. A skipped stage is **never** `approved`. |
+| `settled` | Derived: `approved or skipped`. This is the resume cursor — the run moves past a settled stage. Read this, not `approved`, when you want "is AutoR done with this stage". Read `approved` when you want "was this work actually accepted". |
 | `dirty` | The stage has an unpromoted draft. |
 | `stale` | An earlier stage was rolled back, so this stage's conclusions may no longer hold. `invalidated_reason` and `invalidated_by_stage` say why. |
+
+A skipped stage still writes a stage summary and still feeds downstream
+prompts, because later stages need to know the gap exists. The summary says the
+work was not done; treat its content as a placeholder, not evidence.
 
 `session_id` is the backend conversation for that stage, which is what makes
 refinement continue a conversation instead of restarting one.

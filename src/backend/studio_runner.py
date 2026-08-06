@@ -219,7 +219,7 @@ class StudioRunner:
         from ..utils import STAGES, build_run_paths
         paths = build_run_paths(run_root)
         manifest = ensure_run_manifest(paths)
-        next_pending = next((s for s in manifest.stages if not s.approved), None)
+        next_pending = next((s for s in manifest.stages if not s.settled), None)
         is_at_gate = False
         if next_pending is not None:
             spec = next((s for s in STAGES if s.slug == next_pending.slug), None)
@@ -305,7 +305,7 @@ class StudioRunner:
 
         paths = build_run_paths(run_root)
         manifest = ensure_run_manifest(paths)
-        gate_entry = next((s for s in manifest.stages if not s.approved), None)
+        gate_entry = next((s for s in manifest.stages if not s.settled), None)
         if gate_entry is None:
             # Nothing to do — everything's approved.
             update_manifest_run_status(

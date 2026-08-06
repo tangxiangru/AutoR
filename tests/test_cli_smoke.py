@@ -169,7 +169,11 @@ class CliSmokeTests(unittest.TestCase):
                 capture_output=True,
             )
 
-            self.assertEqual(result.returncode, 1, msg=result.stderr)
+            # A full-auto fake run now completes. This assertion used to expect
+            # exit 1, which was the pipeline aborting after stage 06 exhausted
+            # its retries — incidental to what this test is about, but it meant
+            # the config check only ever ran against a broken run.
+            self.assertEqual(result.returncode, 0, msg=result.stdout[-4000:])
             run_roots = sorted(path for path in runs_dir.iterdir() if path.is_dir())
             self.assertEqual(len(run_roots), 1)
             config = load_run_config(build_run_paths(run_roots[0]))
