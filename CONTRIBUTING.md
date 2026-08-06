@@ -11,6 +11,29 @@ that keep it that way are the easiest to land.
 
 ---
 
+## Read this before you start
+
+**AutoR is proprietary software, not an open source project.** Read
+[LICENSE](LICENSE) first. Two consequences matter before you write any code:
+
+1. **Running AutoR requires written permission.** Publication of this
+   repository grants no right to use, run, modify, or fork it. That includes
+   running it locally to develop against, so obtain permission before you begin
+   — see Section 5 of the LICENSE.
+2. **Contributions are assigned to the copyright holder.** By opening a pull
+   request you grant Xiangru Tang a perpetual, irrevocable, worldwide right to
+   use, modify, distribute, and **relicense** your contribution under any
+   terms, including proprietary terms, with no compensation or attribution
+   owed to you. That is Section 6 of the LICENSE, and it is not negotiable per
+   contribution. If you are not comfortable with it, or if your employer's
+   IP agreement forbids it, do not submit code — a well-written issue is still
+   genuinely valuable.
+
+Contributions are welcome under those terms. They are not a route to obtaining
+a license to the Software.
+
+---
+
 ## Ways to help
 
 | | |
@@ -146,6 +169,18 @@ productization.
 
 These are not oversights. Each one has been considered and declined; a PR that
 adds one will be closed with a pointer here.
+
+---
+
+## Licensing
+
+Every contribution is submitted under Section 6 of [LICENSE](LICENSE), which
+assigns the copyright holder a relicensable right over it. There is no separate
+CLA to sign; opening a pull request is the act of agreement.
+
+Do not add SPDX headers, license blocks, or copyright notices to individual
+files. The repository carries a single license, held by a single copyright
+holder, and per-file notices only create room for that to drift.
 
 ---
 

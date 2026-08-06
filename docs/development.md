@@ -3,6 +3,11 @@
 How to work on AutoR itself. If you want to *use* AutoR, read the
 [English Guide](tutorial_en.md) instead.
 
+> **AutoR is proprietary software.** Running it — including running it locally
+> to develop against — requires written permission from the copyright holder.
+> Contributions are assigned under Section 6 of the [LICENSE](../LICENSE).
+> Read [CONTRIBUTING.md](../CONTRIBUTING.md) before you start.
+
 ---
 
 ## Setup

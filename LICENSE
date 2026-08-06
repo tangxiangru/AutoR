@@ -1,0 +1,135 @@
+AutoR Proprietary License 1.0
+SPDX-License-Identifier: LicenseRef-AutoR-Proprietary-1.0
+
+Copyright (c) 2026 Xiangru Tang. All rights reserved.
+
+PREAMBLE
+
+AutoR is proprietary software. It is published in a public repository so that
+its design and behaviour can be examined, cited, and discussed. Publication is
+not a license. No right to use, copy, modify, or distribute this software is
+granted by its availability, by the acceptance of a contribution, or by any
+statement outside this document.
+
+This license is not an open source license. It is not compatible with any
+OSI-approved license, and it grants none of the freedoms such licenses confer.
+
+1. DEFINITIONS
+
+   "Software" means the contents of this repository, including source code,
+   prompt templates, configuration, documentation, assets, and any output of
+   the Software that reproduces a substantial portion of it.
+
+   "Licensor" means Xiangru Tang, the sole copyright holder.
+
+   "You" means any individual or legal entity that accesses the Software.
+
+2. RESERVATION OF RIGHTS
+
+   All rights in the Software are reserved to the Licensor. No license,
+   whether express, implied, by estoppel, by exhaustion, or otherwise, is
+   granted to You under this document.
+
+   Without prior written permission from the Licensor, You may not:
+
+   (a) use the Software, in whole or in part, for any purpose, whether
+       commercial, academic, personal, governmental, or otherwise;
+   (b) run, execute, deploy, or host the Software, or offer it to third
+       parties as a product or service;
+   (c) copy, reproduce, or store the Software beyond the transient copies
+       your browser or Git client makes while viewing the repository;
+   (d) modify the Software or create derivative works from it;
+   (e) fork, redistribute, sublicense, sell, lease, or otherwise transfer the
+       Software or any derivative work;
+   (f) use the Software, or any part of it, to train, fine-tune, evaluate, or
+       otherwise develop any machine learning model;
+   (g) remove, obscure, or alter this license, any copyright notice, or any
+       attribution contained in the Software.
+
+3. PERMITTED ACCESS
+
+   You may view the Software in this repository, and You may make the
+   automatic local copies that GitHub's own Terms of Service require in order
+   to view or clone a public repository. That permission extends no further:
+   it does not authorise execution, modification, redistribution, or any use
+   described in Section 2.
+
+   You may quote short excerpts of the Software for the purposes of academic
+   citation, commentary, review, teaching, or news reporting, with attribution
+   to the Licensor, to the extent such quotation is permitted by applicable
+   copyright law independently of this license.
+
+4. NO PATENT OR TRADEMARK LICENSE
+
+   No patent rights are granted under this license, expressly or by
+   implication. "AutoR" and any associated names, logos, and marks are the
+   property of the Licensor, and no trademark license is granted.
+
+5. REQUESTING PERMISSION
+
+   Any use beyond Section 3 requires prior written permission from the
+   Licensor. Requests may be made by opening an issue in this repository or by
+   contacting the Licensor directly. Permission, if granted, applies only to
+   the specific use, party, and period stated in writing, and confers no
+   rights beyond those terms.
+
+6. CONTRIBUTIONS
+
+   By submitting a contribution to this repository — including a pull request,
+   patch, issue containing code, or any other submission — You grant the
+   Licensor a perpetual, worldwide, irrevocable, royalty-free, transferable
+   right to use, reproduce, modify, distribute, sublicense, and relicense that
+   contribution under any terms, including proprietary terms, without further
+   notice, compensation, or attribution to You.
+
+   You represent that You have the right to grant that permission, and that
+   the contribution is Your original work or that You are otherwise entitled
+   to submit it.
+
+   Submitting a contribution does not grant You any license to the Software.
+
+7. TERMINATION
+
+   Any permission granted under Section 3 or Section 5 terminates
+   automatically, without notice and without a cure period, upon any breach of
+   this license. The Licensor may revoke any permission granted under Section
+   5 at any time, at the Licensor's sole discretion. Upon termination You must
+   cease all use of the Software and destroy all copies in Your possession.
+
+   Sections 4, 6, 8, 9, and 10 survive termination.
+
+8. NO WARRANTY
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND NONINFRINGEMENT.
+
+   The Software orchestrates autonomous coding agents that execute commands
+   with their permission prompts disabled, and it produces research artifacts
+   that are not verified for correctness. The Licensor makes no representation
+   that any output is accurate, reproducible, safe to execute, or suitable for
+   publication.
+
+9. LIMITATION OF LIABILITY
+
+   IN NO EVENT SHALL THE LICENSOR BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING
+   FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OF OR OTHER
+   DEALINGS IN THE SOFTWARE, INCLUDING WITHOUT LIMITATION ANY LOSS OF DATA,
+   LOSS OF COMPUTE RESOURCES, DAMAGE CAUSED BY COMMANDS EXECUTED BY AN AGENT,
+   OR ANY CONSEQUENCE OF RELYING ON GENERATED RESEARCH OUTPUT.
+
+10. GOVERNING LAW
+
+    This license is governed by the laws of the State of Connecticut, United
+    States of America, without regard to its conflict of law provisions. The
+    state and federal courts located in Connecticut shall have exclusive
+    jurisdiction over any dispute arising under this license.
+
+11. ENTIRE AGREEMENT
+
+    This document is the entire agreement between You and the Licensor
+    concerning the Software, and supersedes any prior or contemporaneous
+    understanding. If any provision is held unenforceable, the remaining
+    provisions remain in full force, and the unenforceable provision shall be
+    reformed only to the minimum extent necessary to make it enforceable.

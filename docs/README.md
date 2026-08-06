@@ -80,7 +80,12 @@ detail behind it.
 Outside this directory:
 
 - [../README.md](../README.md) — overview, showcase, quick start.
-- [../CONTRIBUTING.md](../CONTRIBUTING.md) — how to propose and land changes.
+- [../LICENSE](../LICENSE) — **AutoR is proprietary software, not open source.**
+  Publication of the repository grants no right to use, run, modify, or fork
+  it; any use requires written permission. [../NOTICE](../NOTICE) is the short
+  form.
+- [../CONTRIBUTING.md](../CONTRIBUTING.md) — how to propose and land changes,
+  and the contribution-assignment terms that come with doing so.
 - [../SECURITY.md](../SECURITY.md) — the security model, the sandbox
   trade-offs, and how to report a vulnerability.
 - [../CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md) — community expectations.
