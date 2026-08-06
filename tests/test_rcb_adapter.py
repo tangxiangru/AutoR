@@ -29,6 +29,7 @@ from src.utils import (
     build_run_paths,
     ensure_run_layout,
     read_text,
+    validate_stage_artifacts,
     validate_stage_markdown,
     write_text,
 )
@@ -504,3 +505,79 @@ class BenchmarkArtifactRootTest(unittest.TestCase):
         (self.workspace / "report" / "images" / "fig1.png").write_bytes(PNG_BYTES)
         markdown = self._markdown("report/images/fig1.png")
         self.assertEqual(self._missing_file_problems(markdown, [self.workspace]), [])
+
+
+class BenchmarkArtifactDirTest(unittest.TestCase):
+    """Stage gates must see artifacts written to the benchmark's output paths.
+
+    Same root cause as the `Files Produced` bug: the benchmark contract points stages at
+    `<workspace>/outputs/` and `<workspace>/report/images/`, outside the run tree. Without
+    the extra directories a compliant stage looks like it produced nothing, and stages 03,
+    05 and 06 burn their whole retry budget.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.workspace = Path(self._tmp.name) / "Physics_003_20260806_043103"
+        self.workspace.mkdir()
+        ensure_workspace_layout(self.workspace)
+        self.paths = build_run_paths(runs_dir_for(self.workspace) / "20260806_043110")
+        ensure_run_layout(self.paths)
+        self.dirs = {
+            "data": [self.workspace / "outputs"],
+            "results": [self.workspace / "outputs"],
+            "figures": [self.workspace / "report" / "images"],
+        }
+
+    def _problems(self, stage_number: int, dirs):
+        stage = next(s for s in STAGES if s.number == stage_number)
+        return validate_stage_artifacts(stage, self.paths, dirs)
+
+    def _has(self, problems, needle):
+        return any(needle in p for p in problems)
+
+    def test_stage_03_accepts_data_written_to_the_benchmark_outputs(self) -> None:
+        (self.workspace / "outputs" / "profile.json").write_text('{"n": 1}', encoding="utf-8")
+        self.assertFalse(self._has(self._problems(3, self.dirs), "machine-readable data artifacts"))
+
+    def test_the_same_file_fails_without_the_extra_dirs(self) -> None:
+        (self.workspace / "outputs" / "profile.json").write_text('{"n": 1}', encoding="utf-8")
+        self.assertTrue(self._has(self._problems(3, None), "machine-readable data artifacts"))
+
+    def test_stage_03_still_fails_when_nothing_was_produced(self) -> None:
+        self.assertTrue(self._has(self._problems(3, self.dirs), "machine-readable data artifacts"))
+
+    def test_stage_06_accepts_figures_at_the_benchmark_path(self) -> None:
+        (self.workspace / "report" / "images" / "fig1.png").write_bytes(PNG_BYTES)
+        self.assertFalse(self._has(self._problems(6, self.dirs), "figure artifacts"))
+
+    def test_stage_06_still_fails_with_no_figures_anywhere(self) -> None:
+        self.assertTrue(self._has(self._problems(6, self.dirs), "figure artifacts"))
+
+    def test_the_benchmark_input_data_is_not_counted(self) -> None:
+        """The gate proves the stage did work; read-only inputs must not satisfy it."""
+        (self.workspace / "data").mkdir(exist_ok=True)
+        (self.workspace / "data" / "given.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+        self.assertTrue(self._has(self._problems(3, self.dirs), "machine-readable data artifacts"))
+
+    def test_run_tree_artifacts_still_satisfy_the_gate(self) -> None:
+        write_text(self.paths.data_dir / "derived.csv", "a,b\n1,2\n")
+        self.assertFalse(self._has(self._problems(3, self.dirs), "machine-readable data artifacts"))
+
+
+class ManagerArtifactDirWiringTest(unittest.TestCase):
+    def test_the_manager_maps_roots_to_the_benchmark_output_paths(self) -> None:
+        from src.manager import ResearchManager
+
+        ws = Path("/tmp/ws")
+        manager = ResearchManager(
+            project_root=Path(__file__).resolve().parent.parent,
+            runs_dir=Path("/tmp/runs"),
+            operator=type("Op", (), {"model": "m", "backend_name": "claude"})(),
+            artifact_roots=[ws],
+        )
+        self.assertEqual(manager.artifact_dirs["data"], [ws / "outputs"])
+        self.assertEqual(manager.artifact_dirs["figures"], [ws / "report" / "images"])
+        # The read-only benchmark input must never appear.
+        self.assertNotIn(ws / "data", manager.artifact_dirs["data"])

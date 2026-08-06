@@ -166,6 +166,14 @@ class ResearchManager:
         # Extra roots a stage may legitimately write to, beyond the run tree. A benchmark
         # workspace is one: its output contract points stages at paths outside runs/.
         self.artifact_roots = artifact_roots or []
+        # Where a stage's machine-readable output may legitimately land outside the run
+        # tree. The benchmark's read-only data/ is excluded on purpose: it is always
+        # populated, so counting it would make the stage-03 gate vacuous.
+        self.artifact_dirs: dict[str, list[Path]] = {
+            "data": [root / "outputs" for root in self.artifact_roots],
+            "results": [root / "outputs" for root in self.artifact_roots],
+            "figures": [root / "report" / "images" for root in self.artifact_roots],
+        }
 
     def run(
         self,
@@ -1324,7 +1332,7 @@ class ResearchManager:
                 )
             if stage.slug == "07_writing":
                 self._generate_writing_review(paths)
-            validation_errors = validate_stage_markdown(stage_markdown, stage=stage, paths=paths, artifact_roots=self.artifact_roots) + validate_stage_artifacts(stage, paths)
+            validation_errors = validate_stage_markdown(stage_markdown, stage=stage, paths=paths, artifact_roots=self.artifact_roots) + validate_stage_artifacts(stage, paths, self.artifact_dirs)
             if validation_errors:
                 mark_stage_failed_manifest(paths, stage, "; ".join(validation_errors))
                 self._print(
@@ -1381,7 +1389,7 @@ class ResearchManager:
                     )
                 if stage.slug == "07_writing":
                     self._generate_writing_review(paths)
-                validation_errors = validate_stage_markdown(stage_markdown, stage=stage, paths=paths, artifact_roots=self.artifact_roots) + validate_stage_artifacts(stage, paths)
+                validation_errors = validate_stage_markdown(stage_markdown, stage=stage, paths=paths, artifact_roots=self.artifact_roots) + validate_stage_artifacts(stage, paths, self.artifact_dirs)
                 if validation_errors:
                     self.ui.show_status(
                         f"Repair output for {stage.stage_title} is still incomplete. Normalizing locally...",
@@ -1415,7 +1423,7 @@ class ResearchManager:
                         self._amend_preregistration(
                             paths, "Stage 02 was re-run and rewrote the hypothesis manifest."
                         )
-                    validation_errors = validate_stage_markdown(stage_markdown, stage=stage, paths=paths, artifact_roots=self.artifact_roots) + validate_stage_artifacts(stage, paths)
+                    validation_errors = validate_stage_markdown(stage_markdown, stage=stage, paths=paths, artifact_roots=self.artifact_roots) + validate_stage_artifacts(stage, paths, self.artifact_dirs)
                     if validation_errors:
                         append_log_entry(
                             paths.logs,
