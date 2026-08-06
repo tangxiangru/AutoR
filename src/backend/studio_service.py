@@ -83,6 +83,10 @@ class StudioStageSummary:
     artifact_paths: list[str]
     updated_at: str
     approved_at: str | None = None
+    skipped: bool = False
+    skip_kind: str | None = None
+    skip_reason: str | None = None
+    settled: bool = False
 
 
 @dataclass(frozen=True)
@@ -354,8 +358,8 @@ class StudioService:
             except Exception:
                 continue
             latest_run_status = run_summary.run_status
-            approved = [stage.slug for stage in run_summary.stages if stage.approved]
-            latest_completed_stage_slug = approved[-1] if approved else None
+            settled = [stage.slug for stage in run_summary.stages if stage.settled]
+            latest_completed_stage_slug = settled[-1] if settled else None
             break
 
         return StudioProjectSummary(
@@ -451,6 +455,10 @@ class StudioService:
                 artifact_paths=list(entry.artifact_paths),
                 updated_at=entry.updated_at,
                 approved_at=entry.approved_at,
+                skipped=entry.skipped,
+                skip_kind=entry.skip_kind,
+                skip_reason=entry.skip_reason,
+                settled=entry.settled,
             )
             for entry in manifest.stages
         ]
@@ -721,7 +729,7 @@ class StudioService:
             )
         ]
         for entry in manifest.stages:
-            if not entry.approved:
+            if not entry.settled:
                 if entry.status == "human_review":
                     versions.append(
                         StudioVersionRecord(
@@ -738,6 +746,28 @@ class StudioService:
                             session_id=entry.session_id,
                         )
                     )
+                continue
+            if entry.skipped:
+                actor = "a human operator" if entry.skip_kind == "human" else "unattended mode"
+                versions.append(
+                    StudioVersionRecord(
+                        version_id=f"checkpoint-{entry.slug}",
+                        label=f"Skipped: {entry.title}",
+                        kind="skip_checkpoint",
+                        created_at=entry.updated_at or manifest.updated_at,
+                        stage_slug=entry.slug,
+                        stage_title=entry.title,
+                        stage_number=entry.number,
+                        run_status=entry.status,
+                        artifact_paths=list(entry.artifact_paths),
+                        notes=(
+                            f"{entry.title} was skipped by {actor} and promoted as a skip "
+                            f"summary. Its work was never done. "
+                            f"Reason: {entry.skip_reason or 'not recorded'}"
+                        ),
+                        session_id=entry.session_id,
+                    )
+                )
                 continue
             versions.append(
                 StudioVersionRecord(
@@ -756,7 +786,7 @@ class StudioService:
             )
 
         if manifest.completed_at is not None:
-            final_stage = next((entry for entry in reversed(manifest.stages) if entry.approved), None)
+            final_stage = next((entry for entry in reversed(manifest.stages) if entry.settled), None)
             versions.append(
                 StudioVersionRecord(
                     version_id="run-complete",

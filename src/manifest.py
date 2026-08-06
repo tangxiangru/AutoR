@@ -14,6 +14,9 @@ class StageManifestEntry:
     title: str
     status: str = "pending"
     approved: bool = False
+    skipped: bool = False
+    skip_kind: str | None = None
+    skip_reason: str | None = None
     dirty: bool = False
     stale: bool = False
     attempt_count: int = 0
@@ -27,6 +30,16 @@ class StageManifestEntry:
     updated_at: str = ""
     approved_at: str | None = None
 
+    @property
+    def settled(self) -> bool:
+        """The stage has a promoted summary, so the run should move past it.
+
+        This is the resume cursor. ``approved`` is a narrower claim — that the
+        stage's work was actually reviewed and accepted — and a skipped stage
+        satisfies the first without satisfying the second.
+        """
+        return self.approved or self.skipped
+
     def to_dict(self) -> dict[str, object]:
         return {
             "number": self.number,
@@ -34,6 +47,10 @@ class StageManifestEntry:
             "title": self.title,
             "status": self.status,
             "approved": self.approved,
+            "skipped": self.skipped,
+            "skip_kind": self.skip_kind,
+            "skip_reason": self.skip_reason,
+            "settled": self.settled,
             "dirty": self.dirty,
             "stale": self.stale,
             "attempt_count": self.attempt_count,
@@ -56,6 +73,9 @@ class StageManifestEntry:
             title=str(payload.get("title") or ""),
             status=str(payload.get("status") or "pending"),
             approved=bool(payload.get("approved", False)),
+            skipped=bool(payload.get("skipped", False)),
+            skip_kind=str(payload["skip_kind"]) if payload.get("skip_kind") is not None else None,
+            skip_reason=str(payload["skip_reason"]) if payload.get("skip_reason") is not None else None,
             dirty=bool(payload.get("dirty", False)),
             stale=bool(payload.get("stale", False)),
             attempt_count=int(payload.get("attempt_count") or 0),
@@ -224,6 +244,8 @@ def format_manifest_status(manifest: RunManifest) -> str:
         flags = []
         if entry.approved:
             flags.append("approved")
+        if entry.skipped:
+            flags.append(f"skipped:{entry.skip_kind or 'unknown'}")
         if entry.dirty:
             flags.append("dirty")
         if entry.stale:
@@ -348,11 +370,55 @@ def mark_stage_approved_manifest(
         stage,
         status="approved",
         approved=True,
+        skipped=False,
+        skip_kind=None,
+        skip_reason=None,
         dirty=False,
         stale=False,
         attempt_count=attempt_no,
         artifact_paths=artifact_paths,
         approved_at=_now(),
+    )
+
+
+def mark_stage_skipped_manifest(
+    paths: RunPaths,
+    stage: StageSpec,
+    attempt_no: int,
+    artifact_paths: list[str],
+    *,
+    reason: str,
+    kind: str,
+) -> RunManifest:
+    """Record a stage that was promoted without its work being done.
+
+    A skip settles the stage — the run moves on and downstream stages read the
+    skip summary — but it is not an approval. Recording it as ``approved``
+    would leave the manifest unable to distinguish reviewed work from an
+    exhausted retry budget, which is exactly the distinction a downstream
+    reader of the manifest needs.
+    """
+    if kind not in {"human", "auto"}:
+        raise ValueError(f"skip kind must be 'human' or 'auto', got {kind!r}")
+    update_manifest_run_status(
+        paths,
+        run_status="pending",
+        last_event="stage.skipped",
+        current_stage_slug=None,
+    )
+    return update_stage_entry(
+        paths,
+        stage,
+        status="skipped",
+        approved=False,
+        skipped=True,
+        skip_kind=kind,
+        skip_reason=reason,
+        dirty=False,
+        stale=False,
+        attempt_count=attempt_no,
+        artifact_paths=artifact_paths,
+        approved_at=None,
     )
 
 
@@ -394,6 +460,9 @@ def rollback_to_stage(paths: RunPaths, rollback_stage: StageSpec, reason: str | 
                 {
                     "status": "pending",
                     "approved": False,
+                    "skipped": False,
+                    "skip_kind": None,
+                    "skip_reason": None,
                     "dirty": True,
                     "stale": False,
                     "approved_at": None,
@@ -406,6 +475,9 @@ def rollback_to_stage(paths: RunPaths, rollback_stage: StageSpec, reason: str | 
                 {
                     "status": "stale",
                     "approved": False,
+                    "skipped": False,
+                    "skip_kind": None,
+                    "skip_reason": None,
                     "dirty": True,
                     "stale": True,
                     "approved_at": None,
@@ -440,7 +512,7 @@ def rebuild_memory_from_manifest(paths: RunPaths, manifest: RunManifest | None =
 
     for stage in STAGES:
         entry = next(item for item in manifest.stages if item.slug == stage.slug)
-        if not entry.approved:
+        if not entry.settled:
             continue
         stage_path = paths.stage_file(stage)
         if not stage_path.exists():

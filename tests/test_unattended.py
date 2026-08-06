@@ -7,6 +7,7 @@ from pathlib import Path
 
 import main as autor_main
 from src.manager import ResearchManager
+from src.manifest import load_run_manifest, mark_stage_skipped_manifest
 from src.terminal_ui import TerminalUI, UnattendedInputError
 from src.utils import STAGES, build_run_paths, ensure_run_layout, read_text, write_text
 
@@ -147,6 +148,82 @@ class UnattendedExhaustionTest(unittest.TestCase):
         )
         summary = read_text(self.paths.stage_file(stage))
         self.assertIn("skip", summary.lower())
+
+    def test_an_auto_skipped_stage_is_not_recorded_as_approved(self) -> None:
+        """The manifest is the machine-readable record of what happened.
+
+        An auto-skip means the retry budget ran out and nobody looked at the
+        stage. Recording that as ``approved`` leaves every downstream reader
+        (resume, Studio, the writing manifest) unable to tell reviewed work
+        from work that was never done.
+        """
+        manager = self._manager(unattended=True)
+        stage = STAGES[1]
+
+        manager._handle_stage_exhaustion(
+            paths=self.paths,
+            stage=stage,
+            attempt_no=5,
+            last_validation_errors=["Missing 'Key Results' section"],
+        )
+
+        manifest = load_run_manifest(self.paths.run_manifest)
+        assert manifest is not None
+        entry = next(item for item in manifest.stages if item.slug == stage.slug)
+        self.assertEqual(entry.status, "skipped")
+        self.assertFalse(entry.approved)
+        self.assertIsNone(entry.approved_at)
+        self.assertTrue(entry.skipped)
+        self.assertEqual(entry.skip_kind, "auto")
+        self.assertIn("unattended", (entry.skip_reason or "").lower())
+        # ...but the run still advances past it.
+        self.assertTrue(entry.settled)
+        self.assertNotIn(stage, manager._select_stages_for_run(self.paths, None))
+
+    def test_an_auto_skip_does_not_claim_a_human_directed_it(self) -> None:
+        manager = self._manager(unattended=True)
+        stage = STAGES[1]
+
+        manager._handle_stage_exhaustion(
+            paths=self.paths, stage=stage, attempt_no=5, last_validation_errors=[]
+        )
+
+        summary = read_text(self.paths.stage_file(stage))
+        self.assertNotIn("human direction", summary)
+        self.assertNotIn("human-directed", summary)
+        self.assertIn("no human in the loop", summary)
+        self.assertIn("No human reviewed or directed this skip.", summary)
+        self.assertNotIn(
+            "human-directed skip summary", read_text(self.paths.logs)
+        )
+
+    def test_a_human_skip_is_distinguishable_from_an_auto_skip(self) -> None:
+        manager = self._manager(unattended=True)
+        auto_stage, human_stage = STAGES[1], STAGES[2]
+
+        manager._handle_stage_exhaustion(
+            paths=self.paths, stage=auto_stage, attempt_no=5, last_validation_errors=[]
+        )
+        manager._skip_stage(
+            paths=self.paths,
+            stage=human_stage,
+            attempt_no=1,
+            reason="Human operator skipped this stage via /skip.",
+            kind="human",
+        )
+
+        manifest = load_run_manifest(self.paths.run_manifest)
+        assert manifest is not None
+        kinds = {
+            item.slug: item.skip_kind for item in manifest.stages if item.skipped
+        }
+        self.assertEqual(kinds, {auto_stage.slug: "auto", human_stage.slug: "human"})
+
+    def test_a_skip_kind_outside_the_two_known_values_is_refused(self) -> None:
+        with self.assertRaises(ValueError):
+            mark_stage_skipped_manifest(
+                self.paths, STAGES[0], 1, [], reason="whatever", kind="probably"
+            )
 
     def test_attended_mode_on_a_tty_still_asks_a_human(self) -> None:
         manager = self._manager(unattended=False)

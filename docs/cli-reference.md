@@ -47,7 +47,7 @@ python main.py [--goal GOAL] [--goal-file PATH] [--runs-dir DIR] [--fake-operato
 | `--operator {claude,codex}` | `claude` | Which coding-agent CLI executes each stage. On resume, the existing run's backend is preserved unless you pass this flag. |
 | `--model MODEL` | `sonnet` for Claude, `default` for Codex | Model alias or full model name for the execution backend. On resume, the run's recorded model is reused unless you pass this flag or switch backends. |
 | `--codex-sandbox MODE` | `workspace-write` | Codex CLI sandbox mode. Only meaningful for `--operator codex`. See [the sandbox modes](#codex-sandbox-modes) below. Persisted in `run_config.json` and preserved on resume. |
-| `--fake-operator` | off | Replace the real backend with a deterministic stub that fabricates a valid stage summary. Use this for smoke tests and for exercising the workflow without spending tokens. It does **not** produce real research artifacts. |
+| `--fake-operator` | off | Replace the real backend with a deterministic stub that fabricates a valid stage summary and the placeholder artifacts each stage gate requires, so a fake run completes all nine stages. Use this for smoke tests and for exercising the workflow without spending tokens. It does **not** produce real research artifacts — every placeholder says so in its own contents. |
 | `--stage-timeout SECONDS` | `14400` (4 hours) | Wall-clock ceiling for a single stage attempt. Raise it for long training runs; a stage that exceeds it is treated as a failed attempt. |
 
 #### Codex sandbox modes

@@ -474,6 +474,7 @@ textarea { resize: vertical; line-height: 1.55; }
 .status-chip.status-review     { background: var(--info-soft); color: var(--info); }
 .status-chip.status-completed,
 .status-chip.status-approved   { background: var(--accent-soft); color: var(--accent); }
+.status-chip.status-skipped    { background: var(--warning-soft); color: var(--warning); border: 1px dashed rgba(176, 115, 33, 0.45); }
 .status-chip.status-failed,
 .status-chip.status-stale      { background: var(--danger-soft); color: var(--danger); }
 .status-chip.status-pending,
@@ -1206,6 +1207,7 @@ textarea { resize: vertical; line-height: 1.55; }
 .stage-status.status-approved { background: var(--accent-soft); color: var(--accent); }
 .stage-status.status-human_review,
 .stage-status.status-running { background: var(--warning-soft); color: var(--warning); }
+.stage-status.status-skipped { background: var(--warning-soft); color: var(--warning); border: 1px dashed rgba(176, 115, 33, 0.45); }
 .stage-status.status-failed,
 .stage-status.status-stale   { background: var(--danger-soft); color: var(--danger); }
 

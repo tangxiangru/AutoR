@@ -523,7 +523,7 @@ async function pollRunLight(runId) {
 
   if (!state.selectedStageSlug || !summary.stages.some((s) => s.slug === state.selectedStageSlug)) {
     const reviewing = summary.stages.find((s) => s.status === "human_review");
-    const lastApproved = [...summary.stages].reverse().find((s) => s.approved);
+    const lastApproved = [...summary.stages].reverse().find((s) => s.settled);
     const running = summary.stages.find((s) => s.status === "running");
     state.selectedStageSlug =
       reviewing?.slug || lastApproved?.slug || running?.slug ||
@@ -573,7 +573,7 @@ async function loadRunFull(runId) {
 
   if (!state.selectedStageSlug || !summary.stages.some((s) => s.slug === state.selectedStageSlug)) {
     const reviewing = summary.stages.find((s) => s.status === "human_review");
-    const lastApproved = [...summary.stages].reverse().find((s) => s.approved);
+    const lastApproved = [...summary.stages].reverse().find((s) => s.settled);
     const running = summary.stages.find((s) => s.status === "running");
     state.selectedStageSlug =
       reviewing?.slug || lastApproved?.slug || running?.slug ||
@@ -756,6 +756,7 @@ const STATUS_LABELS = {
   human_review: "Awaiting Review",
   pending: "Queued",
   approved: "Approved",
+  skipped: "Skipped",
   completed: "Completed",
   failed: "Failed",
   stale: "Stale",
@@ -793,9 +794,9 @@ function renderHeader() {
 function renderLivePanel() {
   const summary = state.runSummary;
   const stages = summary?.stages || [];
-  const approved = stages.filter((s) => s.approved).length;
+  const settled = stages.filter((s) => s.settled).length;
   const total = stages.length;
-  const pct = total > 0 ? Math.round((approved / total) * 100) : 0;
+  const pct = total > 0 ? Math.round((settled / total) * 100) : 0;
 
   // Horizontal stage strip — 8 pills at a glance
   renderStageStrip(stages);
@@ -814,7 +815,7 @@ function renderLivePanel() {
     : (
         stages.find((s) => s.status === "running") ||
         stages.find((s) => s.status === "human_review") ||
-        stages.find((s) => !s.approved) ||
+        stages.find((s) => !s.settled) ||
         null
       );
 
@@ -908,6 +909,8 @@ function describeLastEvent(summary, focus) {
       return `👀 Waiting for your review on ${name}${when}. Approve to advance, or send feedback to re-run.`;
     case "approved":
       return `✅ ${name} approved${when}`;
+    case "skipped":
+      return `⏭️ ${name} was skipped${when} — its work was never done`;
     case "failed":
       return `❌ ${name} failed${when}`;
     default:
@@ -929,6 +932,7 @@ function renderActivityFeed() {
       number: s.number,
       status: s.status,
       approved: s.approved,
+      skipped: s.skipped,
       time: s.approved_at || s.updated_at || "",
       attempt: s.attempt_count || 0,
     });

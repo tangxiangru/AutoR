@@ -613,6 +613,188 @@ Original stderr:
 
         return "\n\n".join(parts).strip()
 
+    # A 1-page PDF with no content stream. Small enough to inline, and a real
+    # PDF rather than a renamed text file, so anything that opens the manuscript
+    # during a fake run gets a file it can actually parse.
+    _MINIMAL_PDF = (
+        b"%PDF-1.4\n"
+        b"1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+        b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
+        b"3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]>>endobj\n"
+        b"trailer<</Root 1 0 R>>\n"
+        b"%%EOF\n"
+    )
+
+    def _write_fake_stage_artifacts(self, stage: StageSpec, paths: RunPaths) -> list[Path]:
+        """Produce the artifacts ``validate_stage_artifacts`` requires at this stage.
+
+        Fake mode exists to exercise the workflow end to end without a model.
+        That only works if it clears the same artifact gates a real run clears —
+        otherwise every stage from 03 on fails validation, burns its retry
+        budget and gets auto-skipped, and the "local validation" run validates
+        nothing past stage 02.
+
+        The set is cumulative and rewritten on every stage from 03 onward,
+        because several gates additionally require their artifacts to have been
+        touched during the current stage's execution.
+        """
+        from .utils import selected_venue_key
+
+        if stage.number < 3:
+            return []
+
+        written: list[Path] = []
+
+        def _write(path: Path, body: str) -> None:
+            write_text(path, body)
+            written.append(path)
+
+        def _write_json(path: Path, payload: object) -> None:
+            _write(path, json.dumps(payload, indent=2) + "\n")
+
+        # Stage 03+: machine-readable data under workspace/data.
+        _write_json(
+            paths.data_dir / "fake_dataset.json",
+            {
+                "dataset_id": "fake-synthetic-001",
+                "note": "Placeholder produced by fake-operator mode. Not real data.",
+                "rows": [
+                    {"id": 1, "condition": "baseline", "score": 0.61},
+                    {"id": 2, "condition": "treatment", "score": 0.74},
+                ],
+            },
+        )
+        _write(
+            paths.data_dir / "fake_dataset.csv",
+            "id,condition,score\n1,baseline,0.61\n2,treatment,0.74\n",
+        )
+
+        if stage.number >= 5:
+            # Stage 05+: result artifacts. experiment_manifest.json itself is
+            # written by the manager, and it excludes itself from the result
+            # set, so a separate result file is required.
+            _write_json(
+                paths.results_dir / "fake_results.json",
+                {
+                    "metric": "accuracy",
+                    "baseline": 0.61,
+                    "treatment": 0.74,
+                    "delta": 0.13,
+                    "n_seeds": 2,
+                    "note": "Placeholder produced by fake-operator mode. Not a real result.",
+                },
+            )
+            _write(
+                paths.code_dir / "fake_experiment.py",
+                '"""Placeholder experiment script written by fake-operator mode."""\n'
+                "\n"
+                "def main() -> None:\n"
+                '    print("fake experiment")\n'
+                "\n"
+                "\n"
+                'if __name__ == "__main__":\n'
+                "    main()\n",
+            )
+
+        if stage.number >= 6:
+            # Stage 06+: figures. SVG keeps this a text write with no encoder.
+            _write(
+                paths.figures_dir / "fig1_fake_comparison.svg",
+                '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="120">'
+                '<rect x="20" y="50" width="40" height="50" fill="#888"/>'
+                '<rect x="90" y="30" width="40" height="70" fill="#444"/>'
+                '<text x="20" y="115" font-size="10">fake baseline vs treatment</text>'
+                "</svg>\n",
+            )
+
+        if stage.number >= 7:
+            venue = selected_venue_key(paths)
+            _write(
+                paths.writing_dir / "main.tex",
+                f"% AutoR venue: {venue}\n"
+                "\\documentclass{article}\n"
+                "\\begin{document}\n"
+                "\\title{Placeholder Manuscript (fake-operator mode)}\n"
+                "\\maketitle\n"
+                "\\input{sections/introduction}\n"
+                "\\bibliographystyle{plain}\n"
+                "\\bibliography{references}\n"
+                "\\end{document}\n",
+            )
+            _write(
+                paths.writing_dir / "sections" / "introduction.tex",
+                "\\section{Introduction}\n"
+                "This manuscript was produced by fake-operator mode to exercise the "
+                "Stage 07 writing gates. It contains no research content~\\cite{fake2026}.\n",
+            )
+            _write(
+                paths.writing_dir / "references.bib",
+                "@article{fake2026,\n"
+                "  title  = {A Placeholder Reference},\n"
+                "  author = {Fake Operator},\n"
+                "  year   = {2026},\n"
+                "  journal= {Journal of Workflow Validation}\n"
+                "}\n",
+            )
+            pdf_path = paths.writing_dir / "main.pdf"
+            pdf_path.parent.mkdir(parents=True, exist_ok=True)
+            pdf_path.write_bytes(self._MINIMAL_PDF)
+            written.append(pdf_path)
+            _write(
+                paths.artifacts_dir / "build_log.txt",
+                "fake-operator mode did not run a LaTeX toolchain.\n"
+                "This log exists so the Stage 07 build-metadata gate has something to read.\n",
+            )
+            _write_json(
+                paths.artifacts_dir / "citation_verification.json",
+                {
+                    "overall_status": "placeholder",
+                    "total_citations": 1,
+                    "claim_coverage": [
+                        {
+                            "claim": "Placeholder claim produced by fake-operator mode.",
+                            "citation_keys": ["fake2026"],
+                            "source_ids": ["S1"],
+                        }
+                    ],
+                },
+            )
+            _write_json(
+                paths.artifacts_dir / "self_review.json",
+                {
+                    "overall_status": "placeholder",
+                    "note": "fake-operator mode does not perform a real self review.",
+                    "findings": [],
+                },
+            )
+            _write_json(
+                paths.artifacts_dir / "layout_review.json",
+                {
+                    "overall_status": "placeholder",
+                    "pdf_available": True,
+                    "build_log_checked": True,
+                    "issue_counts": {"critical": 0, "major": 0, "minor": 0},
+                    "issues": [],
+                    "priority_fixes": ["Replace this placeholder with a real layout review."],
+                },
+            )
+
+        if stage.number >= 8:
+            _write_json(
+                paths.reviews_dir / "readiness_review.json",
+                {
+                    "overall_status": "placeholder",
+                    "venue": selected_venue_key(paths),
+                    "checklist": [
+                        {"item": "Manuscript compiles", "status": "not_verified"},
+                        {"item": "Artifacts released", "status": "not_verified"},
+                    ],
+                    "note": "fake-operator mode does not perform a real readiness review.",
+                },
+            )
+
+        return written
+
     def _run_fake(
         self,
         stage: StageSpec,
@@ -870,6 +1052,16 @@ Original stderr:
                 "6. Abort\n"
             )
         else:
+            artifact_paths = self._write_fake_stage_artifacts(stage, paths)
+            artifact_lines = "".join(
+                f"- `{relative_to_run(path, paths.run_root)}`\n" for path in artifact_paths
+            )
+            artifact_did = (
+                f"- Wrote {len(artifact_paths)} placeholder artifacts so this stage clears the same "
+                "artifact gates a real run has to clear.\n"
+                if artifact_paths
+                else ""
+            )
             stage_markdown = (
                 f"# Stage {stage.number:02d}: {stage.display_name}\n\n"
                 "## Objective\n"
@@ -880,14 +1072,16 @@ Original stderr:
                 "## What I Did\n"
                 f"- Executed fake-operator mode instead of invoking {agent_label}.\n"
                 f"- Created a placeholder artifact at `{relative_to_run(note_path, paths.run_root)}`.\n"
-                f"- Simulated a complete stage attempt for `{stage.slug}`.\n\n"
+                + artifact_did
+                + f"- Simulated a complete stage attempt for `{stage.slug}`.\n\n"
                 "## Key Results\n"
                 "- The orchestration loop, run layout, and stage-summary validation path are active.\n"
                 f"- Prompt length for this attempt was {len(prompt.split())} words.\n"
                 "- No research claim from this stage should be treated as real output.\n\n"
                 "## Files Produced\n"
                 f"- `{relative_to_run(note_path, paths.run_root)}`\n"
-                f"- `{relative_to_run(stage_tmp_path, paths.run_root)}`\n\n"
+                + artifact_lines
+                + f"- `{relative_to_run(stage_tmp_path, paths.run_root)}`\n\n"
                 "## Decision Ledger\n"
                 f"- **Open Questions**: What real evidence should replace the fake output for {stage.display_name}?\n"
                 f"- **Locked Decisions**: Keep `{stage.slug}` inside the current run layout and approval contract.\n"

@@ -672,7 +672,15 @@ class ManagerSmokeTests(unittest.TestCase):
             self.assertIsNotNone(manifest)
             assert manifest is not None
             entry = next(item for item in manifest.stages if item.slug == STAGE_01.slug)
-            self.assertTrue(entry.approved)
+            # A skip settles the stage so the run advances, but it is not an
+            # approval: nothing was reviewed and no work was done.
+            self.assertTrue(entry.settled)
+            self.assertFalse(entry.approved)
+            self.assertTrue(entry.skipped)
+            self.assertEqual(entry.status, "skipped")
+            self.assertEqual(entry.skip_kind, "human")
+            self.assertIsNone(entry.approved_at)
+            self.assertIn("Human operator skipped", entry.skip_reason or "")
 
     def test_back_command_rolls_run_to_earlier_stage(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

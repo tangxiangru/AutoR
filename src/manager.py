@@ -47,6 +47,7 @@ from .manifest import (
     initialize_run_manifest,
     load_run_manifest,
     mark_stage_approved_manifest,
+    mark_stage_skipped_manifest,
     mark_stage_failed_manifest,
     mark_stage_human_review_manifest,
     mark_stage_running_manifest,
@@ -341,7 +342,7 @@ class ResearchManager:
         pending: list[StageSpec] = []
         for stage in STAGES:
             entry = next(entry for entry in manifest.stages if entry.slug == stage.slug)
-            if entry.approved and entry.status == "approved":
+            if entry.settled:
                 continue
             pending.append(stage)
 
@@ -1782,6 +1783,7 @@ class ResearchManager:
                 stage=stage,
                 attempt_no=attempt_no,
                 reason="Human operator skipped this stage via /skip.",
+                kind="human",
             )
 
         if normalized.startswith("/back"):
@@ -1858,6 +1860,7 @@ class ResearchManager:
                     stage=stage,
                     attempt_no=attempt_no,
                     reason="Human operator skipped this stage after bounded retries were exhausted.",
+                    kind="human",
                 )
             if choice == "2":
                 target = self._prompt_for_rollback_stage(current_stage=stage)
@@ -1940,6 +1943,7 @@ class ResearchManager:
                 "exhausted. No human was available to choose a recovery action. "
                 "Downstream stages must treat this stage's output as missing, not as approved work."
             ),
+            kind="auto",
         )
 
     def _parse_stage_jump_command(self, command_text: str, current_stage: StageSpec) -> StageSpec | None:
@@ -2006,16 +2010,19 @@ class ResearchManager:
         stage: StageSpec,
         attempt_no: int,
         reason: str,
+        kind: str,
     ) -> bool:
-        stage_markdown = self._build_skipped_stage_markdown(paths, stage, reason)
+        stage_markdown = self._build_skipped_stage_markdown(paths, stage, reason, kind)
         final_stage_path = paths.stage_file(stage)
         write_text(final_stage_path, stage_markdown)
         append_approved_stage_summary(paths.memory, stage, stage_markdown)
-        mark_stage_approved_manifest(
+        mark_stage_skipped_manifest(
             paths,
             stage,
             attempt_no,
             self._stage_file_paths(stage_markdown),
+            reason=reason,
+            kind=kind,
         )
         write_stage_handoff(paths, stage, stage_markdown)
         write_artifact_index(paths)
@@ -2024,7 +2031,8 @@ class ResearchManager:
             paths.logs,
             f"{stage.slug} skipped",
             (
-                f"Stage was intentionally skipped and promoted as a human-directed skip summary.\n"
+                f"Stage was skipped ({kind}) and promoted as a skip summary. "
+                f"Its work was not done and it is not recorded as approved.\n"
                 f"final: {final_stage_path}\n"
                 f"reason: {reason}"
             ),
@@ -2035,29 +2043,43 @@ class ResearchManager:
         )
         return True
 
-    def _build_skipped_stage_markdown(self, paths: RunPaths, stage: StageSpec, reason: str) -> str:
+    def _build_skipped_stage_markdown(
+        self, paths: RunPaths, stage: StageSpec, reason: str, kind: str
+    ) -> str:
         previous = approved_stage_summaries(read_text(paths.memory))
         previous_block = "_None yet._" if previous == "None yet." else previous
         stage_rel_path = str(paths.stage_file(stage).relative_to(paths.run_root)).replace("\\", "/")
+        if kind == "human":
+            directive = "it was intentionally skipped at human direction so the run could continue"
+            did = "- Recorded an explicit human-directed skip for this stage.\n"
+        else:
+            directive = (
+                "it exhausted its retry budget in an unattended run and was auto-skipped "
+                "with no human in the loop"
+            )
+            did = (
+                "- Recorded an automatic skip after the bounded retry window was exhausted.\n"
+                "- No human reviewed or directed this skip.\n"
+            )
         return (
             f"# {stage.stage_title}\n\n"
             "## Objective\n\n"
-            f"This stage would normally execute {stage.display_name}, but it was intentionally skipped at human direction so the run could continue.\n\n"
+            f"This stage would normally execute {stage.display_name}, but {directive}.\n\n"
             "## Previously Approved Stage Summaries\n\n"
             f"{previous_block}\n\n"
             "## What I Did\n\n"
-            "- Recorded an explicit human-directed skip for this stage.\n"
+            + did +
             "- Preserved the workflow timeline so downstream stages can continue with a clear audit trail.\n"
             "- Marked this stage as intentionally incomplete rather than silently fabricating missing work.\n\n"
             "## Key Results\n\n"
-            "- This stage was skipped intentionally.\n"
+            f"- This stage was skipped ({kind}) and its work was never done.\n"
             "- Downstream stages should treat this stage as missing or provisional context, not as completed evidence.\n"
             f"- Skip reason: {reason}\n\n"
             "## Files Produced\n\n"
             f"- `{stage_rel_path}`\n\n"
             "## Decision Ledger\n\n"
             "- **Open Questions**: Which downstream claims now need extra scrutiny because this stage was skipped?\n"
-            f"- **Locked Decisions**: {stage.stage_title} was skipped intentionally to keep the run moving.\n"
+            f"- **Locked Decisions**: {stage.stage_title} was skipped to keep the run moving.\n"
             "- **Assumptions**: Later stages will either work around the missing context or surface the missing dependencies explicitly.\n"
             "- **Rejected Alternatives**: Pretending the skipped work was completed or fabricating artifacts that do not exist.\n\n"
             "## Suggestions for Refinement\n"
