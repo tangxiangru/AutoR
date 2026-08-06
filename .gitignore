@@ -8,11 +8,11 @@ AGENTS.local/
 .codex
 .autor/
 configs/diagram_config.yaml
-docs/
-!docs/
+# docs/ holds published documentation plus local scratch notes. Ignore the
+# directory contents by default, then allow every markdown page back in --
+# without the `!docs/*.md` line a newly added doc is silently untracked.
 docs/*
-!docs/tutorial_zh.md
-!docs/tutorial_en.md
+!docs/*.md
 !docs/ui-design/
 !docs/ui-design/**
 docs/ui-design/.DS_Store

@@ -1,0 +1,502 @@
+# Run Artifacts
+
+Everything a run produces lives inside one directory, `runs/<run_id>/`, where
+`run_id` is a `YYYYMMDD_HHMMSS` timestamp. Nothing is stored in a database,
+nothing is stored globally, and a run directory can be copied, archived, or
+handed to someone else and remain complete.
+
+This page documents every file in that directory and the schema of every
+machine-readable one.
+
+---
+
+## Directory layout
+
+```text
+runs/<run_id>/
+├── user_input.txt              # the original research goal, verbatim
+├── memory.md                   # approved cross-stage memory (the only shared context)
+├── run_config.json             # backend, model, venue, approval mode, sandbox
+├── run_manifest.json           # stage lifecycle state — the machine-readable source of truth
+├── artifact_index.json         # index over workspace/{data,results,figures}
+├── intake_context.json         # Stage 00 Q&A, ingested resources, refined goal
+├── logs.txt                    # human-readable workflow log
+├── logs_raw.jsonl              # raw backend stream-json events
+├── prompt_cache/               # the exact prompt sent for every attempt
+├── operator_state/             # per-stage session IDs, attempt state, start markers
+├── handoff/                    # compressed per-stage handoff summaries
+├── stages/                     # stage summaries: <slug>.tmp.md draft, <slug>.md approved
+├── notebook/                   # Studio Notebook session and transcript (Studio runs only)
+├── sessions/                   # Studio trace events per stage (Studio runs only)
+└── workspace/                  # the research payload
+    ├── literature/             # reading notes, survey tables, sources.json, claims.json
+    ├── code/                   # runnable code, scripts, configs
+    ├── data/                   # machine-readable datasets and manifests
+    ├── results/                # metrics, predictions, ablations, experiment_manifest.json
+    ├── writing/                # LaTeX sources, sections/, bibliography, tables
+    ├── figures/                # plots and paper figures
+    ├── artifacts/              # compiled PDFs, build_log.txt, review JSON, deliverables
+    ├── notes/                  # supporting notes, hypothesis_manifest.json
+    ├── reviews/                # readiness, critique, dissemination material
+    ├── bootstrap/              # --paper-corpus / --project-root scan output
+    └── profile/                # derived researcher profile
+```
+
+The directory shape is created by `ensure_run_layout` and the paths are
+defined once, in `build_run_paths` ([`src/utils.py`](../src/utils.py)). If you
+need a path in code, take it from `RunPaths` rather than joining strings.
+
+---
+
+## Top-level files
+
+### `user_input.txt`
+
+The research goal exactly as given, before any intake refinement. Required for
+resume; a run without it cannot be resumed.
+
+### `memory.md`
+
+The **only** context shared across stages. A stage does not see another
+stage's conversation — it sees this file.
+
+Each approved stage contributes one entry containing its `Objective`,
+`What I Did`, `Key Results`, and `Files Produced` sections. Nothing enters
+`memory.md` before you approve it, which is what makes "approval" mean
+something: an unapproved stage cannot influence the rest of the run.
+
+Required for resume. Rebuilt from `run_manifest.json` after a rollback.
+
+### `run_config.json`
+
+The settings the run was started with, so a resume reproduces them.
+
+```json
+{
+  "model": "sonnet",
+  "operator": "claude",
+  "venue": "neurips_2025",
+  "approval_mode": "manual",
+  "review_operator": "claude",
+  "review_model": "sonnet",
+  "codex_sandbox": "workspace-write",
+  "created_at": "2026-03-30T10:12:22"
+}
+```
+
+| Field | Values |
+| --- | --- |
+| `model` | Model alias or full name for the execution backend. `"unknown"` if never recorded. |
+| `operator` | `claude` or `codex`. |
+| `venue` | A key from the [venue registry](configuration.md#venue-registry). |
+| `approval_mode` | `manual` or `agent`. |
+| `review_operator` | `claude` or `codex`; defaults to `operator`. |
+| `review_model` | Reviewer model; defaults to `sonnet` (Claude) or `default` (Codex). |
+| `codex_sandbox` | `read-only`, `workspace-write`, or `danger-full-access`. |
+| `created_at` | ISO-8601 to the second. Preserved across rewrites. |
+
+A missing or corrupt file falls back to defaults rather than failing the run.
+See [Configuration](configuration.md#run_configjson) for which CLI flags
+override which fields on resume.
+
+### `run_manifest.json`
+
+The machine-readable lifecycle state of the run — what the Studio reads, and
+what rollback rewrites. Written by [`src/manifest.py`](../src/manifest.py).
+
+```json
+{
+  "run_id": "20260330_101222",
+  "created_at": "2026-03-30T10:12:22",
+  "updated_at": "2026-03-30T18:40:07",
+  "run_status": "human_review",
+  "last_event": "stage.human_review",
+  "current_stage_slug": "05_experimentation",
+  "last_error": null,
+  "completed_at": null,
+  "stages": [
+    {
+      "number": 1,
+      "slug": "01_literature_survey",
+      "title": "Stage 01: Literature Survey",
+      "status": "approved",
+      "approved": true,
+      "dirty": false,
+      "stale": false,
+      "attempt_count": 2,
+      "session_id": "a1b2c3d4-...",
+      "final_stage_path": "stages/01_literature_survey.md",
+      "draft_stage_path": "stages/01_literature_survey.tmp.md",
+      "artifact_paths": ["workspace/literature/sources.json"],
+      "last_error": null,
+      "invalidated_reason": null,
+      "invalidated_by_stage": null,
+      "updated_at": "2026-03-30T11:02:15",
+      "approved_at": "2026-03-30T11:02:15"
+    }
+  ]
+}
+```
+
+**`run_status`** — one of `pending`, `running`, `human_review`, `completed`,
+`failed`, `cancelled`.
+
+**Stage `status`** — one of `not_started`, `pending`, `running`,
+`human_review`, `approved`, `completed`, `failed`, `cancelled`.
+
+**Stage flags:**
+
+| Flag | Meaning |
+| --- | --- |
+| `approved` | You (or the reviewer agent) accepted this stage. |
+| `dirty` | The stage has an unpromoted draft. |
+| `stale` | An earlier stage was rolled back, so this stage's conclusions may no longer hold. `invalidated_reason` and `invalidated_by_stage` say why. |
+
+`session_id` is the backend conversation for that stage, which is what makes
+refinement continue a conversation instead of restarting one.
+
+### `artifact_index.json`
+
+An index over `workspace/data/`, `workspace/results/`, and
+`workspace/figures/`, regenerated whenever artifacts change and fed into later
+stages' prompts so a stage can find data without guessing filenames. Written
+by [`src/artifact_index.py`](../src/artifact_index.py).
+
+```json
+{
+  "generated_at": "2026-03-30T18:31:44",
+  "artifact_count": 12,
+  "counts_by_category": { "data": 3, "results": 6, "figures": 3 },
+  "artifacts": [
+    {
+      "category": "results",
+      "rel_path": "results/actor_main.json",
+      "filename": "actor_main.json",
+      "suffix": ".json",
+      "size_bytes": 4211,
+      "updated_at": "2026-03-30T18:22:03",
+      "schema": {
+        "source": "inferred",
+        "kind": "object",
+        "keys": ["accuracy", "seed", "std"]
+      }
+    }
+  ]
+}
+```
+
+`experiment_manifest.json` and any `*.schema.json` sidecar are excluded from
+the index — the manifest is a view of the index, not an entry in it.
+
+#### Schema metadata
+
+Each artifact carries a `schema` block, from one of two sources:
+
+**Declared** — write a sidecar next to the file, named
+`<filename>.schema.json`, and it is used verbatim:
+
+```json
+{
+  "source": "declared",
+  "sidecar_path": "results/actor_main.json.schema.json",
+  "definition": { "...": "your schema" }
+}
+```
+
+Declaring a schema is the cheapest way to make a result file legible to later
+stages. Invalid JSON in a sidecar is recorded as `"error": "invalid_json"`
+rather than crashing the index.
+
+**Inferred** — otherwise AutoR reads the file and infers a shape:
+
+| Suffix | Inferred `kind` |
+| --- | --- |
+| `.json` | `object` with up to 20 sorted `keys`, or `array` with `item_count` and `item_keys` |
+| `.jsonl` | `jsonl` with `row_count` and the union of keys across rows |
+| `.csv`, `.tsv` | column names |
+| `.yaml`, `.yml` | `yaml_document` |
+| `.parquet` | `parquet_table` |
+| `.npz` / `.npy` | `numpy_archive` / `numpy_array` |
+| figures | `figure`, plus `format` |
+| anything else | `file` |
+
+### `intake_context.json`
+
+Stage 00 output: the original goal, the refined goal, the clarification Q&A
+transcript, the ingested resources, and free-form notes.
+
+```json
+{
+  "goal": "refined goal after clarification",
+  "original_goal": "what the user first typed",
+  "resources": [
+    {
+      "source_path": "/home/me/papers/moe.pdf",
+      "resource_type": "pdf",
+      "dest_dir": "literature",
+      "dest_relative": "literature/moe.pdf",
+      "description": ""
+    }
+  ],
+  "qa_transcript": [
+    { "question": "Which base model?", "answer": "Llama-3-8B" }
+  ],
+  "notes": ""
+}
+```
+
+`resource_type` is one of `pdf`, `bib`, `code`, `dataset`, `notes`, `other`;
+`dest_dir` is the workspace subdirectory the resource was copied into.
+
+### `logs.txt` and `logs_raw.jsonl`
+
+`logs.txt` is the human-readable workflow log: stage starts, attempts,
+validation failures, approvals, rollbacks, aborts. Read this first when
+something went wrong.
+
+`logs_raw.jsonl` is one JSON object per line, the raw `stream-json` event
+stream from the backend — every tool call the agent made, in order. This is
+the ground truth for "what did it actually do", and it is what the Studio
+session trace renders.
+
+---
+
+## Directories
+
+### `stages/`
+
+- `<slug>.tmp.md` — the current draft, rewritten on each attempt.
+- `<slug>.md` — the approved summary. Only appears after you approve.
+
+The required shape of both is the [stage contract](stage-contract.md).
+
+### `prompt_cache/`
+
+The exact prompt text sent to the backend, one file per attempt:
+
+| Filename | Written by |
+| --- | --- |
+| `<slug>_attempt_NN.prompt.md` | a normal stage attempt |
+| `<slug>_attempt_NN_repair.prompt.md` | a repair pass after a malformed summary |
+| `<slug>_review_attempt_NN.prompt.md` | the automated reviewer in `--full-auto` |
+
+Nothing is elided: if you want to know why a stage did what it did, the prompt
+that caused it is on disk. Prompts are passed to the backend by reference
+(`-p @<path>`), so these files are load-bearing during a run, not just a log.
+
+### `operator_state/`
+
+| File | Contents |
+| --- | --- |
+| `<slug>.session_id.txt` | the backend session ID for that stage |
+| `<slug>.session.json` | session bookkeeping |
+| `<slug>.attempt_NN.json` | per-attempt state: command line, mode (`start`/`resume`), prompt path, timestamps |
+| `<slug>.started_at.txt` | the freshness cutoff used by the [artifact gate](stage-contract.md#freshness-checks) |
+
+`<slug>.attempt_NN.json` records the literal argv used, which makes a failed
+attempt reproducible by hand.
+
+### `handoff/`
+
+One `<slug>.md` per completed stage: a compressed view carrying only
+`Objective`, `Key Results`, `Files Produced`, and the `Decision Ledger`.
+
+At most the four most recent handoffs before the current stage are injected
+into a prompt, and the `Decision Ledger` section is stripped from that
+injection — the ledger is kept on disk for audit, not spent on context. This
+is what keeps long runs from growing their prompts without bound.
+
+### `workspace/`
+
+| Directory | Holds | Gated at |
+| --- | --- | --- |
+| `literature/` | reading notes, survey tables, `sources.json`, `claims.json` | Stage 01 |
+| `code/` | runnable scripts, configs, method implementations | — |
+| `data/` | machine-readable datasets, manifests, splits, loaders | Stage 03+ |
+| `results/` | metrics, predictions, ablations, `experiment_manifest.json` | Stage 05+ |
+| `figures/` | plots, diagrams, paper figures | Stage 06+ |
+| `writing/` | `main.tex`, `sections/*.tex`, `.bib`, tables | Stage 07+ |
+| `artifacts/` | compiled PDF, `build_log.txt`, review JSON, packaged deliverables | Stage 07+ |
+| `reviews/` | readiness checklists, threats to validity, critique notes | Stage 08+ |
+| `notes/` | supporting notes, `hypothesis_manifest.json` | — |
+| `bootstrap/` | `--paper-corpus` / `--project-root` scan output | — |
+| `profile/` | derived researcher profile and style notes | — |
+
+---
+
+## Validated JSON files
+
+These are the files AutoR parses and rejects rather than merely counting. Each
+schema below is what the validator actually requires.
+
+### `workspace/literature/sources.json`
+
+```json
+{
+  "sources": [
+    { "source_id": "S1", "title": "Attention Is All You Need", "path": "literature/vaswani2017.pdf" }
+  ]
+}
+```
+
+Required per entry: a unique non-empty `source_id`, a non-empty `title`. A
+bare top-level array is also accepted.
+
+### `workspace/literature/claims.json`
+
+```json
+{
+  "claims": [
+    {
+      "claim_id": "CL1",
+      "statement": "Attention sinks emerge within the first 2k training steps.",
+      "source_ids": ["S1", "S4"]
+    }
+  ]
+}
+```
+
+Required per entry: a non-empty `claim_id`; claim text under `statement` **or**
+`claim`; at least one `source_ids` entry, and **every referenced ID must exist
+in `sources.json`**.
+
+Validated by `validate_literature_evidence` in
+[`src/evidence_ledger.py`](../src/evidence_ledger.py).
+
+### `workspace/results/experiment_manifest.json`
+
+Generated by AutoR from the artifact index — you do not normally hand-write
+it, but Stage 05+ fails if it is missing or malformed.
+
+```json
+{
+  "generated_at": "2026-03-30T18:31:44",
+  "ready_for_analysis": true,
+  "result_artifacts": [
+    { "rel_path": "results/actor_main.json", "schema": { "source": "inferred", "...": "..." } }
+  ],
+  "code_artifacts": ["code/train.py", "code/eval.py"],
+  "note_artifacts": ["notes/setup.md"],
+  "summary": {
+    "result_artifact_count": 6,
+    "code_artifact_count": 2,
+    "note_artifact_count": 1
+  }
+}
+```
+
+Required: non-empty `generated_at`; boolean `ready_for_analysis`; all three
+`summary.*_count` keys; and every `result_artifacts` entry must have a
+non-empty `rel_path` and a `schema` object. Non-integer values you add under
+`summary` are preserved across regeneration rather than dropped.
+
+Validated by `validate_experiment_manifest` in
+[`src/experiment_manifest.py`](../src/experiment_manifest.py).
+
+### `workspace/notes/hypothesis_manifest.json`
+
+Parsed out of the Stage 02 summary's typed subsections.
+
+```json
+{
+  "generated_at": "2026-03-30T12:40:11",
+  "theoretical_propositions": [
+    {
+      "id": "T1",
+      "type": "theoretical_proposition",
+      "statement": "...",
+      "derived_from": "",
+      "depends_on": "",
+      "verification_needed": "",
+      "status": ""
+    }
+  ],
+  "empirical_hypotheses": [],
+  "paper_claims": []
+}
+```
+
+Written by [`src/hypothesis_manifest.py`](../src/hypothesis_manifest.py).
+
+### `workspace/artifacts/citation_verification.json`
+
+```json
+{
+  "overall_status": "verified",
+  "total_citations": 41,
+  "claim_coverage": [
+    {
+      "claim": "AGSNv2 improves Actor accuracy over the dense baseline.",
+      "citation_keys": ["vaswani2017"],
+      "source_ids": ["S1"]
+    }
+  ]
+}
+```
+
+Required: non-empty `overall_status`; non-negative integer `total_citations`;
+non-empty `claim_coverage` list, where each entry has a non-empty `claim` and
+at least one of `citation_keys` or `source_ids`.
+
+Validated by `validate_citation_verification` in
+[`src/evidence_ledger.py`](../src/evidence_ledger.py).
+
+### `workspace/artifacts/layout_review.json`
+
+```json
+{
+  "overall_status": "pass",
+  "pdf_available": true,
+  "build_log_checked": true,
+  "issue_counts": { "overfull_hbox": 3, "missing_figure": 0 },
+  "issues": [],
+  "priority_fixes": ["Trim Section 4 to fit the 9-page limit."]
+}
+```
+
+Required: non-empty string `overall_status`; booleans `pdf_available` and
+`build_log_checked`; object `issue_counts`; list `issues`; and
+`priority_fixes` as a list of non-empty strings.
+
+Validated by `validate_layout_review` in
+[`src/writing_manifest.py`](../src/writing_manifest.py).
+
+### `workspace/artifacts/self_review.json`
+
+Required to exist at Stage 07+. Its contents are not schema-validated, so its
+shape is up to the writing stage.
+
+### `workspace/artifacts/build_log.txt`
+
+The LaTeX build output. Required at Stage 07+, and required to be *fresh* —
+written during the Stage 07 execution that is asking for approval.
+
+---
+
+## Studio-only state
+
+Present only for runs driven through [AutoR Studio](studio.md):
+
+| Path | Contents |
+| --- | --- |
+| `<run>/sessions/<slug>.jsonl` | per-stage trace events rendered in the Studio live view |
+| `<run>/notebook/session.json` | the Notebook conversation's session ID |
+| `<run>/notebook/transcript.jsonl` | the Notebook conversation transcript |
+| `<repo>/.autor/projects.json` | the Studio project index (**outside** the run directory) |
+
+`.autor/projects.json` is the one piece of state that is not per-run. Deleting
+it loses the Studio's project groupings; the runs themselves are unaffected.
+
+---
+
+## Practical notes
+
+- **A run directory is self-contained.** Copy or archive `runs/<run_id>/` and
+  you have the whole record.
+- **`runs/` is gitignored.** Runs are outputs, not source. Archive them
+  yourself if you need them.
+- **`--runs-dir` is resolved relative to the repository root.** Point it at a
+  large disk before a heavy experiment; a real run with datasets and
+  checkpoints gets big.
+- **Read `logs.txt`, then `logs_raw.jsonl`, then `prompt_cache/`.** That is
+  the fastest path from "the output is wrong" to "here is why".
