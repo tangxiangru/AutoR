@@ -62,6 +62,11 @@ class PanelRole:
     skill: str | None = None
     backend: str | None = None
     model: str | None = None
+    #: How much of the other seats' round-1 output this member sees when deliberating.
+    #: Uniform full exposure makes the second round a convergence machine; withholding it
+    #: from the seats whose value is independence is what keeps a lone correct objection
+    #: alive long enough to be heard.
+    exposure: str = "full"
     #: A chair breaks ties and writes the final decision. Exactly one role must have it.
     chair: bool = False
 
@@ -143,6 +148,9 @@ DEFAULT_PANEL: tuple[PanelRole, ...] = (
             "Which claim has the thinnest evidence behind it?",
             "What would an unsympathetic reviewer attack first?",
         ),
+        # The seat whose whole job is to not go along with the room is the seat that must
+        # not be shown the room.
+        exposure="none",
     ),
 )
 
@@ -162,10 +170,21 @@ class PanelVerdict:
     feedback: str
     concerns: tuple[str, ...] = ()
     failed: bool = False
+    abstained: bool = False
 
     @property
     def approves(self) -> bool:
         return self.choice == "5" and not self.blocking
+
+    @property
+    def counts(self) -> bool:
+        """Whether this seat contributed a position at all.
+
+        A seat with nothing to say is better silent than padding: forcing every member to
+        produce a verdict on every gate is how five reviewers end up raising much the same
+        points, which is the mechanism behind the null in the multi-agent feedback literature.
+        """
+        return not (self.abstained or self.failed)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -180,6 +199,7 @@ class PanelVerdict:
             "feedback": self.feedback,
             "concerns": list(self.concerns),
             "failed": self.failed,
+            "abstained": self.abstained,
         }
 
 
@@ -191,6 +211,9 @@ class PanelDeliberation:
     decision: ReviewDecision | None = None
     chair_overridden: bool = False
     override_reason: str = ""
+    member_calls: int = 0
+    #: Which seat chairs, so :attr:`solo_baseline` can find its round-1 verdict.
+    chair_key: str = ""
 
     @property
     def final_round(self) -> list[PanelVerdict]:
@@ -199,10 +222,55 @@ class PanelDeliberation:
     def blocking_verdicts(self) -> list[PanelVerdict]:
         return [verdict for verdict in self.final_round if verdict.blocking]
 
-    def to_dict(self) -> dict[str, Any]:
+    @property
+    def solo_baseline(self) -> PanelVerdict | None:
+        """The chair's round-1 verdict: one model, one call, no peer input.
+
+        Every panel run therefore contains its own control arm for free. Recording it is what
+        lets a run answer the only question that matters about this feature — whether the
+        deliberation changed a decision the cheapest possible reviewer would have reached
+        anyway.
+        """
+        if not self.rounds:
+            return None
+        return next((v for v in self.rounds[0] if v.role_key == self.chair_key), None)
+
+    def effect(self) -> dict[str, Any]:
+        """What the panel bought over its own single-pass baseline, at this gate."""
+        solo = self.solo_baseline
+        first = self.rounds[0] if self.rounds else []
+        contributing = [v for v in first if v.counts]
+        final_choice = self.decision.choice if self.decision else None
+        solo_choice = solo.choice if solo is not None else None
         return {
             "stage": self.stage_slug,
             "attempt": self.attempt_no,
+            "solo_choice": solo_choice,
+            "panel_choice": final_choice,
+            "changed_decision": bool(
+                solo_choice is not None and final_choice is not None and solo_choice != final_choice
+            ),
+            "round1_unanimous": len({v.choice for v in contributing}) <= 1,
+            "round1_distinct_positions": len({v.choice for v in contributing}),
+            "abstentions": sum(1 for v in first if v.abstained),
+            "unreachable": sum(1 for v in first if v.failed),
+            "blocking_raised": sum(1 for v in first if v.blocking),
+            "blocking_survived": len(self.blocking_verdicts()),
+            "chair_overridden": self.chair_overridden,
+            "rounds": len(self.rounds),
+            "member_calls": self.member_calls,
+            "solo_calls": 1,
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        seats = [(v.backend, v.model) for group in self.rounds for v in group]
+        return {
+            "stage": self.stage_slug,
+            "attempt": self.attempt_no,
+            "distinct_backends": sorted({backend for backend, _ in seats}),
+            "distinct_models": sorted({model for _, model in seats}),
+            # Five prompts against one model are less independent than five seats look.
+            "homogeneous_panel": len({seat for seat in seats}) <= 1,
             "rounds": [[verdict.to_dict() for verdict in group] for group in self.rounds],
             "blocking_after_deliberation": [v.role_key for v in self.blocking_verdicts()],
             "chair_overridden": self.chair_overridden,
@@ -210,7 +278,47 @@ class PanelDeliberation:
             "final_choice": self.decision.choice if self.decision else None,
             "final_reason": self.decision.reason if self.decision else "",
             "final_feedback": self.decision.feedback if self.decision else "",
+            "effect": self.effect(),
         }
+
+
+def apply_model_assignments(roles: tuple[PanelRole, ...], assignments: list[str] | None) -> tuple[PanelRole, ...]:
+    """Assign a backend and model per seat from ``role=[backend:]model`` strings.
+
+    This is the lever with the best evidence behind it. The multi-agent literature's own
+    critics land on model heterogeneity rather than more rounds: errors idiosyncratic to one
+    model survive when that model checks its own work, and correlate less across families than
+    within them. Five prompts against one model are five correlated reads wearing five hats.
+    """
+    if not assignments:
+        return roles
+
+    by_key = {role.key: role for role in roles}
+    updated = dict(by_key)
+    for raw in assignments:
+        if "=" not in raw:
+            raise ValueError(
+                f"Bad panel model assignment: {raw!r}. Expected role=model or role=backend:model."
+            )
+        key, _, spec = raw.partition("=")
+        key = key.strip().lower()
+        if key not in by_key:
+            known = ", ".join(sorted(by_key))
+            raise ValueError(f"Unknown panel role in model assignment: {key}. Seated roles: {known}.")
+        spec = spec.strip()
+        if not spec:
+            raise ValueError(f"Bad panel model assignment: {raw!r}. No model given.")
+        if ":" in spec:
+            backend, _, model = spec.partition(":")
+            backend, model = backend.strip().lower(), model.strip()
+        else:
+            backend, model = None, spec
+        if not model:
+            raise ValueError(f"Bad panel model assignment: {raw!r}. No model given.")
+        current = updated[key]
+        updated[key] = PanelRole(**{**current.__dict__, "backend": backend or current.backend, "model": model})
+
+    return tuple(updated[role.key] for role in roles)
 
 
 def resolve_roles(keys: list[str] | None) -> tuple[PanelRole, ...]:
@@ -279,6 +387,7 @@ class ReviewPanel:
             for role in roles
         }
         self.chair = next(role for role in roles if role.chair)
+        self._calls = 0
 
     # -- the manager-facing contract -----------------------------------------
 
@@ -299,7 +408,10 @@ class ReviewPanel:
                 raw_response='{"decision":"approve","reason":"fake panel"}',
             )
 
-        deliberation = PanelDeliberation(stage_slug=stage.slug, attempt_no=attempt_no)
+        deliberation = PanelDeliberation(
+            stage_slug=stage.slug, attempt_no=attempt_no, chair_key=self.chair.key
+        )
+        self._calls = 0
 
         verdicts = self._round(
             paths=paths,
@@ -338,6 +450,7 @@ class ReviewPanel:
         )
         deliberation.decision = decision
 
+        deliberation.member_calls = self._calls
         decision = self._enforce_blocking_objections(deliberation)
         self._record(paths, deliberation)
         self._render(deliberation)
@@ -380,6 +493,7 @@ class ReviewPanel:
                 prompt=prompt,
                 label=f"panel_{role.key}_r{round_no}",
             )
+            self._calls += 1
             verdicts.append(
                 self._verdict_from_output(
                     role=role,
@@ -415,8 +529,22 @@ class ReviewPanel:
                 failed=True,
             )
 
-        decision = member.parse_decision(stdout_text)
         payload = self._payload(stdout_text)
+        if isinstance(payload, dict) and self._is_abstention(payload):
+            return PanelVerdict(
+                role_key=role.key,
+                role_title=role.title,
+                backend=member.backend_name,
+                model=member.model,
+                choice="",
+                decision_token="abstain",
+                blocking=False,
+                reason=str(payload.get("reason") or "").strip() or "Nothing to add from this seat.",
+                feedback="",
+                abstained=True,
+            )
+
+        decision = member.parse_decision(stdout_text)
         blocking = bool(payload.get("blocking")) if isinstance(payload, dict) else False
         concerns: tuple[str, ...] = ()
         if isinstance(payload, dict) and isinstance(payload.get("concerns"), list):
@@ -437,15 +565,29 @@ class ReviewPanel:
             concerns=concerns,
         )
 
+    @staticmethod
+    def _is_abstention(payload: dict[str, Any]) -> bool:
+        token = str(payload.get("decision") or "").strip().lower()
+        return token in {"abstain", "abstention", "no_comment", "pass"}
+
     def _payload(self, raw_response: str) -> dict[str, Any] | None:
         member = next(iter(self._members.values()))
         return member._extract_json_payload(raw_response)  # noqa: SLF001
 
     @staticmethod
     def _is_unanimous(verdicts: list[PanelVerdict]) -> bool:
+        """Unanimous among the seats that actually spoke.
+
+        An unreachable member is not agreement, so it breaks unanimity. A deliberate
+        abstention is not disagreement either — it is a seat saying it has nothing to add,
+        which is exactly the behaviour that keeps the panel from padding.
+        """
         if any(verdict.failed for verdict in verdicts):
             return False
-        return all(verdict.approves for verdict in verdicts) or len({v.choice for v in verdicts}) == 1
+        speaking = [verdict for verdict in verdicts if verdict.counts]
+        if not speaking:
+            return False
+        return all(v.approves for v in speaking) or len({v.choice for v in speaking}) == 1
 
     # -- synthesis and enforcement -------------------------------------------
 
@@ -469,6 +611,7 @@ class ReviewPanel:
             )
 
         chair = self._members[self.chair.key]
+        self._calls += 1
         self.ui.show_status(f"Panel chair ({self.chair.title}) is synthesizing the decision...", level="info")
         exit_code, stdout_text, stderr_text = chair.run_prompt(
             paths=paths,
@@ -581,22 +724,40 @@ class ReviewPanel:
                 "## Round 1 of the panel: independent review\n\n"
                 "You have not seen the other members' views and you should not speculate about "
                 "them. Form your own judgement from the artifacts. Disagreement between members "
-                "is useful to this run; agreement you did not actually reach is not.\n"
+                "is useful to this run; agreement you did not actually reach is not.\n\n"
+                "If your seat has nothing substantive to add on this stage, return "
+                '`{"decision":"abstain"}` with a one-line reason. An abstention costs the panel '
+                "nothing; a manufactured objection costs it its credibility.\n"
+            )
+        elif role.exposure == "none":
+            round_block = (
+                f"## Round {round_no} of the panel: hold or revise, independently\n\n"
+                "The panel did not agree. You are deliberately **not** being shown what the "
+                "others concluded, because your value to this panel is that your read is not "
+                "downstream of theirs.\n\n"
+                "Re-examine the artifacts and state your position again. Change it only if you "
+                "find something in the work itself, not because a room you cannot see may "
+                "disagree with you.\n"
             )
         else:
+            peers = [verdict for verdict in previous if verdict.role_key != role.key and verdict.counts]
+            if role.exposure == "objections":
+                peers = [verdict for verdict in peers if not verdict.approves]
+            # Peer positions are anonymized: a methodologist should weigh an objection on its
+            # evidence, not defer to it because the chair signed it.
             positions = "\n\n".join(
-                f"**{verdict.role_title}** -> {verdict.decision_token}"
+                f"**Reviewer {chr(ord('A') + index)}** -> {verdict.decision_token}"
                 + (" (BLOCKING)" if verdict.blocking else "")
                 + (f"\nReason: {verdict.reason}" if verdict.reason else "")
                 + (f"\nConcerns: {'; '.join(verdict.concerns)}" if verdict.concerns else "")
-                for verdict in previous
-                if verdict.role_key != role.key
-            )
+                for index, verdict in enumerate(peers)
+            ) or "(no other seat recorded a position)"
             own = next((v for v in previous if v.role_key == role.key), None)
             round_block = (
                 f"## Round {round_no} of the panel: cross-examination\n\n"
-                "The panel did not agree. Below is what every other member concluded. Read them "
-                "as colleagues who looked at the same artifacts and saw something you did not.\n\n"
+                "The panel did not agree. Below is what the other members concluded, with their "
+                "identities withheld so you weigh each objection on its evidence rather than on "
+                "who raised it.\n\n"
                 "Change your position if they found something real. Hold it if they did not — "
                 "converging to be agreeable is the failure mode this round exists to avoid, and "
                 "a lone correct objection is worth more than a comfortable consensus.\n\n"
@@ -767,6 +928,7 @@ class ReviewPanel:
         )
         write_text(panel_dir / f"{stem}.md", self._render_markdown(deliberation))
 
+        effect = record_panel_effect(paths, deliberation)
         summary = "; ".join(
             f"{verdict.role_title}={verdict.decision_token}" + ("(blocking)" if verdict.blocking else "")
             for verdict in deliberation.final_round
@@ -778,7 +940,8 @@ class ReviewPanel:
                 f"rounds: {len(deliberation.rounds)}\n"
                 f"positions: {summary}\n"
                 f"chair_overridden: {deliberation.chair_overridden}\n"
-                f"final_choice: {deliberation.decision.choice if deliberation.decision else '?'}"
+                f"final_choice: {deliberation.decision.choice if deliberation.decision else '?'}\n"
+                f"vs single pass: {effect['summary']['verdict']}"
             ),
         )
 
@@ -826,6 +989,83 @@ class ReviewPanel:
             if deliberation.decision.reason:
                 body.append(f"Reason   : {deliberation.decision.reason}")
         self.ui.panel("Review Panel", body, color=self.ui.FG_MAGENTA)
+
+
+#: Where the run's accumulated panel-versus-single-pass comparison is written.
+PANEL_EFFECT_FILENAME = "panel_effect.json"
+
+
+def record_panel_effect(paths: RunPaths, deliberation: PanelDeliberation) -> dict[str, Any]:
+    """Accumulate what the panel bought over its own single-pass baseline, across the run.
+
+    The multi-agent feedback literature has a pre-registered null at its centre: authors of 44
+    papers ranked a plain single pass *above* two multi-agent tools that spent up to thirty
+    times the tokens, and the tools' own builders had predicted the opposite. The mechanism
+    the authors reported was that the reports "tended to raise much the same points".
+
+    A panel that cannot be shown to change a decision is that null wearing a costume. So this
+    file exists to let a run say, in its own artifacts, that the panel did not earn its cost.
+    It is the least flattering thing the feature writes about itself, which is why it writes it.
+    """
+    path = paths.reviews_dir / "panel" / PANEL_EFFECT_FILENAME
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    history: list[dict[str, Any]] = []
+    if path.exists():
+        try:
+            previous = json.loads(read_text(path))
+            if isinstance(previous, dict) and isinstance(previous.get("gates"), list):
+                history = previous["gates"]
+        except (OSError, json.JSONDecodeError):
+            history = []
+
+    gate = deliberation.effect()
+    # A re-review of the same stage attempt replaces its earlier record rather than
+    # double-counting it into the rate.
+    history = [
+        entry
+        for entry in history
+        if not (entry.get("stage") == gate["stage"] and entry.get("attempt") == gate["attempt"])
+    ]
+    history.append(gate)
+
+    gates = len(history)
+    changed = sum(1 for entry in history if entry.get("changed_decision"))
+    contested = sum(1 for entry in history if not entry.get("round1_unanimous", True))
+    overrides = sum(1 for entry in history if entry.get("chair_overridden"))
+    member_calls = sum(int(entry.get("member_calls") or 0) for entry in history)
+    solo_calls = sum(int(entry.get("solo_calls") or 1) for entry in history)
+
+    summary = {
+        "gates_reviewed": gates,
+        "gates_where_the_panel_changed_the_decision": changed,
+        "gates_where_round_1_disagreed": contested,
+        "chair_overrides": overrides,
+        "panel_calls": member_calls,
+        "single_pass_calls": solo_calls,
+        "cost_multiple": round(member_calls / solo_calls, 2) if solo_calls else None,
+        "verdict": _effect_sentence(gates, changed, member_calls, solo_calls),
+    }
+    payload = {"summary": summary, "gates": history}
+    write_text(path, json.dumps(payload, indent=2, ensure_ascii=False))
+    return payload
+
+
+def _effect_sentence(gates: int, changed: int, member_calls: int, solo_calls: int) -> str:
+    """One line a human can act on, written to be unflattering when that is the truth."""
+    if gates == 0:
+        return "No gates reviewed yet."
+    multiple = (member_calls / solo_calls) if solo_calls else 0
+    if changed == 0:
+        return (
+            f"The panel reached the same decision as its own single-pass baseline at all "
+            f"{gates} gate(s), at {multiple:.1f}x the reviewer cost. On this run it did not "
+            "earn that cost; consider --panel-roles with fewer seats, or dropping the panel."
+        )
+    return (
+        f"The panel changed the decision at {changed} of {gates} gate(s) that a single pass "
+        f"would have settled differently, at {multiple:.1f}x the reviewer cost."
+    )
 
 
 def load_persona(path: Path | str | None) -> str:

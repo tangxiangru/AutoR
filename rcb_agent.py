@@ -32,7 +32,13 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.approval_agent import AutomatedReviewer  # noqa: E402
-from src.review_panel import DEFAULT_PANEL, ReviewPanel, load_persona, resolve_roles  # noqa: E402
+from src.review_panel import (
+    DEFAULT_PANEL,
+    ReviewPanel,
+    apply_model_assignments,
+    load_persona,
+    resolve_roles,
+)  # noqa: E402
 from src.manager import ResearchManager  # noqa: E402
 from src.operator import ClaudeOperator  # noqa: E402
 from src.operator_codex import CodexOperator  # noqa: E402
@@ -164,6 +170,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         nargs="+",
         metavar="ROLE",
         help="Seat only these panel roles, in this order. Defaults to all of them.",
+    )
+    parser.add_argument(
+        "--panel-models",
+        nargs="+",
+        metavar="ROLE=MODEL",
+        help="Assign a model per panel seat, as role=model or role=backend:model "
+             "(for example: pi=opus skeptic=codex:default). Seats left unassigned use the "
+             "reviewer default. Heterogeneity is the lever with the best evidence behind it: "
+             "five prompts against one model are five correlated reads wearing five hats.",
     )
     parser.add_argument(
         "--panel-rounds",
@@ -318,7 +333,7 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
 
     if args.review_panel:
         reviewer = ReviewPanel(
-            resolve_roles(args.panel_roles),
+            apply_model_assignments(resolve_roles(args.panel_roles), args.panel_models),
             backend_name=review_backend,
             model=review_model,
             fake_mode=args.fake_operator,
