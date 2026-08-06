@@ -1,0 +1,22 @@
+AutoR
+Copyright (c) 2026 Xiangru Tang. All rights reserved.
+
+This software is proprietary. See LICENSE for the full terms.
+
+Publication of this repository is not a license. No right to use, run, copy,
+modify, fork, or redistribute AutoR is granted by its availability. Any use
+beyond viewing the repository and quoting short excerpts for citation or
+commentary requires prior written permission from the copyright holder.
+
+Contributions submitted to this repository are licensed to the copyright
+holder under Section 6 of LICENSE, which grants the copyright holder the right
+to relicense them under any terms.
+
+AutoR invokes third-party command-line tools and services that are not part of
+this software and are governed by their own terms:
+
+  - Claude Code (Anthropic)
+  - Codex CLI (OpenAI)
+  - Gemini API (Google), used optionally for research diagrams and web search
+
+No affiliation with or endorsement by those vendors is claimed.

@@ -15,6 +15,9 @@
   <img src="https://img.shields.io/badge/Human-Approval%20Required-orange" alt="Human approval required" />
   <img src="https://img.shields.io/badge/Execution-Agent%20Harness-purple" alt="Agent harness" />
   <img src="https://img.shields.io/badge/Artifacts-Reproducible%20Research%20Runs-red" alt="Reproducible research runs" />
+  <a href="LICENSE">
+    <img src="https://img.shields.io/badge/License-Proprietary-lightgrey" alt="Proprietary license" />
+  </a>
   <a href="https://github.com/tangxiangru/AutoR">
     <img src="https://img.shields.io/github/stars/tangxiangru/AutoR?style=social" alt="GitHub stars" />
   </a>
@@ -38,6 +41,8 @@
   <a href="#-documentation">Documentation</a>
   ·
   <a href="#-roadmap">Roadmap</a>
+  ·
+  <a href="#-license">License</a>
 </p>
 
 <p align="center">
@@ -822,7 +827,7 @@ Implemented milestone:
 - Writing pipeline hardening. Turn Stage 07 into a reliable manuscript production pipeline with stable conference and journal-style writing structures, bibliography handling, table and figure inclusion, and reproducible PDF compilation. The goal is a submission-grade research package, not just writing notes.
 - Review and dissemination package. Expand Stage 08 so it produces readiness checklists, threats-to-validity notes, artifact manifests, release notes, and external-facing research bundles. The final stage should feel like packaging a verifiable research release, not just wrapping up text.
 - Frontend run dashboard. Build a lightweight UI that can browse runs, stage status, summaries, logs, artifacts, and validation failures. It should read from the run directory and manifest rather than introducing a database first.
-- README and open-source assets. Keep refining the README and add `assets/` images such as workflow diagrams, UI screenshots, and artifact examples. This is important for open-source clarity, onboarding, and project presentation.
+- README and presentation assets. Keep refining the README and add `assets/` images such as workflow diagrams, UI screenshots, and artifact examples. This is important for clarity, onboarding, and project presentation.
 
 </details>
 
@@ -837,3 +842,23 @@ python -m unittest discover -s tests -p "test_*.py"
 ```
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request, and [docs/development.md](docs/development.md) before changing code. Security issues go through [SECURITY.md](SECURITY.md), not a public issue.
+
+
+Note that contributions are assigned to the copyright holder under Section 6 of the [LICENSE](LICENSE), and that running AutoR requires written permission — see below.
+
+## 📜 License
+
+**AutoR is proprietary software. It is not open source.**
+
+Copyright © 2026 **Xiangru Tang**. All rights reserved. See [LICENSE](LICENSE) for the full terms and [NOTICE](NOTICE) for the summary.
+
+This repository is public so that AutoR's design and behaviour can be examined, cited, and discussed. **Publication is not a license.** No right to use, run, copy, modify, fork, or redistribute the Software is granted by its availability here.
+
+| | |
+| --- | --- |
+| **Permitted** | Viewing this repository. Quoting short excerpts for academic citation, commentary, review, teaching, or news reporting, with attribution. |
+| **Requires written permission** | Any use at all — running AutoR, deploying it, modifying it, forking it, redistributing it, or using it to train or evaluate a model. |
+| **Not granted** | Any patent license. Any trademark license to the AutoR name or marks. |
+| **Contributions** | Assigned to the copyright holder with a relicensable right (LICENSE §6). |
+
+To request permission, open an issue or contact the copyright holder directly. Permission applies only to the specific use, party, and period stated in writing.
