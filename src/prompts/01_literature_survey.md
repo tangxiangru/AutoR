@@ -40,7 +40,6 @@ The markdown at `{{STAGE_OUTPUT_PATH}}` must follow the required output structur
 Additional expectations for this stage:
 
 - `Objective` should describe the exact research question and survey objective.
-- `Previously Approved Stage Summaries` should summarize approved earlier context in readable form.
 - `What I Did` should explain how the literature landscape was mapped, including which searches you ran.
 - `Key Results` should include:
   - major research clusters or schools of thought

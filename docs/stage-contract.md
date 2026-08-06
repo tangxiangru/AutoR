@@ -28,7 +28,6 @@ Every stage writes `runs/<run_id>/stages/<slug>.tmp.md` as a draft, and
 # Stage 03: Study Design
 
 ## Objective
-## Previously Approved Stage Summaries
 ## What I Did
 ## Key Results
 ## Files Produced
@@ -37,9 +36,14 @@ Every stage writes `runs/<run_id>/stages/<slug>.tmp.md` as a draft, and
 ## Your Options
 ```
 
-All eight headings are required, in the list defined by
+All seven headings are required, in the list defined by
 `REQUIRED_STAGE_HEADINGS`. A missing heading is reported as
 `Missing required section: <name>`.
+
+An eighth heading, in which each stage restated the approved summaries of the
+stages before it, is retired. It required every stage to relay the context it
+had just been given, which is where the growth from 235 to 1,211 words per
+stage came from.
 
 ### Title
 

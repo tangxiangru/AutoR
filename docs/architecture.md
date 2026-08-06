@@ -1,32 +1,50 @@
 # Architecture
 
 AutoR is a **research control loop layered over a coding-agent execution
-loop**. The agent CLI does the work; AutoR decides what work happens, checks
-what came back, and stops for a human at every stage boundary.
+loop**. The agent CLI does the work; AutoR decides which work is admissible,
+checks what came back, attacks the result, measures the draft, and stops for a
+human at every stage boundary.
 
 This page describes how that is put together. For what a run *produces*, see
 [Run Artifacts](run-artifacts.md); for what a stage must satisfy, see the
-[Stage Contract](stage-contract.md).
+[Stage Contract](stage-contract.md); for the loops themselves, see
+[Recursive Self-Improvement](self-improvement.md).
 
 ---
 
 ## Design commitments
 
-Four constraints shape almost every decision in the codebase.
+Five constraints shape almost every decision in the codebase.
 
 **The filesystem is the database.** A run is a directory. There is no
 persistent process, no schema migration, no server that must be up. Run state
 survives a crash because it was never anywhere else.
 
-**Approved memory is the only cross-stage channel.** Stage 05 cannot see Stage
-03's conversation — only the approved entries in `memory.md`. This is what
-makes human approval load-bearing rather than ceremonial: refuse a stage and
-its content genuinely does not propagate.
+**No conversation crosses a stage boundary.** Stage 05 cannot see Stage 03's
+session. What crosses is `memory.md` — the approved stage summaries — plus
+`handoff/<slug>.md`, the same summaries cut down to Objective / Key Results /
+Files Produced (`write_stage_handoff`, `src/utils.py:1628`), plus thirteen typed
+channels in [`src/information_flow.py`](../src/information_flow.py), each of
+which declares which stages read it. Memory and the handoff are the free text;
+everything else that crosses a boundary is a typed channel or a JSON artifact.
+Approval stays load-bearing because it is what puts a summary into memory and
+what triggers the preregistration freeze; a refused stage propagates neither.
 
-**Validation is structural, not semantic.** AutoR checks that files exist, are
-parseable, are fresh, and cross-reference correctly. It never judges whether
-the science is right. Every check is one a machine can be trusted with; the
-rest is left explicitly to you.
+**Two different kinds of check, deliberately separated.**
+`validate_stage_artifacts` ([`src/utils.py`](../src/utils.py):1232-1490) runs
+artifact gates — this file exists, is parseable, is fresh, cross-references
+correctly — and then runs seven validity-chain validators that ask whether a
+claim is warranted: `validate_preregistration`,
+`validate_experimental_protocol`, `validate_hypothesis_outcomes`,
+`validate_outcome_statistics`, `validate_claim_provenance`,
+`validate_validity_response`, `validate_round_decision`. The code labels the
+split itself at `src/utils.py:1292-1297`. A run can fail because a claim is
+unwarranted, not only because a file is absent.
+
+**Nothing that measures may also approve.** The rubric scores, the evolution
+controller reverts, the adversarial reviewer objects, the archive reorders
+preferences — and none of them can pass a stage. Approval comes from the
+terminal, or from the reviewer agent that stands in for it.
 
 **One conversation per stage.** Refinement continues the same backend session
 rather than restarting it, so iterating on a stage does not discard everything
@@ -37,47 +55,111 @@ the agent learned in it.
 ## Layers
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  Interfaces      main.py (terminal)    studio.py (browser)  │
-├─────────────────────────────────────────────────────────────┤
-│  Control loop    ResearchManager                            │
-│                  stage sequencing · approval · repair ·     │
-│                  resume · redo · rollback                   │
-├─────────────────────────────────────────────────────────────┤
-│  Contract        utils.py · manifest.py · artifact_index.py │
-│                  experiment_manifest.py · evidence_ledger.py│
-│                  hypothesis_manifest.py · writing_manifest.py│
-├─────────────────────────────────────────────────────────────┤
-│  Execution       OperatorProtocol                           │
-│                  ClaudeOperator · CodexOperator             │
-├─────────────────────────────────────────────────────────────┤
-│  Backend CLI     claude          codex                      │
-└─────────────────────────────────────────────────────────────┘
-                              ↕
-                   runs/<run_id>/  (the only state)
+┌───────────────────────────────────────────────────────────────────┐
+│  Interfaces    main.py (terminal)            studio.py (browser)  │
+├───────────────────────────────────────────────────────────────────┤
+│  Walk          ResearchManager · stage_graph · router             │
+│                which moves are admissible · which one is taken    │
+├───────────────────────────────────────────────────────────────────┤
+│  Gates         utils.validate_stage_markdown / _stage_artifacts   │
+│                artifact gates ┊ preregistration ·                 │
+│                               ┊ experimental_protocol ·           │
+│                               ┊ validity_review · research_rounds │
+├───────────────────────────────────────────────────────────────────┤
+│  Improvement   rubric → evolution → pareto → archive              │
+│                measures a draft; cannot approve one               │
+├───────────────────────────────────────────────────────────────────┤
+│  Review        approval_agent · review_panel · cross_reviewer     │
+│                review_policy · obligations                        │
+├───────────────────────────────────────────────────────────────────┤
+│  Contract      utils · manifest · information_flow ·              │
+│                prompt_fragments · artifact_index ·                │
+│                experiment_manifest · evidence_ledger ·            │
+│                hypothesis_manifest · writing_manifest             │
+├───────────────────────────────────────────────────────────────────┤
+│  Execution     OperatorProtocol → ClaudeOperator · CodexOperator  │
+├───────────────────────────────────────────────────────────────────┤
+│  Backend CLI   claude                        codex                │
+└───────────────────────────────────────────────────────────────────┘
+                                ↕
+                     runs/<run_id>/  (the only state)
 ```
 
-Each layer talks only to the one below it. The control loop never shells out
-to a CLI directly; the operators never decide what stage runs next.
+`ResearchManager` is the only module that reaches across layers. The operators
+never decide what stage runs next; nothing in the gate, improvement or review
+layers writes a prompt; and the improvement layer never approves.
 
 ---
 
 ## Module map
 
+Line counts are the shape of the system: `manager.py` (2955) and `utils.py`
+(2214) are the two largest files in the repo, and after them the four largest
+counted below are the panel, the rubric, the archive and the graph.
+
 ### Entry points
 
 | Module | Responsibility |
 | --- | --- |
-| [`main.py`](../main.py) | CLI parsing, backend and reviewer construction, new-run vs resume dispatch. Contains no workflow logic. |
+| [`main.py`](../main.py) | CLI parsing, backend and reviewer construction, archive wiring, new-run vs resume dispatch. Contains no workflow logic. |
 | [`studio.py`](../studio.py) | Three-line shim over `src/backend/studio_http.main`. |
 
-### Control loop
+### The walk
 
-| Module | Responsibility |
-| --- | --- |
-| [`src/manager.py`](../src/manager.py) | `ResearchManager` — the whole workflow. Intake, bootstrap, the stage loop, prompt assembly, validation dispatch, the approval menu, repair and normalization, retry exhaustion handling, skip/back control commands, resume, redo, rollback. |
-| [`src/terminal_ui.py`](../src/terminal_ui.py) | All terminal rendering: banners, stage panels, backend event streams, display-width-aware markdown wrapping, keyboard-selectable menus. The manager never writes to stdout directly. |
-| [`src/approval_agent.py`](../src/approval_agent.py) | `AutomatedReviewer` — the strict reviewer agent that stands in for the human gate under `--full-auto`. Returns a `ReviewDecision`. |
+| Module | Lines | Responsibility |
+| --- | --- | --- |
+| [`src/manager.py`](../src/manager.py) | 2955 | `ResearchManager` — "walk the stage graph until it reaches `finish` or nothing is open" (`:412`). Owns intake, the attempt loop, prompt assembly, validation dispatch, the approval menu, the evolution controller, the freeze/amend seam, the validity review, the round close, the obligation ledger, the cross-review veto, the inbound-channel record, repair, resume, redo and rollback. |
+| [`src/stage_graph.py`](../src/stage_graph.py) | 724 | Eight stages plus `FINISH` as a directed graph. Six of the seven forward edges carry a guard (`_ADVANCE_GUARDS`, `:266-273`) evaluated against artifacts on disk; `REVISIT_EDGES` (`:301-359`) adds ten backward moves; `DEFAULT_MAX_VISITS = 3` (`:76`) is a per-node budget. `moves()` (`:555`) returns blocked edges *with* the reason they are blocked, and `repeats_a_previous_reason()` (`:652`) refuses a revisit already justified on the same grounds. |
+| [`src/router.py`](../src/router.py) | 385 | Picks among admissible moves and records why. `--routing auto` asks only where more than one move is live. A choice outside the menu is refused, appended to `evolution/routing_refusals.jsonl` (`:186`), and replaced by the forward edge. |
+| [`src/research_rounds.py`](../src/research_rounds.py) | 320 | Stages 03-06 as a repeatable round. Stage 06 records `converged`, `refine_design`, `new_hypothesis` or `abandon`; `converged` with nothing supported is refused unless the round declares `negative_result` (`:161`). Bounded by `--max-rounds`, which defaults to 1. |
+| [`src/terminal_ui.py`](../src/terminal_ui.py) | | All terminal rendering: banners, stage panels, backend event streams, display-width-aware markdown wrapping, keyboard-selectable menus. The manager never writes to stdout directly. |
+
+### Gates
+
+| Module | Lines | Responsibility |
+| --- | --- | --- |
+| [`src/utils.py`](../src/utils.py) | 2214 | The contract layer. `STAGES`, `RunPaths`/`build_run_paths`, `REQUIRED_STAGE_HEADINGS`, `FIXED_STAGE_OPTIONS`, prompt assembly, `validate_stage_markdown`, `validate_stage_artifacts`, memory rendering, handoff read/write, venue resolution, `run_config.json` I/O, and every default the CLI overrides. |
+| [`src/preregistration.py`](../src/preregistration.py) | 579 | Freezes and hashes the hypothesis set before results exist, adjudicates every frozen hypothesis at Stage 06 against a named result artifact, and traces every manuscript claim back to a supported hypothesis at Stage 07. A post-freeze change is legal only as an `amend_preregistration` (`:234`) amendment carrying the previous digest. |
+| [`src/experimental_protocol.py`](../src/experimental_protocol.py) | 234 | Declares the primary metric, the seed count and each baseline's `why_competent` and `tuning_budget` before the experiments run. `MIN_SEEDS_FOR_A_VERDICT = 2` (`:37`) refuses a supported/refuted verdict resting on one run unless the run says why one run settles it. |
+| [`src/validity_review.py`](../src/validity_review.py) | 512 | The adversarial pass after Stages 05 and 06 (`REVIEWED_STAGE_NUMBERS`, `:42`). Asks why the result is wrong across ten named failure modes rather than whether the stage is complete, and requires the next stage to answer every finding. Has no authority to approve or reject. |
+| [`src/manifest.py`](../src/manifest.py) | | `run_manifest.json`: stage lifecycle, status transitions, rollback and stale marking, memory rebuild from approved entries. |
+| [`src/artifact_index.py`](../src/artifact_index.py) | | Scans `data/`, `results/`, `figures/`; infers or reads declared schemas; writes `artifact_index.json`. |
+| [`src/experiment_manifest.py`](../src/experiment_manifest.py) | | Builds and validates `results/experiment_manifest.json` as a view over the artifact index. |
+| [`src/evidence_ledger.py`](../src/evidence_ledger.py) | | Validates the Stage 01 `sources.json`/`claims.json` pair and the Stage 07 `citation_verification.json`. |
+| [`src/hypothesis_manifest.py`](../src/hypothesis_manifest.py) | | Parses Stage 02's typed `T*`/`H*`/`C*` identifiers into `hypothesis_manifest.json` — the input the `has_hypotheses` guard reads. |
+| [`src/writing_manifest.py`](../src/writing_manifest.py) | | Stage 07 support: writing manifest, figure/result scanning, layout review generation and validation. |
+
+### Improvement
+
+| Module | Lines | Responsibility |
+| --- | --- | --- |
+| [`src/rubric.py`](../src/rubric.py) | 926 | Eight weighted criteria read off disk with no backend call (`CRITERIA`, `:135-143`), including `reproducibility` (3.0), which walks the same validity chain the gate walks, and `commitment` (1.5), which counts hedge patterns. Verdicts are read only through `_verdict_blind_outcomes` (`:260`), so the score carries no gradient toward changing an answer. |
+| [`src/evolution.py`](../src/evolution.py) | 692 | The champion ratchet. `consider()` (`:248`) scores each valid draft; `_revert()` (`:383`) copies the champion back over a losing polish round before the reviewer sees it; a round whose `verdict_digest` moved is rejected whatever it scored (`:306-327`); a human-directed revision is exempt (`:288-304`). `measure=True`, `rounds=2` by default (`:97`, `:102`). |
+| [`src/pareto.py`](../src/pareto.py) | 212 | Keeps drafts that are non-dominated on the criterion vector even when they lose on the weighted total (`frontier`, `:74`). `complementary_pair` (`:153`) names the two whose merge has the most headroom — the only place two drafts are combined rather than ranked. |
+| [`src/archive.py`](../src/archive.py) | 784 | Cross-run record under `~/.autor/archive`. `record_run` (`:426`) stores route, edges and per-stage fitness; `edge_payoffs` compares runs that took an edge against runs that reached the same node and did not; `propose_variant` (`:512`) reorders priorities and can never open, add or remove a guard. Promotion requires a win within every `comparability_basis` (`:91`), so halting early cannot raise mean fitness. |
+
+### Review
+
+| Module | Lines | Responsibility |
+| --- | --- | --- |
+| [`src/approval_agent.py`](../src/approval_agent.py) | | `AutomatedReviewer` — the strict reviewer agent that stands in for the human gate under `--full-auto`. Returns a `ReviewDecision`, and renders the standing rules and open obligations into its own prompt. |
+| [`src/review_panel.py`](../src/review_panel.py) | 1223 | Five seats. Round 1 is independent; a cross-examination round runs only if that round was not unanimous, up to `--panel-rounds` (default 2, `:513`); then the chair synthesizes one decision. The Adversarial Reviewer's exposure is `"none"` (`:256`); peers are anonymised in round 2 (`:893`); abstention is a first-class verdict (`:325`); an unreachable member breaks unanimity rather than counting as agreement (`_is_unanimous`, `:723`); `_enforce_blocking_objections` (`:783`) converts a chair's approval into a refusal in code. `record_panel_effect` (`:1143`) accumulates the chair's round-1 solo verdict as the panel's own control arm. |
+| [`src/cross_reviewer.py`](../src/cross_reviewer.py) | 239 | A second opinion from a different model family, applied only to approvals. A veto, never an override; an auditor that errors or returns unparseable output is recorded `unavailable` (`:60`, `:111-134`), never as agreement. |
+| [`src/review_policy.py`](../src/review_policy.py) | 212 | Corrections the reviewer demanded become standing rules in `runs/<id>/review_policy.json` (`policy_path`, `:103`) and are rendered into every later review prompt. Per-run: nothing carries a rule into the next run. |
+| [`src/obligations.py`](../src/obligations.py) | 306 | What an approving reviewer says a later stage still owes. Written to `runs/<id>/obligations.json` (`:160`), injected into that stage's prompt *and* its review, discharged only by a reviewer (`discharge_obligations`, `:226`), with deferrals counted rather than silent (`note_deferrals`, `:249`). |
+| [`src/ideation_panel.py`](../src/ideation_panel.py) | 712 | Stage 02 divergence: five proposer lenses, Jaccard deduplication, scoring into a candidate pool the stage chooses from. Decides nothing. `measure_adoption` (`:604`) marks afterwards which pooled candidates the approved stage actually built on. |
+
+### Context and inputs
+
+| Module | Lines | Responsibility |
+| --- | --- | --- |
+| [`src/information_flow.py`](../src/information_flow.py) | 395 | Thirteen typed channels (`CHANNELS`, `:240-395`). Each declares `produced_by`, a `consumed_by` set of real stage slugs, and a rationale for every narrowing. `render_inbound()` composes a stage's context per consumer; `dependency_edges()` prints the producer→consumer topology. |
+| [`src/prompt_fragments.py`](../src/prompt_fragments.py) | 104 | The rules every stage prompt shares, held once. `compose_stage_template` (`:97`) orders them: the stage's own instructions, then the output-format rules that constrain them, then `RUN_SAFETY`. |
+| [`src/intake.py`](../src/intake.py) | | Stage 00: clarification-question parsing, resource classification and ingestion, `intake_context.json`. Runs before the graph walk begins. |
+| [`src/bootstrap.py`](../src/bootstrap.py) | | `--paper-corpus`: scans your prior papers (PDF/LaTeX/BibTeX) into a researcher profile, citation neighborhood, and style profile. |
+| [`src/project_bootstrap.py`](../src/project_bootstrap.py) | | `--project-root`: scans an existing repository, assesses per-stage completion, recommends a re-entry stage. |
+| [`src/prompts/`](../src/prompts) | | One markdown template per stage, plus intake and bootstrap templates. Editing these changes agent behaviour with no code change. |
+| [`src/skills/`](../src/skills) | | Agent skills, installed into each run's `.claude/skills/` by [`src/run_skills.py`](../src/run_skills.py). Pull-based counterpart to the templates: loaded only when the model judges one relevant. The install path is load-bearing — the operator runs with `cwd=run_root`, so skills left in the AutoR checkout are never discovered. |
 
 ### Execution
 
@@ -87,39 +169,14 @@ to a CLI directly; the operators never decide what stage runs next.
 | [`src/operator.py`](../src/operator.py) | `ClaudeOperator` — session management, prompt-file invocation, live `stream-json` parsing, resume-failure detection and fallback, the repair pass, per-attempt state records. Also the shared base for other CLI backends. |
 | [`src/operator_codex.py`](../src/operator_codex.py) | `CodexOperator` — subclass of `ClaudeOperator` overriding invocation. Runs `codex exec --json`, applies the sandbox mode, and works through a stable temp-directory symlink to the run root. |
 
-### Contract and state
-
-| Module | Responsibility |
-| --- | --- |
-| [`src/utils.py`](../src/utils.py) | The contract layer. `StageSpec`/`STAGES`, `RunPaths`/`build_run_paths`, prompt assembly, `validate_stage_markdown`, `validate_stage_artifacts`, memory rendering, handoff read/write, venue resolution, `run_config.json` I/O. Everything shared lives here. |
-| [`src/manifest.py`](../src/manifest.py) | `run_manifest.json`: stage lifecycle, status transitions, rollback and stale marking, memory rebuild from approved entries. |
-| [`src/artifact_index.py`](../src/artifact_index.py) | Scans `data/`, `results/`, `figures/`; infers or reads declared schemas; writes `artifact_index.json`. |
-| [`src/experiment_manifest.py`](../src/experiment_manifest.py) | Builds and validates `results/experiment_manifest.json` as a view over the artifact index. |
-| [`src/evidence_ledger.py`](../src/evidence_ledger.py) | Validates the Stage 01 `sources.json`/`claims.json` pair and the Stage 07 `citation_verification.json`. |
-| [`src/hypothesis_manifest.py`](../src/hypothesis_manifest.py) | Parses Stage 02's typed `T*`/`H*`/`C*` identifiers into `hypothesis_manifest.json`. |
-| [`src/preregistration.py`](../src/preregistration.py) | Freezes the hypothesis set before results exist, adjudicates every frozen hypothesis at Stage 06, and traces every manuscript claim back to a supported one at Stage 07. The one part of the pipeline that gates on whether a claim is warranted rather than on whether a file exists. |
-| [`src/experimental_protocol.py`](../src/experimental_protocol.py) | Declares the primary metric, the seed count and each baseline's tuning budget before the experiments run, and refuses a verdict that rests on one run or on an unstated dispersion measure. |
-| [`src/validity_review.py`](../src/validity_review.py) | The adversarial pass after Stages 05 and 06. Asks why the result is wrong rather than whether the stage is complete, and requires the next stage to answer every finding it raises. Has no authority to approve or reject. |
-| [`src/research_rounds.py`](../src/research_rounds.py) | Stages 03-06 as a repeatable round. Stage 06 decides whether the run converged, needs a better design, needs a new hypothesis, or should be abandoned, and a refuted hypothesis becomes the input to the next round instead of a dead end. |
-| [`src/writing_manifest.py`](../src/writing_manifest.py) | Stage 07 support: writing manifest, figure/result scanning, layout review generation and validation. |
-
-### Inputs
-
-| Module | Responsibility |
-| --- | --- |
-| [`src/intake.py`](../src/intake.py) | Stage 00: clarification-question parsing, resource classification and ingestion, `intake_context.json`. |
-| [`src/bootstrap.py`](../src/bootstrap.py) | `--paper-corpus`: scans your prior papers (PDF/LaTeX/BibTeX) into a researcher profile, citation neighborhood, and style profile. |
-| [`src/project_bootstrap.py`](../src/project_bootstrap.py) | `--project-root`: scans an existing repository, assesses per-stage completion, recommends a re-entry stage. |
-
 ### Output
 
 | Module | Responsibility |
 | --- | --- |
 | [`src/platform/foundry.py`](../src/platform/foundry.py) | Post-approval packaging: paper package and release package. |
-| [`src/diagram_gen.py`](../src/diagram_gen.py) | Optional Gemini method-diagram generation, injected into `report.md` or `method.tex` depending on the run's output format. The only module with a third-party dependency. |
+| [`src/diagram_gen.py`](../src/diagram_gen.py) | Optional Gemini method-diagram generation, injected into `report.md` or `method.tex` depending on the run's output format. |
+| [`src/web_search.py`](../src/web_search.py) | `build_genai_client` and the Gemini backend shared by `--web-search gemini`, `--research-diagram` and the cross-model reviewer. The only place `google-genai` is imported for reviews. |
 | [`src/mcp_web_search.py`](../src/mcp_web_search.py) | An MCP server exposing Gemini search as a real `web_search` tool, so the capability sits where the disabled built-in used to: in the tool list, and in the trace as a named call. Stdlib JSON-RPC over stdio. |
-| [`src/prompts/`](../src/prompts) | One markdown template per stage, plus intake and bootstrap templates. Editing these changes agent behaviour with no code change. |
-| [`src/skills/`](../src/skills) | Agent skills, installed into each run's `.claude/skills/` by [`src/run_skills.py`](../src/run_skills.py). Pull-based counterpart to the prompt templates: loaded only when the model judges one relevant. The install path is load-bearing — the operator runs with `cwd=run_root`, so skills left in the AutoR checkout are never discovered. |
 
 ### Studio
 
@@ -127,7 +184,7 @@ to a CLI directly; the operators never decide what stage runs next.
 | --- | --- |
 | [`src/backend/studio_http.py`](../src/backend/studio_http.py) | `ThreadingHTTPServer` request router, static asset serving, SSE for the Notebook. Stdlib `http.server` only. |
 | [`src/backend/studio_service.py`](../src/backend/studio_service.py) | The service layer: project index, run summaries, stage documents, file tree, paper preview, version history, iteration planning. |
-| [`src/backend/studio_runner.py`](../src/backend/studio_runner.py) | Drives real `ResearchManager` runs in a background thread under the Studio's approval gate. |
+| [`src/backend/studio_runner.py`](../src/backend/studio_runner.py) | Drives real `ResearchManager` runs in a background thread under the Studio's approval gate. Its lazy-resume approve path picks the next stage by stage number (`:361-364`) rather than asking the router, so graph routing is a CLI capability today. |
 | [`src/backend/sessions.py`](../src/backend/sessions.py) | Per-stage trace events for the live view; parses `logs_raw.jsonl` into renderable events. |
 | [`src/backend/notebook.py`](../src/backend/notebook.py) | The Notebook view's Claude conversation over a run. |
 | [`src/frontend/static/`](../src/frontend/static) | The single-page UI: `index.html`, `app.js`, `notebook.js`, `styles.css`. No build step, no framework. |
@@ -138,51 +195,77 @@ shims that re-export from `src/backend/`. New code should import from
 
 ---
 
-## The stage attempt loop
+## The walk
 
-This is the core of the system. Everything else supports it.
+Stage 00 intake runs before the walk. `_graph_entry_stage` →
+`_select_stages_for_run` (`src/manager.py:693-715`) yields only `STAGES`, so
+the graph has eight nodes plus `FINISH`, not nine.
 
 ```mermaid
 flowchart TD
-    A[Assemble prompt] --> B[Write to prompt_cache/]
-    B --> C[Start or resume the stage session]
-    C --> D[Backend writes stages/&lt;slug&gt;.tmp.md]
-    D --> E{Draft present?}
-    E -- No --> F[Repair pass: rewrite the summary only]
-    F --> G{Present now?}
-    G -- No --> H[Local fallback normalization]
-    G -- Yes --> I
-    H --> I[Validate markdown + artifacts]
-    E -- Yes --> I
-    I --> J{Valid?}
-    J -- No, attempts left --> A
-    J -- No, attempts exhausted --> K[Escalate: skip / roll back / abort]
-    J -- Yes --> L[Show draft for review]
-    L --> M{Decision}
-    M -- 1/2/3 --> N[Continue session with a suggestion] --> A
-    M -- 4 --> O[Continue session with your feedback] --> A
-    M -- 5 --> P[Promote to stages/&lt;slug&gt;.md]
-    P --> Q[Append to memory.md · write handoff/ · update manifest]
-    Q --> R[Next stage]
-    M -- 6 --> S[Abort]
+    E[graph_enter: record the visit] --> A[Assemble prompt: template + fragments + typed channels]
+    A --> B[Write to prompt_cache/ · start or resume the stage session]
+    B --> C[Backend writes stages/&lt;slug&gt;.tmp.md]
+    C --> D{Draft present?}
+    D -- No --> R1[Repair pass, then local normalization]
+    R1 --> V
+    D -- Yes --> V[Validate markdown · artifact gates · validity chain]
+    V -- Invalid, attempts left --> A
+    V -- Invalid, exhausted --> K[Escalate: skip / roll back / abort]
+    V -- Valid --> S[Score the draft · revert a losing polish round]
+    S -- headroom left, budget left --> A
+    S -- done --> H{Approval: terminal menu, or reviewer agent}
+    H -- 1/2/3/4 --> A
+    H -- 6 --> X[Abort]
+    H -- 5 --> P[Promote · append to memory.md · update manifest]
+    P --> Q[Freeze at 04 · adversarial review after 05/06 · close the round at 06 · package at 07/08]
+    Q --> L[finalize_stage · router.choose among admissible moves · graph_leave]
+    L --> E
 ```
+
+Three things bypass the router at the jump seam (`src/manager.py:440-465`):
+`/back <stage>`, a rollback after retry exhaustion, and a round that decided to
+refine its design or change its hypothesis. All are already-made moves by the
+time the walk sees them, and all are recorded on the route as revisits.
 
 ### Prompt assembly
 
-`ResearchManager._build_stage_prompt` composes, in order:
+Context is composed **per consumer, not per availability**.
+`ResearchManager._build_stage_prompt` does, in order:
 
-1. The stage template from `src/prompts/<slug>.md`.
-2. The stage summary contract and execution-discipline constraints.
-3. `user_input.txt` — the original goal.
-4. `memory.md` — approved stage summaries.
-5. `intake_context.json`, when present.
-6. Venue configuration for the run.
-7. The structured artifact index, regenerated at prompt time.
-8. The experiment bundle manifest, for Stage 05 and later.
-9. Up to four prior handoff summaries, with the Decision Ledger stripped.
-10. Refinement feedback, on a refinement attempt.
-11. The current draft and workspace context, on a continuation attempt.
-12. Previous validation errors, when re-running after a failure.
+1. `compose_stage_template` — the stage template from `src/prompts/<slug>.md`,
+   the shared output-format fragments, and `RUN_SAFETY`.
+2. `render_inbound(ChannelContext(...), CHANNELS)` (`src/manager.py:2033-2039`)
+   — the typed channels whose `consumed_by` includes this stage. The delivered
+   keys are written to the run log by `_record_inbound_channels` (`:2900`).
+3. The stage-summary contract — the required heading order, the six fixed
+   options, three refinement suggestions — and the execution-discipline rules.
+4. `user_input.txt`.
+5. `# Obligations Carried Forward` when the stage owes one, the web-search
+   capability block, and `intake_context.json`, each only when it has content.
+6. `memory.md`, filtered to the stages before this one on a redo — then the
+   handoff, but only if memory came back empty.
+7. Refinement feedback, or — on a continuation attempt — the current draft, the
+   workspace, and, from attempt 3 on, the previous validation errors.
+
+Steps 3-7 are `build_prompt` (`src/utils.py:753`); a continuation attempt takes
+`build_continuation_prompt` (`:820`) instead, which always sends the handoff
+because it sends no memory at all.
+
+Three channel narrowings worth knowing, because they are what "typed" buys:
+the artifact index skips Stages 00-02, which produce none; the writing manifest
+reaches Stage 07 alone; and the mutable Stage 02 hypotheses stop at
+`04_implementation`, where the freeze supersedes them.
+
+Five blocks are still passed as arguments rather than declared as channels:
+`obligations_context`, `intake_context_text`, `web_search_context`,
+`approved_memory` and `handoff_context` (`src/manager.py:2041-2069`). Their
+delivery rules therefore sit inside `build_prompt` instead of next to a
+`consumed_by` set — which is where the one rule that matters lives:
+`build_prompt` withholds the handoff when memory is non-empty
+(`src/utils.py:807`), because the handoff is a strict subset of memory and
+sending both put ~350 words of verbatim duplicate into every prompt from Stage
+04 on.
 
 The result is written to `prompt_cache/<slug>_attempt_NN.prompt.md` and passed
 to the CLI **by reference** (`-p @<path>`). Two consequences worth knowing:
@@ -239,8 +322,10 @@ A separate mechanism handles a **resume failure**: if the backend reports that
 a session ID no longer exists, the operator detects it from the error text and
 falls back to a fresh session rather than failing the stage.
 
-After `MAX_STAGE_ATTEMPTS` (5), AutoR stops and offers you skip, roll back, or
-abort. It never silently gives up and it never silently continues.
+After `MAX_STAGE_ATTEMPTS` (5, `src/utils.py:13`) AutoR stops and offers you
+skip, roll back, or abort. Under `--full-auto` the stage is auto-skipped
+instead, bounded by `--max-auto-skips`. It never silently gives up and it never
+silently continues.
 
 ---
 
@@ -253,12 +338,13 @@ output was weak but the direction was right.
 
 **Rollback** returns to a stage and marks every downstream stage `stale` in
 `run_manifest.json`, recording `invalidated_reason` and `invalidated_by_stage`
-on each. `memory.md` is rebuilt from the approved entries that survive. Use it
-when a later stage proved an earlier decision wrong — which is the normal
-shape of real research, not an exception.
+on each. `memory.md` is rebuilt from the approved entries that survive.
 
 Staleness is recorded rather than enforced: a stale stage is visibly marked,
-and re-running it clears the mark.
+and re-running it clears the mark. Rollback is also the mechanism the run uses
+on itself — `_rollback_and_jump` (`src/manager.py:2585`) is how a research
+round that decided `refine_design` gets back to Stage 03, and how a cross-model
+veto reopens a stage that was already approved.
 
 ---
 
@@ -273,6 +359,7 @@ the same run directories, writing the same files.
 | Approval | six-option menu | Approve button / feedback box |
 | Live output | streamed to the terminal | session trace from `logs_raw.jsonl` |
 | Restart safety | resume by `run_id` | lazy-resume on the next approve/feedback |
+| Next stage | `router.choose` among admissible moves | next stage number (`studio_runner.py:361-364`) |
 | Extra state | none | `.autor/projects.json`, `<run>/sessions/`, `<run>/notebook/` |
 
 You can start a run in the terminal and inspect it in the Studio, or the
@@ -287,27 +374,37 @@ Ordered by how much of the system you have to understand first.
 | To change… | Edit | Code change needed |
 | --- | --- | --- |
 | What a stage asks the agent to do | `src/prompts/<slug>.md` | none |
+| A rule every stage prompt shares | `src/prompt_fragments.py` | none |
 | Craft guidance an agent can pull mid-stage | a new `src/skills/<name>/SKILL.md` | none |
 | The set of target venues | `templates/registry.yaml` | none |
+| What a hostile reviewer would object to | `VALIDITY_CATEGORIES` in `src/validity_review.py` | none |
+| Which stages read which information | `CHANNELS` in `src/information_flow.py` | small |
 | What a stage must produce | `validate_stage_artifacts` in `src/utils.py` | small |
 | What counts as a warranted claim | `src/preregistration.py` | small |
 | What counts as adequate evidence | `src/experimental_protocol.py` | small |
-| What a hostile reviewer would object to | `VALIDITY_CATEGORIES` in `src/validity_review.py` | none |
 | How a round may conclude | `DECISIONS` in `src/research_rounds.py` | small |
+| What a good draft scores | `CRITERIA` in `src/rubric.py` | small |
 | The summary contract | `REQUIRED_STAGE_HEADINGS` + `validate_stage_markdown` | small |
+| Which moves exist and what guards them | `_ADVANCE_GUARDS`, `REVISIT_EDGES`, `GUARDS` in `src/stage_graph.py` | moderate |
 | The stage list | `STAGES` in `src/utils.py`, plus a new prompt template | moderate |
 | The execution backend | implement `OperatorProtocol`, or subclass `ClaudeOperator` | moderate |
-| The approval policy | `AutomatedReviewer` in `src/approval_agent.py` | moderate |
+| The approval policy | `AutomatedReviewer` in `src/approval_agent.py`, or the seats in `src/review_panel.py` | moderate |
 
 Step-by-step recipes are in [Development](development.md#extending-autor).
+
+A note on adding a guard: a guard is a routing preference, not a gate. If the
+guard closes the only forward edge, the run still advances and the stage's own
+validation refuses it there. Anything that must be impossible belongs in
+`validate_stage_artifacts`, not only in `GUARDS`.
 
 ---
 
 ## What AutoR deliberately is not
 
-- **Not a multi-agent framework.** One agent executes; one loop supervises.
-- **Not concurrent.** Stages run in order, one at a time. Ordering is the
-  point.
+- **Not a multi-agent framework.** One agent executes. The panels are review
+  and ideation seats at two specific gates, not an orchestration layer.
+- **Not concurrent.** Stages run one at a time. Ordering is the point.
 - **Not database-backed.** Files, and nothing else.
 - **Not a dashboard product.** The Studio is a view over run directories.
-- **Not autonomous.** The default is that nothing advances without a human.
+- **Not autonomous.** The default is that nothing advances without a human,
+  and no loop in the system can approve a stage.

@@ -788,8 +788,6 @@ def build_prompt(
     ]
     if obligations_context:
         sections.extend(["# Obligations Carried Forward", obligations_context.strip()])
-    if obligations_context:
-        sections.extend(["# Obligations Carried Forward", obligations_context.strip()])
     if web_search_context:
         sections.extend(["# Web Search Capability", web_search_context.strip()])
     if intake_context_text:

@@ -47,7 +47,7 @@ python main.py [--goal GOAL] [--goal-file PATH] [--runs-dir DIR] [--fake-operato
 | `--operator {claude,codex}` | `claude` | Which coding-agent CLI executes each stage. On resume, the existing run's backend is preserved unless you pass this flag. |
 | `--model MODEL` | `sonnet` for Claude, `default` for Codex | Model alias or full model name for the execution backend. On resume, the run's recorded model is reused unless you pass this flag or switch backends. |
 | `--codex-sandbox MODE` | `workspace-write` | Codex CLI sandbox mode. Only meaningful for `--operator codex`. See [the sandbox modes](#codex-sandbox-modes) below. Persisted in `run_config.json` and preserved on resume. |
-| `--fake-operator` | off | Replace the real backend with a deterministic stub that fabricates a valid stage summary and the placeholder artifacts each stage gate requires, so a fake run completes all nine stages. Use this for smoke tests and for exercising the workflow without spending tokens. It does **not** produce real research artifacts — every placeholder says so in its own contents. |
+| `--fake-operator` | off | Replace the real backend with a deterministic stub that fabricates a valid stage summary and the placeholder artifacts each stage gate requires, so a fake run completes all eight stages. Use this for smoke tests and for exercising the workflow without spending tokens. It does **not** produce real research artifacts — every placeholder says so in its own contents. |
 | `--stage-timeout SECONDS` | `14400` (4 hours) | Wall-clock ceiling for a single stage attempt. Raise it for long training runs; a stage that exceeds it is treated as a failed attempt. |
 | `--max-attempts N` | `5` | Attempts allowed per stage before AutoR escalates or auto-skips. Each retry re-runs the stage with the previous attempt's validation errors attached, so raising this trades wall-clock for a better chance of clearing the gates. |
 
@@ -178,7 +178,7 @@ that runs the script need not be the same.
 
 The two modes differ in which Stage 07 prompt is loaded, which artifacts the
 stage gate requires, and whether a `paper_package/` bundle is produced after
-approval. See [Stage Contract](stage-contract.md#artifact-requirements).
+approval. See [Stage Contract](stage-contract.md#2-the-artifact-gate).
 
 ### Review panel
 
@@ -189,6 +189,8 @@ approval. See [Stage Contract](stage-contract.md#artifact-requirements).
 | `--panel-rounds N` | `2` | Maximum deliberation rounds. Round 1 is always independent; later rounds run only on disagreement. |
 | `--panel-models ROLE=MODEL...` | — | Assign a model per seat, as `role=model` or `role=backend:model` (`pi=opus skeptic=codex:default`). Heterogeneity is the lever with the best evidence behind it. |
 | `--persona PATH` | — | Markdown description of the researcher the panel stands in for, injected into every seat so they hold one consistent bar. |
+| `--cross-review {auto,gemini,off}` | `auto` | Independent second opinion on each approval, from a different model family. It can veto an approval it cannot defend and can never override a refusal, so it only makes the gate stricter. `auto` enables it when a Gemini backend is configured. Only meaningful with an agent approval gate. |
+| `--cross-review-model MODEL` | `gemini-3.1-pro-preview` | Model for the cross-model reviewer (`DEFAULT_CROSS_REVIEW_MODEL`, `src/cross_reviewer.py:45`). |
 
 A blocking objection from any member cannot be approved over — the chair's approval is
 converted to a refinement in code. Each run also writes
@@ -268,6 +270,7 @@ mechanism and the reasoning behind each refusal.
 | `--no-archive` | off | Do not record this run in the archive. |
 | `--archive-steer` / `--no-archive-steer` | **off** | Let the archive choose the topology this run uses, rather than only recording what it did. A run silently using a different topology from the one asked for is not a surprise a research tool gets to spring on anyone; turn this on once `--archive-report` shows the archive has something to say. A learned prior only reorders which move is preferred — it can never open a guarded edge. Preserved on resume. |
 | `--archive-report` | off | Print what the archive has learned, and exit. |
+| `--max-rounds N` | `1` | How many times Stages 03-06 may run. A round ends when Stage 06 records `converged`, `refine_design`, `new_hypothesis` or `abandon`. The default keeps the single-pass behaviour: the decision is still recorded, so a one-round run says whether it converged or merely stopped, but a round that asks to go back is recorded with `acted_on: false` and the run continues. Raise it to let a refuted hypothesis lead to a second round. |
 
 ### Optional enhancements
 

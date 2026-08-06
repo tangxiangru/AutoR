@@ -1,300 +1,205 @@
-<h1 align="center">AutoR: A Human-Centered Research OS</h1>
+<h1 align="center">AutoR: A Recursive Research System</h1>
 
 <p align="center">
-  <strong>AI handles execution. Humans own the direction.</strong>
-</p>
-
-<p align="center">
-  A terminal-first research harness, with a local browser Studio, that turns long, messy research work into reproducible, artifact-backed runs.
+  <strong>It proposes, tests, and tries to refute itself. The approval gate is the one thing it does not own — by default, that is you.</strong>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.10%2B-blue" alt="Python 3.10+" />
-  <img src="https://img.shields.io/badge/Workflow-Intake%20%2B%208%20Stages-black" alt="Intake plus 8 stages" />
+  <img src="https://img.shields.io/badge/Workflow-8%20Stages%2C%20Directed%20Graph-black" alt="8 stages, directed graph" />
   <img src="https://img.shields.io/badge/Interface-Terminal--first-green" alt="Terminal-first" />
   <img src="https://img.shields.io/badge/Human-Approval%20Required-orange" alt="Human approval required" />
   <img src="https://img.shields.io/badge/Execution-Agent%20Harness-purple" alt="Agent harness" />
   <img src="https://img.shields.io/badge/Artifacts-Reproducible%20Research%20Runs-red" alt="Reproducible research runs" />
-  <a href="LICENSE">
-    <img src="https://img.shields.io/badge/License-Proprietary-lightgrey" alt="Proprietary license" />
-  </a>
-  <a href="https://github.com/tangxiangru/AutoR">
-    <img src="https://img.shields.io/github/stars/tangxiangru/AutoR?style=social" alt="GitHub stars" />
-  </a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Proprietary-lightgrey" alt="Proprietary license" /></a>
+  <a href="https://github.com/tangxiangru/AutoR"><img src="https://img.shields.io/github/stars/tangxiangru/AutoR?style=social" alt="GitHub stars" /></a>
 </p>
 
 <p align="center">
-  <a href="#-overview">Overview</a>
-  ·
-  <a href="#-news">News</a>
-  ·
-  <a href="#-showcase">Showcase</a>
-  ·
-  <a href="#-quick-start">Quick Start</a>
-  ·
-  <a href="#-how-it-works">How It Works</a>
-  ·
-  <a href="#-run-layout">Run Layout</a>
-  ·
-  <a href="#-architecture">Architecture</a>
-  ·
-  <a href="#-documentation">Documentation</a>
-  ·
-  <a href="#-roadmap">Roadmap</a>
-  ·
-  <a href="#-license">License</a>
-</p>
-
-<p align="center">
-  <strong>Start Here:</strong>
-  <a href="docs/tutorial_en.md">English Guide</a>
-  ·
-  <a href="docs/tutorial_zh.md">中文教程</a>
-  ·
+  <strong>Start here:</strong>
+  <a href="docs/tutorial_en.md">English Guide</a> ·
+  <a href="docs/tutorial_zh.md">中文教程</a> ·
   <a href="docs/">Full Documentation</a>
 </p>
-
-<p align="center">
-  <img src="assets/examples/example_fig6_two_layer.png" alt="AutoR example figure" width="92%" />
-</p>
-
----
-
-> AutoR is not a chat demo, not a generic agent framework, and not a markdown-only research toy.
->
-> It is a structured research harness over a coding agent execution layer:
-> **AI handles execution, humans own the direction, and every run becomes an inspectable research artifact on disk.**
-
-> New users should start with the step-by-step guides:
-> [English Guide](docs/tutorial_en.md) or [中文教程](docs/tutorial_zh.md).
-
-## 📖 Overview
-
-Most autoresearch systems optimize for autonomy.
-
-AutoR takes a different position: research is too important to hand over as a blind end-to-end loop. The goal is not to remove humans from research. The goal is to give them a stronger execution system.
-
-### ✨ At a Glance
-
-| Dimension | AutoR |
-| --- | --- |
-| Execution model | A coding agent as the execution layer, AutoR as the research control loop |
-| Control model | Human approval by default, with an optional strict reviewer-agent gate for unattended runs |
-| Research unit | A reproducible run under `runs/<run_id>/` |
-| Workflow shape | Nine stages as a **directed graph** the run navigates; the linear sequence is one path through it |
-| Improvement | On by default: drafts are measured and ratcheted, so a stage can only get better — and the score is blind to what the run concluded |
-| Quality bar | Artifact-backed outputs, not markdown-only summaries |
-| Recovery | Resume, redo-stage, rollback-stage, stage-local continuation |
-
-### 🔦 Highlights
-
-| Layer | Highlight | What AutoR actually does |
-| --- | --- | --- |
-| Big idea | **Human-centered research execution** | AutoR is not an autonomous scientist. AI handles execution; humans retain approval and direction at every stage boundary. |
-| Big idea | **The stages are a graph, not a list** | Analysis that exposes a design flaw can send the run back to Stage 03 instead of writing up around it. AutoR computes which moves are open by checking artifacts on disk; the agent chooses among those and says why. [Details](docs/self-improvement.md) |
-| Big idea | **Improvement that is measured, not hoped for** | A refinement round is scored against a rigour rubric read off disk. The best-scoring draft is what gets promoted; a round that scores worse is reverted. A stage can only improve. |
-| Big idea | **Self-improvement that cannot p-hack** | The fitness function is blind to what the run concluded — a refuted hypothesis with clean evidence outscores a supported one resting on an assertion — and any round that moves a hypothesis verdict is rejected outright. |
-| Big idea | **The harness learns across runs** | An optional archive compares each graph edge against runs that reached the same node and did not take it, and reorders which move is preferred. It can never open a guarded edge. |
-| Big idea | **Research loop over agent loop** | The system manages stage progression, validation, repair, recovery, and human checkpoints above the lower-level agent execution loop. |
-| Big idea | **Every run is a reproducible research artifact** | Each run leaves behind prompts, logs, approved summaries, code, data, figures, writing sources, and packaged outputs under `runs/<run_id>/`. |
-| Big idea | **Verifiable outputs, not paper-shaped theater** | The workflow is judged by inspectable artifacts and human approval, not by whether a generated document merely looks polished. |
-| Useful feature | **Structured literature organization** | Survey notes, bibliographies, related-work tables, and reading artifacts stay under `workspace/literature/` instead of disappearing into chat history. |
-| Useful feature | **Automated experiment manifests** | Machine-readable experiment and result files make runs inspectable, comparable, and reusable downstream. |
-| Useful feature | **Citation verification and writing checks** | Writing expects citation verification, figure-link checks, and self-review artifacts before Stage 07 is considered complete. |
-| Useful feature | **Artifact indexing across stages** | `artifact_index.json` and related manifests help later stages find data, results, and figures without guessing from filenames. |
-| Useful feature | **Obligations carried forward** | An approving reviewer records what a later stage still owes; the debt is injected into that stage and its review, and only a reviewer can discharge it. |
-| Useful feature | **Cross-model review veto** | When the reviewer approves, a different model family audits that approval and can send the stage back. A veto, never an override, so it can only tighten the gate. |
-| Useful feature | **Self-improving review policy** | Every correction the reviewer demands becomes a standing rule checked on all later stages, recorded in an auditable `review_policy.json` with the stage and attempt that produced it. |
-| Useful feature | **Resume, redo, and rollback controls** | Long research runs can continue in place, retry a stage, or roll downstream state back without starting over. |
-| Useful feature | **Deliberating review panel** | Instead of one reviewer agent at the approval gate, `--review-panel` seats a PI, domain expert, methodologist, reproducibility engineer and adversarial reviewer who review independently, cross-examine, then converge — and a blocking objection cannot be approved over. Each run measures the panel against its own single-pass baseline and reports when it did not earn its cost. |
-| Useful feature | **Divergent ideation panel** | `--ideation-panel` widens Stage 02 with proposers working from distinct lenses - mechanism, contrarian, adjacent field, null/artifact, regime - deduplicated and scored into a candidate pool the stage chooses from. It decides nothing, and reports when the extra proposers added nothing. |
-| Useful feature | **Two output formats** | Stage 07 writes a benchmark-ready markdown report (`report/report.md` + PNG figures) by default, or a venue-aware LaTeX paper package with a compiled PDF via `--output-format latex`. |
-
-In practice, that means AutoR is useful not only because of the high-level framing, but also because it handles real research chores: literature organization, experiment manifests, citation verification, artifact indexing, manuscript packaging, and recoverable long-running workflows.
-
-### ✅ What AutoR Guarantees
-
-- By default, human approval is required before the workflow advances.
-- An optional reviewer agent can simulate that gate for unattended runs, but the human-centered default remains manual review.
-- Approved summaries become the only cross-stage memory.
-- Every run is isolated, resumable, and auditable.
-- Later stages must produce real artifacts, not only prose.
-- A coding agent is the execution layer; AutoR is the research control loop above it.
-
-### 🤔 Why AutoR?
-
-Many systems aim to generate research outputs that *look* ready.
-
-AutoR takes a harder path:
-
-- it requires real experiments
-- it enforces artifact validation
-- it keeps humans in control
-
-So the question is not:
-
-> Does it look ready?
-
-It is:
-
-> Can you verify every part of it?
-
-## 📰 News
-
-Latest mainline updates:
-
-- **2026-08-06**: **Recursive self-improvement is now the default.** The nine stages are a **directed graph** the run navigates: an analysis that exposes a design flaw can send the run back to Stage 03 instead of writing up around it, and the move into Stage 07 stays closed until every hypothesis carries a verdict. The stage that just ran chooses the next move, among the ones AutoR's guards leave open. Every valid draft is scored against a rigour rubric read off disk and held to a champion ratchet, so the draft that gets promoted is the best one the run produced rather than the last one — that half costs nothing, because the rubric never calls a backend. Two improvement rounds per stage are budgeted on top, and a stage the rubric has nothing to say about spends none of them. A round that scores worse is reverted; a round that changes a hypothesis verdict is rejected outright. Each finished run records its route and measured fitness in a cross-run archive, which compares every graph edge against runs that reached the same node and did not take it. Opt out with `--stage-graph linear`, `--routing off`, `--no-evolve`, `--no-archive`. See [Recursive Self-Improvement](docs/self-improvement.md).
-- **2026-06-02**: Added a configurable Codex sandbox mode. Codex-backed runs still default to `workspace-write`, but users who intentionally need remote GPU or SSH execution can now opt into `--codex-sandbox danger-full-access`; the setting is persisted in `run_config.json` and preserved on resume.
-- **2026-05-10**: Refined the terminal-first run experience. Stage 00 now uses a dedicated clarification flow: the first intake pass asks the user questions one by one with selectable options, custom answers, and skip; the revised intake brief then uses a compact refine / approve / abort menu instead of showing the normal suggestion template. The terminal UI also keeps colored frames on wrapped body rows, handles long lines and wide characters more reliably, and the Codex backend now uses the current `--sandbox workspace-write` execution flag instead of the deprecated Codex CLI `--full-auto` flag.
-- **2026-04-20**: Added an optional `--full-auto` approval mode. The execution loop is unchanged, but the manual approval gate can now be replaced by a strict simulated reviewer agent backed by Claude or Codex, with reviewer settings persisted in `run_config.json`.
-- **2026-04-19**: Merged **AutoR Studio** into main: a local browser workspace for the same run-based workflow, with live stage monitoring, human review, restart-safe recovery, paper preview, version history, and a Notebook view. The browser UI shares the same run directories and artifact model as the terminal workflow and is currently Claude-backed.
-- **2026-04-18**: Fixed a stage-summary recovery bug so local normalization now restores the required `Decision Ledger` section and validates draft outputs against the correct `.tmp.md` path. Added stage recovery controls that let operators `/skip` the current stage, `/back <stage>` to an earlier stage, or choose skip / roll back directly after retry exhaustion.
-- **2026-04-15**: Added minimal `--operator codex` support alongside Claude, persisted the selected execution backend in `run_config.json`, and improved terminal rendering for backend JSON streams.
-- **2026-04-13**: Added literature evidence ledgers and citation verification outputs, introduced typed hypothesis manifests, hardened experiment manifest parsing, and added regression coverage for research diagram injection.
-- **2026-04-10**: Added a decision ledger for human approvals and refined the public showcase gallery so research artifacts are presented more clearly.
-- **2026-04-08**: Documented optional `--research-diagram` dependencies and tightened the README positioning around human-centered, artifact-backed research execution.
-
-## 🌟 Showcase
-
-AutoR already has a full example run used throughout the repository: `runs/20260330_101222`.
-
-### 🧪 Example Run Snapshot
-
-| What the run produced | What it demonstrates |
-| --- | --- |
-| [example_paper.pdf](assets/examples/example_paper.pdf) | A compiled manuscript artifact within a broader research package |
-| Executable research code | The run is not just a writing pipeline |
-| Machine-readable datasets and result files | Claims are backed by inspectable experiment outputs |
-| Real figures used in the research package | The run produces publication-style visuals, not placeholders |
-| Review and dissemination materials | The workflow continues past writing into release readiness |
-
-Highlighted outcomes from that run:
-
-- `AGSNv2` reached **36.21 ± 1.08** on Actor.
-- The system produced a full research package with real figures, writing sources, and auditable artifacts.
-- The final run preserved the full human-in-the-loop approval trail.
-
-### 🖥️ Terminal Experience
-
-AutoR is designed for terminal-first execution, but the interaction layer is not limited to raw logs and plain prompts. The current UI supports banner-style startup, colored stage panels, parsed backend event streams, display-width-aware markdown wrapping, keyboard-selectable menus, and a Stage 00 clarification flow suitable for demos and recordings.
 
 <p align="center">
   <img src="assets/terminal.png" alt="AutoR terminal UI" width="92%" />
 </p>
 
-### 📈 Example Figures
+---
+
+## What AutoR is
+
+Most autoresearch systems optimize for autonomy. AutoR takes a different position: research is too
+important to hand over as a blind end-to-end loop. The goal is not to remove humans from research.
+The goal is to give them a stronger execution system.
+
+AutoR runs a research project as eight stages wired into a directed graph: six forward edges are
+guarded by artifacts on disk, ten backward edges let a late finding send the run back — Stage 07
+can reopen the literature survey. Hypotheses are frozen and hashed when Stage 04 is approved, every
+one must be adjudicated at Stage 06 against a named result file, and every paper claim traced at
+Stage 07; a `supported` or `refuted` verdict resting on one run is refused unless the run records
+why one run settles it. An adversarial reviewer attacks Stage 05's results and Stage 06's analysis,
+and the stage after each must answer every finding in writing or the gate refuses it. Drafts are
+scored and a refinement that does not improve is reverted. Every stage still stops at an approval
+gate, and by default that gate is you.
+
+"Recursive" is six mechanisms, each of them a file you can open:
+
+| Move | What runs | Where |
+| --- | --- | --- |
+| **Propose** | Five proposers work from distinct lenses — mechanism, contrarian, adjacent field, null/artifact, regime — blind to each other; two statements whose Jaccard overlap reaches 0.5 collapse into one idea | [`ideation_panel.py`](src/ideation_panel.py) · 712L |
+| **Test** | Every baseline declares `why_competent` and a `tuning_budget` before it runs; the hypothesis set is frozen and hashed before any result exists, and a later change is legal only as a recorded amendment | [`experimental_protocol.py`](src/experimental_protocol.py) · 234L<br />[`preregistration.py`](src/preregistration.py) · 579L |
+| **Refute** | An adversarial pass asks why the result is wrong across ten named failure modes — confound, leakage, `metric_cherry_picking`, `effect_within_noise`, six more; a round can close as `converged`, `refine_design`, `new_hypothesis` or `abandon` | [`validity_review.py`](src/validity_review.py) · 512L<br />[`research_rounds.py`](src/research_rounds.py) · 320L |
+| **Critique** | Five seats review independently, cross-examine anonymised, then converge; a blocking objection is turned into a refusal in code against the panel's own chair, and a different model family audits the approval as a veto | [`review_panel.py`](src/review_panel.py) · 1223L<br />[`cross_reviewer.py`](src/cross_reviewer.py) · 239L |
+| **Iterate** | Every valid draft is scored against a rubric read off disk; the champion is kept and a losing polish round is reverted before anyone reads it; a draft that loses on the weighted total but is non-dominated on the criterion vector is kept anyway | [`rubric.py`](src/rubric.py) · 926L<br />[`evolution.py`](src/evolution.py) · 692L<br />[`pareto.py`](src/pareto.py) · 212L |
+| **Learn** | Each finished run records its route and measured fitness; a fitness comparison is keyed on the set of stages the run actually measured, so a run cannot score well by stopping early | [`archive.py`](src/archive.py) · 784L |
+
+Three of those six are on for every run: **Test**, **Refute**, and **Iterate** (`--evolve` defaults
+on). **Propose** needs `--ideation-panel`; **Critique** needs `--review-panel` and `--cross-review`;
+**Learn** records on every run but only reorders the graph under `--archive-steer`.
+
+**AutoR does not run itself.** Manual approval is the default — `approval_mode` is `manual` unless a
+flag opts out ([`main.py`](main.py)) — and `--full-auto`, `--review-panel` and `--approval-mode
+agent` are those flags. Five of the six moves above can only score, refuse, revert or re-order;
+none of them can approve a stage. The sixth, the review panel, *is* an approval gate, and it exists
+only on the runs where you hand it the gate. Recursion did not change who decides; it changed what
+reaches the desk. The research unit is unchanged: one reproducible run under `runs/<run_id>/`,
+isolated, resumable, with redo and rollback.
+
+Approved stage summaries are the only *free-text* memory. Every other cross-stage edge is a typed
+artifact with a declared reader: thirteen channels in
+[`information_flow.py`](src/information_flow.py) each name the exact stage slugs that consume them,
+and the seven produced inside the walk name their producing stage as well. `obligations.json` and
+`review_policy.json` cross stages without touching a summary at all — both only behind an agent
+approval gate.
+
+Many systems aim to generate research outputs that *look* ready. So the question is not
+
+> Does it look ready?
+
+It is
+
+> Can you verify every part of it?
+
+The answer is the validity chain — freeze at Stage 04, adjudicate at Stage 06, trace at Stage 07
+([`preregistration.py`](src/preregistration.py)) — and the edge into writing stays shut until every
+frozen hypothesis carries a verdict (`_guard_validity_chain`, [`stage_graph.py`](src/stage_graph.py)).
+
+## What changed, measured
+
+Every node used to be contractually required to restate its inbound edge. That heading is gone from
+the stage contract, and the effect on a real run is the cheapest evidence in this document:
+
+| Measured across one run | Before | After |
+| --- | --- | --- |
+| Words a node emits | grew 235 → 1,211 | flat, 228-277 per stage |
+| Share of stage output that was relay | 64% | 0% |
+| Assembled prompt text | 21,823 words | 20,353 words |
+
+The sharpest single case: the mutable Stage 02 hypotheses and the frozen preregistration were both
+delivered from Stage 05 on — the same hypothesis twice, one copy labelled editable, sitting next to
+the frozen one at exactly the stages where the freeze is the point. The `hypotheses` channel now
+stops at `04_implementation`, where the freeze supersedes it
+([`information_flow.py`](src/information_flow.py)).
+
+The shape of the system, in counts you can re-derive from named symbols in the source: eight stages
+plus `FINISH`, six guarded forward edges (`_ADVANCE_GUARDS`), ten backward edges (`REVISIT_EDGES`),
+thirteen typed information channels (`CHANNELS`). Alongside the 27 stage gates that ask whether a
+file exists, seven validators ask whether a claim is warranted; they are named in full under
+[the stage contract](#-the-stage-contract-and-what-gets-validated).
+
+## News
+
+- **2026-08-06** — Per-stage output is flat at 228-277 words where it used to grow 235 → 1,211,
+  relay is 0% where it was 64%, and assembled prompt text fell 21,823 → 20,353 words across a run.
+  Behind those numbers: the stages became a directed graph with a router that must justify its move
+  and is refused off-menu (`stage_graph.py`, `router.py`); every valid draft is scored and held to a
+  champion ratchet (`rubric.py`, `evolution.py`, `pareto.py`); the cross-run archive keys every
+  fitness comparison on the stages a run actually measured (#137); plus a deliberating review panel
+  (#126), research rounds (#127), a cross-model veto (#128), a divergent ideation panel (#131),
+  obligations carried forward (#132), self-improvement on by default (#134),
+  shared prompt fragments (#136) and typed information edges (`dd54947`). Opt out with
+  `--stage-graph linear`, `--routing off`, `--no-evolve`, `--no-archive`; details in [Recursive Self-Improvement](docs/self-improvement.md).
+- **2026-06-02** — `--codex-sandbox danger-full-access` for runs that intentionally need remote GPU or SSH execution. Codex still defaults to `workspace-write`, and the setting persists in `run_config.json`.
+- **2026-05-10** — Stage 00 clarification flow: questions asked one at a time with selectable options, custom answers and skip, then a compact refine / approve / abort menu on the revised brief.
+- **2026-04-20** — `--full-auto`: the manual approval gate can be replaced by a strict reviewer agent, with reviewer settings persisted in `run_config.json`.
+- **2026-04-19** — AutoR Studio merged into main: a local browser workspace over the same run directories, with live stage monitoring, review, restart-safe recovery, paper preview and a Notebook view.
+- **2026-04-13** — Literature evidence ledgers and citation verification outputs, typed hypothesis manifests, and hardened experiment-manifest parsing.
+
+## Showcase
+
+`runs/20260330_101222` is the full example run the docs work from. Run directories are gitignored,
+so what ships in the repository is the artifacts lifted out of it, under `assets/`.
+
+| What the run produced | What it demonstrates |
+| --- | --- |
+| [example_paper.pdf](assets/examples/example_paper.pdf) | A compiled manuscript inside a larger research package |
+| Executable research code | The run is not a writing pipeline |
+| Machine-readable datasets and result files | Claims are backed by inspectable experiment outputs |
+| Real figures used in the package | Publication-style visuals, not placeholders |
+| Review and dissemination materials | The run continues past writing into release readiness |
+
+`AGSNv2` reached **36.21 ± 1.08** on Actor, and the run preserved the full human approval trail.
+The shot at the top of this page is the real terminal UI: colored stage panels, parsed backend
+event streams, display-width-aware wrapping, keyboard-selectable menus.
 
 <table>
   <tr>
-    <td align="center" valign="top">
-      <strong>Accuracy Comparison</strong><br />
-      <img src="assets/examples/example_fig1_accuracy.png" alt="Example accuracy figure" width="300" />
-    </td>
-    <td align="center" valign="top">
-      <strong>Ablation + Actor Results</strong><br />
-      <img src="assets/examples/example_fig4_ablation_actor.png" alt="Example ablation figure" width="300" />
-    </td>
-  </tr>
-  <tr>
-    <td align="center" valign="top" colspan="2">
-      <strong>Two-Layer Narrative Figure</strong><br />
-      <img src="assets/examples/example_fig6_two_layer.png" alt="Two-layer narrative figure" width="620" />
-    </td>
+    <td align="center" valign="top"><strong>Accuracy Comparison</strong><br /><img src="assets/examples/example_fig1_accuracy.png" alt="Example accuracy figure" width="260" /></td>
+    <td align="center" valign="top"><strong>Ablation + Actor Results</strong><br /><img src="assets/examples/example_fig4_ablation_actor.png" alt="Example ablation figure" width="260" /></td>
+    <td align="center" valign="top"><strong>Two-Layer Narrative</strong><br /><img src="assets/examples/example_fig6_two_layer.png" alt="Two-layer narrative figure" width="260" /></td>
   </tr>
 </table>
 
-### 🧾 Research Output Gallery
+### Research output gallery
 
-The manuscript pages below are only the visible surface of larger AutoR runs. To keep the showcase compact and comparable, this gallery uses a consistent 4 × 2 layout: four artifact-backed research outputs, two representative pages from each, and a short note on what each run is demonstrating.
+Four artifact-backed runs, two pages each: the framing page and an evidence page.
 
 <table>
-  <tr>
-    <td valign="top" width="23%">
-      <strong>Output 1</strong><br />
-      A complete end-to-end AutoR run. The pair below shows the opening manuscript page and a later evidence-heavy page where algorithm, tables, and quantitative results appear together.
-    </td>
-    <td align="center" valign="top">
-      <img src="assets/examples/example_paper_page1.png" alt="Output 1 page 1" width="220" /><br />
-      <strong>Page 1</strong>
-    </td>
-    <td align="center" valign="top">
-      <img src="assets/examples/example_paper_page5.png" alt="Output 1 evidence page" width="220" /><br />
-      <strong>Evidence Page</strong>
-    </td>
-  </tr>
-  <tr>
-    <td valign="top" width="23%">
-      <strong>Output 2</strong><br />
-      <em>Do More Experts Help?</em> A parameter-matched MoE-LoRA study. The selected pages show the framing page and a chart-heavy evidence page.
-    </td>
-    <td align="center" valign="top">
-      <img src="assets/paper_gallery/other_run_1_page1.png" alt="Output 2 page 1" width="220" /><br />
-      <strong>Page 1</strong>
-    </td>
-    <td align="center" valign="top">
-      <img src="assets/paper_gallery/other_run_1_results.png" alt="Output 2 evidence page" width="220" /><br />
-      <strong>Evidence Page</strong>
-    </td>
-  </tr>
-  <tr>
-    <td valign="top" width="23%">
-      <strong>Output 3</strong><br />
-      <em>Attention Sink Onset in Tiny Transformers</em> A controlled factorial study. The chosen pages show the opening page and a later structured overview page with visual decomposition.
-    </td>
-    <td align="center" valign="top">
-      <img src="assets/paper_gallery/other_run_2_page1.png" alt="Output 3 page 1" width="220" /><br />
-      <strong>Page 1</strong>
-    </td>
-    <td align="center" valign="top">
-      <img src="assets/paper_gallery/other_run_2_overview.png" alt="Output 3 overview page" width="220" /><br />
-      <strong>Overview Page</strong>
-    </td>
-  </tr>
-  <tr>
-    <td valign="top" width="23%">
-      <strong>Output 4</strong><br />
-      <em>HSOD: Harmonic Spectral Operator Decomposition</em> A stability-focused time-series study. The pair below shows the framing page and a later page with dense training-dynamics plots.
-    </td>
-    <td align="center" valign="top">
-      <img src="assets/paper_gallery/other_run_3_page1.png" alt="Output 4 page 1" width="220" /><br />
-      <strong>Page 1</strong>
-    </td>
-    <td align="center" valign="top">
-      <img src="assets/paper_gallery/other_run_3_results.png" alt="Output 4 analysis page" width="220" /><br />
-      <strong>Analysis Page</strong>
-    </td>
-  </tr>
+  <tr><td valign="top" width="23%"><strong>Output 1</strong><br />A complete end-to-end AutoR run.</td>
+    <td align="center"><img src="assets/examples/example_paper_page1.png" alt="Output 1 page 1" width="220" /><br /><strong>Page 1</strong></td>
+    <td align="center"><img src="assets/examples/example_paper_page5.png" alt="Output 1 evidence page" width="220" /><br /><strong>Evidence Page</strong></td></tr>
+  <tr><td valign="top"><strong>Output 2</strong><br /><em>Do More Experts Help?</em> A parameter-matched MoE-LoRA study.</td>
+    <td align="center"><img src="assets/paper_gallery/other_run_1_page1.png" alt="Output 2 page 1" width="220" /><br /><strong>Page 1</strong></td>
+    <td align="center"><img src="assets/paper_gallery/other_run_1_results.png" alt="Output 2 evidence page" width="220" /><br /><strong>Evidence Page</strong></td></tr>
+  <tr><td valign="top"><strong>Output 3</strong><br /><em>Attention Sink Onset in Tiny Transformers</em> A controlled factorial study.</td>
+    <td align="center"><img src="assets/paper_gallery/other_run_2_page1.png" alt="Output 3 page 1" width="220" /><br /><strong>Page 1</strong></td>
+    <td align="center"><img src="assets/paper_gallery/other_run_2_overview.png" alt="Output 3 overview page" width="220" /><br /><strong>Overview Page</strong></td></tr>
+  <tr><td valign="top"><strong>Output 4</strong><br /><em>HSOD: Harmonic Spectral Operator Decomposition</em> A stability-focused time-series study.</td>
+    <td align="center"><img src="assets/paper_gallery/other_run_3_page1.png" alt="Output 4 page 1" width="220" /><br /><strong>Page 1</strong></td>
+    <td align="center"><img src="assets/paper_gallery/other_run_3_results.png" alt="Output 4 analysis page" width="220" /><br /><strong>Analysis Page</strong></td></tr>
 </table>
 
-### 🧑‍🔬 Human-in-the-Loop in Practice
+### What the human changed, and what they check now
 
-The example run is interesting not because the AI was left alone, but because the human intervened at critical moments:
+In that run the human intervened where direction mattered: Stage 04 pushed the system to download
+real datasets and run pre-checks, Stage 05 forced experimentation to continue until real benchmark
+results existed, Stage 06 redirected the story from leaderboard framing to mechanism analysis.
 
-- **Stage 02** narrowed the project to a single core claim.
-- **Stage 04** pushed the system to download real datasets and run actual pre-checks.
-- **Stage 05** forced experimentation to continue until real benchmark results were obtained.
-- **Stage 06** redirected the story away from leaderboard-only framing toward mechanism-driven analysis.
+What a human checks at Stage 02 has since changed. The headline feature there is now the opposite
+of narrowing — `--ideation-panel` exists to widen the pool. The prompt instead requires a
+`- Decision rule:` line on every empirical hypothesis, stating in advance what observation would
+count as support and what would count as refutation
+([`02_hypothesis_generation.md`](src/prompts/02_hypothesis_generation.md)); those are the
+hypotheses frozen at Stage 04 and adjudicated at Stage 06. "Narrow it to one claim" is advice about
+scope. "Make each one refutable" is advice about a gate that now exists.
 
-That is the intended shape of AutoR:
-AI handles execution load; humans steer the research when direction actually matters.
+## Quick Start
 
-## 🚀 Quick Start
-
-### 🧰 Prerequisites
+### Prerequisites
 
 - Python 3.10+
 - Claude CLI or Codex CLI available on `PATH` for real runs
 - Local TeX tools are only needed for `--output-format latex`; the default markdown output needs no TeX
-- For `--research-diagram` (Gemini-generated method illustration inserted into the report):
-  - `pip install google-genai` (the `google.genai` SDK is **not** a default dependency; if it is missing the diagram step prints `Diagram generation failed: No module named 'google'` and the rest of the run continues unaffected)
-  - A Gemini API key exposed via `GOOGLE_API_KEY` or `GEMINI_API_KEY`, or a local `configs/diagram_config.yaml` (see `configs/diagram_config.template.yaml`)
+- `pip install google-genai` and a Gemini key in `GOOGLE_API_KEY` or `GEMINI_API_KEY` — needed by three paths, not only the diagram one: `--web-search gemini`, required where the backend's own `WebSearch` tool is disabled (`build_genai_client`, src/web_search.py:346, called at :482); the cross-model veto `--cross-review auto|gemini`, which builds the same client (src/cross_reviewer.py:108); and `--research-diagram`, which also reads `configs/diagram_config.yaml` (see `configs/diagram_config.template.yaml`)
+- The SDK is **not** a default dependency. Without it the diagram step prints `Diagram generation failed: No module named 'google'` and the run continues; cross-review records itself unavailable rather than agreeing
 
-### ⌨️ Common Commands
+### Common commands
 
 | Goal | Command |
 | --- | --- |
-| Start a new run | `python main.py` |
-| Start with an explicit goal | `python main.py --goal "Your research goal here"` |
+| Start a run (the goal is prompted for if omitted) | `python main.py --goal "Your research goal here"` |
 | Start with preloaded resources | `python main.py --goal "Your research goal here" --resources paper.pdf refs.bib data.csv` |
 | Run a local smoke test without a real agent backend | `python main.py --fake-operator --goal "Smoke test"` |
 | Run with the automated reviewer gate | `python main.py --full-auto --goal "Your research goal here"` |
@@ -302,10 +207,8 @@ AI handles execution load; humans steer the research when direction actually mat
 | Give the panel a researcher persona to stand in for | `python main.py --review-panel --persona docs/persona-example.md --goal "..."` |
 | Seat the panel across different models | `python main.py --review-panel --panel-models pi=opus skeptic=codex:default --goal "..."` |
 | Widen Stage 02's hypotheses with a proposer panel | `python main.py --ideation-panel --goal "..."` |
-| Choose the execution backend | `python main.py --operator claude` or `python main.py --operator codex` |
+| Choose the execution backend and model | `python main.py --operator claude --model opus` or `python main.py --operator codex --model default` |
 | Choose the reviewer backend separately | `python main.py --full-auto --review-operator claude --review-model opus` |
-| Choose a Claude model | `python main.py --operator claude --model sonnet` or `python main.py --operator claude --model opus` |
-| Start with Codex | `python main.py --operator codex --model default --goal "Your research goal here"` |
 | Allow Codex-backed SSH / remote GPU execution | `python main.py --operator codex --codex-sandbox danger-full-access --goal "Your research goal here"` |
 | Produce a LaTeX paper package instead of a markdown report | `python main.py --output-format latex --goal "..."` |
 | Stop once the report is written, skipping dissemination | `python main.py --final-stage 07_writing --goal "..."` |
@@ -318,200 +221,122 @@ AI handles execution load; humans steer the research when direction actually mat
 | Store runs on another disk | `python main.py --runs-dir /mnt/big-disk/runs --goal "..."` |
 | Raise the per-attempt ceiling for long training runs | `python main.py --stage-timeout 43200 --goal "..."` |
 | Give a stubborn stage more retries | `python main.py --max-attempts 10 --goal "..."` |
+| Let Stages 03-06 run as a repeatable round, so a refuted hypothesis can start a second one (default 1) | `python main.py --max-rounds 2 --goal "..."` |
 | Skip the intake stage | `python main.py --skip-intake --goal "..."` |
 | Add a generated method diagram to the paper | `python main.py --research-diagram --goal "..."` |
 | Search the web where the agent's own `WebSearch` is disabled | `python main.py --web-search gemini --goal "..."` |
 | Benchmark AutoR on ResearchClawBench | `python rcb_agent.py --workspace <WORKSPACE> --prompt <PROMPT>` |
 
-Every flag, its default, and what is preserved on resume: **[docs/cli-reference.md](docs/cli-reference.md)**.
+Every flag, its default, and what is preserved on resume: **[docs/cli-reference.md](docs/cli-reference.md)**. Stage identifiers accept `03`, `3` or `03_study_design`; `--venue` defaults to `neurips_2025`.
 
-If `--venue` is omitted, AutoR defaults to `neurips_2025`.
-
-`--full-auto` does not change the stage pipeline. It only replaces the manual approval menu with a strict reviewer agent, and puts the run into unattended mode so it never blocks on terminal input. This is useful for unattended sweeps, overnight runs, and dry-run automation, but the default human-reviewed mode is still the recommended path for serious research work.
+**Two flags in that table remove the human from the gate.** `resolve_unattended` returns `True` for both `--full-auto` and `--review-panel` (main.py:567-577), and `approval_mode = "agent" if (args.full_auto or args.review_panel)` (main.py:862). So both replace the approval menu with an agent reviewer, never block on terminal input, and auto-skip a stage that exhausts its retries, up to `--max-auto-skips` (default 3). Under a badge reading *Human approval required*, the flag that looks like more review is the flag that removes the reviewer. Three headline mechanisms — obligations, the standing review policy, the cross-model veto — also run only behind that agent gate. Manual approval is the default and remains the path for work you intend to publish.
 
 For Codex-backed runs, AutoR defaults to `--codex-sandbox workspace-write`. If a verified remote experiment needs SSH or external GPU access, use `--codex-sandbox danger-full-access` intentionally. This grants the Codex backend unrestricted local/remote execution ability, so it should not be the default for untrusted tasks.
 
-Valid stage identifiers include `03`, `3`, and `03_study_design`.
-
 ```bash
-# Self-improvement is on by default. This run navigates the stage graph, scores
-# every draft, keeps the best, and records its route in ~/.autor/archive.
+# Self-improvement is on by default: navigate the graph, score every draft, keep the
+# best, and record the route in ~/.autor/archive.
 python main.py --goal "..."
-
-# What the archive has learned across runs so far.
-python main.py --archive-report
-
-# Spend more on improvement, or none at all.
-python main.py --goal "..." --evolve-rounds 4
+python main.py --archive-report                   # what the archive has learned so far
+python main.py --goal "..." --evolve-rounds 4     # spend more on improvement
 python main.py --goal "..." --evolve-rounds 0     # measure and ratchet, no extra passes
+python main.py --goal "..." --archive-steer       # let the archive pick the topology
 
 # Opt out entirely: the strict 01-through-08 sequence, last draft wins.
 python main.py --goal "..." --stage-graph linear --routing off --no-evolve --no-archive
-
-# Let the archive pick the topology, once it has something to say.
-python main.py --goal "..." --archive-steer
 ```
 
 ### Studio (browser UI)
 
-AutoR Studio is a local web UI that drives the same real Claude-backed pipeline through a browser instead of a terminal. Human-in-the-loop approval, feedback, stage re-runs, live session traces, and the compiled paper all live in one page.
+A local web UI over the same Claude-backed runs: create a project, watch stages execute, approve or send feedback, read the compiled paper. It needs the Claude CLI on `PATH` to start a run.
 
 ```bash
-# Start the Studio server (default: http://127.0.0.1:8000)
-python studio.py
-
-# Then open the UI in your browser:
-#   http://127.0.0.1:8000/studio/
-```
-
-Options:
-
-```bash
-python studio.py --port 8765                    # custom port
-python studio.py --host 0.0.0.0 --port 8000     # bind externally
+python studio.py                                # http://127.0.0.1:8000/studio/
+python studio.py --host 0.0.0.0 --port 8765     # bind externally, see the warning below
 python studio.py --runs-dir /path/to/runs       # override runs directory
 ```
 
-What you can do in the Studio:
-
-- **Create a project** from the hub — fill in the title + thesis, click **Create Project**, and a real Claude-backed run starts immediately
-- **Watch stages run live** on the Overview page — stage strip, pulsing current stage, live session trace streaming real Claude tool calls from `logs_raw.jsonl`
-- **Review & Approve** — the Review page shows a "You are reviewing" hero card with a TL;DR extracted from the stage markdown, a Files Produced pill list, and an `✅ Approve → Advance to <next stage>` button
-- **Send Feedback & Re-run** — feedback is woven into the **first attempt's prompt** of the next run (not wasted on an intermediate Claude call). Works on `human_review` AND `failed` stages
-- **Resume across restarts** — if you stop the server and come back, clicking Approve/Feedback lazy-resumes the existing on-disk run without re-running stages that already have a draft
-- **Paper preview** — the Paper tab renders `report.md` for markdown runs, or the compiled PDF, LaTeX sources, and build log for LaTeX runs
-- **Versions page** — the full checkpoint/attempt timeline for every stage
-
-The Studio requires the **Claude CLI** (`claude` on `PATH`) since every run is a real Claude-driven pipeline. The check happens when you start a run, not at server startup: without `claude` the server still comes up and you can browse existing runs, read stage documents, and view papers, but starting a run fails with a clear error.
-
 > The Studio API has **no authentication**. It binds to `127.0.0.1` by default; anything that can reach it can start runs, approve stages, and read every file under the runs directory. For remote access prefer an SSH tunnel over `--host 0.0.0.0`. See [SECURITY.md](SECURITY.md).
 
-Full page-by-page walkthrough and the complete HTTP API: **[docs/studio.md](docs/studio.md)**.
+One honest limit, then the walkthrough: the Studio's lazy-resume approve path picks the next stage arithmetically — the first stage with a higher number (src/backend/studio_runner.py:361-364) — and never consults the router, so graph routing and backward moves are a CLI capability today. Page-by-page walkthrough and the full HTTP API: **[docs/studio.md](docs/studio.md)**.
 
-## ⚙️ How It Works
+## How it works: the stage graph
 
-AutoR uses a 9-stage research workflow: one optional intake stage plus eight formal research stages.
-
-0. `00_intake` (optional)
-1. `01_literature_survey`
-2. `02_hypothesis_generation`
-3. `03_study_design`
-4. `04_implementation`
-5. `05_experimentation`
-6. `06_analysis`
-7. `07_writing`
-8. `08_dissemination`
-
-### The 9 Stages
-
-| Stage | Role | What the human should check |
-| --- | --- | --- |
-| `00_intake` | Align the research goal, resources, constraints, target venue, and success criteria before formal work begins. | Answer the clarification questions, add missing constraints, and make sure the project is narrow enough to execute. |
-| `01_literature_survey` | Build the related-work base, collect evidence, organize papers, and identify the real gap. | Reject shallow paper lists; require task framing, benchmarks, baselines, differences, and structured literature files. |
-| `02_hypothesis_generation` | Convert the broad direction into testable hypotheses and provisional paper claims. | Push for one main claim plus measurable secondary hypotheses instead of an unfocused idea list. |
-| `03_study_design` | Turn the hypothesis into an executable experimental plan. | Check datasets, metrics, baselines, ablations, budgets, failure criteria, and machine-readable data artifacts. |
-| `04_implementation` | Build the runnable code, configs, data preparation, and sanity checks. | Do not approve skeletons; require executable scripts, reproducible commands, and logs or checks showing the path runs. |
-| `05_experimentation` | Run the planned experiments and write machine-readable results. | Distinguish smoke tests from real experiments; require baselines, repeats, result files, and failure records. |
-| `06_analysis` | Interpret the results, create figures, analyze failures, and refine the evidence story. | Require real plots, ablations, error analysis, and explanations rather than metric narration. |
-| `07_writing` | Produce the final deliverable: a markdown research report with embedded figures, or a venue-aware LaTeX package with a compiled PDF. | Verify that every major claim is backed by artifacts, experiments, or citations. |
-| `08_dissemination` | Package the run for review, release, reproduction, or external presentation. | Confirm that readiness notes, review materials, manifests, and outward-facing deliverables exist. |
-
-```mermaid
-flowchart TD
-    A[Start or resume run] --> G0{Skip intake?}
-    G0 -- Yes --> S1[01 Literature Survey]
-    G0 -- No --> I0[00 Intake]
-    I0 --> H0{Human approval}
-    H0 -- Refine --> I0
-    H0 -- Approve --> S1[01 Literature Survey]
-    H0 -- Abort --> X[Abort]
-
-    S1 --> H1{Human approval}
-    H1 -- Refine --> S1
-    H1 -- Approve --> S2[02 Hypothesis Generation]
-    H1 -- Abort --> X[Abort]
-
-    S2 --> H2{Human approval}
-    H2 -- Refine --> S2
-    H2 -- Approve --> S3[03 Study Design]
-    H2 -- Abort --> X
-
-    S3 --> H3{Human approval}
-    H3 -- Refine --> S3
-    H3 -- Approve --> S4[04 Implementation]
-    H3 -- Abort --> X
-
-    S4 --> H4{Human approval}
-    H4 -- Refine --> S4
-    H4 -- Approve --> S5[05 Experimentation]
-    H4 -- Abort --> X
-
-    S5 --> H5{Human approval}
-    H5 -- Refine --> S5
-    H5 -- Approve --> S6[06 Analysis]
-    H5 -- Abort --> X
-
-    S6 --> H6{Human approval}
-    H6 -- Refine --> S6
-    H6 -- Approve --> S7[07 Writing]
-    H6 -- Abort --> X
-
-    S7 --> H7{Human approval}
-    H7 -- Refine --> S7
-    H7 -- Approve --> S8[08 Dissemination]
-    H7 -- Abort --> X
-
-    S8 --> H8{Human approval}
-    H8 -- Refine --> S8
-    H8 -- Approve --> Z[Run complete]
-    H8 -- Abort --> X
-```
-
-### The Stage Graph
-
-The nine stages are nodes in a directed graph, and that graph is what a run walks
-by default. Forward edges advance; backward edges exist for the conditions that
-actually occur in research. `--stage-graph linear` restores the strict sequence,
-which is the same graph with the backward edges removed.
+Eight stages are the nodes; a `finish` node closes the walk. Stage 00 intake is not one of
+them — it runs before the walk starts, and `_graph_entry_stage` → `_select_stages_for_run`
+(src/manager.py:507-510, 693-715) only ever yields the eight. Solid edges advance, dotted
+edges go back; `--stage-graph linear` is the solid edges alone, and the guards come off with
+the backward ones (`_advance_edges(guarded=False)`, src/stage_graph.py:535) — one edge out of
+each node leaves nothing to choose, so a guard there could only halt a run that the stage's
+own validation is about to fail anyway.
 
 ```mermaid
 flowchart LR
     S1[01 Literature] --> S2[02 Hypotheses]
-    S2 --> S3[03 Design]
-    S3 --> S4[04 Implementation]
-    S4 --> S5[05 Experiments]
-    S5 --> S6[06 Analysis]
-    S6 -->|guard: every hypothesis adjudicated| S7[07 Writing]
-    S7 --> S8[08 Dissemination]
+    S2 -->|has_hypotheses| S3[03 Design]
+    S3 -->|design_artifacts| S4[04 Implementation]
+    S4 -->|runnable_code| S5[05 Experiments]
+    S5 -->|results_exist| S6[06 Analysis]
+    S6 -->|validity_chain| S7[07 Writing]
+    S7 -->|report_exists| S8[08 Dissemination]
     S8 --> Z([finish])
 
     S4 -.->|not executable as specified| S3
-    S5 -.->|comparison cannot distinguish| S3
     S5 -.->|implementation is at fault| S4
+    S5 -.->|comparison cannot distinguish| S3
     S6 -.->|results insufficient to decide| S5
     S6 -.->|confound the results cannot repair| S3
     S6 -.->|evidence refutes, and points somewhere| S2
     S7 -.->|claim has no analysis behind it| S6
     S7 -.->|needs a result never produced| S5
+    S7 -.->|the survey missed related work| S1
     S8 -.->|deliverable is not what a reader needs| S7
 ```
 
-Solid edges advance, dotted edges go back. The move into Stage 07 is guarded: the
-hypotheses have to be frozen and every one of them adjudicated before anything can
-be written up. That check is over artifacts on disk, so it is not something an
-agent can argue its way past — a gated edge is simply not on the menu it chooses
-from.
+Six of the eight forward edges carry a guard, one per target stage
+(`_ADVANCE_GUARDS`, src/stage_graph.py:266-273); 01→02 and 08→`finish` are
+unguarded. Ten dotted edges go back (`REVISIT_EDGES`, :301-359). The longest is
+07→01: writing it up showed the finding relates to work the survey missed. The
+Stage 07 guard is the strictest — every preregistered empirical hypothesis needs a
+verdict **and** at least one figure under `workspace/figures`
+(`_guard_validity_chain`, :157-190).
+
+**Who decides the move.** AutoR decides which moves are *admissible*, by evaluating
+each edge's guard against the artifacts on disk. With `--routing auto` (the default,
+src/utils.py:367) the agent chooses among them and states a reason; `--routing off`
+always takes the graph's default. An off-menu choice — an unlisted target, or one
+with no stated reason — is refused, written to `evolution/routing_refusals.jsonl`
+(src/router.py:186), and replaced by the forward edge.
+
+Two design calls worth naming. Blocked moves are handed to the agent *with the
+reason they are blocked* (`StageGraph.moves`, :555) — the useful thing to say is not
+"you may go to 06" but "07 is closed because H2 has no verdict", and an agent that
+sees why writing is closed routes to the analysis that opens it. And a revisit whose
+justification repeats one already on the path is refused (`repeats_a_previous_reason`, :652): going again on the same grounds is a loop, not an iteration.
 
 **A backward move is only ever a deliberate choice.** The default is always the
 forward edge, and when a guard has closed it the default advances anyway and lets
-the stage's own validation — unchanged, and still refusing a Stage 07 that writes
-up unadjudicated hypotheses — be the gate it always was. A guard is a routing
-preference; the gate is the gate. So a refusal, a routing failure, or a run nobody
-is steering all come out as the linear pipeline rather than as a stall, and going
-back is something the run does on purpose or not at all.
+the stage's own validation — still refusing a Stage 07 that writes up unadjudicated
+hypotheses — be the gate it always was. A guard is a routing preference; the gate is
+the gate. So a refusal, a routing failure, or a run nobody is steering all come out
+as the linear pipeline rather than as a stall.
 
-Two budgets bound the walk: `--graph-max-visits` per stage and `--graph-max-steps`
-overall.
+A stage is a node with a visit budget, not a position in a sequence:
+`DEFAULT_MAX_VISITS = 3` (:76, `--graph-max-visits`); `--graph-max-steps` bounds the whole walk at 20.
+
+### The eight stages, and what you check at each
+
+| Stage | Role | What the human is checking |
+| --- | --- | --- |
+| `00_intake` (before the walk) | Align the goal, resources, constraints, target venue and success criteria. | Answer the clarification questions, add the missing constraints, and narrow the project until it is executable. |
+| `01_literature_survey` | Build the related-work base, organize the evidence, identify the real gap. | Reject shallow paper lists; require task framing, benchmarks, baselines, differences, and structured literature files. |
+| `02_hypothesis_generation` | Convert the direction into typed, testable hypotheses and provisional paper claims. | A `- Decision rule:` line on every empirical hypothesis, stating in advance what would count as support and what would count as refutation (src/prompts/02_hypothesis_generation.md:52-58). These are the hypotheses frozen at 04 and adjudicated at 06. |
+| `03_study_design` | Turn the hypotheses into an executable plan and a declared protocol. | Datasets, metrics, ablations, budgets, failure criteria, machine-readable data artifacts — and a baseline set where every entry says `why_competent` and names its `tuning_budget`. |
+| `04_implementation` | Build the runnable code, configs, data preparation and sanity checks. | This is the freeze point: approving the stage hashes the hypothesis set into `workspace/notes/preregistration.json`. Check the set you are freezing, and do not approve skeletons. |
+| `05_experimentation` | Run the planned experiments and write machine-readable results. | The declared baselines and the seeds: a supported or refuted verdict off a single seed is refused unless the run states why one run settles it (`MIN_SEEDS_FOR_A_VERDICT = 2`, src/experimental_protocol.py:37). |
+| `06_analysis` | Interpret the results, produce figures, adjudicate every frozen hypothesis. | A verdict for each one, backed by a result file the validator can find. The forward edge stays closed until then. |
+| `07_writing` | Produce the deliverable: a markdown report with embedded figures, or a venue-aware LaTeX package with a compiled PDF. | That every claim traces. A `confirmatory` claim whose hypothesis is not in the supported set is already refused, so what is left to check is whether the exploratory ones are honestly labelled. |
+| `08_dissemination` | Package the run for review, release, reproduction or presentation. | Readiness notes, review materials, manifests and outward-facing deliverables exist. |
 
 ### Self-Improvement Rounds
 
@@ -534,6 +359,12 @@ acting on spends none of them — a round aimed at a criterion already at full m
 produces churn, so AutoR does not buy one. `--evolve-rounds 0` measures without
 polishing; `--no-evolve` restores the old behaviour entirely.
 
+One edge of that budget is worth knowing before you resume a run. `state()` rehydrates the
+champion and the Pareto frontier from disk and nothing else (src/evolution.py:204-243), so
+`--resume-run` restarts `rounds_spent` and the patience counter at zero: the best draft
+survives the resume, the *spend cap* does not, and a stage resumed twice can buy the two
+rounds twice.
+
 A round that scores worse is reverted, so a stage can only improve. A round that
 changes a hypothesis verdict is rejected outright, whatever it scored — the rubric
 is blind to what the run concluded, which removes the incentive, and the drift
@@ -545,57 +376,41 @@ governs AutoR's own rounds, not the direction it is given.
 Full mechanism, and the reasoning behind each refusal, in
 [docs/self-improvement.md](docs/self-improvement.md).
 
-### Stage Attempt Loop
-
-```mermaid
-flowchart TD
-    A[Build prompt from template + goal + memory + optional feedback] --> B[Start or resume stage session]
-    B --> C[Backend agent writes draft stage summary]
-    C --> D[Validate markdown and required artifacts]
-    D --> E{Valid?}
-    E -- No --> F[Repair, normalize, or rerun current stage]
-    F --> A
-    E -- Yes --> G[Present validated draft for human review]
-    G --> H{Human choice}
-    H -- 1 or 2 or 3 --> I[Continue current stage conversation with AI refinement]
-    I --> A
-    H -- 4 --> J[Continue current stage conversation with custom feedback]
-    J --> A
-    H -- 5 --> K[Promote approved summary and append to memory.md]
-    K --> L[Continue to next stage]
-    H -- 6 --> X[Abort]
-```
-
 ### Approval semantics
 
 - Stage 00 has a dedicated manual intake flow. On the first pass, AutoR asks the clarification questions one by one with selectable options, custom answers, and skip. On the revised pass, the user sees a compact intake brief and chooses refine, approve, or abort.
 - Stages 01-08 use the standard six-action review menu: `1 / 2 / 3` continue with an AI refinement suggestion, `4` continues with custom feedback, `5` approves, and `6` aborts.
 
-The stage loop is controlled by AutoR, not by Claude.
+The division of labour is not "AutoR drives, the agent types": AutoR owns the menu of admissible moves, the agent owns the pick and has to justify it, and the human owns the approval without which there is no next move at all.
 
-### The graph learns which moves pay — including ones it has never made
+### The archive: which moves paid, across runs
 
-The stages are a directed graph, and an archive across runs learns which edges are
-worth preferring. That learning had a blind spot with no exit: payoffs compare runs
-that *took* an edge against runs that did not, so an edge nothing has ever taken has
-no evidence in either direction, is never proposed, is never preferred, and is
-therefore never taken. The backward edges — the reason the graph exists at all —
-start unpreferred, so they are exactly the ones the loop stranded.
+Every finished run is recorded into `~/.autor/archive` — the route it took, the rubric
+fitness it reached, and the set of stages it actually measured (`Archive.record_run`,
+src/archive.py:426, from `record_into_archive`, main.py:657). `edge_payoffs` compares runs
+that *took* an edge against runs that reached the same node and did not, and
+`propose_variant` (:512) turns a payoff that is believable — enough observations, and a
+delta above `min_gain` — into a child variant that moves that one edge one step up or down
+the preference order.
 
-So there are two proposers, not one:
+A variant is only a reordering. It never opens a guarded edge, never adds one that was not
+declared, and never removes one: the guards are the correctness argument for letting an
+agent route at all, and the component that learns from outcomes is precisely the one that
+must not be able to weaken them. Promotion is as conservative — a challenger has to beat the
+incumbent *within every comparability basis* rather than on a pooled mean, because "runs
+that stopped early" is the cheapest composition for a topology to win on (`promote`, :661).
 
-| | reads | produces |
-|:---|:---|:---|
-| **exploit** | believable payoffs | prefer an edge that has been paying |
-| **explore** | edges with *zero* observations | buy one trial for an edge never tried |
+Two limits, stated here rather than left to be assumed:
 
-Exploration buys a trial, never a verdict. An explored edge that does not pay is
-deprioritised again by the ordinary proposer once its payoff becomes believable, so
-exploration cannot ratchet anything in by itself. And like every variant it only
-reorders preferences: it never opens a guarded edge, adds one, or removes one — the
-guards are the correctness argument for letting an agent route at all, and the
-component that learns from outcomes is precisely the one that must not be able to
-weaken them.
+- **The archive records and proposes on every run; it steers only when you ask.** The
+  proposed variant is written down and reported, but the topology a run walks comes from
+  the archive only under `--archive-steer` (main.py:792, 874). Without it, `resolve_graph`
+  returns the declared topology unchanged.
+- **A payoff comparison cannot reach an edge nothing has taken.** No takers means no
+  evidence in either direction, so such an edge is never proposed and never preferred — and
+  the backward edges start unpreferred, so they are the ones this strands.
+  `propose_exploration` and `unexplored_edges` (src/archive.py:595, :576) are written for
+  exactly that blind spot and have no production caller; see [Limits](#-limits).
 
 ### Obligations carried forward
 
@@ -674,18 +489,40 @@ Approvals teach nothing and are not recorded.
 
 ### Unattended runs
 
-`--full-auto` (or `--unattended`) removes the human entirely, which is what benchmark harnesses and overnight sweeps need:
+`--full-auto` — equivalently `--approval-mode agent`, and implied by `--review-panel` — removes the human entirely, which is what benchmark harnesses and overnight sweeps need:
 
 - The reviewer agent decides every approval, including the Stage 00 intake flow.
+- `--unattended` on its own is only half of that. It stops AutoR blocking on stdin, but it does not install a reviewer: `approval_mode` stays `manual` (main.py:862), so the first approval menu raises `UnattendedInputError` instead of being decided. For a run with nobody at the terminal, pass `--full-auto`.
 - The resource prompt is skipped even on a TTY. Pass resources with `--resources` instead.
 - A stage that exhausts its retry budget is auto-skipped rather than aborting the run, bounded by `--max-auto-skips` (default 3). The skip is promoted as an explicit skip summary so downstream stages know the work is missing.
 - Any interactive prompt still reachable raises `UnattendedInputError` instead of waiting on stdin — a prompt added later fails on its first unattended run rather than silently hanging an overnight job.
 
 `python rcb_agent.py` runs AutoR against a [ResearchClawBench](https://github.com/InternScience/ResearchClawBench) workspace on this basis and exports the benchmark's deliverables (`report/report.md`, `report/images/`, `code/`, `outputs/`). See [docs/researchclawbench.md](docs/researchclawbench.md).
 
-## ✅ Validation Bar
+## ✅ The Stage Contract and What Gets Validated
 
 AutoR does not consider a run successful just because it generated a plausible markdown summary.
+
+**Required stage summary shape.** Seven headings, in this order — `REQUIRED_STAGE_HEADINGS` ([src/utils.py:144-152](src/utils.py)):
+
+```md
+# Stage X: <name>
+
+## Objective
+## What I Did
+## Key Results
+## Files Produced
+## Decision Ledger
+## Suggestions for Refinement
+## Your Options
+```
+
+There was an eighth heading, retired in this branch: a section in which each stage restated the approved summaries of the stages before it. It made every node contractually required to relay its inbound edge. Stage output grew 235 → 1,211 words across a run and 64% of it was relay of context the stage had just been handed; without the section, relay is 0% and output is flat at 228-277 words per stage.
+
+Also required, and checked: exactly 3 numbered refinement suggestions, exactly the fixed 6 user options, concrete file paths under `Files Produced`, and no `[In progress]`, `[Pending]`, `[TODO]` or `[TBD]` placeholders.
+
+**Artifact gates.** 27 of them start by asking whether a file is there — and the rows below that say
+"valid", "resolving" or "matching" then parse it:
 
 | Stage | Required non-toy output |
 | --- | --- |
@@ -697,96 +534,29 @@ AutoR does not consider a run successful just because it generated a plausible m
 | Stage 07+ (latex) | `main.tex` matching the venue, `sections/*.tex`, a bibliography, a compiled PDF, `build_log.txt`, `citation_verification.json`, `self_review.json`, `layout_review.json` |
 | Stage 08+ | Review and readiness assets under `workspace/reviews/` |
 
-Requirements are cumulative, and the stage that *produces* a class of artifact must produce it **during that stage's execution** — a re-run is not credited with the previous attempt's files.
+Requirements are cumulative, and the stage that *produces* a class of artifact must produce it **during that stage's execution** — a re-run is not credited with the previous attempt's files. The cutoff is `stage_execution_started_at` feeding `recent_in` ([src/utils.py:1249-1261](src/utils.py)), and the rubric enforces the same rule independently in `_fresh_artifact_kinds` ([src/rubric.py:417](src/rubric.py)), so a Stage 07 draft cannot score on Stage 06's figures.
+
+**Validity gates.** The same function — `validate_stage_artifacts` ([src/utils.py:1232](src/utils.py)) — also runs seven validators that never ask whether a file exists: `validate_preregistration`, `validate_experimental_protocol`, `validate_hypothesis_outcomes`, `validate_outcome_statistics`, `validate_claim_provenance`, `validate_validity_response`, `validate_round_decision`. The code labels the split itself: "The scientific-validity chain, distinct from the artifact gates around it" ([src/utils.py:1292-1297](src/utils.py)). A run can fail because a claim is unwarranted, not only because a file is absent.
 
 The complete gate, including every JSON schema that is parsed rather than merely counted, is in **[docs/stage-contract.md](docs/stage-contract.md)**.
 
-Required stage summary shape:
-
-```md
-# Stage X: <name>
-
-## Objective
-## Previously Approved Stage Summaries
-## What I Did
-## Key Results
-## Files Produced
-## Decision Ledger
-## Suggestions for Refinement
-## Your Options
-```
-
-Additional rules:
-
-- exactly 3 numbered refinement suggestions
-- the fixed 6 user options
-- no `[In progress]`, `[Pending]`, `[TODO]`, `[TBD]`, or similar placeholders
-- concrete file paths in `Files Produced`
-
-If a run only leaves behind markdown notes, it has not met AutoR's quality bar.
-
-## 📂 Run Layout
-
-Every run lives entirely inside its own directory.
-
-```text
-runs/<run_id>/
-├── user_input.txt
-├── memory.md
-├── run_config.json
-├── run_manifest.json
-├── artifact_index.json
-├── intake_context.json
-├── logs.txt
-├── logs_raw.jsonl
-├── prompt_cache/
-├── operator_state/
-├── handoff/
-├── stages/
-└── workspace/
-    ├── literature/
-    ├── code/
-    ├── data/
-    ├── results/
-    ├── report/
-    ├── writing/
-    ├── figures/
-    ├── artifacts/
-    ├── notes/
-    └── reviews/
-```
-
-### Workspace Directory Semantics
-
-- `literature/`: reading notes, survey tables, benchmark notes
-- `code/`: runnable code, scripts, configs, implementations
-- `data/`: machine-readable data and manifests
-- `results/`: machine-readable experiment outputs
-- `report/`: the markdown deliverable, `report.md` plus `images/` (markdown mode)
-- `writing/`: LaTeX sources, sections, bibliography, tables (latex mode)
-- `figures/`: real plots and paper figures
-- `artifacts/`: review JSON, build metadata, compiled PDFs, and packaged deliverables
-- `notes/`: temporary or supporting research notes
-- `reviews/`: readiness, critique, and dissemination materials
-
 ## 🧠 Execution Model
 
-For each stage attempt, AutoR assembles a prompt from:
+Context is composed per consumer, not per availability. A stage's inbound block is built by `render_inbound(ChannelContext(...), CHANNELS)` ([src/manager.py:2033-2039](src/manager.py)) from the thirteen typed channels in [src/information_flow.py](src/information_flow.py). Each channel declares `produced_by`, a `consumed_by` set of real stage slugs, and a `rationale`; `test_every_narrowing_is_argued_for` ([tests/test_information_flow.py:67](tests/test_information_flow.py)) fails a channel that withholds itself from a stage without saying why. Withholding has to be argued for, not just done.
 
-1. the stage template from [src/prompts/](src/prompts)
-2. the required stage summary contract
-3. execution-discipline constraints
-4. `user_input.txt`
-5. approved `memory.md`
-6. `intake_context.json`, `artifact_index.json`, and, when available, `experiment_manifest.json`
-7. optional refinement feedback
-8. for continuation attempts, the current draft/final stage files and workspace context
+Three narrowings, because the abstraction is not the point:
 
-The assembled prompt is written to `runs/<run_id>/prompt_cache/`, per-stage session IDs are stored in `runs/<run_id>/operator_state/`, and the selected CLI backend is invoked in live streaming mode.
+- the **artifact index** skips Stages 00-02 — they produce no data, results or figures, so the index is empty noise there
+- the **writing manifest** reaches Stage 07 alone
+- the mutable **Stage 02 hypotheses** stop at `04_implementation` ([src/information_flow.py:333-350](src/information_flow.py)), because the freeze at Stage 04's approval supersedes them. Before that edge was typed, the same H1 went into every prompt from Stage 05 on twice — one copy labelled editable, sitting next to the frozen one at exactly the stages where the freeze is the point.
 
-From Stage 05 on the prompt also carries the **frozen preregistration**, worded as a constraint rather than as background — the hypotheses were fixed before any result existed and cannot be renegotiated to fit one.
+`dependency_edges()` returns every `(producer, consumer, channel key)` triple, so the information topology can be printed and diffed rather than reconstructed from thirteen `if` statements. `_record_inbound_channels` ([src/manager.py:2900](src/manager.py)) writes the delivered channel keys per stage into the run log.
 
-That list is everything the agent is *given*. Alongside it, AutoR installs an agent skill pack from [src/skills/](src/skills) into `runs/<run_id>/.claude/skills/` — the operator's working directory — so the agent can *pull* long-form craft guidance when it needs it: writing principles, citation discipline, venue checklists, LaTeX repair, results tables, reproducibility review. A skill costs nothing in the prompts that do not use it, which is why guidance that matters to one stage in one situation lives there rather than in the templates.
+Honest scope: thirteen blocks are typed. Five more — `obligations_context`, `intake_context_text`, `web_search_context`, `approved_memory` and `handoff_context` — are still passed to `build_prompt` as ordinary arguments rather than declared as channels ([src/manager.py:2041-2069](src/manager.py)), so each one's delivery rule lives in `build_prompt` instead of next to a `consumed_by` set. Around them, `compose_stage_template` ([src/prompt_fragments.py](src/prompt_fragments.py)) assembles the stage's own instructions, the accepted-extension lists generated from the validators' constants rather than hand-copied, and the run-safety rules.
+
+One duplication has already been cut: `build_prompt` withholds the handoff when approved memory is non-empty ([src/utils.py:807-811](src/utils.py)). The handoff was a strict subset of memory, so sending both put ~350 words of verbatim duplicate into every prompt from Stage 04 on. Assembled prompts across a run: 21,823 → 20,353 words.
+
+The assembled prompt is written to `runs/<run_id>/prompt_cache/`, per-stage session IDs to `runs/<run_id>/operator_state/`, and the selected CLI backend is invoked in live streaming mode. Alongside the prompt, AutoR installs an agent skill pack from [src/skills/](src/skills) into `runs/<run_id>/.claude/skills/` — the operator's working directory — so the agent can *pull* long-form craft guidance when it needs it. A skill costs nothing in the prompts that do not use it.
 
 <details>
 <summary><strong>Exact Claude CLI pattern</strong></summary>
@@ -825,253 +595,112 @@ Important behavior:
 - if resume fails, AutoR can fall back to a fresh session
 - if stage markdown is incomplete, AutoR can repair or normalize it locally
 
+## 📂 Run Layout
+
+Every run lives entirely inside its own directory. The tree is `build_run_paths` ([src/utils.py:232-273](src/utils.py)).
+
+```text
+runs/<run_id>/
+├── user_input.txt      memory.md             run_config.json
+├── run_manifest.json   artifact_index.json   intake_context.json
+├── obligations.json    review_policy.json    # both per-run; nothing crosses runs
+├── logs.txt            logs_raw.jsonl
+├── prompt_cache/       operator_state/       handoff/        stages/
+├── .claude/skills/     # the skill pack, pulled on demand by the agent
+├── evolution/          # champion drafts, improvement_ledger.jsonl, summary.json,
+│                       # stage_graph.json, routing_refusals.jsonl
+└── workspace/
+    ├── literature/  code/  data/  figures/  report/  writing/
+    ├── bootstrap/   profile/
+    ├── notes/       preregistration.json, experimental_protocol.json,
+    │                research_rounds.json, round_decision.json, hypothesis_manifest.json
+    ├── results/     experiment_manifest.json, hypothesis_outcomes.json
+    ├── artifacts/   claim_provenance.json, review JSON, build metadata, compiled PDFs
+    └── reviews/     validity_review_<stage>.json, panel/
+```
+
+`evolution/` sits outside `workspace/` on purpose, and the dataclass records the reason: it is "a record of how the run reached its answer, not part of the answer, and a benchmark export that swept it up would ship the losing drafts alongside the report" ([src/utils.py:92-96](src/utils.py)).
+
+**Workspace semantics.** `literature/` reading notes, survey tables, benchmark notes · `code/` runnable code, scripts, configs, implementations · `data/` machine-readable datasets, manifests, processed splits · `results/` metrics, predictions, ablations, plus the standardized `experiment_manifest.json` · `report/` the markdown deliverable, `report.md` and the PNGs it embeds under `images/` · `writing/` LaTeX sources, sections, tables, bibliography (latex mode) · `figures/` plots and paper figures · `artifacts/` review JSON, build metadata, compiled PDFs, packaged deliverables · `notes/` the frozen files of the validity chain plus supporting notes · `reviews/` adversarial validity reviews, panel transcripts, readiness reviews.
+
+Outside `workspace/`: `memory.md` is the approved free-text cross-stage memory; `handoff/<slug>.md` is the second free-text carrier, each approved summary trimmed to Objective / Key Results / Files Produced (`write_stage_handoff`, [src/utils.py:1628](src/utils.py)) and sent only on a continuation attempt or when memory is still empty; every other cross-stage edge is a typed channel or a JSON artifact. `run_manifest.json` is the lifecycle state that resume, redo and rollback read; `artifact_index.json` indexes `data/`, `results/` and `figures/`; `prompt_cache/` holds the exact prompt of every attempt and repair.
+
 ## 🏗️ Architecture
-
-The main code lives in:
-
-- [main.py](main.py)
-- [src/manager.py](src/manager.py)
-- [src/operator.py](src/operator.py)
-- [src/intake.py](src/intake.py)
-- [src/manifest.py](src/manifest.py)
-- [src/artifact_index.py](src/artifact_index.py)
-- [src/experiment_manifest.py](src/experiment_manifest.py)
-- [src/utils.py](src/utils.py)
-- [src/writing_manifest.py](src/writing_manifest.py)
-- [src/platform/foundry.py](src/platform/foundry.py)
-- [src/prompts/](src/prompts)
-- [src/skills/](src/skills)
 
 ```mermaid
 flowchart LR
-    A[main.py] --> B[src/manager.py]
-    B --> C[src/operator.py]
-    B --> D[src/intake.py]
-    B --> E[src/manifest.py]
-    B --> F[src/artifact_index.py]
-    B --> G[src/experiment_manifest.py]
-    B --> H[src/utils.py]
-    B --> I[src/writing_manifest.py]
-    B --> J[src/platform/foundry.py]
-    B --> K[src/prompts/*]
-    B --> L[src/skills/*]
-    C --> H
+    C[information_flow.py<br/>13 typed channels] --> M
+    M[manager.py<br/>walks the stage graph] --> W[walk<br/>stage_graph · router]
+    M --> G[gates<br/>preregistration · experimental_protocol · validity_review]
+    M --> I[improvement<br/>rubric · evolution · pareto · archive]
+    M --> R[review<br/>review_panel · cross_reviewer · obligations · review_policy]
 ```
 
-File boundaries:
+| Module | Lines | What it owns |
+| --- | ---: | --- |
+| [main.py](main.py) | 965 | CLI entry: start, resume, `--redo-stage`, `--rollback-stage`, and the archive record at the end of a run |
+| [src/manager.py](src/manager.py) | 2955 | Walks the stage graph until it reaches finish or nothing is open — plus the router call, the evolution controller, the freeze/amend seam, the validity review, the round close, the obligation ledger, the cross-review veto and the inbound-channel record |
+| [src/utils.py](src/utils.py) | 2214 | Stage metadata, run paths, prompt assembly, markdown validation, the artifact gates and the validity-chain wiring |
+| [src/review_panel.py](src/review_panel.py) | 1223 | The deliberating panel; a blocking objection is enforced in code against its own chair |
+| [src/rubric.py](src/rubric.py) | 926 | The rigour score over a draft and the artifacts it names. Never calls a backend |
+| [src/archive.py](src/archive.py) | 784 | Cross-run routes and edge payoffs, keyed on a comparability basis; variant proposal and promotion |
+| [src/stage_graph.py](src/stage_graph.py) | 724 | Stages as nodes: six guarded forward edges, ten backward edges, a per-stage visit budget |
+| [src/ideation_panel.py](src/ideation_panel.py) | 712 | Divergent Stage 02 proposers across five lenses, deduplicated into a candidate pool |
+| [src/evolution.py](src/evolution.py) | 692 | The champion ratchet: budgeted polish rounds, reverted when they do not improve |
+| [src/preregistration.py](src/preregistration.py) | 579 | Freeze, amend, adjudicate, trace |
+| [src/validity_review.py](src/validity_review.py) | 512 | The adversarial pass after Stages 05 and 06 |
+| [src/information_flow.py](src/information_flow.py) | 395 | Thirteen typed information channels, each with declared readers |
+| [src/router.py](src/router.py) | 385 | The agent's choice among admissible moves; an off-menu choice is refused and logged |
+| [src/research_rounds.py](src/research_rounds.py) | 320 | Stages 03-06 as a repeatable round, bounded by `--max-rounds` |
+| [src/obligations.py](src/obligations.py) | 306 | What a later stage still owes; only a reviewer can discharge it |
+| [src/cross_reviewer.py](src/cross_reviewer.py) | 239 | A second opinion from a different model family. Veto only, never an override |
+| [src/experimental_protocol.py](src/experimental_protocol.py) | 234 | Declared baselines, seeds and dispersion, fixed before the result exists |
+| [src/pareto.py](src/pareto.py) | 212 | Non-dominated drafts kept beside the champion, and the pair worth merging |
+| [src/review_policy.py](src/review_policy.py) | 212 | Standing review rules learned from this run's own corrections |
+| [src/prompt_fragments.py](src/prompt_fragments.py) | 104 | Shared prompt blocks generated from the validators' own constants |
 
-- [main.py](main.py): CLI entry point. Starts a new run, resumes an existing run, collects resources, and exposes redo/rollback controls.
-- [src/manager.py](src/manager.py): Owns intake plus the 8-stage loop, approval flow, repair flow, resume/redo/rollback logic, and stage-level continuation policy.
-- [src/operator.py](src/operator.py): The shared CLI operator flow used by Claude today and reused by Codex support for stage session state, live streaming, and resume fallback.
-- [src/operator_codex.py](src/operator_codex.py): Codex CLI adapter over the same stage contract, including JSON event streaming and stage-local session continuation.
-- [src/intake.py](src/intake.py): Resource ingestion, intake context persistence, and prompt formatting for preloaded materials.
-- [src/manifest.py](src/manifest.py): Lightweight run lifecycle state, stage status tracking, and rollback/stale invalidation.
-- [src/artifact_index.py](src/artifact_index.py): Run-wide artifact indexing over data, results, and figures.
-- [src/experiment_manifest.py](src/experiment_manifest.py): Standardized experiment bundle summary used by later stages.
-- [src/utils.py](src/utils.py): Stage metadata, prompt assembly, run paths, markdown validation, artifact validation, and handoff helpers.
-- [src/evidence_ledger.py](src/evidence_ledger.py): Stage 01 literature evidence and Stage 07 citation verification.
-- [src/hypothesis_manifest.py](src/hypothesis_manifest.py): Stage 02 typed propositions, hypotheses, and paper claims.
-- [src/bootstrap.py](src/bootstrap.py) and [src/project_bootstrap.py](src/project_bootstrap.py): `--paper-corpus` and `--project-root` scanning.
-- [src/approval_agent.py](src/approval_agent.py): The strict reviewer agent used by `--full-auto`.
-- [src/backend/](src/backend) and [src/frontend/](src/frontend): AutoR Studio service, HTTP layer, and the browser UI.
-- [src/research_rounds.py](src/research_rounds.py): Stages 03-06 as a repeatable round, so a refuted hypothesis leads to a second round instead of a dead end. Bounded by `--max-rounds`.
-- [src/validity_review.py](src/validity_review.py): The adversarial pass after Stages 05 and 06 — asks why the result is wrong, and requires the next stage to answer every objection.
-- [src/preregistration.py](src/preregistration.py): Freezes the hypotheses before the experiments, adjudicates each one at Stage 06, and traces each manuscript claim back to a supported hypothesis at Stage 07.
-- [src/prompts/](src/prompts): Per-stage prompt templates.
-- [src/skills/](src/skills) and [src/run_skills.py](src/run_skills.py): Agent skills installed into each run's `.claude/skills/`, loaded on demand rather than concatenated into every prompt.
+Supporting modules: [operator.py](src/operator.py) and [operator_codex.py](src/operator_codex.py) (the Claude and Codex CLI adapters — stage session state, live streaming, resume fallback), [approval_agent.py](src/approval_agent.py), [intake.py](src/intake.py), [manifest.py](src/manifest.py), [artifact_index.py](src/artifact_index.py), [experiment_manifest.py](src/experiment_manifest.py), [evidence_ledger.py](src/evidence_ledger.py), [hypothesis_manifest.py](src/hypothesis_manifest.py), [writing_manifest.py](src/writing_manifest.py), [bootstrap.py](src/bootstrap.py) and [project_bootstrap.py](src/project_bootstrap.py), [platform/foundry.py](src/platform/foundry.py), [run_skills.py](src/run_skills.py), [prompts/](src/prompts), [skills/](src/skills), and [backend/](src/backend) + [frontend/](src/frontend) for the Studio.
 
-The full module map, the stage attempt loop, how prompts are assembled, and the extension points are in **[docs/architecture.md](docs/architecture.md)**.
-
-## 🗂️ Run State
-
-Each run contains `user_input.txt`, `memory.md`, `run_manifest.json`, `artifact_index.json`, `prompt_cache/`, `operator_state/`, `stages/`, `workspace/`, `.claude/skills/`, `logs.txt`, and `logs_raw.jsonl`. The substantive research payload lives in `workspace/`.
-
-```mermaid
-flowchart TD
-    A[workspace/] --> B[literature/]
-    A --> C[code/]
-    A --> D[data/]
-    A --> E[results/]
-    A --> R[report/]
-    A --> F[writing/]
-    A --> G[figures/]
-    A --> H[artifacts/]
-    A --> I[notes/]
-    A --> J[reviews/]
-```
-
-Workspace directories:
-
-- `literature/`: papers, benchmark notes, survey tables, reading artifacts.
-- `code/`: runnable pipeline code, scripts, configs, and method implementations.
-- `data/`: machine-readable datasets, manifests, processed splits, caches, and loaders.
-- `results/`: machine-readable metrics, predictions, ablations, tables, and evaluation outputs.
-  AutoR also standardizes `results/experiment_manifest.json` as a machine-readable summary over result, code, and note artifacts for downstream analysis.
-- `report/`: the markdown deliverable in markdown mode — `report.md` and the PNG figures it embeds under `images/`.
-- `writing/`: manuscript sources, LaTeX, section drafts, tables, and bibliography in latex mode.
-- `figures/`: plots, diagrams, charts, and paper figures.
-- `artifacts/`: review JSON, build metadata, compiled PDFs, and packaged deliverables.
-- `notes/`: temporary notes and setup material.
-- `reviews/`: critique notes, threat-to-validity notes, and readiness reviews.
-
-Other run state:
-
-- `memory.md`: approved cross-stage memory only.
-- `run_manifest.json`: machine-readable run and stage lifecycle state.
-- `artifact_index.json`: machine-readable index over `workspace/data`, `workspace/results`, and `workspace/figures`.
-- `prompt_cache/`: exact prompts used for stage attempts and repairs.
-- `operator_state/`: per-stage backend session IDs.
-- `stages/`: draft and promoted stage summaries.
-- `logs.txt` and `logs_raw.jsonl`: workflow logs and raw backend stream output.
-
-## ✅ Validation
-
-AutoR validates both the stage markdown and the stage artifacts.
-
-Required stage markdown shape:
-
-```md
-# Stage X: <name>
-
-## Objective
-## Previously Approved Stage Summaries
-## What I Did
-## Key Results
-## Files Produced
-## Decision Ledger
-## Suggestions for Refinement
-## Your Options
-```
-
-Additional markdown requirements:
-
-- Exactly 3 numbered refinement suggestions.
-- The fixed 6 user options.
-- No unfinished placeholders such as `[In progress]`, `[Pending]`, `[TODO]`, or `[TBD]`.
-- Concrete file paths in `Files Produced`.
-
-Artifact requirements by stage:
-
-- Stage 03+: machine-readable data under `workspace/data/`
-- Stage 05+: machine-readable results under `workspace/results/`
-- Stage 05+: `workspace/results/experiment_manifest.json` must exist and remain structurally valid
-- Stage 06+: figure files under `workspace/figures/`
-- Stage 07+: a markdown report at `workspace/report/report.md` whose figure references all resolve, or with `--output-format latex`, venue-aware LaTeX sources plus a compiled PDF under `workspace/writing/` or `workspace/artifacts/`
-- Stage 08+: review and readiness artifacts under `workspace/reviews/`
-
-A run with only markdown notes does not pass validation.
-
-## 📌 Scope
-
-### Included in the current mainline
-
-- optional intake stage and resource ingestion
-- 9-stage workflow: optional intake plus eight formal research stages
-- the stages as a navigable directed graph, with guarded backward moves (default)
-- agent-chosen routing constrained to the moves the guards leave open (default)
-- an outcome-blind rigour rubric and a champion ratchet on every draft (default)
-- measured improvement rounds, budgeted and skipped where there is no headroom
-- verdict-drift rejection, so an improvement round cannot move a finding
-- a cross-run archive of routes and edge payoffs, recording by default and
-  steering only when asked
-- mandatory human approval after every stage
-- Claude Code or Codex as the execution layer
-- Stage 00 clarification Q&A plus a compact intake approval flow
-- stage-local continuation within the same backend session
-- prompt caching via `@file`
-- live streaming terminal output with keyboard-selectable menus
-- repair passes and local fallback normalization
-- run manifest, rollback, and stale tracking
-- artifact index and experiment manifest
-- stage handoff context
-- manuscript/release package generation after approval
-- artifact-aware validation
-- resume, `--redo-stage`, and `--rollback-stage`
-- lightweight venue profiles for Stage 07 writing
-
-### Intentionally out of scope
-
-- generic multi-agent orchestration
-- database-backed runtime state
-- concurrent stage execution
-- heavyweight platform abstractions
-- dashboard-first productization
+The full module map, the stage attempt loop and the extension points are in **[docs/architecture.md](docs/architecture.md)**.
 
 ## 📚 Documentation
 
 The [docs/](docs/) directory is the reference documentation. This README is the overview; everything below is the detail behind it.
 
-**Guides**
-
 | | |
 | --- | --- |
 | [English Guide](docs/tutorial_en.md) · [中文教程](docs/tutorial_zh.md) | Install, run your first project end to end, review each stage, and write feedback that actually improves output. |
-
-**Reference**
-
-| | |
-| --- | --- |
 | [CLI Reference](docs/cli-reference.md) | Every flag on `main.py` and `studio.py`, defaults, what is preserved on resume, exit codes. |
 | [Configuration](docs/configuration.md) | `run_config.json`, the venue registry, diagram setup, environment variables, hard-coded limits. |
 | [Run Artifacts](docs/run-artifacts.md) | The run directory, file by file, and the schema of every machine-readable artifact. |
-| [Stage Contract](docs/stage-contract.md) | Exactly what a stage must produce to be accepted, as the code enforces it. |
+| [Stage Contract](docs/stage-contract.md) | Exactly what a stage must produce to be accepted, as `validate_stage_artifacts` enforces it. |
+| [Recursive Self-Improvement](docs/self-improvement.md) | The stage graph, routing, the rigour rubric and the champion ratchet, the cross-run archive — and the constraints that stop a scored loop from optimising toward a nicer answer. |
+| [Review Panel](docs/review-panel.md) | The five seats, the independent round and the cross-examination that only runs on disagreement, blocking objections, `--panel-models`, `--persona`, and the solo baseline every panel run measures itself against. |
+| [Ideation Panel](docs/ideation-panel.md) | The five proposer lenses, Jaccard deduplication, scoring into a candidate pool, and the adoption measurement taken after the stage is approved. |
 | [Studio Guide & API](docs/studio.md) | The browser workspace and its complete HTTP API. |
-| [Recursive Self-Improvement](docs/self-improvement.md) | The stage graph, routing, the rigour rubric and the champion ratchet, the cross-run archive — and the constraint that keeps a scored loop from becoming an automated p-hacker. |
 | [ResearchClawBench](docs/researchclawbench.md) | Running with no human in the loop: unattended execution, the benchmark adapter and its output contract, and Gemini-backed web search. |
 | [ResearchClawBench Landscape](docs/researchclawbench-landscape.md) | How EvoScientist, ARIS Codex and MIRA actually score on the benchmark, which reported numbers reproduce, and the baseline any result must be quoted against. |
-
-**Internals**
-
-| | |
-| --- | --- |
-| [Architecture](docs/architecture.md) | Layers, module map, the stage attempt loop, prompt assembly, recovery, extension points. |
+| [Architecture](docs/architecture.md) | Layers, the module map with line counts, the stage walk, prompt assembly by typed channel, recovery, extension points. |
 | [Development](docs/development.md) | Dev setup, tests, CI, conventions, and recipes for adding a stage, venue, or backend. |
 | [Troubleshooting](docs/troubleshooting.md) | Symptom-to-fix for the errors AutoR actually raises. |
+| [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Code of Conduct](CODE_OF_CONDUCT.md) | How to land a change; the security model, the sandbox trade-offs and how to report a vulnerability; community expectations. |
 
-**Project**
+## 🚧 Limits
 
-| | |
-| --- | --- |
-| [Contributing](CONTRIBUTING.md) | How to propose and land a change, and what a reviewer looks for. |
-| [Security](SECURITY.md) | The security model, the sandbox trade-offs, and how to report a vulnerability. |
-| [Code of Conduct](CODE_OF_CONDUCT.md) | Community expectations. |
+Six things the mechanisms above do not close. Each is also the next thing worth building, named at the code that would have to change.
 
-## 🛣️ Roadmap
+- **The archive's explore proposer does not run.** `propose_exploration` and `unexplored_edges` ([src/archive.py](src/archive.py):595, :576) have no production caller: `record_into_archive` calls `propose_variant` alone ([main.py](main.py):687), and every other reference is in `tests/test_archive_exploration.py`. `propose_variant` reads only believable payoffs, and an edge nobody has taken has no payoff in either direction — so a never-taken backward edge stays untaken.
+- **A crashed adversarial pass is indistinguishable from a clean result.** `_write_review(..., failed=True)` records `reviewer_failed: true` ([src/validity_review.py](src/validity_review.py):405) and no production code reads that flag. Zero findings and a reviewer that never returned are the same input to `validate_validity_response`: nothing owed, gate open.
+- **Attribution stops at the log.** `_record_inbound_channels` ([src/manager.py](src/manager.py):2900) writes which channels reached each stage, but `RunRecord` ([src/archive.py](src/archive.py):113-125) has no channel field, so "this edge helped" cannot yet become "this information helped".
+- **The self-measurement files have no reader in code.** `panel_effect.json` is read only by the function that appends to it, and the adoption marks `measure_adoption` writes back into `idea_pool.json` change no later decision. Both files exist to say when a feature did not earn its cost, and the party they say it to is you.
+- **Most of the recursion is opt-in or partial.** `--max-rounds` defaults to 1 ([main.py](main.py):128), so a round that asks to go back is recorded with `acted_on: false` and a budget note, and the run continues to writing anyway ([src/manager.py](src/manager.py):2741-2755); the archive steers the topology only under `--archive-steer`; and `REVIEWED_STAGE_NUMBERS = (5, 6)` ([src/validity_review.py](src/validity_review.py):42), so nothing attacks Stage 07 or 08.
+- **Studio does not route.** Its lazy-resume approve path picks the next stage by stage number ([src/backend/studio_runner.py](src/backend/studio_runner.py):361-364) and never consults the router, so graph routing is a CLI capability today.
 
-The most valuable next steps are the ones that make AutoR more like a real research workflow, not more like a demo framework.
-
-| Next step | Why it matters |
-| --- | --- |
-| **Deeper cross-stage rollback and invalidation** | Make downstream stale-state handling stronger and more explicit after earlier-stage changes. |
-| **Stronger machine-readable run state** | Extend the current run manifest into a better source of truth for stage status, stale dependencies, and artifact pointers. |
-| **Continuation handoff compression** | Make long stage refinement more stable without bloating context. |
-| **Stronger automated tests** | Cover repair flow, resume fallback, artifact validation, and approval-loop correctness more deeply. |
-| **Richer artifact indexing** | Extend metadata around `data/`, `results/`, `figures/`, and `writing/` without turning AutoR into a heavy platform. |
-| **Frontend run browser** | Add a lightweight UI for browsing runs, stages, logs, and artifacts directly from the run directory. |
-
-Implemented milestone:
-
-- ~~Recursive self-improvement.~~ The stages are a directed graph the run navigates, stage drafts are measured and ratcheted so a stage can only improve, and an optional archive learns which moves pay across runs. Implemented in `src/stage_graph.py`, `src/router.py`, `src/rubric.py`, `src/evolution.py`, `src/pareto.py` and `src/archive.py`; see [docs/self-improvement.md](docs/self-improvement.md).
-- ~~Stage-local continuation sessions.~~ Keep one Claude conversation per stage, reuse it for `1/2/3/4` refinement, and fall back to a fresh session only when resume fails. This is now implemented in the operator and manager flow.
-- ~~Artifact-level validation for non-toy outputs.~~ Enforce machine-readable data, result files, figures, LaTeX sources, PDF output, and review artifacts at the right stages. This is now part of the workflow validation path.
-
-<details>
-<summary><strong>Expanded roadmap notes</strong></summary>
-
-- Cross-stage rollback and invalidation. When a later stage reveals that an earlier design decision is wrong, the workflow should be able to jump back to an earlier stage and mark downstream stages as stale. This is the biggest current control-flow gap.
-- Machine-readable run manifest. Add a single source of truth such as `run_manifest.json` to track stage status, approval state, stale dependencies, session IDs, and key artifact pointers. This should make both automation and future UI work much cleaner.
-- Continuation handoff compression. Add a short machine-generated stage handoff file that summarizes what is already correct, what is missing, and which files matter most. This should reduce context growth and make continuation more stable over long runs.
-- ~~Result schema and artifact indexing.~~ Standardize `workspace/data/`, `workspace/results/`, and `workspace/figures/` around explicit schemas and generate an artifact index automatically. The workflow now writes `artifact_index.json`, carries basic inferred or declared schema metadata, and feeds the index into later-stage prompt context and the writing manifest.
-- Writing pipeline hardening. Turn Stage 07 into a reliable manuscript production pipeline with stable conference and journal-style writing structures, bibliography handling, table and figure inclusion, and reproducible PDF compilation. The goal is a submission-grade research package, not just writing notes.
-- Review and dissemination package. Expand Stage 08 so it produces readiness checklists, threats-to-validity notes, artifact manifests, release notes, and external-facing research bundles. The final stage should feel like packaging a verifiable research release, not just wrapping up text.
-- Frontend run dashboard. Build a lightweight UI that can browse runs, stage status, summaries, logs, artifacts, and validation failures. It should read from the run directory and manifest rather than introducing a database first.
-- README and presentation assets. Keep refining the README and add `assets/` images such as workflow diagrams, UI screenshots, and artifact examples. This is important for clarity, onboarding, and project presentation.
-
-</details>
+**Intentionally out of scope**: generic multi-agent orchestration, database-backed runtime state, concurrent stage execution, heavyweight platform abstractions, dashboard-first productization.
 
 ## 🤝 Contributing
 
-Bug reports, feature requests, documentation fixes, and shared runs are all welcome. Setup is one clone and one command — AutoR has no third-party Python dependencies and no build step:
+Bug reports, feature requests, documentation fixes, and shared runs are all welcome. Setup is one clone and one command — AutoR's runtime imports nothing outside the standard library and there is no build step. Only the optional Gemini-backed paths (`--web-search gemini`, `--research-diagram`, the cross-model reviewer) need `google-genai`:
 
 ```bash
 git clone https://github.com/tangxiangru/AutoR.git
@@ -1079,10 +708,7 @@ cd AutoR
 python -m unittest discover -s tests -p "test_*.py"
 ```
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request, and [docs/development.md](docs/development.md) before changing code. Security issues go through [SECURITY.md](SECURITY.md), not a public issue.
-
-
-Note that contributions are assigned to the copyright holder under Section 6 of the [LICENSE](LICENSE), and that running AutoR requires written permission — see below.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request, and [docs/development.md](docs/development.md) before changing code. Security issues go through [SECURITY.md](SECURITY.md), not a public issue. Contributions are assigned to the copyright holder under Section 6 of the [LICENSE](LICENSE), and running AutoR requires written permission — see below.
 
 ## 📜 License
 
