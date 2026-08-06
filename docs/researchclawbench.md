@@ -174,6 +174,21 @@ can be inspected or resumed after the fact.
 
 ---
 
+## How other agents score
+
+[researchclawbench-landscape.md](researchclawbench-landscape.md) works through the public
+leaderboard: where EvoScientist, ARIS Codex and MIRA actually land, which of their reported
+numbers reproduce, and what the same-model baseline is that any AutoR result has to be
+quoted against. Two findings worth knowing before you run:
+
+- **Model choice dominates harness choice.** Most agents above any given harness on the
+  board simply use a stronger model. Quote AutoR against the same-model baseline or the
+  number says nothing.
+- **A scaffold can be negative.** ARIS Codex, a large skill library over Codex CLI, loses to
+  the plain Codex CLI it wraps on 31 of 40 tasks.
+
+---
+
 ## Smoke test
 
 ```bash

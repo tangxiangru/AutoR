@@ -47,7 +47,7 @@ from src.rcb import (  # noqa: E402
 )
 from src.terminal_ui import TerminalUI  # noqa: E402
 from src.utils import DEFAULT_VENUE, resolve_venue_key  # noqa: E402
-from src.web_search import build_web_search_prompt_section, resolve_gemini_api_key  # noqa: E402
+from src.web_search import resolve_web_search_context, web_search_notice  # noqa: E402
 
 
 DEFAULT_STAGE_TIMEOUT = 3600
@@ -161,14 +161,6 @@ def create_operator(backend: str, *, model: str, codex_sandbox: str, fake_mode: 
     return ClaudeOperator(model=model, fake_mode=fake_mode, ui=ui, stage_timeout=stage_timeout)
 
 
-def resolve_web_search_context(mode: str) -> str | None:
-    if mode == "native":
-        return None
-    if mode == "auto" and not resolve_gemini_api_key():
-        return None
-    return build_web_search_prompt_section()
-
-
 def run(args: argparse.Namespace) -> BenchmarkResult:
     workspace = Path(args.workspace).expanduser().resolve()
     if not workspace.exists():
@@ -192,6 +184,10 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
             "workspace": str(workspace),
         }
     )
+
+    notice, level = web_search_notice(args.web_search)
+    emit_event({"type": "progress", "stage": "web_search", "level": level, "message": notice})
+    ui.show_status(notice, level=level)
 
     operator = create_operator(
         operator_backend,

@@ -13,6 +13,8 @@ import main as autor_main
 from src.utils import STAGES, build_prompt
 from src.web_search import (
     DEFAULT_SEARCH_MODEL,
+    resolve_web_search_context,
+    web_search_notice,
     SearchResult,
     WebSearchError,
     WebSearchResponse,
@@ -231,6 +233,59 @@ class PromptSectionTest(unittest.TestCase):
     def test_no_section_means_no_heading(self) -> None:
         prompt = build_prompt(STAGES[0], "template", "user request", "memory")
         self.assertNotIn("# Web Search Capability", prompt)
+
+
+class WebSearchNoticeTest(unittest.TestCase):
+    """The notice exists so a silent fallback cannot hide a dead Stage 01."""
+
+    def _no_key(self):
+        return patch("src.web_search.DIAGRAM_CONFIG_PATH", Path("/nonexistent/diagram.yaml"))
+
+    def test_auto_without_a_key_warns_and_names_the_deployment(self) -> None:
+        with patch.dict(os.environ, {}, clear=True), self._no_key():
+            message, level = web_search_notice("auto")
+        self.assertEqual(level, "warn")
+        self.assertIn("Vertex", message)
+        self.assertIn("GEMINI_API_KEY", message)
+
+    def test_auto_with_a_key_is_informational(self) -> None:
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "k"}, clear=True):
+            message, level = web_search_notice("auto")
+        self.assertEqual(level, "info")
+        self.assertIn("Gemini", message)
+
+    def test_gemini_without_a_key_is_an_error_not_a_warning(self) -> None:
+        with patch.dict(os.environ, {}, clear=True), self._no_key():
+            message, level = web_search_notice("gemini")
+        self.assertEqual(level, "error")
+        self.assertIn("fail on first use", message)
+
+    def test_native_is_informational_even_with_a_key(self) -> None:
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "k"}, clear=True):
+            message, level = web_search_notice("native")
+        self.assertEqual(level, "info")
+
+    def test_every_mode_yields_a_notice(self) -> None:
+        for mode in ("auto", "gemini", "native"):
+            for env in ({}, {"GEMINI_API_KEY": "k"}):
+                with patch.dict(os.environ, env, clear=True), self._no_key():
+                    message, level = web_search_notice(mode)
+                self.assertTrue(message.strip(), mode)
+                self.assertIn(level, {"info", "warn", "error"}, mode)
+
+    def test_the_notice_agrees_with_what_is_injected(self) -> None:
+        """A warn/error notice must mean no Gemini block reached the prompt, and vice versa."""
+        for mode in ("auto", "gemini", "native"):
+            for env in ({}, {"GEMINI_API_KEY": "k"}):
+                with patch.dict(os.environ, env, clear=True), self._no_key():
+                    _message, level = web_search_notice(mode)
+                    injected = resolve_web_search_context(mode) is not None
+                if mode == "gemini":
+                    self.assertTrue(injected, mode)   # gemini always injects, even keyless
+                elif mode == "native":
+                    self.assertFalse(injected, mode)
+                else:
+                    self.assertEqual(injected, level == "info", (mode, env))
 
 
 class WebSearchModeTest(unittest.TestCase):
