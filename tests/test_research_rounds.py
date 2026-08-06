@@ -32,6 +32,7 @@ from src.research_rounds import (
     read_round_decision,
     record_round,
     resume_stage_slug_for,
+    unreopened_abandonment,
     validate_round_decision,
 )
 from src.utils import STAGES, build_run_paths, ensure_run_layout, validate_stage_artifacts, write_text
@@ -221,6 +222,73 @@ class Stage07GateTest(RoundTestCase):
     def test_the_stage_gate_calls_this(self) -> None:
         problems = validate_stage_artifacts(STAGE_07, self.paths)
         self.assertTrue(any("closed research round" in problem for problem in problems), problems)
+
+
+class AbandonmentStandsUntilOverruledTest(RoundTestCase):
+    """An abandonment is a conclusion about the run, not about the last round.
+
+    Reading only the last entry let it be laundered: abandon, go back through any
+    route that does not consult it, re-approve Stage 06, declare converged — the
+    ledger reads `[abandon, converged]` and every downstream check saw only the
+    second. The run then wrote up the question it had recorded it could not answer.
+    """
+
+    def _abandon(self) -> None:
+        write_validity_chain(self.paths, close_first_round=False)
+        self.refute_everything()
+        write_round_decision(
+            self.paths,
+            decision="abandon",
+            rationale="The effect cannot be separated from tuning noise at this budget.",
+            what_we_learned="Every arm we can afford sits within noise of the baseline.",
+            what_changes_next="",
+        )
+        record_round(self.paths, acted_on=True)
+
+    def test_a_later_converged_round_does_not_erase_it(self) -> None:
+        self._abandon()
+        write_round_decision(
+            self.paths,
+            decision="converged",
+            rationale="On reflection the second design does separate the effect cleanly.",
+            what_we_learned="The development split removes the confound entirely.",
+            what_changes_next="",
+            negative_result=True,
+        )
+        record_round(self.paths, acted_on=True)
+
+        self.assertEqual(
+            [item.decision for item in load_rounds(self.paths)], ["abandon", "converged"]
+        )
+        problems = validate_round_decision(self.paths, STAGE_07)
+        self.assertTrue(any("concluded `abandon`" in problem for problem in problems), problems)
+        self.assertTrue(any("reopens_round: 1" in problem for problem in problems), problems)
+
+    def test_a_round_that_says_it_reopens_the_abandonment_is_allowed_through(self) -> None:
+        """Overruling one is legitimate and often right. It has to be on the record —
+        the same rule preregistration already applies to a revised hypothesis."""
+        self._abandon()
+        write_round_decision(
+            self.paths,
+            decision="converged",
+            rationale="The second design separates the effect, so the earlier call was wrong.",
+            what_we_learned="Tuning on a development split removes the confound entirely.",
+            what_changes_next="",
+            negative_result=True,
+        )
+        payload = json.loads(self.paths.round_decision.read_text(encoding="utf-8"))
+        payload["reopens_round"] = 1
+        write_text(self.paths.round_decision, json.dumps(payload))
+        record_round(self.paths, acted_on=True)
+
+        self.assertEqual(unreopened_abandonment(self.paths), None)
+        self.assertEqual(validate_round_decision(self.paths, STAGE_07), [])
+
+    def test_an_abandonment_with_nothing_after_it_still_stands(self) -> None:
+        self._abandon()
+        standing = unreopened_abandonment(self.paths)
+        self.assertIsNotNone(standing)
+        self.assertEqual(standing.number, 1)
 
 
 class PromptCarryForwardTest(RoundTestCase):

@@ -83,6 +83,8 @@ class Round:
     recorded_at: str
     acted_on: bool = True
     budget_note: str = ""
+    #: The abandoned round this one overrules, if any. Zero otherwise.
+    reopens_round: int = 0
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -96,6 +98,7 @@ class Round:
             "recorded_at": self.recorded_at,
             "acted_on": self.acted_on,
             "budget_note": self.budget_note,
+            "reopens_round": self.reopens_round,
         }
 
 
@@ -124,6 +127,7 @@ def load_rounds(paths: RunPaths) -> list[Round]:
                 recorded_at=str(entry.get("recorded_at") or ""),
                 acted_on=bool(entry.get("acted_on", True)),
                 budget_note=str(entry.get("budget_note") or ""),
+                reopens_round=int(entry.get("reopens_round") or 0),
             )
         )
     return rounds
@@ -178,11 +182,13 @@ def validate_round_decision(paths: RunPaths, stage: StageSpec) -> list[str]:
                 "requires at least one closed research round. Stage 06 records the round's "
                 "conclusion in workspace/notes/research_rounds.json when it is approved."
             ]
-        if final.decision == "abandon":
+        standing = unreopened_abandonment(paths)
+        if standing is not None:
             return [
-                f"cannot run: round {final.number} concluded `abandon` — {final.rationale}. "
+                f"cannot run: round {standing.number} concluded `abandon` — {standing.rationale}. "
                 "Writing up a run that decided the question could not be answered would "
-                "contradict its own record."
+                "contradict its own record. A later round may overrule it, but has to say so: "
+                f"set `reopens_round: {standing.number}` in round_decision.json."
             ]
         return []
 
@@ -258,6 +264,7 @@ def record_round(
         recorded_at=_now(),
         acted_on=acted_on,
         budget_note=budget_note,
+        reopens_round=int(payload.get("reopens_round") or 0),
     )
     rounds.append(entry)
     _write_rounds(paths, rounds)
@@ -265,6 +272,32 @@ def record_round(
     # next round inherit the previous round's conclusion.
     paths.round_decision.unlink(missing_ok=True)
     return entry
+
+
+def unreopened_abandonment(paths: RunPaths) -> Round | None:
+    """The abandonment that still stands, if there is one.
+
+    Not ``latest_round``. An abandonment is a conclusion about the whole run, and
+    reading only the last entry let it be laundered: close round 1 as ``abandon``,
+    go back through any route that does not consult it — `/back`,
+    `--rollback-stage`, or the graph's own revisit edges — re-approve Stage 06 and
+    declare ``converged``, and the ledger reads ``[abandon, converged]`` while every
+    downstream check sees only the second. The run then writes up the question it
+    had recorded that it could not answer.
+
+    Overruling one is legitimate and often right — a person who disagrees is exactly
+    who should be able to. It has to be on the record, which is what
+    ``reopens_round`` is: a later round naming the abandoned round it supersedes.
+    The difference between "we reconsidered and said so" and "we reconsidered" is
+    the whole of the thing, which is the same rule
+    :func:`src.preregistration.amend_preregistration` already applies to hypotheses.
+    """
+    rounds = load_rounds(paths)
+    reopened = {item.reopens_round for item in rounds if item.reopens_round}
+    standing = [
+        item for item in rounds if item.decision == "abandon" and item.number not in reopened
+    ]
+    return standing[-1] if standing else None
 
 
 def resume_stage_slug_for(decision: str) -> str | None:

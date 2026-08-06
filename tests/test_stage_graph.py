@@ -267,17 +267,38 @@ class AdaptiveTopologyTests(unittest.TestCase):
             )
         )
 
-    def test_final_stage_prunes_moves_past_it(self) -> None:
-        """`--final-stage 07` means the run does not owe a dissemination package, so
-        the edge into one must not be on the menu."""
+    def test_final_stage_takes_the_move_past_it_off_the_menu(self) -> None:
+        """`--final-stage 07` means the run does not owe a dissemination package."""
         stage_07 = stage_for_slug("07_writing")
-        targets = {
-            move.target
-            for move in self.graph.moves(
-                self.paths, "07_writing", GraphState(), final_stage=stage_07
-            )
-        }
-        self.assertNotIn("08_dissemination", targets)
+        moves = self.graph.moves(
+            self.paths, "07_writing", GraphState(), final_stage=stage_07
+        )
+        pruned = next(move for move in moves if move.target == "08_dissemination")
+        self.assertFalse(pruned.admissible)
+        self.assertEqual(pruned.blocked_kind, "pruned")
+
+    def test_final_stage_ends_the_walk_instead_of_sending_it_backwards(self) -> None:
+        """The bug that dropping the edge caused, at every final stage.
+
+        `moves()` used to omit a pruned edge entirely, so the node looked like one
+        with no forward move at all and `default_move` fell through to the backward
+        edges. On the adaptive topology — the default — `--final-stage 07` therefore
+        sent the run back to Stage 06 and kept going until a budget stopped it.
+        Measured before the fix: final-stage 05 went to 04, 06 went to 05, 07 went to
+        06, all revisits, on the graph a default run walks.
+
+        A pruned edge is the caller's own instruction. It is not a fact about the
+        research, and unlike a guard there is nothing to route around.
+        """
+        for number in (5, 6, 7):
+            final = next(stage for stage in STAGES if stage.number == number)
+            with self.subTest(final_stage=final.slug):
+                self.assertIsNone(
+                    self.graph.default_move(
+                        self.paths, final.slug, GraphState(), final_stage=final
+                    ),
+                    msg=f"--final-stage {final.slug} did not end the walk",
+                )
 
     # -- what the graph allows ----------------------------------------------
 

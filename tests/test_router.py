@@ -247,7 +247,7 @@ class RouterTests(unittest.TestCase):
             json.dumps({"target": "07_writing", "reason": "The refutation is the contribution."})
         )
         decision = StageRouter(operator, mode="auto").choose(
-            paths=self.paths, stage=STAGE_06, graph=self.graph, state=GraphState()
+            paths=self.paths, stage=STAGE_06, graph=self.graph, state=self.abandoned_state()
         )
         self.assertEqual(decision.target, FINISH)
         self.assertFalse(decision.agent_directed)
@@ -259,10 +259,40 @@ class RouterTests(unittest.TestCase):
         self.adjudicate()
         self.abandon()
         decision = StageRouter(None, mode="off").choose(
-            paths=self.paths, stage=STAGE_06, graph=self.graph, state=GraphState()
+            paths=self.paths, stage=STAGE_06, graph=self.graph, state=self.abandoned_state()
         )
         self.assertEqual(set(decision.blocked.values()), {"concluded"})
         self.assertIn("07_writing", decision.blocked)
+
+    def abandoned_state(self) -> GraphState:
+        """A graph state whose current visit is the one that closed the round.
+
+        The guard is scoped to the traversal, not to the run, so a bare
+        `GraphState()` is a Stage 06 that closed nothing — which is the whole point
+        of the scoping and is asserted directly in
+        `test_a_stale_abandonment_does_not_govern_a_later_visit`.
+        """
+        from src.research_rounds import latest_round
+
+        state = GraphState()
+        state.path.append(Visit(stage=STAGE_06.slug, entered_at="t"))
+        final = latest_round(self.paths)
+        state.path[-1].closed_round = final.number if final else 0
+        return state
+
+    def test_a_stale_abandonment_does_not_govern_a_later_visit(self) -> None:
+        """`research_rounds.json` is run-global and nothing invalidates it — not a
+        rollback, and not an auto-skipped Stage 06, which closes no round at all. Read
+        globally, one abandonment would terminate every later arrival at Stage 06 for
+        the rest of the run, and preemption would leave the agent nowhere else to go.
+        """
+        self.adjudicate()
+        self.abandon()
+        decision = StageRouter(None, mode="off").choose(
+            paths=self.paths, stage=STAGE_06, graph=self.graph, state=GraphState()
+        )
+        self.assertNotEqual(decision.target, FINISH)
+        self.assertNotIn("concluded", decision.blocked.values())
 
     def abandon(self) -> None:
         from src.research_rounds import record_round

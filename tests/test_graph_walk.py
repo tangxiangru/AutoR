@@ -404,7 +404,17 @@ class GraphWalkTests(unittest.TestCase):
         self._abandon_at_analysis(manager)
         self.drive(manager)
         paths = self.only_run()
-        self.assertTrue(GUARDS["round_abandoned"](paths, GraphState()).ok)
+
+        # Against the state the run actually persisted, not a synthetic one: the
+        # guard is scoped to the visit that closed the round, so a bare GraphState
+        # is a Stage 06 that closed nothing, and asserting on one would prove the
+        # opposite of what this test is for.
+        state = load_graph_state(paths)
+        self.assertTrue(GUARDS["round_abandoned"](paths, state).ok)
+        self.assertEqual(state.path[-1].closed_round, 1)
+
+        # And the same ledger does not govern a visit that closed no round.
+        self.assertFalse(GUARDS["round_abandoned"](paths, GraphState()).ok)
 
     # -- settings survive a resume -------------------------------------------
 

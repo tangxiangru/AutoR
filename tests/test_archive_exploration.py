@@ -10,7 +10,7 @@ from src.archive import (
     RunRecord,
     edge_payoffs,
 )
-from src.stage_graph import StageGraph
+from src.stage_graph import Edge, StageGraph
 from src.utils import append_jsonl
 
 
@@ -29,6 +29,63 @@ def _record(run_id: str, edges: list[str], fitness: float = 0.5) -> RunRecord:
         agent_directed=0,
         recorded_at="2026-08-06T00:00:00",
     )
+
+
+class ExplorableOnlyWithARivalTest(unittest.TestCase):
+    """An edge with no rival at its source is not explorable.
+
+    Preferring it changes nothing — a run reaching that node was going to take it
+    anyway — so a proposal naming it buys a variant for a trial that cannot run.
+    Held by its own test rather than as a side effect of the `linear` case, which
+    only exercises it while `linear` happens to have a non-zero priority somewhere.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.archive = Archive(Path(self._tmp.name) / "archive")
+        for index in range(5):
+            append_jsonl(
+                self.archive.runs_file,
+                _record(f"r{index}", ["01_literature_survey->02_hypothesis_generation"]).to_dict(),
+            )
+
+    def _graph(self, edges):
+        return StageGraph(edges, name="adaptive")
+
+    def test_a_lone_untaken_advance_is_not_offered_for_exploration(self) -> None:
+        graph = self._graph(
+            [
+                Edge("01_literature_survey", "02_hypothesis_generation", "advance", "on", priority=0),
+                Edge("02_hypothesis_generation", "03_study_design", "advance", "on", priority=2),
+            ]
+        )
+        self.assertIsNone(self.archive.propose_exploration(graph=graph))
+
+    def test_an_untaken_edge_with_a_rival_is_offered(self) -> None:
+        graph = self._graph(
+            [
+                Edge("01_literature_survey", "02_hypothesis_generation", "advance", "on", priority=0),
+                Edge("02_hypothesis_generation", "03_study_design", "advance", "on", priority=0),
+                Edge("02_hypothesis_generation", "01_literature_survey", "revisit", "back", priority=2),
+            ]
+        )
+        variant = self.archive.propose_exploration(graph=graph)
+        self.assertIsNotNone(variant)
+        self.assertIn("02_hypothesis_generation->01_literature_survey", variant.edge_priority)
+
+    def test_a_terminal_does_not_count_as_a_rival(self) -> None:
+        """`06_analysis->finish` is live only when the round concluded the question
+        cannot be answered, and in that case it is the only live forward move — so
+        its priority relative to the writing edge decides nothing either."""
+        graph = self._graph(
+            [
+                Edge("01_literature_survey", "02_hypothesis_generation", "advance", "on", priority=0),
+                Edge("02_hypothesis_generation", "03_study_design", "advance", "on", priority=2),
+                Edge("02_hypothesis_generation", "finish", "finish", "stop", guard="round_abandoned"),
+            ]
+        )
+        self.assertIsNone(self.archive.propose_exploration(graph=graph))
 
 
 class EdgeVisibilityTest(unittest.TestCase):
