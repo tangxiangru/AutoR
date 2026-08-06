@@ -108,12 +108,35 @@ overnight job.
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--web-search {auto,gemini,native}` | `auto` | Which search path the operators use. `gemini` routes searches through the Gemini API's Google Search grounding via `tools/web_search.py`; `native` leaves the backend's own tool in charge; `auto` picks Gemini when a Gemini API key is configured and falls back to native otherwise. |
+| `--web-search {auto,gemini,native}` | `auto` | Which search path the operators use. `gemini` routes searches through the Gemini API's Google Search grounding via `tools/web_search.py`; `native` leaves the backend's own tool in charge; `auto` picks Gemini when it can actually run and falls back to native otherwise. |
 
 Set `gemini` on deployments where the built-in `WebSearch` tool is disabled —
 notably **Claude Code on Vertex AI** — otherwise Stage 01 has no way to search
 and will either stall or fabricate citations. See
 [ResearchClawBench → Web search](researchclawbench.md#web-search-on-deployments-where-websearch-is-disabled).
+
+#### What "can actually run" means
+
+Injecting the search block tells every stage prompt that the built-in `WebSearch`
+tool is disabled and `tools/web_search.py` is the replacement. That is a promise,
+and credentials alone do not keep it. Three things are checked:
+
+| Precondition | Why credentials are not enough |
+| --- | --- |
+| A Gemini backend | An API key, or Vertex ADC plus a project. |
+| `google-genai` importable | Not a default dependency. The Vertex probe uses `google.auth`, a **different distribution** that can be installed without it. |
+| The sandbox permits egress | `--operator codex` with `read-only` or `workspace-write` (the default) restricts outbound network access, so the search subprocess cannot reach Gemini. |
+
+`auto` falls back to native search if any of them fails, and says which one at
+startup. `--web-search gemini` **refuses to start** when the backend or the SDK
+is missing — you asked for a tool that provably cannot work, and continuing means
+Stage 01 burns its retry budget on a dead command before falling back to memory.
+The sandbox case only warns, because it is inferred from the requested mode rather
+than observed.
+
+The advertised command names AutoR's own interpreter (`sys.executable`), not a
+bare `python3` — otherwise the interpreter checked for `google-genai` and the one
+that runs the script need not be the same.
 
 ### Output format
 

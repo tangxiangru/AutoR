@@ -58,7 +58,11 @@ from src.utils import (  # noqa: E402
     resolve_stage,
     resolve_venue_key,
 )
-from src.web_search import resolve_web_search_context, web_search_notice  # noqa: E402
+from src.web_search import (  # noqa: E402
+    assess_search_readiness,
+    resolve_web_search_context,
+    web_search_notice,
+)
 
 
 #: The harness enforces no wall clock of its own — neither the UI runner nor the batch CLI
@@ -234,9 +238,20 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
         }
     )
 
-    notice, level = web_search_notice(args.web_search)
+    readiness = assess_search_readiness(
+        operator=operator_backend,
+        codex_sandbox=args.codex_sandbox,
+    )
+    notice, level = web_search_notice(args.web_search, readiness=readiness)
     emit_event({"type": "progress", "stage": "web_search", "level": level, "message": notice})
     ui.show_status(notice, level=level)
+    if args.web_search == "gemini" and readiness.hard_blocker:
+        # The benchmark scores a report, and a keyless search tool produces one built on
+        # citations the agent had to invent. Refuse the run instead of spending hours on it.
+        raise ValueError(
+            f"--web-search gemini cannot work here: {readiness.hard_blocker} "
+            "Fix it, or use --web-search auto to fall back to native search."
+        )
 
     operator = create_operator(
         operator_backend,
@@ -292,7 +307,7 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
         unattended=True,
         max_auto_skips=args.max_auto_skips,
         max_stage_attempts=args.max_attempts,
-        web_search_context=resolve_web_search_context(args.web_search),
+        web_search_context=resolve_web_search_context(args.web_search, readiness=readiness),
         # Stages are told to keep code/, outputs/ and report/images/ up to date in the
         # benchmark workspace, so 'Files Produced' must resolve against it too.
         artifact_roots=[workspace],

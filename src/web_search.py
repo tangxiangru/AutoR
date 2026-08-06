@@ -18,9 +18,11 @@ from __future__ import annotations
 
 import argparse
 import html
+import importlib.util
 import json
 import os
 import re
+import shlex
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -173,6 +175,32 @@ def resolve_vertex_location() -> str:
         if value:
             return value
     return DEFAULT_VERTEX_LOCATION
+
+
+def genai_sdk_available() -> bool:
+    """Whether `google-genai` can actually be imported by *this* interpreter.
+
+    Credentials alone are not enough to promise the agent a working search tool:
+    `google-genai` is not a default dependency, and the Vertex path probes `google.auth`,
+    which ships in a different distribution and can be present without it.
+
+    `find_spec` imports the parent package to search it, so a missing `google` namespace
+    raises instead of returning None -- the exact case this function exists to detect.
+    """
+    try:
+        return importlib.util.find_spec("google.genai") is not None
+    except (ImportError, AttributeError, ValueError):
+        return False
+
+
+def search_command_prefix() -> str:
+    """The interpreter to advertise for `tools/web_search.py`.
+
+    `python3` is whatever the agent's PATH resolves it to, which need not be the
+    interpreter AutoR checked for `google-genai`. Naming our own makes the check and the
+    command that gets run refer to the same site-packages.
+    """
+    return shlex.quote(sys.executable or "python3")
 
 
 def vertex_credentials_available() -> bool:
@@ -510,20 +538,117 @@ def format_response_markdown(response: WebSearchResponse) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def resolve_web_search_context(mode: str) -> str | None:
+#: Codex sandbox modes that restrict outbound network access, so a search subprocess
+#: launched inside them cannot reach Gemini. `danger-full-access` is the only mode that
+#: does not.
+NETWORK_RESTRICTED_CODEX_SANDBOXES = frozenset({"read-only", "workspace-write"})
+
+#: Imported rather than re-declared so the default cannot drift from the CLI's.
+#: `src.utils` takes the search block as a parameter and never imports this module, so
+#: there is no cycle.
+from .utils import DEFAULT_CODEX_SANDBOX as DEFAULT_CODEX_SANDBOX_NAME  # noqa: E402
+
+_FIX_CREDENTIALS = (
+    "Set GOOGLE_API_KEY / GEMINI_API_KEY, or configure Vertex AI "
+    "(GOOGLE_CLOUD_PROJECT plus `gcloud auth application-default login`)."
+)
+
+
+@dataclass(frozen=True)
+class SearchReadiness:
+    """Whether `tools/web_search.py` can actually run, and what stops it if not.
+
+    Telling an operator "the built-in WebSearch tool is disabled, use this script instead"
+    is a promise. Credentials alone do not keep it: the SDK has to be importable by the
+    interpreter that will run the script, and the sandbox the operator runs in has to let
+    the process reach the network.
+    """
+
+    backend: SearchBackend | None
+    sdk_available: bool
+    sandbox_blocker: str | None = None
+
+    @property
+    def usable(self) -> bool:
+        return self.backend is not None and self.sdk_available and self.sandbox_blocker is None
+
+    @property
+    def blocker(self) -> str | None:
+        """The first reason the tool cannot run, as a sentence, or None."""
+        if self.backend is None:
+            return f"no Gemini backend is configured. {_FIX_CREDENTIALS}"
+        if not self.sdk_available:
+            return (
+                "the google-genai package is not importable by this interpreter "
+                f"({sys.executable}). Install it with: pip install google-genai"
+            )
+        return self.sandbox_blocker
+
+    @property
+    def hard_blocker(self) -> str | None:
+        """A blocker AutoR is certain about, so it is safe to fail a run on.
+
+        The sandbox blocker is deliberately excluded: it is inferred from the requested
+        Codex mode rather than observed, so it warns instead of aborting.
+        """
+        if self.backend is None or not self.sdk_available:
+            return self.blocker
+        return None
+
+
+def assess_search_readiness(
+    *,
+    operator: str | None = None,
+    codex_sandbox: str | None = None,
+    model: str | None = None,
+) -> SearchReadiness:
+    sandbox_blocker = None
+    if (operator or "").strip().lower() == "codex":
+        sandbox = (codex_sandbox or DEFAULT_CODEX_SANDBOX_NAME).strip().lower()
+        if sandbox in NETWORK_RESTRICTED_CODEX_SANDBOXES:
+            sandbox_blocker = (
+                f"the Codex sandbox `{sandbox}` restricts outbound network access, so the "
+                "search subprocess cannot reach Gemini. Use --codex-sandbox "
+                "danger-full-access, switch to --operator claude, or pass --web-search "
+                "native."
+            )
+    return SearchReadiness(
+        backend=resolve_backend(model),
+        sdk_available=genai_sdk_available(),
+        sandbox_blocker=sandbox_blocker,
+    )
+
+
+def resolve_web_search_context(
+    mode: str,
+    *,
+    readiness: SearchReadiness | None = None,
+    operator: str | None = None,
+    codex_sandbox: str | None = None,
+) -> str | None:
     """Return the prompt block for the Gemini search tool, or None to keep native search.
 
-    'auto' degrades to native search when no Gemini key is configured, so the default path
-    never advertises a tool that would fail on first use.
+    'auto' degrades to native search whenever the tool could not actually run, so the
+    default path never advertises a tool that would fail on first use. An explicit
+    `gemini` still injects — the caller is expected to have refused the run already if
+    :attr:`SearchReadiness.hard_blocker` is set.
     """
     if mode == "native":
         return None
-    if mode == "auto" and resolve_backend() is None:
+    if readiness is None:
+        readiness = assess_search_readiness(operator=operator, codex_sandbox=codex_sandbox)
+    if mode == "auto" and not readiness.usable:
         return None
     return build_web_search_prompt_section()
 
 
-def web_search_notice(mode: str) -> tuple[str, str]:
+def web_search_notice(
+    mode: str,
+    *,
+    readiness: SearchReadiness | None = None,
+    operator: str | None = None,
+    codex_sandbox: str | None = None,
+) -> tuple[str, str]:
     """Describe the resolved search path as a ``(message, level)`` pair.
 
     `auto` silently falling back to native search is the dangerous case: on a deployment
@@ -535,28 +660,26 @@ def web_search_notice(mode: str) -> tuple[str, str]:
     if mode == "native":
         return ("Web search: the backend's native tool.", "info")
 
-    backend = resolve_backend()
+    if readiness is None:
+        readiness = assess_search_readiness(operator=operator, codex_sandbox=codex_sandbox)
+    blocker = readiness.blocker
 
     if mode == "gemini":
-        if backend is None:
-            return (
-                "Web search: --web-search gemini was requested but no Gemini backend is "
-                "configured. Operators will be told to use tools/web_search.py and it will "
-                "fail on first use. Set GOOGLE_API_KEY / GEMINI_API_KEY, or configure Vertex "
-                "AI (GOOGLE_CLOUD_PROJECT plus `gcloud auth application-default login`).",
-                "error",
-            )
-        return (f"Web search: {backend.describe()}.", "info")
+        if blocker is None:
+            return (f"Web search: {readiness.backend.describe()}.", "info")
+        return (
+            f"Web search: --web-search gemini was requested but {blocker} Operators will be "
+            "told to use tools/web_search.py and it will fail on first use.",
+            "error",
+        )
 
-    if backend is not None:
-        return (f"Web search: {backend.describe()}, selected automatically.", "info")
+    if blocker is None:
+        return (f"Web search: {readiness.backend.describe()}, selected automatically.", "info")
 
     return (
-        "Web search: no Gemini backend found, falling back to the backend's native search. "
+        f"Web search: falling back to the backend's native search because {blocker} "
         "If this deployment has WebSearch disabled (for example Claude Code on Vertex AI), "
-        "Stage 01 has no way to search at all. Set GOOGLE_API_KEY / GEMINI_API_KEY, or "
-        "configure Vertex AI (GOOGLE_CLOUD_PROJECT plus `gcloud auth application-default "
-        "login`), or pass --web-search native to silence this.",
+        "Stage 01 has no way to search at all. Pass --web-search native to silence this.",
         "warn",
     )
 
@@ -568,6 +691,7 @@ def build_web_search_prompt_section(
 ) -> str:
     """Build the prompt block that redirects operators away from the native search tool."""
     resolved_script = (script_path or WEB_SEARCH_SCRIPT).resolve()
+    interpreter = search_command_prefix()
     backend = resolve_backend(model)
     provider = backend.describe() if backend else f"Gemini ({resolve_search_model(model)})"
     return (
@@ -575,8 +699,8 @@ def build_web_search_prompt_section(
         "fail or silently return nothing, so do not rely on it.\n\n"
         "Use this Gemini-backed replacement instead, through a shell command:\n\n"
         "```bash\n"
-        f'python3 "{resolved_script}" "your search query here"\n'
-        f'python3 "{resolved_script}" "your search query here" --json --max-results 8\n'
+        f'{interpreter} "{resolved_script}" "your search query here"\n'
+        f'{interpreter} "{resolved_script}" "your search query here" --json --max-results 8\n'
         "```\n\n"
         f"- It performs a real, grounded Google search through {provider} "
         "and prints a synthesised answer plus the source URLs it is grounded in.\n"
