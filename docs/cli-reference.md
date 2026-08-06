@@ -29,7 +29,7 @@ python main.py [--goal GOAL] [--goal-file PATH] [--runs-dir DIR] [--fake-operato
                [--rollback-stage STAGE] [--resources PATH [PATH ...]]
                [--skip-intake] [--research-diagram]
                [--project-root PATH] [--paper-corpus PATH]
-               [--stage-timeout SECONDS]
+               [--stage-timeout SECONDS] [--max-attempts N]
 ```
 
 ### Goal and run location
@@ -49,6 +49,7 @@ python main.py [--goal GOAL] [--goal-file PATH] [--runs-dir DIR] [--fake-operato
 | `--codex-sandbox MODE` | `workspace-write` | Codex CLI sandbox mode. Only meaningful for `--operator codex`. See [the sandbox modes](#codex-sandbox-modes) below. Persisted in `run_config.json` and preserved on resume. |
 | `--fake-operator` | off | Replace the real backend with a deterministic stub that fabricates a valid stage summary and the placeholder artifacts each stage gate requires, so a fake run completes all nine stages. Use this for smoke tests and for exercising the workflow without spending tokens. It does **not** produce real research artifacts — every placeholder says so in its own contents. |
 | `--stage-timeout SECONDS` | `14400` (4 hours) | Wall-clock ceiling for a single stage attempt. Raise it for long training runs; a stage that exceeds it is treated as a failed attempt. |
+| `--max-attempts N` | `5` | Attempts allowed per stage before AutoR escalates or auto-skips. Each retry re-runs the stage with the previous attempt's validation errors attached, so raising this trades wall-clock for a better chance of clearing the gates. |
 
 #### Codex sandbox modes
 
@@ -194,7 +195,8 @@ control commands are accepted where the UI offers a recovery prompt:
 Anything else is rejected with
 `Unknown control command. Supported commands are '/skip' and '/back <stage>'.`
 
-A stage gets at most `MAX_STAGE_ATTEMPTS` (5, in [`src/utils.py`](../src/utils.py))
+A stage gets at most `--max-attempts` attempts (default `MAX_STAGE_ATTEMPTS`, 5, in
+[`src/utils.py`](../src/utils.py))
 attempts before AutoR stops and escalates to you.
 
 ### Examples
@@ -283,7 +285,8 @@ python rcb_agent.py [--workspace PATH] [--prompt TEXT | --prompt-file PATH]
                     [--operator {claude,codex}] [--model MODEL]
                     [--review-operator {claude,codex}] [--review-model MODEL]
                     [--codex-sandbox MODE] [--venue VENUE]
-                    [--stage-timeout SECONDS] [--max-auto-skips N]
+                    [--stage-timeout SECONDS] [--max-attempts N]
+                    [--max-auto-skips N]
                     [--intake] [--web-search {auto,gemini,native}]
                     [--no-synthesis] [--export-only] [--fake-operator]
 ```
@@ -293,7 +296,8 @@ python rcb_agent.py [--workspace PATH] [--prompt TEXT | --prompt-file PATH]
 | `--workspace PATH` | `.` | Benchmark workspace. The harness runs the agent with this as its working directory, so the default is usually right. |
 | `--prompt TEXT` | — | Benchmark instructions as a literal string. This is what the harness's `<PROMPT>` placeholder expands to. |
 | `--prompt-file PATH` | `<workspace>/INSTRUCTIONS.md` | Read the instructions from a file instead. |
-| `--stage-timeout SECONDS` | `3600` | Lower than `main.py`'s default, because benchmark runs are wall-clock bound. |
+| `--stage-timeout SECONDS` | `14400` | The benchmark harness imposes no timeout of its own — neither the UI runner nor the batch CLI puts one on the agent subprocess — so this is the only thing that can cut a stage short. |
+| `--max-attempts N` | `8` | Higher than `main.py`'s default. An exhausted stage is auto-skipped, and a skipped stage costs real score, so the extra retries are worth their wall-clock. |
 | `--intake` | off | Run Stage 00. Off by default: the benchmark instructions are already a complete task specification. |
 | `--no-synthesis` | off | Skip the operator-backed report synthesis pass and use only the deterministic fallback. |
 | `--export-only` | off | Re-export the most recent run in the workspace without re-running the pipeline. Use this to recover deliverables from an interrupted job. |

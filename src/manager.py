@@ -127,6 +127,7 @@ class ResearchManager:
         review_model: str | None = None,
         unattended: bool = False,
         max_auto_skips: int = 3,
+        max_stage_attempts: int = MAX_STAGE_ATTEMPTS,
         web_search_context: str | None = None,
         artifact_roots: list[Path] | None = None,
     ) -> None:
@@ -149,6 +150,10 @@ class ResearchManager:
         self._jump_target_stage: StageSpec | None = None
         self.unattended = unattended
         self.max_auto_skips = max_auto_skips
+        # Retries are the cheapest quality lever there is: each one re-runs the stage with the
+        # previous attempt's validation errors attached. The ceiling exists to bound a runaway
+        # loop, not to save money, so callers with time to spend should raise it.
+        self.max_stage_attempts = max_stage_attempts
         self.auto_skipped_stages: list[str] = []
         self.web_search_context = web_search_context
         # Extra roots a stage may legitimately write to, beyond the run tree. A benchmark
@@ -424,13 +429,13 @@ class ResearchManager:
         mark_stage_execution_started(paths, stage)
 
         while True:
-            if attempt_no > MAX_STAGE_ATTEMPTS:
+            if attempt_no > self.max_stage_attempts:
                 self.ui.show_status(
-                    f"{stage.stage_title} failed after {MAX_STAGE_ATTEMPTS} attempts. Escalating to user.",
+                    f"{stage.stage_title} failed after {self.max_stage_attempts} attempts. Escalating to user.",
                     level="error",
                 )
                 append_log_entry(paths.logs, f"{stage.slug} max_attempts_exceeded",
-                                 f"Stopped after {MAX_STAGE_ATTEMPTS} attempts.")
+                                 f"Stopped after {self.max_stage_attempts} attempts.")
                 return False
             self.ui.show_stage_start(stage.stage_title, attempt_no, continue_session)
             prompt = self._build_stage_prompt(paths, stage, revision_feedback, continue_session)
@@ -706,13 +711,13 @@ class ResearchManager:
         continue_session = False
 
         while True:
-            if attempt_no > MAX_STAGE_ATTEMPTS:
+            if attempt_no > self.max_stage_attempts:
                 self.ui.show_status(
-                    f"{stage.stage_title} failed after {MAX_STAGE_ATTEMPTS} attempts. Escalating to user.",
+                    f"{stage.stage_title} failed after {self.max_stage_attempts} attempts. Escalating to user.",
                     level="error",
                 )
                 append_log_entry(paths.logs, f"project_bootstrap max_attempts_exceeded",
-                                 f"Stopped after {MAX_STAGE_ATTEMPTS} attempts.")
+                                 f"Stopped after {self.max_stage_attempts} attempts.")
                 return None
             self.ui.show_stage_start(stage.stage_title, attempt_no, continue_session)
             prompt = self._build_project_bootstrap_prompt(
@@ -867,13 +872,13 @@ class ResearchManager:
         continue_session = False
 
         while True:
-            if attempt_no > MAX_STAGE_ATTEMPTS:
+            if attempt_no > self.max_stage_attempts:
                 self.ui.show_status(
-                    f"{stage.stage_title} failed after {MAX_STAGE_ATTEMPTS} attempts. Escalating to user.",
+                    f"{stage.stage_title} failed after {self.max_stage_attempts} attempts. Escalating to user.",
                     level="error",
                 )
                 append_log_entry(paths.logs, f"bootstrap max_attempts_exceeded",
-                                 f"Stopped after {MAX_STAGE_ATTEMPTS} attempts.")
+                                 f"Stopped after {self.max_stage_attempts} attempts.")
                 return False
             self.ui.show_stage_start(stage.stage_title, attempt_no, continue_session)
             prompt = self._build_bootstrap_prompt(paths, stage, corpus_prompt_section, revision_feedback, continue_session)
@@ -1196,13 +1201,13 @@ class ResearchManager:
                 pass
 
         while True:
-            if loop_attempts >= MAX_STAGE_ATTEMPTS:
+            if loop_attempts >= self.max_stage_attempts:
                 error = (
-                    f"Exceeded {MAX_STAGE_ATTEMPTS} attempts in the current stage run. "
+                    f"Exceeded {self.max_stage_attempts} attempts in the current stage run. "
                     f"Last validation errors: {'; '.join(last_validation_errors) or 'None recorded.'}"
                 )
                 self.ui.show_status(
-                    f"{stage.stage_title} failed after {MAX_STAGE_ATTEMPTS} attempts in this run.",
+                    f"{stage.stage_title} failed after {self.max_stage_attempts} attempts in this run.",
                     level="error",
                 )
                 append_log_entry(

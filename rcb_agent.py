@@ -61,7 +61,13 @@ from src.utils import (  # noqa: E402
 from src.web_search import resolve_web_search_context, web_search_notice  # noqa: E402
 
 
-DEFAULT_STAGE_TIMEOUT = 3600
+#: The harness enforces no wall clock of its own — neither the UI runner nor the batch CLI
+#: puts a timeout on the agent subprocess — so a stage is only ever cut short by this value.
+#: Clipping it buys nothing back except a thinner report.
+DEFAULT_STAGE_TIMEOUT = 14400
+#: More retries than the interactive default: every retry re-runs the stage with its
+#: validation errors attached, and an exhausted stage is auto-skipped, which costs real score.
+DEFAULT_MAX_ATTEMPTS = 8
 #: The benchmark scores report/report.md, which Stage 07 writes. Everything after it is
 #: wall-clock spent on artifacts the judge never opens.
 DEFAULT_FINAL_STAGE = "07_writing"
@@ -135,8 +141,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--stage-timeout",
         type=int,
         default=DEFAULT_STAGE_TIMEOUT,
-        help=f"Seconds allowed per stage attempt. Defaults to {DEFAULT_STAGE_TIMEOUT} "
-             "(lower than AutoR's interactive default, because benchmark runs are wall-clock bound).",
+        help=f"Seconds allowed per stage attempt. Defaults to {DEFAULT_STAGE_TIMEOUT}. "
+             "The benchmark harness imposes no timeout of its own, so this is the only thing "
+             "that can cut a stage short.",
+    )
+    parser.add_argument(
+        "--max-attempts",
+        type=int,
+        default=DEFAULT_MAX_ATTEMPTS,
+        help="Attempts allowed per stage before it is auto-skipped. Each retry re-runs the "
+             f"stage with the previous attempt's validation errors attached. Defaults to "
+             f"{DEFAULT_MAX_ATTEMPTS}.",
     )
     parser.add_argument(
         "--max-auto-skips",
@@ -276,6 +291,7 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
         review_model=review_model,
         unattended=True,
         max_auto_skips=args.max_auto_skips,
+        max_stage_attempts=args.max_attempts,
         web_search_context=resolve_web_search_context(args.web_search),
         # Stages are told to keep code/, outputs/ and report/images/ up to date in the
         # benchmark workspace, so 'Files Produced' must resolve against it too.

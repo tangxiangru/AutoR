@@ -18,6 +18,7 @@ from src.utils import (
     DEFAULT_OUTPUT_FORMAT,
     DEFAULT_VENUE,
     OUTPUT_FORMAT_CLI_CHOICES,
+    MAX_STAGE_ATTEMPTS,
     STAGES,
     build_run_paths,
     load_run_config,
@@ -95,6 +96,14 @@ def parse_args() -> argparse.Namespace:
         default=3,
         help="In unattended mode, the maximum number of stages that may be auto-skipped after "
              "exhausting their retry budget before the run aborts. Defaults to 3.",
+    )
+    parser.add_argument(
+        "--max-attempts",
+        type=int,
+        default=MAX_STAGE_ATTEMPTS,
+        help="Attempts allowed per stage before AutoR escalates or auto-skips. Each retry "
+             "re-runs the stage with the previous attempt's validation errors attached. "
+             f"Defaults to {MAX_STAGE_ATTEMPTS}.",
     )
     parser.add_argument(
         "--review-operator",
@@ -403,6 +412,7 @@ def main() -> int:
             review_model=review_model,
             unattended=unattended,
             max_auto_skips=args.max_auto_skips,
+            max_stage_attempts=args.max_attempts,
             web_search_context=web_search_context,
         )
         return 0 if manager.resume_run(
@@ -452,6 +462,7 @@ def main() -> int:
         review_model=review_model,
         unattended=unattended,
         max_auto_skips=args.max_auto_skips,
+        max_stage_attempts=args.max_attempts,
         web_search_context=web_search_context,
     )
 
