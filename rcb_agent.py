@@ -32,6 +32,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.approval_agent import AutomatedReviewer  # noqa: E402
+from src.review_panel import DEFAULT_PANEL, ReviewPanel, load_persona, resolve_roles  # noqa: E402
 from src.manager import ResearchManager  # noqa: E402
 from src.operator import ClaudeOperator  # noqa: E402
 from src.operator_codex import CodexOperator  # noqa: E402
@@ -148,6 +149,33 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=f"Seconds allowed per stage attempt. Defaults to {DEFAULT_STAGE_TIMEOUT}. "
              "The benchmark harness imposes no timeout of its own, so this is the only thing "
              "that can cut a stage short.",
+    )
+    parser.add_argument(
+        "--review-panel",
+        action="store_true",
+        help="Replace the single reviewer agent with a deliberating panel of role-differentiated "
+             "reviewers ("
+             + ", ".join(role.key for role in DEFAULT_PANEL)
+             + "). They review independently, cross-examine, then a chair decides; a blocking "
+             "objection cannot be approved over.",
+    )
+    parser.add_argument(
+        "--panel-roles",
+        nargs="+",
+        metavar="ROLE",
+        help="Seat only these panel roles, in this order. Defaults to all of them.",
+    )
+    parser.add_argument(
+        "--panel-rounds",
+        type=int,
+        default=2,
+        help="Maximum deliberation rounds. Later rounds run only on disagreement. Defaults to 2.",
+    )
+    parser.add_argument(
+        "--persona",
+        metavar="PATH",
+        help="Markdown description of the researcher the panel stands in for, injected into "
+             "every panelist so the simulated humans hold one consistent bar.",
     )
     parser.add_argument(
         "--max-attempts",
@@ -288,13 +316,25 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
     output_format = resolve_output_format(args.output_format)
     goal = build_benchmark_goal(workspace, instructions, output_format=output_format)
 
-    reviewer = AutomatedReviewer(
-        review_backend,
-        model=review_model,
-        fake_mode=args.fake_operator,
-        ui=ui,
-        stage_timeout=args.stage_timeout,
-    )
+    if args.review_panel:
+        reviewer = ReviewPanel(
+            resolve_roles(args.panel_roles),
+            backend_name=review_backend,
+            model=review_model,
+            fake_mode=args.fake_operator,
+            ui=ui,
+            stage_timeout=args.stage_timeout,
+            persona_text=load_persona(args.persona),
+            deliberation_rounds=args.panel_rounds,
+        )
+    else:
+        reviewer = AutomatedReviewer(
+            review_backend,
+            model=review_model,
+            fake_mode=args.fake_operator,
+            ui=ui,
+            stage_timeout=args.stage_timeout,
+        )
     manager = ResearchManager(
         project_root=REPO_ROOT,
         runs_dir=runs_dir_for(workspace),

@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from src.approval_agent import AutomatedReviewer
+from src.review_panel import DEFAULT_PANEL, ReviewPanel, load_persona, resolve_roles
 from src.intake import ResourceEntry, classify_resource, collect_resource_paths_from_ui
 from src.manager import ResearchManager
 from src.operator import ClaudeOperator
@@ -100,6 +101,37 @@ def parse_args() -> argparse.Namespace:
         default=3,
         help="In unattended mode, the maximum number of stages that may be auto-skipped after "
              "exhausting their retry budget before the run aborts. Defaults to 3.",
+    )
+    parser.add_argument(
+        "--review-panel",
+        action="store_true",
+        help="Replace the single reviewer agent with a deliberating panel of role-differentiated "
+             "reviewers (PI, domain expert, methodologist, reproducibility engineer, adversarial "
+             "reviewer). They review independently, then cross-examine, then a chair synthesizes "
+             "one decision. A blocking objection cannot be approved over. Implies "
+             "--approval-mode agent.",
+    )
+    parser.add_argument(
+        "--panel-roles",
+        nargs="+",
+        metavar="ROLE",
+        help="Seat only these roles on the panel, in this order: "
+             + ", ".join(role.key for role in DEFAULT_PANEL)
+             + ". The first seat chairs unless the PI is present. Defaults to all five.",
+    )
+    parser.add_argument(
+        "--panel-rounds",
+        type=int,
+        default=2,
+        help="Maximum deliberation rounds. Round 1 is always independent; later rounds are only "
+             "run when the panel disagreed. Defaults to 2.",
+    )
+    parser.add_argument(
+        "--persona",
+        metavar="PATH",
+        help="Path to a markdown description of the researcher the panel is standing in for "
+             "(their priorities, standards, risk tolerance). Injected into every panelist so the "
+             "simulated humans hold a consistent bar instead of improvising one per stage.",
     )
     parser.add_argument(
         "--max-attempts",
@@ -241,7 +273,26 @@ def create_reviewer(
     fake_mode: bool,
     ui: TerminalUI,
     stage_timeout: int,
-) -> AutomatedReviewer:
+    panel_roles: list[str] | None = None,
+    use_panel: bool = False,
+    persona_text: str = "",
+    deliberation_rounds: int = 2,
+):
+    """Build the approval gate: one reviewer, or a panel that deliberates first.
+
+    Both satisfy the same ``review_stage`` contract, so the manager never learns which it got.
+    """
+    if use_panel:
+        return ReviewPanel(
+            resolve_roles(panel_roles),
+            backend_name=backend_name,
+            model=model,
+            fake_mode=fake_mode,
+            ui=ui,
+            stage_timeout=stage_timeout,
+            persona_text=persona_text,
+            deliberation_rounds=deliberation_rounds,
+        )
     return AutomatedReviewer(
         backend_name,
         model=model,
@@ -267,10 +318,15 @@ def resolve_resume_run(runs_dir: Path, value: str) -> Path:
 def resolve_unattended(args: argparse.Namespace) -> bool:
     """Decide whether this invocation is allowed to block on terminal input.
 
-    `--full-auto` and `--approval-mode agent` both replace the human approval gate with a
-    reviewer agent, so neither has anyone left to answer a prompt.
+    `--full-auto`, `--approval-mode agent` and `--review-panel` all replace the human approval
+    gate with an agent, so none of them has anyone left to answer a prompt.
     """
-    return bool(args.unattended or args.full_auto or args.approval_mode == "agent")
+    return bool(
+        args.unattended
+        or args.full_auto
+        or getattr(args, "review_panel", False)
+        or args.approval_mode == "agent"
+    )
 
 
 def resolve_goal(args: argparse.Namespace, *, unattended: bool) -> str:
@@ -341,6 +397,7 @@ def main() -> int:
     repo_root = Path(__file__).resolve().parent
     runs_dir = repo_root / args.runs_dir
     unattended = resolve_unattended(args)
+    persona_text = load_persona(args.persona)
     ui = TerminalUI(interactive=not unattended)
     ui.show_banner()
 
@@ -386,7 +443,11 @@ def main() -> int:
         else:
             model = (existing_model if existing_model != "unknown" else None) or default_model_for_operator(operator_name)
         codex_sandbox = args.codex_sandbox or existing_config.get("codex_sandbox") or DEFAULT_CODEX_SANDBOX
-        approval_mode = "agent" if args.full_auto else (args.approval_mode or existing_config.get("approval_mode") or "manual")
+        approval_mode = (
+            "agent"
+            if (args.full_auto or args.review_panel)
+            else (args.approval_mode or existing_config.get("approval_mode") or "manual")
+        )
         if approval_mode == "agent":
             unattended = True
             ui.interactive = False
@@ -418,6 +479,10 @@ def main() -> int:
                 fake_mode=args.fake_operator,
                 ui=ui,
                 stage_timeout=args.stage_timeout,
+                use_panel=args.review_panel,
+                panel_roles=args.panel_roles,
+                persona_text=persona_text,
+                deliberation_rounds=args.panel_rounds,
             )
         manager = ResearchManager(
             project_root=repo_root,
@@ -446,7 +511,7 @@ def main() -> int:
     operator_name = (args.operator or "claude").strip().lower()
     model = args.model or default_model_for_operator(operator_name)
     codex_sandbox = args.codex_sandbox or DEFAULT_CODEX_SANDBOX
-    approval_mode = "agent" if args.full_auto else (args.approval_mode or "manual")
+    approval_mode = "agent" if (args.full_auto or args.review_panel) else (args.approval_mode or "manual")
     review_operator = (args.review_operator or operator_name).strip().lower()
     review_model = args.review_model or default_model_for_operator(review_operator)
     venue = resolve_venue_key(args.venue or DEFAULT_VENUE)
@@ -468,6 +533,10 @@ def main() -> int:
             fake_mode=args.fake_operator,
             ui=ui,
             stage_timeout=args.stage_timeout,
+            use_panel=args.review_panel,
+            panel_roles=args.panel_roles,
+            persona_text=persona_text,
+            deliberation_rounds=args.panel_rounds,
         )
     manager = ResearchManager(
         project_root=repo_root,
