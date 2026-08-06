@@ -59,6 +59,7 @@ from src.utils import (  # noqa: E402
     resolve_stage,
     resolve_venue_key,
 )
+from src.cross_reviewer import resolve_cross_reviewer
 from src.web_search import (  # noqa: E402
     assess_search_readiness,
     resolve_web_search_context,
@@ -196,6 +197,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Run the intake stage. Off by default: the benchmark instructions are already "
              "a complete task specification, so intake only costs wall-clock time.",
+    )
+    parser.add_argument(
+        "--cross-review",
+        choices=["auto", "gemini", "off"],
+        default="auto",
+        help="Independent second opinion on each approval from a different model family. "
+             "Can veto an approval, never override a refusal.",
+    )
+    parser.add_argument(
+        "--cross-review-model",
+        help="Model for the cross-model reviewer. Defaults to gemini-3.1-pro-preview.",
     )
     parser.add_argument(
         "--web-search",
@@ -352,6 +364,7 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
         # Stages are told to keep code/, outputs/ and report/images/ up to date in the
         # benchmark workspace, so 'Files Produced' must resolve against it too.
         artifact_roots=[workspace],
+        cross_reviewer=resolve_cross_reviewer(args.cross_review, args.cross_review_model),
     )
 
     pipeline_completed = False

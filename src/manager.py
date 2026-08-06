@@ -15,6 +15,7 @@ from .bootstrap import (
     scan_corpus,
 )
 from .approval_agent import AutomatedReviewer, ReviewDecision
+from .cross_reviewer import GeminiCrossReviewer
 from .review_policy import load_policy, policy_summary, record_correction
 from .project_bootstrap import (
     format_project_context_for_prompt,
@@ -140,6 +141,7 @@ class ResearchManager:
         web_search_context: str | None = None,
         web_search_mode: str | None = None,
         artifact_roots: list[Path] | None = None,
+        cross_reviewer: GeminiCrossReviewer | None = None,
     ) -> None:
         self.project_root = project_root
         self.runs_dir = runs_dir
@@ -173,6 +175,9 @@ class ResearchManager:
         # Extra roots a stage may legitimately write to, beyond the run tree. A benchmark
         # workspace is one: its output contract points stages at paths outside runs/.
         self.artifact_roots = artifact_roots or []
+        # A veto-only second opinion from a different model family. Never overrides a
+        # refusal, so enabling it can only make the gate stricter.
+        self.cross_reviewer = cross_reviewer
         # Where a stage's machine-readable output may legitimately land outside the run
         # tree. The benchmark's read-only data/ is excluded on purpose: it is always
         # populated, so counting it would make the stage-03 gate vacuous.
@@ -1870,7 +1875,87 @@ class ResearchManager:
         self._record_review_correction(
             paths=paths, stage=stage, attempt_no=attempt_no, decision=decision, suggestions=suggestions
         )
+
+        cross = self._apply_cross_review(
+            paths=paths, stage=stage, attempt_no=attempt_no, decision=decision,
+            stage_markdown=stage_markdown,
+        )
+        if cross is not None:
+            return cross
+
         return decision.choice, decision.feedback or None
+
+    def _apply_cross_review(
+        self,
+        *,
+        paths: RunPaths,
+        stage: StageSpec,
+        attempt_no: int,
+        decision: ReviewDecision,
+        stage_markdown: str,
+    ) -> tuple[str, str | None] | None:
+        """Let an independent model family veto an approval.
+
+        Returns a replacement decision when the audit refuses, or None to leave the
+        primary's decision standing. Only approvals are audited: a refusal already sends
+        the stage back, so a second opinion on it would change nothing.
+        """
+        if self.cross_reviewer is None or decision.choice != "5":
+            return None
+
+        self.ui.show_status("Cross-model reviewer is auditing the approval...", level="info")
+        verdict = self.cross_reviewer.audit(
+            paths=paths,
+            stage=stage,
+            stage_markdown=stage_markdown,
+            primary_reason=decision.reason,
+            primary_model=self.review_model,
+        )
+
+        append_log_entry(
+            paths.logs,
+            f"{stage.slug} attempt {attempt_no} cross_review",
+            "\n".join(
+                [
+                    f"model: {verdict.model or 'unavailable'}",
+                    f"agrees: {verdict.agrees}",
+                    f"unavailable: {verdict.unavailable}",
+                    f"reason: {verdict.reason}",
+                ]
+            ),
+        )
+
+        if verdict.unavailable:
+            # Not agreement — the audit did not happen. Said plainly so a run whose
+            # cross-review silently never ran cannot be mistaken for one that passed it.
+            self.ui.show_status(
+                f"Cross-model review did not run: {verdict.reason}", level="warn"
+            )
+            return None
+
+        if not verdict.vetoes:
+            self.ui.show_status(
+                f"Cross-model reviewer ({verdict.model}) agrees with the approval.", level="success"
+            )
+            return None
+
+        self.ui.show_status(
+            f"Cross-model reviewer ({verdict.model}) vetoed the approval: {verdict.reason}",
+            level="warn",
+        )
+        record_correction(
+            paths,
+            stage=stage,
+            attempt_no=attempt_no,
+            text=f"Cross-model review vetoed an approval of {stage.stage_title}: {verdict.reason}",
+            source="rollback",
+        )
+        feedback = (
+            "An independent reviewer from a different model family rejected the approval of "
+            "this stage. Address this before it can be approved again:\n"
+            f"{verdict.reason}"
+        )
+        return "4", feedback
 
     def _record_review_correction(
         self,
