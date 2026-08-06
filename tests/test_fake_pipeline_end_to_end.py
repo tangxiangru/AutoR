@@ -28,22 +28,30 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 class FakePipelineEndToEndTest(unittest.TestCase):
+    #: Overridden by the LaTeX subclass. ``None`` means "whatever the default is",
+    #: which is the path most users take and the one that must not regress.
+    OUTPUT_FORMAT: str | None = None
+
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         runs_dir = Path(self._tmp.name) / "runs"
 
+        command = [
+            sys.executable,
+            "main.py",
+            "--fake-operator",
+            "--full-auto",
+            "--goal",
+            "End-to-end fake pipeline coverage.",
+            "--runs-dir",
+            str(runs_dir),
+        ]
+        if self.OUTPUT_FORMAT is not None:
+            command.extend(["--output-format", self.OUTPUT_FORMAT])
+
         self.result = subprocess.run(
-            [
-                sys.executable,
-                "main.py",
-                "--fake-operator",
-                "--full-auto",
-                "--goal",
-                "End-to-end fake pipeline coverage.",
-                "--runs-dir",
-                str(runs_dir),
-            ],
+            command,
             cwd=REPO_ROOT,
             text=True,
             capture_output=True,
@@ -116,6 +124,27 @@ class FakePipelineEndToEndTest(unittest.TestCase):
                     "placeholder" in payload or "not real" in payload,
                     msg=f"{rel} does not disclose that it is fake output",
                 )
+
+    def test_the_markdown_report_is_a_real_report_that_admits_it_is_fake(self) -> None:
+        if self.OUTPUT_FORMAT == "latex":
+            self.skipTest("markdown report is not the deliverable in latex mode")
+        report = self.paths.report_file
+        self.assertTrue(report.exists())
+        text = report.read_text(encoding="utf-8")
+        self.assertIn("fake operator", text.lower())
+        image = self.paths.report_images_dir / "fake_comparison.png"
+        self.assertTrue(image.exists())
+        self.assertTrue(image.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"))
+
+
+class FakePipelineLatexEndToEndTest(FakePipelineEndToEndTest):
+    """The same run with ``--output-format latex``.
+
+    Stage 07's gates fork on the output format, so a fake operator that only
+    satisfies one branch leaves the other exactly as broken as both used to be.
+    """
+
+    OUTPUT_FORMAT = "latex"
 
 
 if __name__ == "__main__":
