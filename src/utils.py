@@ -733,6 +733,7 @@ def build_prompt(
     revision_feedback: str | None = None,
     intake_context_text: str | None = None,
     web_search_context: str | None = None,
+    obligations_context: str | None = None,
 ) -> str:
     sections = [
         "# Stage Instructions",
@@ -759,6 +760,10 @@ def build_prompt(
         "# Original User Request",
         user_request.strip(),
     ]
+    if obligations_context:
+        sections.extend(["# Obligations Carried Forward", obligations_context.strip()])
+    if obligations_context:
+        sections.extend(["# Obligations Carried Forward", obligations_context.strip()])
     if web_search_context:
         sections.extend(["# Web Search Capability", web_search_context.strip()])
     if intake_context_text:
@@ -787,6 +792,7 @@ def build_continuation_prompt(
     attempt_no: int = 1,
     previous_validation_errors: list[str] | None = None,
     web_search_context: str | None = None,
+    obligations_context: str | None = None,
 ) -> str:
     current_draft = paths.stage_tmp_file(stage)
     current_final = paths.stage_file(stage)
