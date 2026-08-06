@@ -480,7 +480,8 @@ characters, no placeholder text, and at least one figure reference where every
 reference is report-relative, resolves to a real file under
 `workspace/report/`, and uses a format the report viewer can render
 (`.png .jpg .jpeg .gif .webp`). Figures live in `workspace/report/images/` and
-are referenced as `images/<name>.png`.
+are referenced as `images/<name>.png`, with at most `MAX_REPORT_FIGURES` (5) published —
+a benchmark judge is shown only the first five it finds, in filesystem order.
 
 Validated by `validate_markdown_report` in [`src/utils.py`](../src/utils.py).
 
@@ -498,12 +499,14 @@ each Stage 07 attempt and fed back into the next attempt's prompt.
   "report_char_count": 8412,
   "referenced_image_count": 4,
   "available_image_count": 5,
+  "figure_budget": 5,
   "issue_counts": {
     "broken_image_links": 1,
     "non_relative_image_links": 0,
     "unrenderable_images": 0,
     "non_png_images": 0,
     "unreferenced_images": 1,
+    "figures_over_budget": 0,
     "total": 2
   },
   "issues": [

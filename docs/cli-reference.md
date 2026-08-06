@@ -124,6 +124,15 @@ The two modes differ in which Stage 07 prompt is loaded, which artifacts the
 stage gate requires, and whether a `paper_package/` bundle is produced after
 approval. See [Stage Contract](stage-contract.md#artifact-requirements).
 
+### Stopping early
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--final-stage STAGE` | run every stage | Stop after this stage slug or number (`07_writing`, `7`). Useful when only the report or manuscript is wanted and the dissemination package is not. `rcb_agent.py` defaults this to `07_writing`. |
+
+Combining it with `--redo-stage`/`--rollback-stage` that start *after* it is an error rather
+than a silently empty run.
+
 ### Writing venue
 
 | Flag | Default | Description |

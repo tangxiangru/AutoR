@@ -148,10 +148,14 @@ Stage 07's requirements depend on the run's `output_format`.
 | **07+** | Every figure reference is report-relative — not absolute, not a URL. |
 | **07+** | Every figure reference resolves to a file that exists under `workspace/report/`. |
 | **07+** | Every referenced figure is renderable: `.png .jpg .jpeg .gif .webp`. |
-| **07+** | At least one renderable image under `workspace/report/images/`. |
+| **07+** | At least one renderable image under `workspace/report/images/`, and **at most 5**. |
 | **07+** | `workspace/artifacts/citation_verification.json`, structurally valid. |
 | **07+** | `workspace/artifacts/self_review.json`. |
 | **07+** | `workspace/artifacts/report_review.json`, structurally valid. |
+
+The upper bound is not a style preference. A benchmark judge is shown only the first five
+images it finds, in filesystem order, so a sixth figure does not add a sixth chance to be
+credited — it makes it arbitrary which of yours are seen.
 
 **`latex`:**
 

@@ -293,6 +293,7 @@ AI handles execution load; humans steer the research when direction actually mat
 | Start with Codex | `python main.py --operator codex --model default --goal "Your research goal here"` |
 | Allow Codex-backed SSH / remote GPU execution | `python main.py --operator codex --codex-sandbox danger-full-access --goal "Your research goal here"` |
 | Produce a LaTeX paper package instead of a markdown report | `python main.py --output-format latex --goal "..."` |
+| Stop once the report is written, skipping dissemination | `python main.py --final-stage 07_writing --goal "..."` |
 | Choose a writing venue profile | `python main.py --venue neurips_2025` or `python main.py --venue nature` or `python main.py --venue jmlr` |
 | Resume the latest run | `python main.py --resume-run latest` |
 | Redo a stage inside the same run | `python main.py --resume-run 20260329_210252 --redo-stage 03` |
@@ -480,7 +481,7 @@ AutoR does not consider a run successful just because it generated a plausible m
 | Stage 03+ | Machine-readable data under `workspace/data/` |
 | Stage 05+ | Machine-readable results under `workspace/results/`, plus a valid `experiment_manifest.json` |
 | Stage 06+ | Real figure files under `workspace/figures/` |
-| Stage 07+ (markdown) | `report/report.md` with resolving figure references, `report/images/*.png`, `citation_verification.json`, `self_review.json`, `report_review.json` |
+| Stage 07+ (markdown) | `report/report.md` with resolving figure references, at most 5 figures under `report/images/`, `citation_verification.json`, `self_review.json`, `report_review.json` |
 | Stage 07+ (latex) | `main.tex` matching the venue, `sections/*.tex`, a bibliography, a compiled PDF, `build_log.txt`, `citation_verification.json`, `self_review.json`, `layout_review.json` |
 | Stage 08+ | Review and readiness assets under `workspace/reviews/` |
 
