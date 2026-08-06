@@ -826,6 +826,17 @@ Required: non-empty string `overall_status`; booleans `pdf_available` and
 Validated by `validate_layout_review` in
 [`src/writing_manifest.py`](../src/writing_manifest.py).
 
+### `workspace/reviews/deliberations.json`
+
+Written when a stage raises a crux under `--deliberation`. Every question escalated, the
+expert brief, each voice's position and self-objection, and the resolution with its falsifier
+and surviving dissent.
+
+`summary.confirmed_the_agents_answer` is the one to read: escalations where the panel simply
+agreed with what the agent already had are escalations that were not needed.
+
+See [Raising a Crux](deliberation.md).
+
 ### `workspace/reviews/comment_ledger.json`
 
 Written when a reviewer anchors its objections to quoted passages. One entry per review round,
