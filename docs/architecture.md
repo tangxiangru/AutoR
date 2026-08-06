@@ -114,6 +114,7 @@ to a CLI directly; the operators never decide what stage runs next.
 | [`src/platform/foundry.py`](../src/platform/foundry.py) | Post-approval packaging: paper package and release package. |
 | [`src/diagram_gen.py`](../src/diagram_gen.py) | Optional Gemini method-diagram generation, injected into `report.md` or `method.tex` depending on the run's output format. The only module with a third-party dependency. |
 | [`src/prompts/`](../src/prompts) | One markdown template per stage, plus intake and bootstrap templates. Editing these changes agent behaviour with no code change. |
+| [`src/skills/`](../src/skills) | Agent skills, installed into each run's `.claude/skills/` by [`src/run_skills.py`](../src/run_skills.py). Pull-based counterpart to the prompt templates: loaded only when the model judges one relevant. The install path is load-bearing — the operator runs with `cwd=run_root`, so skills left in the AutoR checkout are never discovered. |
 
 ### Studio
 
@@ -281,6 +282,7 @@ Ordered by how much of the system you have to understand first.
 | To change… | Edit | Code change needed |
 | --- | --- | --- |
 | What a stage asks the agent to do | `src/prompts/<slug>.md` | none |
+| Craft guidance an agent can pull mid-stage | a new `src/skills/<name>/SKILL.md` | none |
 | The set of target venues | `templates/registry.yaml` | none |
 | What a stage must produce | `validate_stage_artifacts` in `src/utils.py` | small |
 | The summary contract | `REQUIRED_STAGE_HEADINGS` + `validate_stage_markdown` | small |

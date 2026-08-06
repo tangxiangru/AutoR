@@ -1,6 +1,6 @@
 # Citation Discipline and Hallucination Prevention
 
-Use this reference only when the built-in DBLP/CrossRef workflow in `paper-write` is not enough.
+Read this from Stage 07 (Writing) when a citation cannot be settled by a straightforward DBLP/CrossRef lookup. `SKILL.md` in this directory carries the rules you need most often; this file is the full treatment.
 
 This is an intentionally longer reference. It is not meant to replace the main workflow. Instead, it gives stricter standards for handling citations when:
 
@@ -244,7 +244,7 @@ The principle is:
 
 ### BibTeX vs BibLaTeX
 
-This `insleep`-derived workflow still prioritizes compatibility with existing conference templates. It does not force a move to BibLaTeX.
+This workflow prioritizes compatibility with existing conference templates. It does not force a move to BibLaTeX.
 
 Still, you should know the tradeoff:
 

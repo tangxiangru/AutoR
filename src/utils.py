@@ -83,6 +83,10 @@ class RunPaths:
     bootstrap_dir: Path
     profile_dir: Path
     intake_context: Path
+    #: Where the operator's agent CLI looks for project skills. The operator is
+    #: invoked with ``cwd=run_root``, so this is the run's own ``.claude/skills``
+    #: and not the AutoR checkout's.
+    skills_dir: Path
 
     def stage_file(self, stage: StageSpec) -> Path:
         return self.stages_dir / stage.filename
@@ -216,6 +220,7 @@ def build_run_paths(run_root: Path) -> RunPaths:
         artifact_index=run_root / "artifact_index.json",
         logs=run_root / "logs.txt",
         logs_raw=run_root / "logs_raw.jsonl",
+        skills_dir=run_root / ".claude" / "skills",
         prompt_cache_dir=run_root / "prompt_cache",
         operator_state_dir=run_root / "operator_state",
         stages_dir=run_root / "stages",
@@ -244,6 +249,7 @@ def build_run_paths(run_root: Path) -> RunPaths:
 def ensure_run_layout(paths: RunPaths) -> None:
     paths.run_root.mkdir(parents=True, exist_ok=True)
     paths.prompt_cache_dir.mkdir(parents=True, exist_ok=True)
+    paths.skills_dir.mkdir(parents=True, exist_ok=True)
     paths.operator_state_dir.mkdir(parents=True, exist_ok=True)
     paths.stages_dir.mkdir(parents=True, exist_ok=True)
     paths.handoff_dir.mkdir(parents=True, exist_ok=True)

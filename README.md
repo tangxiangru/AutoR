@@ -571,6 +571,8 @@ For each stage attempt, AutoR assembles a prompt from:
 
 The assembled prompt is written to `runs/<run_id>/prompt_cache/`, per-stage session IDs are stored in `runs/<run_id>/operator_state/`, and the selected CLI backend is invoked in live streaming mode.
 
+That list is everything the agent is *given*. Alongside it, AutoR installs an agent skill pack from [src/skills/](src/skills) into `runs/<run_id>/.claude/skills/` — the operator's working directory — so the agent can *pull* long-form craft guidance when it needs it: writing principles, citation discipline, venue checklists, LaTeX repair, results tables, reproducibility review. A skill costs nothing in the prompts that do not use it, which is why guidance that matters to one stage in one situation lives there rather than in the templates.
+
 <details>
 <summary><strong>Exact Claude CLI pattern</strong></summary>
 
@@ -623,6 +625,7 @@ The main code lives in:
 - [src/writing_manifest.py](src/writing_manifest.py)
 - [src/platform/foundry.py](src/platform/foundry.py)
 - [src/prompts/](src/prompts)
+- [src/skills/](src/skills)
 
 ```mermaid
 flowchart LR
@@ -636,6 +639,7 @@ flowchart LR
     B --> I[src/writing_manifest.py]
     B --> J[src/platform/foundry.py]
     B --> K[src/prompts/*]
+    B --> L[src/skills/*]
     C --> H
 ```
 
@@ -656,12 +660,13 @@ File boundaries:
 - [src/approval_agent.py](src/approval_agent.py): The strict reviewer agent used by `--full-auto`.
 - [src/backend/](src/backend) and [src/frontend/](src/frontend): AutoR Studio service, HTTP layer, and the browser UI.
 - [src/prompts/](src/prompts): Per-stage prompt templates.
+- [src/skills/](src/skills) and [src/run_skills.py](src/run_skills.py): Agent skills installed into each run's `.claude/skills/`, loaded on demand rather than concatenated into every prompt.
 
 The full module map, the stage attempt loop, how prompts are assembled, and the extension points are in **[docs/architecture.md](docs/architecture.md)**.
 
 ## 🗂️ Run State
 
-Each run contains `user_input.txt`, `memory.md`, `run_manifest.json`, `artifact_index.json`, `prompt_cache/`, `operator_state/`, `stages/`, `workspace/`, `logs.txt`, and `logs_raw.jsonl`. The substantive research payload lives in `workspace/`.
+Each run contains `user_input.txt`, `memory.md`, `run_manifest.json`, `artifact_index.json`, `prompt_cache/`, `operator_state/`, `stages/`, `workspace/`, `.claude/skills/`, `logs.txt`, and `logs_raw.jsonl`. The substantive research payload lives in `workspace/`.
 
 ```mermaid
 flowchart TD

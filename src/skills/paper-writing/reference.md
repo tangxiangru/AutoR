@@ -1,8 +1,8 @@
-# Orchestra-Adapted Writing Principles
+# Writing Principles (long-form reference)
 
-Use this reference when `paper-plan` needs help shaping the paper's story or when `paper-write` needs stronger drafting and revision guidance.
+Read this from Stage 07 (Writing) when the story needs shaping or the draft needs stronger revision guidance. `SKILL.md` in this directory carries the rules you need most often; this file is the full treatment.
 
-This is the expanded English counterpart to the detailed Chinese version. It is not a new workflow phase. Its purpose is to provide a stronger writing model on top of the existing `insleep` pipeline.
+This is reference material, not a workflow phase. AutoR's stages are unchanged; this only gives Stage 07 a stronger writing model to work from.
 
 ## Contents
 

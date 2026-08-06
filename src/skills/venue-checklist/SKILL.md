@@ -1,6 +1,11 @@
-# Venue Checklists for ICLR, NeurIPS, and ICML
+---
+name: venue-checklist
+description: Use when the target venue's submission requirements matter — checking a draft against NeurIPS, ICML or ICLR expectations, deciding which required sections (checklist, broader impact, reproducibility, LLM disclosure) the paper needs, or running the Stage 08 submission-readiness review.
+---
 
-Use this reference near the end of `paper-plan` and during the final checks in `paper-write`.
+# Venue checklists: NeurIPS, ICML, ICLR
+
+Read this when the target venue is set in Stage 03, when locking the Stage 07 outline, and again during the Stage 08 readiness review. The run's venue is in `run_config.json` and is rendered into every stage prompt under **Run Configuration**.
 
 ## When to Read
 
