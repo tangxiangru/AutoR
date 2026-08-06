@@ -573,6 +573,30 @@ flowchart TD
 
 The stage loop is controlled by AutoR, not by Claude.
 
+### The graph learns which moves pay — including ones it has never made
+
+The stages are a directed graph, and an archive across runs learns which edges are
+worth preferring. That learning had a blind spot with no exit: payoffs compare runs
+that *took* an edge against runs that did not, so an edge nothing has ever taken has
+no evidence in either direction, is never proposed, is never preferred, and is
+therefore never taken. The backward edges — the reason the graph exists at all —
+start unpreferred, so they are exactly the ones the loop stranded.
+
+So there are two proposers, not one:
+
+| | reads | produces |
+|:---|:---|:---|
+| **exploit** | believable payoffs | prefer an edge that has been paying |
+| **explore** | edges with *zero* observations | buy one trial for an edge never tried |
+
+Exploration buys a trial, never a verdict. An explored edge that does not pay is
+deprioritised again by the ordinary proposer once its payoff becomes believable, so
+exploration cannot ratchet anything in by itself. And like every variant it only
+reorders preferences: it never opens a guarded edge, adds one, or removes one — the
+guards are the correctness argument for letting an agent route at all, and the
+component that learns from outcomes is precisely the one that must not be able to
+weaken them.
+
 ### Obligations carried forward
 
 The reviewer's insight used to be captured only when it refused. But most stages are
