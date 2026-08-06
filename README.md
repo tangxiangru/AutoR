@@ -109,6 +109,7 @@ AutoR takes a different position: research is too important to hand over as a bl
 | Useful feature | **Deliberating review panel** | Instead of one reviewer agent at the approval gate, `--review-panel` seats a PI, domain expert, methodologist, reproducibility engineer and adversarial reviewer who review independently, cross-examine, then converge — and a blocking objection cannot be approved over. Each run measures the panel against its own single-pass baseline and reports when it did not earn its cost. |
 | Useful feature | **Divergent ideation panel** | `--ideation-panel` widens Stage 02 with proposers working from distinct lenses - mechanism, contrarian, adjacent field, null/artifact, regime - deduplicated and scored into a candidate pool the stage chooses from. It decides nothing, and reports when the extra proposers added nothing. |
 | Useful feature | **Anchored review comments** | A reviewer can quote the passage it objects to instead of refusing the whole stage. The revision is told to change only those spans, and is then diffed against them — so "preserve the correct parts" is measured rather than hoped for. |
+| Useful feature | **Selective deep thinking** | Most steps are execution. With `--deliberation` a stage that hits a genuine crux can stop, name the question, and pull in a panel of theorist / empiricist / critic / pragmatist plus an expert brief — then carry on with an answer that names its own falsifier. Budgeted, and measured against what the agent already believed. |
 | Useful feature | **Two output formats** | Stage 07 writes a benchmark-ready markdown report (`report/report.md` + PNG figures) by default, or a venue-aware LaTeX paper package with a compiled PDF via `--output-format latex`. |
 
 In practice, that means AutoR is useful not only because of the high-level framing, but also because it handles real research chores: literature organization, experiment manifests, citation verification, artifact indexing, manuscript packaging, and recoverable long-running workflows.
@@ -303,6 +304,7 @@ AI handles execution load; humans steer the research when direction actually mat
 | Give the panel a researcher persona to stand in for | `python main.py --review-panel --persona docs/persona-example.md --goal "..."` |
 | Seat the panel across different models | `python main.py --review-panel --panel-models pi=opus skeptic=codex:default --goal "..."` |
 | Widen Stage 02's hypotheses with a proposer panel | `python main.py --ideation-panel --goal "..."` |
+| Let a stage stop and think hard at a crux | `python main.py --deliberation --goal "..."` |
 | Choose the execution backend | `python main.py --operator claude` or `python main.py --operator codex` |
 | Choose the reviewer backend separately | `python main.py --full-auto --review-operator claude --review-model opus` |
 | Choose a Claude model | `python main.py --operator claude --model sonnet` or `python main.py --operator claude --model opus` |

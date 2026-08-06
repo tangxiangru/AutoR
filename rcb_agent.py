@@ -58,6 +58,7 @@ from src.rcb import (  # noqa: E402
     runs_dir_for,
 )
 from src.terminal_ui import TerminalUI  # noqa: E402
+from src.deliberation import DEFAULT_MAX_DELIBERATIONS  # noqa: E402
 from src.utils import (  # noqa: E402
     DEFAULT_OUTPUT_FORMAT,
     DEFAULT_VENUE,
@@ -181,6 +182,33 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "(for example: pi=opus skeptic=codex:default). Seats left unassigned use the "
              "reviewer default. Heterogeneity is the lever with the best evidence behind it: "
              "five prompts against one model are five correlated reads wearing five hats.",
+    )
+    parser.add_argument(
+        "--deliberation",
+        action="store_true",
+        help="Let a stage stop and pull in a panel when it hits a genuine crux. The agent "
+             "names the question, finishes with its working answer, and a focused panel "
+             "resolves it for the next pass. Most steps are execution; this is for the few "
+             "that are not.",
+    )
+    parser.add_argument(
+        "--max-deliberations",
+        type=int,
+        default=DEFAULT_MAX_DELIBERATIONS,
+        help="Cruxes a run may escalate before the budget is refused. Scarcity is what makes "
+             f"'think hard here' mean anything. Defaults to {DEFAULT_MAX_DELIBERATIONS}.",
+    )
+    parser.add_argument(
+        "--deliberation-voices",
+        nargs="+",
+        metavar="VOICE",
+        help="Seat only these voices: theorist, empiricist, critic, pragmatist.",
+    )
+    parser.add_argument(
+        "--deliberation-models",
+        nargs="+",
+        metavar="VOICE=MODEL",
+        help="Assign a model per voice, as voice=model or voice=backend:model.",
     )
     parser.add_argument(
         "--ideation-panel",
@@ -500,6 +528,19 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
             ui=ui,
             stage_timeout=args.stage_timeout,
             ideas_per_proposer=args.ideas_per_proposer,
+        )
+
+    if args.deliberation:
+        from src.deliberation import CruxPanel, apply_voice_models, resolve_voices
+
+        manager.crux_panel = CruxPanel(
+            apply_voice_models(resolve_voices(args.deliberation_voices), args.deliberation_models),
+            backend_name=review_backend,
+            model=review_model,
+            fake_mode=args.fake_operator,
+            ui=ui,
+            stage_timeout=args.stage_timeout,
+            max_deliberations=args.max_deliberations,
         )
 
     pipeline_completed = False

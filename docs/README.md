@@ -16,6 +16,7 @@ detail behind it.
 | Replace the reviewer agent with a panel that argues before it decides | [Review Panel](review-panel.md) |
 | Send back one passage instead of the whole stage | [Anchored Review Comments](stage-comments.md) |
 | Widen Stage 02's hypotheses with a panel that proposes instead of deciding | [Ideation Panel](ideation-panel.md) |
+| Let a stage stop and think hard when it hits a genuine crux | [Raising a Crux](deliberation.md) |
 | Configure venues, backends, sandboxes, or API keys | [Configuration](configuration.md) |
 | Use or script the browser UI | [Studio Guide & HTTP API](studio.md) |
 | Understand how the code is organized | [Architecture](architecture.md) |

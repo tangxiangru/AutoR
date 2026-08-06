@@ -109,6 +109,14 @@ from .stage_graph import (
 from .diagram_gen import post_writing_diagram_hook
 from .terminal_ui import TerminalUI
 from .platform.foundry import generate_paper_package, generate_release_package
+from .deliberation import (
+    CruxPanel,
+    clear_requests,
+    escalation_offer,
+    format_resolution_for_prompt,
+    read_requests,
+    record_resolution,
+)
 from .ideation_panel import (
     IdeationPanel,
     format_pool_for_prompt,
@@ -218,6 +226,8 @@ class ResearchManager:
         self._research_diagram: bool = False
         self._final_stage: StageSpec | None = None
         self.ideation_panel: IdeationPanel | None = None
+        self.crux_panel: CruxPanel | None = None
+        self._crux_resolutions: list[Any] = []
         self._pending_comments: list[Any] = []
         self._open_comments: list[Any] = []
         self._commented_draft: str = ""
@@ -705,6 +715,58 @@ class ResearchManager:
                 )
         except Exception as exc:  # noqa: BLE001 - measurement must not derail the stage
             append_log_entry(paths.logs, f"{stage.slug} anchored_revision_failed", str(exc))
+
+    def _settle_cruxes(self, paths: RunPaths, stage: StageSpec, attempt_no: int) -> str | None:
+        """Deliberate any crux the agent raised, and send the stage back with the answers.
+
+        Returns the revision instruction when a deliberation ran, or None to let the stage
+        proceed to its gate untouched. Best-effort: a panel that cannot be reached must not
+        strand a stage that already produced a usable draft.
+        """
+        if self.crux_panel is None:
+            return None
+        try:
+            requests = read_requests(paths, stage)
+        except Exception:  # noqa: BLE001 - a malformed escalation costs the escalation only
+            requests = []
+        if not requests:
+            return None
+        clear_requests(paths)
+
+        resolutions = []
+        for request in requests:
+            if self.crux_panel.budget_left == 0:
+                append_log_entry(
+                    paths.logs,
+                    f"{stage.slug} crux_budget_spent",
+                    f"Refused to deliberate: {request.question}",
+                )
+                self.ui.show_status(
+                    "Deliberation budget is spent; the remaining crux was not escalated.",
+                    level="warn",
+                )
+                break
+            self.ui.show_status(f"{stage.stage_title} raised a crux: {request.question}", level="info")
+            try:
+                resolution = self.crux_panel.deliberate(
+                    paths=paths, stage=stage, attempt_no=attempt_no, request=request
+                )
+            except Exception as exc:  # noqa: BLE001 - never strand a usable draft
+                append_log_entry(paths.logs, f"{stage.slug} crux_failed", str(exc))
+                continue
+            if resolution is None:
+                continue
+            record_resolution(paths, stage, resolution)
+            resolutions.append(resolution)
+
+        if not resolutions:
+            return None
+        self._crux_resolutions = resolutions
+        return (
+            "Continue the current stage conversation. A panel resolved the crux(es) you raised; "
+            "the answers are below under `Resolved Cruxes`. Apply them and revise the parts of "
+            "the stage that depended on your working answer, leaving the rest alone."
+        )
 
     def _generate_writing_review(self, paths: RunPaths) -> dict[str, object]:
         """Produce the Stage 07 triage artifact that matches this run's output format.
@@ -1857,6 +1919,14 @@ class ResearchManager:
             # them before anyone decides anything.
             self._close_comment_round(paths, stage, attempt_no, stage_markdown)
 
+            # The agent may have stopped and asked for help on a specific question.
+            crux_feedback = self._settle_cruxes(paths, stage, attempt_no)
+            if crux_feedback is not None:
+                revision_feedback = crux_feedback
+                continue_session = True
+                attempt_no += 1
+                continue
+
             # The draft is valid. Measure it, and decide whether it may stand.
             if self.evolution is not None and self.evolution.config.applies_to(stage):
                 outcome = self.evolution.consider(
@@ -2154,6 +2224,21 @@ class ResearchManager:
                     + format_resources_for_intake_prompt(ctx.resources)
                     + "\n"
                 )
+        if self.crux_panel is not None:
+            stage_template = (
+                stage_template.rstrip()
+                + "\n\n"
+                + escalation_offer(paths, self.crux_panel.budget_left)
+                + "\n"
+            )
+        if self._crux_resolutions:
+            stage_template = (
+                stage_template.rstrip()
+                + "\n\n## Resolved Cruxes\n\n"
+                + format_resolution_for_prompt(self._crux_resolutions)
+                + "\n"
+            )
+            self._crux_resolutions = []
         if stage.slug == "02_hypothesis_generation" and self.ideation_panel is not None:
             stage_template = (
                 stage_template.rstrip()
