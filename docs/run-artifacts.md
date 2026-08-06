@@ -14,6 +14,7 @@ machine-readable one.
 
 ```text
 runs/<run_id>/
+├── .claude/skills/             # agent skills, installed from src/skills/ (this is the operator's cwd)
 ├── user_input.txt              # the original research goal, verbatim
 ├── memory.md                   # approved cross-stage memory (the only shared context)
 ├── run_config.json             # backend, model, venue, approval mode, sandbox
@@ -167,6 +168,19 @@ work was not done; treat its content as a placeholder, not evidence.
 
 `session_id` is the backend conversation for that stage, which is what makes
 refinement continue a conversation instead of restarting one.
+
+### `.claude/skills/`
+
+The agent skill pack, copied from `src/skills/` when the run is created and
+again on resume. The operator invokes its agent CLI with `cwd=run_root`, and
+Claude Code discovers project skills at `<cwd>/.claude/skills/<name>/SKILL.md`
+— so this directory, not the AutoR checkout's, is what the operator can reach.
+
+Each skill is loaded only when the model judges it relevant to what it is
+doing, which is why long-form craft guidance lives here rather than in the
+stage prompts. `logs.txt` records which skills were installed.
+
+Safe to delete: it is rebuilt on the next resume.
 
 ### `artifact_index.json`
 

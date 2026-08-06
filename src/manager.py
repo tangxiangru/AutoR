@@ -41,6 +41,7 @@ from .intake import (
 from .artifact_index import format_artifact_index_for_prompt, write_artifact_index
 from .experiment_manifest import format_experiment_manifest_for_prompt, write_experiment_manifest
 from .hypothesis_manifest import write_hypothesis_manifest
+from .run_skills import install_run_skills
 from .manifest import (
     ensure_run_manifest,
     format_manifest_status,
@@ -133,6 +134,7 @@ class ResearchManager:
         self.operator = operator
         self.reviewer = reviewer
         self.prompt_dir = self.project_root / "src" / "prompts"
+        self.skills_dir = self.project_root / "src" / "skills"
         self.output_stream = output_stream
         self.ui = ui or TerminalUI(output_stream=output_stream)
         self.approval_mode = "agent" if reviewer is not None else "manual"
@@ -212,6 +214,9 @@ class ResearchManager:
         self._research_diagram = research_diagram
         paths = build_run_paths(run_root)
         ensure_run_layout(paths)
+        # Reinstalled on resume so a run picks up skill edits without needing a
+        # fresh run directory.
+        self._install_skills(paths)
         config = ensure_run_config(
             paths,
             model=self.operator.model,
@@ -314,6 +319,7 @@ class ResearchManager:
         run_root = create_run_root(self.runs_dir)
         paths = build_run_paths(run_root)
         ensure_run_layout(paths)
+        self._install_skills(paths)
         write_text(paths.user_input, user_goal)
 
         # Ingest any pre-provided resources into workspace
@@ -2161,6 +2167,35 @@ class ResearchManager:
         if manifest is None:
             raise RuntimeError(f"Could not load run manifest from {paths.run_manifest}")
         return format_manifest_status(manifest)
+
+    def _install_skills(self, paths: RunPaths) -> list[str]:
+        """Put the agent skill pack where the operator's CLI will find it.
+
+        The operator runs with ``cwd=run_root``, so skills have to live in the
+        run's own ``.claude/skills/``. Installing them is best-effort: a run
+        must not fail because a skill file is unreadable, since skills are
+        guidance and every stage has a complete prompt without them.
+        """
+        try:
+            installed = install_run_skills(paths, self.skills_dir)
+        except OSError as exc:
+            append_log_entry(
+                paths.logs,
+                "skills install_failed",
+                f"Could not install the agent skill pack from {self.skills_dir}: {exc}",
+            )
+            return []
+        if installed:
+            append_log_entry(
+                paths.logs,
+                "skills installed",
+                (
+                    f"Installed {len(installed)} agent skills into "
+                    f"{paths.skills_dir.relative_to(paths.run_root).as_posix()}: "
+                    + ", ".join(installed)
+                ),
+            )
+        return installed
 
     def _stage_file_paths(self, stage_markdown: str) -> list[str]:
         from .utils import extract_path_references

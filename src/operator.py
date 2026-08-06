@@ -289,7 +289,7 @@ Original stderr:
                 session_id,
                 paths=paths,
                 resume=True,
-                tools="Write,Read,Glob,Grep",
+                tools="Skill,Write,Read,Glob,Grep",
             )
         else:
             session_id = self._resolve_stage_session_id(paths, stage, continue_session=False)
@@ -298,7 +298,7 @@ Original stderr:
                 session_id,
                 paths=paths,
                 resume=False,
-                tools="Write,Read,Glob,Grep",
+                tools="Skill,Write,Read,Glob,Grep",
             )
 
         append_jsonl(
@@ -349,7 +349,7 @@ Original stderr:
                 fallback_session_id,
                 paths=paths,
                 resume=False,
-                tools="Write,Read,Glob,Grep",
+                tools="Skill,Write,Read,Glob,Grep",
             )
             append_jsonl(
                 paths.logs_raw,

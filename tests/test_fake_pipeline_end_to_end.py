@@ -99,6 +99,21 @@ class FakePipelineEndToEndTest(unittest.TestCase):
             with self.subTest(stage=stage.slug):
                 self.assertEqual(validate_stage_artifacts(stage, self.paths), [])
 
+    def test_the_agent_skill_pack_reached_the_run(self) -> None:
+        """Installed by the real CLI path, not just by the unit test's own call.
+
+        The operator's cwd is the run root, so a skill only exists for the
+        operator if it is here.
+        """
+        installed = sorted(
+            child.name for child in self.paths.skills_dir.iterdir() if child.is_dir()
+        )
+        self.assertEqual(self.paths.skills_dir, self.run_root / ".claude" / "skills")
+        self.assertIn("paper-writing", installed)
+        for name in installed:
+            with self.subTest(skill=name):
+                self.assertTrue((self.paths.skills_dir / name / "SKILL.md").is_file())
+
     def test_the_manuscript_package_is_a_real_pdf(self) -> None:
         pdf = self.paths.writing_dir / "main.pdf"
         self.assertTrue(pdf.exists())

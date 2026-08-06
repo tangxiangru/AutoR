@@ -226,18 +226,38 @@ src/
   diagram_gen.py            optional Gemini diagrams
   platform/foundry.py       paper and release packaging
   prompts/                  per-stage templates
+  skills/                   agent skills installed into each run
+  run_skills.py             installs src/skills/ into <run>/.claude/skills/
   backend/                  Studio service, HTTP, runner, sessions, notebook
   frontend/static/          the Studio SPA (no build step)
 templates/registry.yaml     venue registry
 configs/                    optional diagram config template
 tests/                      unittest suite
 docs/                       this documentation
-.claude/skills/guides/      writing, citation, and venue reference material
 ```
 
-`.claude/skills/guides/` holds long-form reference material — writing
-principles, citation discipline, venue checklists — available to agents
-working in this repository. It is guidance, not code.
+### Agent skills
+
+`src/skills/` holds long-form craft guidance — writing principles, citation
+discipline, venue checklists, LaTeX repair, results tables, reproducibility
+review. Each is a directory with a `SKILL.md` carrying YAML frontmatter
+(`name` matching the directory, plus a `description` specific enough for the
+model to route on) and optionally a `reference.md` for the long tail.
+
+`install_run_skills` copies the pack into `<run_root>/.claude/skills/` when a
+run is created and again on resume. That location is not incidental: the
+operator invokes its agent CLI with `cwd=run_root`, and Claude Code discovers
+project skills at `<cwd>/.claude/skills/<name>/SKILL.md`. Skills left in the
+AutoR checkout are never on that path and are never loaded.
+
+Skills are the pull-based half of prompt assembly. Stage prompts are
+concatenated up front and grow through the run; guidance that one stage needs
+in one situation belongs in a skill, which is read only when the model judges
+it relevant. Adding a skill costs nothing in prompts that do not use it.
+
+To add one: create `src/skills/<name>/SKILL.md` with matching frontmatter.
+`tests/test_run_skills.py` asserts the pack is well-formed and installs, so a
+malformed skill fails the suite rather than silently never loading.
 
 ---
 
