@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE_REGISTRY_PATH = REPO_ROOT / "templates" / "registry.yaml"
@@ -1107,9 +1107,36 @@ def validate_markdown_report(paths: RunPaths) -> list[str]:
     return problems
 
 
-def validate_stage_artifacts(stage: StageSpec, paths: RunPaths) -> list[str]:
+def validate_stage_artifacts(
+    stage: StageSpec,
+    paths: RunPaths,
+    artifact_dirs: "Mapping[str, Sequence[Path]] | None" = None,
+) -> list[str]:
+    """Check that a stage produced the machine-readable artifacts its gate requires.
+
+    ``artifact_dirs`` adds extra directories to search per category (``data``, ``results``,
+    ``figures``). A ResearchClawBench run needs them: its output contract points stages at
+    ``<workspace>/outputs/`` and ``<workspace>/report/images/``, which sit outside the run
+    tree, so a compliant stage would otherwise look like it produced nothing.
+
+    The benchmark's own read-only ``data/`` is deliberately *not* one of these. It is always
+    populated, so counting it would make the stage-03 gate pass without the stage producing
+    anything — the gate exists to prove work happened, not that inputs exist.
+    """
     problems: list[str] = []
     freshness_cutoff = stage_execution_started_at(paths, stage)
+
+    def dirs_for(category: str, primary: Path) -> list[Path]:
+        return [primary, *(artifact_dirs or {}).get(category, ())]
+
+    def count_in(category: str, primary: Path, suffixes) -> int:
+        return sum(_count_files_with_suffixes(d, suffixes) for d in dirs_for(category, primary))
+
+    def recent_in(category: str, primary: Path, suffixes, cutoff) -> bool:
+        return any(
+            _has_recent_files_with_suffixes(d, suffixes, cutoff)
+            for d in dirs_for(category, primary)
+        )
 
     if stage.number == 1:
         from .evidence_ledger import validate_literature_evidence
@@ -1118,12 +1145,12 @@ def validate_stage_artifacts(stage: StageSpec, paths: RunPaths) -> list[str]:
             problems.append(f"{stage.stage_title}: {problem}")
 
     if stage.number >= 3:
-        if _count_files_with_suffixes(paths.data_dir, MACHINE_DATA_SUFFIXES) == 0:
+        if count_in("data", paths.data_dir, MACHINE_DATA_SUFFIXES) == 0:
             problems.append(
                 f"{stage.stage_title} requires machine-readable data artifacts under workspace/data, not only markdown notes."
             )
-        elif stage.number == 3 and freshness_cutoff is not None and not _has_recent_files_with_suffixes(
-            paths.data_dir, MACHINE_DATA_SUFFIXES, freshness_cutoff
+        elif stage.number == 3 and freshness_cutoff is not None and not recent_in(
+            "data", paths.data_dir, MACHINE_DATA_SUFFIXES, freshness_cutoff
         ):
             problems.append(
                 f"{stage.stage_title} requires machine-readable data artifacts produced or updated during the current stage execution."
@@ -1144,7 +1171,7 @@ def validate_stage_artifacts(stage: StageSpec, paths: RunPaths) -> list[str]:
         for problem in validate_experimental_protocol(paths):
             problems.append(f"{stage.stage_title} {problem}")
 
-        if _count_files_with_suffixes(paths.results_dir, RESULT_SUFFIXES) == 0:
+        if count_in("results", paths.results_dir, RESULT_SUFFIXES) == 0:
             problems.append(
                 f"{stage.stage_title} requires machine-readable result artifacts under workspace/results."
             )
@@ -1167,12 +1194,12 @@ def validate_stage_artifacts(stage: StageSpec, paths: RunPaths) -> list[str]:
         for problem in validate_outcome_statistics(paths):
             problems.append(f"{stage.stage_title} {problem}")
 
-        if _count_files_with_suffixes(paths.figures_dir, FIGURE_SUFFIXES) == 0:
+        if count_in("figures", paths.figures_dir, FIGURE_SUFFIXES) == 0:
             problems.append(
                 f"{stage.stage_title} requires figure artifacts under workspace/figures."
             )
-        elif stage.number == 6 and freshness_cutoff is not None and not _has_recent_files_with_suffixes(
-            paths.figures_dir, FIGURE_SUFFIXES, freshness_cutoff
+        elif stage.number == 6 and freshness_cutoff is not None and not recent_in(
+            "figures", paths.figures_dir, FIGURE_SUFFIXES, freshness_cutoff
         ):
             problems.append(
                 f"{stage.stage_title} requires figures produced or updated during the current stage execution."
