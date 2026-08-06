@@ -106,6 +106,7 @@ AutoR takes a different position: research is too important to hand over as a bl
 | Useful feature | **Self-improving review policy** | Every correction the reviewer demands becomes a standing rule checked on all later stages, recorded in an auditable `review_policy.json` with the stage and attempt that produced it. |
 | Useful feature | **Resume, redo, and rollback controls** | Long research runs can continue in place, retry a stage, or roll downstream state back without starting over. |
 | Useful feature | **Deliberating review panel** | Instead of one reviewer agent at the approval gate, `--review-panel` seats a PI, domain expert, methodologist, reproducibility engineer and adversarial reviewer who review independently, cross-examine, then converge — and a blocking objection cannot be approved over. Each run measures the panel against its own single-pass baseline and reports when it did not earn its cost. |
+| Useful feature | **Divergent ideation panel** | `--ideation-panel` widens Stage 02 with proposers working from distinct lenses - mechanism, contrarian, adjacent field, null/artifact, regime - deduplicated and scored into a candidate pool the stage chooses from. It decides nothing, and reports when the extra proposers added nothing. |
 | Useful feature | **Two output formats** | Stage 07 writes a benchmark-ready markdown report (`report/report.md` + PNG figures) by default, or a venue-aware LaTeX paper package with a compiled PDF via `--output-format latex`. |
 
 In practice, that means AutoR is useful not only because of the high-level framing, but also because it handles real research chores: literature organization, experiment manifests, citation verification, artifact indexing, manuscript packaging, and recoverable long-running workflows.
@@ -299,6 +300,7 @@ AI handles execution load; humans steer the research when direction actually mat
 | Replace the single reviewer with a deliberating panel | `python main.py --review-panel --goal "..."` |
 | Give the panel a researcher persona to stand in for | `python main.py --review-panel --persona docs/persona-example.md --goal "..."` |
 | Seat the panel across different models | `python main.py --review-panel --panel-models pi=opus skeptic=codex:default --goal "..."` |
+| Widen Stage 02's hypotheses with a proposer panel | `python main.py --ideation-panel --goal "..."` |
 | Choose the execution backend | `python main.py --operator claude` or `python main.py --operator codex` |
 | Choose the reviewer backend separately | `python main.py --full-auto --review-operator claude --review-model opus` |
 | Choose a Claude model | `python main.py --operator claude --model sonnet` or `python main.py --operator claude --model opus` |

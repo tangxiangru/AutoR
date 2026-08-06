@@ -182,6 +182,33 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "five prompts against one model are five correlated reads wearing five hats.",
     )
     parser.add_argument(
+        "--ideation-panel",
+        action="store_true",
+        help="Widen Stage 02's hypotheses with a panel of proposers working from distinct "
+             "lenses (mechanism, contrarian, adjacent field, null/artifact, regime). They "
+             "propose blind to each other; candidates are deduplicated, scored on novelty, "
+             "feasibility and relevance, and handed to the stage as material to choose from. "
+             "It decides nothing.",
+    )
+    parser.add_argument(
+        "--ideation-lenses",
+        nargs="+",
+        metavar="LENS",
+        help="Seat only these ideation lenses. Defaults to all five.",
+    )
+    parser.add_argument(
+        "--ideation-models",
+        nargs="+",
+        metavar="LENS=MODEL",
+        help="Assign a model per ideation lens, as lens=model or lens=backend:model.",
+    )
+    parser.add_argument(
+        "--ideas-per-proposer",
+        type=int,
+        default=2,
+        help="Candidate hypotheses each proposer may return. Defaults to 2.",
+    )
+    parser.add_argument(
         "--panel-rounds",
         type=int,
         default=2,
@@ -398,6 +425,19 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
         artifact_roots=[workspace],
         cross_reviewer=resolve_cross_reviewer(args.cross_review, args.cross_review_model),
     )
+
+    if args.ideation_panel:
+        from src.ideation_panel import IdeationPanel, apply_lens_models, resolve_lenses
+
+        manager.ideation_panel = IdeationPanel(
+            apply_lens_models(resolve_lenses(args.ideation_lenses), args.ideation_models),
+            backend_name=review_backend,
+            model=review_model,
+            fake_mode=args.fake_operator,
+            ui=ui,
+            stage_timeout=args.stage_timeout,
+            ideas_per_proposer=args.ideas_per_proposer,
+        )
 
     pipeline_completed = False
     try:
