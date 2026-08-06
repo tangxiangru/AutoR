@@ -22,6 +22,7 @@ Nothing here ever reads stdin. Any prompt that would block raises
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
 import traceback
@@ -309,6 +310,24 @@ def create_operator(
     )
 
 
+def _recorded_duration(workspace: Path, started_at: float) -> int:
+    """Keep a duration already on record rather than overwriting it with the export's.
+
+    A recovered run took as long as the run did. Replacing that with the seconds this
+    export took would report a multi-hour run as a ten-second one, and the leaderboard
+    derives cost from duration.
+    """
+    meta_path = workspace / "_meta.json"
+    if meta_path.exists():
+        try:
+            existing = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            existing = {}
+        if isinstance(existing, dict) and existing.get("duration_seconds"):
+            return int(existing["duration_seconds"])
+    return round(time.monotonic() - started_at)
+
+
 def run(args: argparse.Namespace) -> BenchmarkResult:
     started_at = time.monotonic()
     workspace = Path(args.workspace).expanduser().resolve()
@@ -371,6 +390,21 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
             workspace=workspace,
             pipeline_completed=False,
             synthesize=synthesizer,
+        )
+        # A recovered run needs the same record as a normal one, or the recovery is
+        # only half a recovery: `evaluation.score` and the leaderboard importer both
+        # refuse a workspace whose status is still "running". This is the path taken
+        # after a run is killed rather than returning — exactly when the metadata was
+        # never written — so leaving it out made --export-only unable to produce a
+        # scoreable workspace, which is the only reason it exists.
+        write_run_meta(
+            workspace,
+            task_id=infer_task_id(workspace),
+            run_id=paths.run_root.name,
+            status="completed" if export.report_path.exists() else "failed",
+            duration_seconds=_recorded_duration(workspace, started_at),
+            model=model,
+            extra={"report_source": export.report_source, "recovered": True},
         )
         return BenchmarkResult(
             workspace=workspace,
