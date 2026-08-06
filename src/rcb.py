@@ -439,6 +439,8 @@ def collect_figures(paths: RunPaths, workspace: Path, report_text: str = "") -> 
 #: Stage-summary headings that exist for AutoR's own control loop. A judge reading them sees
 #: an agent's workflow log rather than research, and the rubric says to be skeptical.
 _WORKFLOW_ONLY_HEADINGS = (
+    # Retired from the stage contract, but old runs still carry it and their
+    # summaries are still exported, so the stripper keeps the entry.
     "Previously Approved Stage Summaries",
     "Decision Ledger",
     "Suggestions for Refinement",

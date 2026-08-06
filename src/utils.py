@@ -143,7 +143,6 @@ STAGES: list[StageSpec] = [
 
 REQUIRED_STAGE_HEADINGS = [
     "Objective",
-    "Previously Approved Stage Summaries",
     "What I Did",
     "Key Results",
     "Files Produced",
@@ -731,8 +730,6 @@ def required_stage_output_template(stage: StageSpec) -> str:
         f"# Stage {stage.number:02d}: {stage.display_name}\n\n"
         "## Objective\n"
         "[State the exact objective of this stage.]\n\n"
-        "## Previously Approved Stage Summaries\n"
-        "[Summarize approved earlier stages from memory, or write _None yet._]\n\n"
         "## What I Did\n"
         "[Describe what you actually did in this stage.]\n\n"
         "## Key Results\n"
@@ -2111,10 +2108,6 @@ def canonicalize_stage_markdown(
         or f"Complete {stage.stage_title} and capture the main objective, work performed, results, and produced artifacts."
     )
 
-    previous_summaries = extract_markdown_section(markdown, "Previously Approved Stage Summaries")
-    if not previous_summaries:
-        approved = approved_stage_summaries(memory_text)
-        previous_summaries = "_None yet._" if approved == "None yet." else approved
 
     what_i_did = extract_markdown_section(markdown, "What I Did")
     if not what_i_did:
@@ -2172,8 +2165,6 @@ def canonicalize_stage_markdown(
         f"# Stage {stage.number:02d}: {stage.display_name}\n\n"
         "## Objective\n\n"
         f"{objective.strip()}\n\n"
-        "## Previously Approved Stage Summaries\n\n"
-        f"{previous_summaries.strip()}\n\n"
         "## What I Did\n\n"
         f"{what_i_did.strip()}\n\n"
         "## Key Results\n\n"

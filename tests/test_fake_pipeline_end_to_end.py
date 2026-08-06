@@ -99,6 +99,37 @@ class FakePipelineEndToEndTest(unittest.TestCase):
             with self.subTest(stage=stage.slug):
                 self.assertEqual(validate_stage_artifacts(stage, self.paths), [])
 
+    def test_node_output_does_not_grow_with_the_run(self) -> None:
+        """The relay is what made stage summaries grow 235 -> 1,211 words.
+
+        Each node now emits what it added. If the mandated relay comes back, or
+        something else starts restating upstream content, the last stage's
+        summary balloons and this fails.
+        """
+        sizes = {
+            path.stem: len(path.read_text(encoding="utf-8").split())
+            for path in sorted(self.paths.stages_dir.glob("*.md"))
+            if not path.name.endswith(".tmp.md")
+        }
+        self.assertGreaterEqual(len(sizes), 8, sizes)
+        first = sizes["01_literature_survey"]
+        last = sizes["08_dissemination"]
+        self.assertLess(
+            last,
+            first * 3,
+            f"stage summaries are growing with the run, not staying flat: {sizes}",
+        )
+
+    def test_no_stage_summary_restates_its_inbound_edge(self) -> None:
+        for path in sorted(self.paths.stages_dir.glob("*.md")):
+            if path.name.endswith(".tmp.md"):
+                continue
+            with self.subTest(stage=path.stem):
+                self.assertNotIn(
+                    "## Previously Approved Stage Summaries",
+                    path.read_text(encoding="utf-8"),
+                )
+
     def test_the_agent_skill_pack_reached_the_run(self) -> None:
         """Installed by the real CLI path, not just by the unit test's own call.
 

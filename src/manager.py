@@ -52,6 +52,7 @@ from .intake import (
 from .artifact_index import format_artifact_index_for_prompt, write_artifact_index
 from .experiment_manifest import format_experiment_manifest_for_prompt, write_experiment_manifest
 from .hypothesis_manifest import write_hypothesis_manifest
+from .information_flow import CHANNELS, ChannelContext, render_inbound
 from .prompt_fragments import compose_stage_template
 from .validity_review import ValidityReviewer, format_findings_for_prompt
 from .research_rounds import (
@@ -1369,8 +1370,6 @@ class ResearchManager:
             f"# Stage {stage.number:02d}: {stage.display_name}\n\n"
             "## Objective\n"
             f"Carry forward the pre-existing project state for {stage.display_name} from the approved project bootstrap.\n\n"
-            "## Previously Approved Stage Summaries\n"
-            f"{prior}\n\n"
             "## What I Did\n"
             "- Reviewed the approved project bootstrap artifacts for this repository.\n"
             "- Recorded the prior state of this stage instead of rerunning it from scratch.\n\n"
@@ -2027,127 +2026,17 @@ class ResearchManager:
                 "and what would count as refutation. Derive them from the goal and the "
                 "existing project; do not invent a hypothesis the work is not testing.\n"
             )
-        stage_template = (
-            stage_template.rstrip()
-            + "\n\n## Run Configuration\n\n"
-            + format_venue_for_prompt(paths)
-            + "\n"
+        # Typed information edges: each channel declares which stages read it,
+        # instead of every block being gated on a stage-number threshold. The
+        # delivered keys are recorded so a run can say what information actually
+        # reached a stage — which is what attribution needs.
+        inbound, delivered = render_inbound(
+            ChannelContext(paths=paths, stage=stage, attempt_no=attempt_no, manager=self),
+            CHANNELS,
         )
-        artifact_index = write_artifact_index(paths)
-        stage_template = (
-            stage_template.rstrip()
-            + "\n\n## Structured Artifact Index\n\n"
-            + f"Run-wide artifact index: `{paths.artifact_index.resolve()}`\n\n"
-            + format_artifact_index_for_prompt(artifact_index)
-            + "\n"
-        )
-        if stage.number >= 5:
-            experiment_manifest = write_experiment_manifest(paths)
-            stage_template = (
-                stage_template.rstrip()
-                + "\n\n## Experiment Bundle Manifest\n\n"
-                + f"Standard experiment manifest: `{paths.experiment_manifest.resolve()}`\n\n"
-                + format_experiment_manifest_for_prompt(experiment_manifest)
-                + "\n"
-            )
-        if stage.slug == "00_intake":
-            ctx = load_intake_context(paths)
-            if ctx and ctx.resources:
-                stage_template = (
-                    stage_template.rstrip()
-                    + "\n\n## Pre-Loaded Resources (already in workspace)\n\n"
-                    + format_resources_for_intake_prompt(ctx.resources)
-                    + "\n"
-                )
-        if stage.slug == "02_hypothesis_generation" and self.ideation_panel is not None:
-            stage_template = (
-                stage_template.rstrip()
-                + "\n\n## Candidate Hypothesis Pool\n\n"
-                + self._build_idea_pool(paths, stage, attempt_no)
-                + "\n"
-            )
-        if stage.slug == "07_writing":
-            manifest = build_writing_manifest(paths)
-            stage_template = (
-                stage_template.rstrip()
-                + "\n\n## Writing Manifest\n\n"
-                + format_manifest_for_prompt(manifest)
-                + "\n"
-            )
-
-        # Inject bootstrap researcher profile if available (stage-specific)
-        profile_text = format_profile_for_prompt(paths, stage_slug=stage.slug)
-        if profile_text and stage.number >= 1:
-            stage_template = (
-                stage_template.rstrip()
-                + "\n\n# Researcher Profile (from paper corpus bootstrap)\n\n"
-                + profile_text
-                + "\n"
-            )
-
-        # Inject accumulated decision ledger from prior stages
-        ledger_context = build_decision_ledger_context(paths, upto_stage=stage)
-        if ledger_context and stage.number >= 2:
-            stage_template = (
-                stage_template.rstrip()
-                + "\n\n# Decision Ledger (from prior stages)\n\n"
-                "The following decisions, assumptions, and open questions were recorded in earlier stages. "
-                "Respect locked decisions and accepted assumptions. Address open questions when relevant.\n\n"
-                + ledger_context
-                + "\n"
-            )
-
-        hypothesis_context = build_hypothesis_context(paths)
-        if hypothesis_context and stage.number >= 3:
-            stage_template = (
-                stage_template.rstrip()
-                + "\n\n# Hypothesis Context (from Stage 02)\n\n"
-                "The following typed claims were approved in Stage 02.\n"
-                "- Treat **Theoretical Propositions** as accepted premises rather than direct experimental targets.\n"
-                "- Treat **Empirical Hypotheses** as the claims that downstream implementation, experimentation, and analysis should test.\n"
-                "- Treat **Paper Claims (Provisional)** as narrative framing only until evidence supports them.\n\n"
-                + hypothesis_context
-                + "\n"
-            )
-
-        # From Stage 05 on, the frozen preregistration supersedes the Stage 02
-        # context above as the thing the run is accountable to. It is injected
-        # separately and worded as a constraint rather than as background,
-        # because the whole point is that it cannot be renegotiated.
-        prereg = load_preregistration(paths)
-        if prereg is not None and stage.number >= 5:
-            stage_template = (
-                stage_template.rstrip()
-                + "\n\n# Preregistered Hypotheses (frozen — not editable)\n\n"
-                + format_preregistration_for_prompt(prereg)
-                + "\n"
-            )
-        rounds_context = format_rounds_for_prompt(paths)
-        if rounds_context and stage.number >= 2:
-            stage_template = (
-                stage_template.rstrip()
-                + "\n\n# Earlier Research Rounds\n\n"
-                + rounds_context
-                + "\n"
-            )
-
-        findings_context = format_findings_for_prompt(paths, stage)
-        if findings_context:
-            stage_template = (
-                stage_template.rstrip()
-                + "\n\n# Adversarial Validity Findings (each must be answered)\n\n"
-                + findings_context
-                + "\n"
-            )
-
-        outcomes_context = format_outcomes_for_prompt(paths) if stage.number >= 7 else ""
-        if outcomes_context:
-            stage_template = (
-                stage_template.rstrip()
-                + "\n\n# Hypothesis Verdicts\n\n"
-                + outcomes_context
-                + "\n"
-            )
+        if inbound:
+            stage_template = stage_template.rstrip() + "\n\n" + inbound + "\n"
+        self._record_inbound_channels(paths, stage, delivered)
 
         approved_memory = read_text(paths.memory)
         if self._redo_start_stage is not None and stage.number >= self._redo_start_stage.number:
@@ -2791,8 +2680,6 @@ class ResearchManager:
             f"# {stage.stage_title}\n\n"
             "## Objective\n\n"
             f"This stage would normally execute {stage.display_name}, but {directive}.\n\n"
-            "## Previously Approved Stage Summaries\n\n"
-            f"{previous_block}\n\n"
             "## What I Did\n\n"
             + did +
             "- Preserved the workflow timeline so downstream stages can continue with a clear audit trail.\n"
@@ -3007,6 +2894,26 @@ class ResearchManager:
                 f"reason: {reason}\n"
                 f"amendments on record: {len(amended.amendments)}\n"
                 f"digest: {amended.digest}"
+            ),
+        )
+
+    def _record_inbound_channels(
+        self, paths: RunPaths, stage: StageSpec, delivered: list[str]
+    ) -> None:
+        """Write down what information reached this stage.
+
+        The archive learns which *moves* through the graph pay off. A move
+        carries a payload, and until the payload has a name the archive cannot
+        get from "this edge helped" to "this information helped". This is the
+        cheapest possible version of that record: the channel keys, per stage,
+        in the run log.
+        """
+        append_log_entry(
+            paths.logs,
+            f"{stage.slug} inbound_channels",
+            (
+                f"{len(delivered)} information channels delivered.\n"
+                + ("\n".join(f"- {key}" for key in delivered) or "- none")
             ),
         )
 
