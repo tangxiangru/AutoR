@@ -309,10 +309,18 @@ python tools/web_search.py QUERY... [--json] [--model MODEL] [--max-results N]
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--json` | off | Emit `{query, model, answer, results[]}` instead of markdown. |
-| `--model MODEL` | `gemini-2.5-flash` | Overridable with `AUTOR_WEB_SEARCH_MODEL` or `GEMINI_MODEL`. |
+| `--json` | off | Emit `{query, model, backend, answer, results[]}` instead of markdown. |
+| `--model MODEL` | `gemini-2.5-flash` (API key) / `gemini-3.6-flash` (Vertex) | Overridable with `AUTOR_WEB_SEARCH_MODEL` or `GEMINI_MODEL`. |
 | `--max-results N` | `10` | Maximum number of grounded sources to report. |
+| `--no-resolve-urls` | off | Leave Vertex grounding redirects unresolved. Faster, but the source URLs are opaque stubs that cannot be cited. |
 
-The API key is resolved from `GOOGLE_API_KEY`, then `GEMINI_API_KEY`, then
-`configs/diagram_config.yaml` — the same resolution order diagram generation
-uses. Exits `1` with the reason on stderr when a search cannot be performed.
+Two backends are supported and auto-detected:
+
+- **Gemini Developer API** — key from `GOOGLE_API_KEY`, then `GEMINI_API_KEY`, then
+  `configs/diagram_config.yaml`, the same order diagram generation uses.
+- **Vertex AI** — Application Default Credentials plus a project from
+  `AUTOR_VERTEX_PROJECT`, `GOOGLE_CLOUD_PROJECT`, or `ANTHROPIC_VERTEX_PROJECT_ID`, and a
+  location from `AUTOR_VERTEX_LOCATION` or `GOOGLE_CLOUD_LOCATION` (default `global`).
+
+An explicit API key wins; `AUTOR_WEB_SEARCH_BACKEND=vertex|api_key` forces the choice.
+Exits `1` with the reason on stderr when a search cannot be performed.

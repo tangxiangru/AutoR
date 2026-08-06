@@ -144,16 +144,29 @@ Stage 01 needs real search. Some coding-agent deployments ship with the
 built-in `WebSearch` tool disabled — notably **Claude Code on Vertex AI** —
 which leaves the stage unable to search at all.
 
-`--web-search gemini` routes searches through the Gemini API's Google Search
-grounding instead, using the same key as diagram generation:
+`--web-search gemini` routes searches through Gemini's Google Search grounding
+instead. Two backends work; AutoR picks whichever is configured:
 
 ```bash
+# Vertex AI — no API key, uses Application Default Credentials
+gcloud auth application-default login
+export GOOGLE_CLOUD_PROJECT="your-project"
+python main.py --web-search gemini --goal "..."
+
+# or the Gemini Developer API, using the same key as diagram generation
 export GEMINI_API_KEY="..."
 python main.py --web-search gemini --goal "..."
 
 # The tool is also usable on its own:
 python tools/web_search.py "black hole superradiance constraints" --json
 ```
+
+An explicit API key wins over Vertex; `AUTOR_WEB_SEARCH_BACKEND=vertex|api_key`
+forces the choice. On a box already running Claude Code on Vertex,
+`ANTHROPIC_VERTEX_PROJECT_ID` is inherited as a last-resort project, so
+`--web-search auto` works with no extra configuration — which matters, because
+that is precisely the deployment where the built-in `WebSearch` tool is
+disabled.
 
 `auto` (the default) uses Gemini when a key is configured and falls back to the
 backend's native search otherwise, so it never advertises a tool that would
@@ -216,8 +229,11 @@ AutoR reads very few environment variables of its own.
 | --- | --- | --- |
 | `GOOGLE_API_KEY` | `src/web_search.py` | Gemini key for `--research-diagram` and for `--web-search gemini`. |
 | `GEMINI_API_KEY` | `src/web_search.py` | Same, checked second. |
-| `AUTOR_WEB_SEARCH_MODEL` | `src/web_search.py` | Model for Gemini-backed web search. Defaults to `gemini-2.5-flash`. |
+| `AUTOR_WEB_SEARCH_MODEL` | `src/web_search.py` | Model for Gemini-backed web search. Defaults to `gemini-2.5-flash` on the Gemini API and `gemini-3.6-flash` on Vertex AI. |
 | `GEMINI_MODEL` | `src/web_search.py` | Same, checked second. |
+| `AUTOR_WEB_SEARCH_BACKEND` | `src/web_search.py` | Force `vertex` or `api_key` instead of auto-detecting. |
+| `AUTOR_VERTEX_PROJECT` | `src/web_search.py` | Vertex AI project for web search. Falls back to `GOOGLE_CLOUD_PROJECT`, then `ANTHROPIC_VERTEX_PROJECT_ID`. |
+| `AUTOR_VERTEX_LOCATION` | `src/web_search.py` | Vertex AI location. Falls back to `GOOGLE_CLOUD_LOCATION`, then `global`. |
 | `TERM` | `src/terminal_ui.py` | `TERM=dumb` disables colored output. Useful for CI logs and for piping to a file. |
 
 Everything else — API keys, authentication, model access — belongs to the

@@ -102,14 +102,44 @@ Stage 01 (Literature Survey) needs real search. Some Claude Code deployments —
 **Claude Code on Vertex AI** — ship with the built-in `WebSearch` tool disabled, which
 quietly guts that stage: the agent cannot search, so it either stalls or invents citations.
 
-AutoR ships a replacement backed by the Gemini API's Google Search grounding:
+AutoR ships a replacement backed by Gemini's Google Search grounding. It reaches Gemini
+two ways, and picks whichever is configured:
 
 ```bash
-export GEMINI_API_KEY=...      # or GOOGLE_API_KEY, or configs/diagram_config.yaml
+# Vertex AI (no API key needed) — the natural fit if you already run Claude Code on Vertex
+gcloud auth application-default login
+export GOOGLE_CLOUD_PROJECT=your-project        # or AUTOR_VERTEX_PROJECT
+
+# or the Gemini Developer API
+export GEMINI_API_KEY=...                       # or GOOGLE_API_KEY, or configs/diagram_config.yaml
 
 python3 tools/web_search.py "black hole superradiance constraints"
 python3 tools/web_search.py "diffusion model scaling laws" --json --max-results 8
 ```
+
+| | Vertex AI | Gemini Developer API |
+|:---|:---|:---|
+| Auth | Application Default Credentials | API key |
+| Project | `AUTOR_VERTEX_PROJECT`, `GOOGLE_CLOUD_PROJECT`, or `ANTHROPIC_VERTEX_PROJECT_ID` | — |
+| Location | `AUTOR_VERTEX_LOCATION`, `GOOGLE_CLOUD_LOCATION`, default `global` | — |
+| Default model | `gemini-3.6-flash` | `gemini-2.5-flash` |
+
+An explicit API key wins over Vertex, because setting one is deliberate whereas the Vertex
+project is often inherited from the host's Claude Code configuration. Force the choice with
+`AUTOR_WEB_SEARCH_BACKEND=vertex|api_key`.
+
+`ANTHROPIC_VERTEX_PROJECT_ID` is consulted last and on purpose: a box already running Claude
+Code on Vertex has it set, and that is exactly the deployment where the built-in `WebSearch`
+tool is disabled and this module is needed. On such a box `--web-search auto` just works
+with no extra configuration.
+
+**Grounding redirects.** Vertex returns citations as opaque
+`vertexaisearch.cloud.google.com/...` stubs rather than source URLs. The tool follows each
+one to its canonical URL (`https://arxiv.org/abs/2606.07591`) before reporting it, and
+de-duplicates afterwards, since two stubs routinely resolve to the same page. A stub that
+cannot be resolved is kept but labelled **unresolved redirect, not citable**, and the prompt
+tells operators to treat it as a lead rather than a reference. `--no-resolve-urls` skips the
+resolution step.
 
 Both `main.py` and `rcb_agent.py` take `--web-search`:
 
