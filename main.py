@@ -659,6 +659,7 @@ def record_into_archive(
     manager: ResearchManager,
     variant_id: str,
     ui: TerminalUI,
+    args: argparse.Namespace,
 ) -> None:
     """Fold a finished run into the archive, and let it propose and promote.
 
@@ -669,7 +670,14 @@ def record_into_archive(
     if archive is None or manager.last_run_paths is None:
         return
     try:
-        record = archive.record_run(manager.last_run_paths, variant_id=variant_id)
+        record = archive.record_run(
+            manager.last_run_paths,
+            variant_id=variant_id,
+            # A fake operator's scores measure the script, not the research. Kept in
+            # the archive — it is the only end-to-end exercise of this seam — and
+            # excluded from every estimate.
+            provenance="fake" if args.fake_operator else "live",
+        )
         if record is None:
             ui.show_status(
                 "Nothing was recorded in the archive: this run has no measured stages. "
@@ -853,7 +861,7 @@ def main() -> int:
             output_format=output_format,
             final_stage=final_stage,
         )
-        record_into_archive(archive, manager, variant_id, ui)
+        record_into_archive(archive, manager, variant_id, ui, args)
         return 0 if completed else 1
 
     operator_name = (args.operator or "claude").strip().lower()
@@ -950,7 +958,7 @@ def main() -> int:
         output_format=output_format,
         final_stage=final_stage,
     )
-    record_into_archive(archive, manager, variant_id, ui)
+    record_into_archive(archive, manager, variant_id, ui, args)
     return 0 if completed else 1
 
 

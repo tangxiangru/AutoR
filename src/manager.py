@@ -459,6 +459,10 @@ class ResearchManager:
                     default_choice="",
                     agent_directed=False,
                     score_total=None,
+                    # No choice set: the move was already made by the time the walk
+                    # saw it. Marked so an estimator excludes it rather than reading
+                    # an operator's intervention as evidence about an edge.
+                    bypassed=True,
                 )
                 stage = target
                 continue
@@ -536,6 +540,8 @@ class ResearchManager:
             default_choice=decision.default_target,
             agent_directed=decision.agent_directed,
             score_total=score.total if score is not None else None,
+            offered=decision.offered,
+            blocked=decision.blocked,
         )
         if decision.agent_directed or decision.refusal:
             self.ui.show_status(format_decision(decision), level="info")

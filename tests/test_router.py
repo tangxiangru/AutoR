@@ -275,6 +275,42 @@ class RouterTests(unittest.TestCase):
         self.assertIn("07_writing", prompt)
         self.assertIn(prereg_support.HYPOTHESIS_ID, prompt)
 
+    # -- what the decision records -------------------------------------------
+
+    def test_the_choice_set_is_recorded_on_the_accepted_path(self) -> None:
+        """"This edge was taken" and "this edge was offered and taken" are different
+        observations, and only the second can be a control arm."""
+        self.adjudicate()
+        decision, _ = self.choose(
+            json.dumps({"target": "05_experimentation", "reason": "H1 rests on one seed."})
+        )
+        self.assertIn("05_experimentation", decision.offered)
+        self.assertIn("07_writing", decision.offered)
+        self.assertEqual(decision.blocked, {})
+
+    def test_the_choice_set_is_recorded_on_the_refusal_path_too(self) -> None:
+        """A refusal is still an observation of what was on the table. Recording it
+        with an empty choice set would make it indistinguishable from a jump, which
+        genuinely had none."""
+        prereg_support.write_hypothesis_manifest(self.paths)
+        prereg_support.freeze_preregistration(self.paths)
+        decision, _ = self.choose(json.dumps({"target": "04_implementation", "reason": "Rebuild."}))
+        self.assertTrue(decision.refusal)
+        self.assertIn("05_experimentation", decision.offered)
+        self.assertEqual(decision.blocked.get("07_writing"), "guard")
+
+    def test_a_blocked_target_records_which_kind_of_block(self) -> None:
+        """The kind is the discriminator: a guard is a statement about the research
+        and a budget is a statement about the run, and an estimator that cannot tell
+        them apart is pooling two different reasons for not taking an edge."""
+        prereg_support.write_hypothesis_manifest(self.paths)
+        prereg_support.freeze_preregistration(self.paths)
+        decision, _ = self.choose(
+            json.dumps({"target": "05_experimentation", "reason": "one seed"})
+        )
+        self.assertEqual(set(decision.blocked.values()) - {"guard", "visits", "steps"}, set())
+        self.assertEqual(decision.blocked["07_writing"], "guard")
+
     # -- reporting -----------------------------------------------------------
 
     def test_the_summary_counts_edges_rather_than_stages(self) -> None:

@@ -355,7 +355,7 @@ alongside the report.
 
 | Path | Contents |
 | --- | --- |
-| `stage_graph.json` | Every visit: the stage, when it was entered and left, the move chosen out of it, its kind, the stated reason, what AutoR would have chosen, whether the agent chose it, and the rubric total at the time. |
+| `stage_graph.json` | Every visit: the stage, when it was entered and left, the move chosen out of it, its kind, the stated reason, what AutoR would have chosen, whether the agent chose it, the rubric total at the time, **the targets that were live at the moment of choosing (`offered`) and why the rest were not (`blocked`, target → `guard`/`visits`/`steps`)**, and whether the move bypassed the router entirely (`bypassed` — a `/back`, a rollback, or a research-round decision). The choice set cannot be reconstructed afterwards: re-evaluating a guard needs the workspace as it was at that moment. |
 | `improvement_ledger.jsonl` | One row per measured round: stage, attempt, per-criterion scores, delta against the champion, the verdict (`first`, `promoted`, `frontier`, `regressed`, `directed`, `verdict_drift`), whether the draft was reverted, and the verdict digest. |
 | `routing_refusals.jsonl` | Every agent routing choice AutoR refused, why, and which edge it fell back to. |
 | `summary.json` | The settled champion score per stage. This is what the cross-run archive reads. |

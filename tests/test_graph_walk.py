@@ -229,6 +229,36 @@ class GraphWalkTests(unittest.TestCase):
         self.assertLessEqual(state.steps, 6)
         self.assertIn("step limit", state.halted_because)
 
+    def test_a_jump_is_marked_bypassed_and_a_routed_move_is_not(self) -> None:
+        """`/back`, a retry rollback and a research-round decision all reach the walk
+        with the move already made. They had no choice set, and an estimator that
+        counted them as decisions where nothing else was on offer would be reading an
+        operator's intervention as evidence about an edge.
+        """
+        _operator, manager = self.build(stage_graph=StageGraph.adaptive(), routing_mode="agent")
+        jumped = {"done": False}
+        real_run_stage = manager._run_stage
+
+        def run_stage(paths, stage):
+            approved = real_run_stage(paths, stage)
+            if stage.slug == STAGE_06.slug and not jumped["done"]:
+                jumped["done"] = True
+                manager._jump_target_stage = STAGE_05
+                manager._jump_reason = "Operator sent it back."
+            return approved
+
+        with patch.object(manager, "_run_stage", side_effect=run_stage), patch.object(
+            manager.router, "choose", side_effect=lambda **kw: _advance(kw["stage"])
+        ):
+            self.drive(manager)
+
+        path = load_graph_state(self.only_run()).path
+        bypassed = [v for v in path if v.bypassed]
+        self.assertEqual(len(bypassed), 1)
+        self.assertEqual(bypassed[0].chose, STAGE_05.slug)
+        self.assertEqual(bypassed[0].offered, ())
+        self.assertTrue(all(not v.bypassed for v in path if v is not bypassed[0]))
+
     # -- the checks have to be satisfiable -----------------------------------
 
     def test_every_guard_passes_on_a_completed_run(self) -> None:
