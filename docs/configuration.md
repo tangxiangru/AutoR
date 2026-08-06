@@ -263,7 +263,7 @@ Change them in source if you must, and expect the tests to have an opinion.
 
 | Constant | Value | Meaning |
 | --- | --- | --- |
-| `MAX_STAGE_ATTEMPTS` | 5 | Attempts before a stage escalates to you. |
+| `MAX_STAGE_ATTEMPTS` | 5 | Default attempts before a stage escalates to you. This one *is* overridable per run, with `--max-attempts`. |
 | `DEFAULT_VENUE` | `neurips_2025` | Venue when `--venue` is omitted. |
 | `DEFAULT_CODEX_SANDBOX` | `workspace-write` | Codex sandbox when unspecified. |
 | stage timeout | 14400 s | Per-attempt ceiling — this one *is* a flag, `--stage-timeout`. |

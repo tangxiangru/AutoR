@@ -224,11 +224,53 @@ class TestRunStageMaxAttempts(unittest.TestCase):
         self.operator.run_stage.assert_called_once()
         self.assertTrue(self.paths.stage_file(stage).exists())
 
+    def test_the_attempt_ceiling_defaults_to_the_module_value_and_can_be_raised(self):
+        from src.manager import ResearchManager
+
+        default = ResearchManager(
+            project_root=self.repo_root,
+            runs_dir=self.runs_dir,
+            operator=self.operator,
+            ui=self.ui,
+        )
+        self.assertEqual(default.max_stage_attempts, MAX_STAGE_ATTEMPTS)
+
+        # A caller with time to spend can buy more retries, which is the whole point: each one
+        # re-runs the stage with the previous attempt's validation errors attached.
+        raised = ResearchManager(
+            project_root=self.repo_root,
+            runs_dir=self.runs_dir,
+            operator=self.operator,
+            ui=self.ui,
+            max_stage_attempts=MAX_STAGE_ATTEMPTS + 4,
+        )
+        self.assertEqual(raised.max_stage_attempts, MAX_STAGE_ATTEMPTS + 4)
+
+    def test_the_recorded_ceiling_is_the_instance_value_not_a_constant(self):
+        # Pinning a value other than 0 is what proves the loop reads self.max_stage_attempts:
+        # a hardcoded constant would report 5 here, and the old module-level patch would too.
+        stage = STAGES[0]
+        self.manager.max_stage_attempts = 2
+        self.manager._ask_choice = MagicMock(return_value="3")
+
+        from src.utils import write_attempt_count
+
+        write_attempt_count(self.paths, stage, 2)
+
+        self.manager._run_stage(self.paths, stage)
+
+        manifest = load_run_manifest(self.paths.run_manifest)
+        self.assertIsNotNone(manifest)
+        entry = next(item for item in manifest.stages if item.slug == stage.slug)
+        self.assertIn("Exceeded 2 attempts", entry.last_error or "")
+
     def test_run_stage_marks_manifest_failed_when_attempt_window_is_exhausted(self):
         stage = STAGES[0]
 
-        with patch("src.manager.MAX_STAGE_ATTEMPTS", 0):
-            result = self.manager._run_stage(self.paths, stage)
+        # The ceiling is per-manager, not a module global: patching the constant would no
+        # longer reach the loop that reads it.
+        self.manager.max_stage_attempts = 0
+        result = self.manager._run_stage(self.paths, stage)
 
         self.assertFalse(result)
         manifest = load_run_manifest(self.paths.run_manifest)

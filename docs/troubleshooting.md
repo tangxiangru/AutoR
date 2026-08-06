@@ -127,7 +127,8 @@ Read the validation errors — they name the exact requirement. The
 
 ### `Stage X failed after 5 attempts. Escalating to user.`
 
-`MAX_STAGE_ATTEMPTS` is exhausted. You are offered skip, roll back, or abort.
+The attempt ceiling is exhausted. You are offered skip, roll back, or abort. Raise it with
+`--max-attempts` when the stage is close but keeps missing one gate.
 
 Repeated failure at the same stage usually means the goal is too broad for the
 stage to complete, or a dependency is missing (no dataset, no GPU, no LaTeX).

@@ -159,7 +159,17 @@ carries a figure reference that is absolute, remote, unrenderable, or points at 
 is not there, or publishes more than five figures. A broken figure link is the expensive
 defect here: the judge reads the prose promising a figure and is shown nothing.
 
-### 3. Streams progress
+### 3. Spends the time it is given
+
+Neither the UI runner nor the batch CLI puts a timeout on the agent subprocess — the
+`max_runtime_seconds` in the shipped configs is a ResearchHarness-internal setting, not
+something the harness enforces. Nothing outside AutoR will stop a run, so the adapter's own
+ceilings are the only ones that bind, and they are set for quality rather than thrift:
+`--stage-timeout 14400` and `--max-attempts 8`. Every retry re-runs the stage with its
+validation errors attached, and an exhausted stage is auto-skipped, which is the expensive
+outcome.
+
+### 4. Streams progress
 
 `rcb_agent.py` writes JSON lines to stdout, which the harness captures into
 `_agent_output.jsonl`. The first line carries the model name so the run browser can display
@@ -259,8 +269,11 @@ The search model defaults to `gemini-2.5-flash` and is overridable with
 --review-operator {claude,codex}  Reviewer backend. Default: the execution backend.
 --review-model NAME             Reviewer model. Default: the backend default.
 
---stage-timeout SECONDS  Per stage attempt. Default: 3600, lower than AutoR's interactive
-                         default because benchmark runs are wall-clock bound.
+--stage-timeout SECONDS  Per stage attempt. Default: 14400. The harness enforces no wall
+                         clock of its own, so this is the only thing that can cut a stage
+                         short.
+--max-attempts N         Attempts per stage before it is auto-skipped. Default: 8, higher
+                         than the interactive default because a skipped stage costs score.
 --max-auto-skips N       Stages that may be auto-skipped before aborting. Default: 3.
 --intake                 Run the intake stage. Off by default: the benchmark instructions
                          are already a complete task specification.
