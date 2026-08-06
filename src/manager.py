@@ -41,6 +41,13 @@ from .intake import (
 from .artifact_index import format_artifact_index_for_prompt, write_artifact_index
 from .experiment_manifest import format_experiment_manifest_for_prompt, write_experiment_manifest
 from .hypothesis_manifest import write_hypothesis_manifest
+from .preregistration import (
+    amend_preregistration,
+    format_outcomes_for_prompt,
+    format_preregistration_for_prompt,
+    freeze_preregistration,
+    load_preregistration,
+)
 from .run_skills import install_run_skills
 from .manifest import (
     ensure_run_manifest,
@@ -1312,6 +1319,9 @@ class ResearchManager:
             write_text(result.stage_file_path, stage_markdown)
             if stage.slug == "02_hypothesis_generation":
                 write_hypothesis_manifest(paths, stage_markdown)
+                self._amend_preregistration(
+                    paths, "Stage 02 was re-run and rewrote the hypothesis manifest."
+                )
             if stage.slug == "07_writing":
                 self._generate_writing_review(paths)
             validation_errors = validate_stage_markdown(stage_markdown, stage=stage, paths=paths, artifact_roots=self.artifact_roots) + validate_stage_artifacts(stage, paths)
@@ -1366,6 +1376,9 @@ class ResearchManager:
                 write_text(repair_result.stage_file_path, stage_markdown)
                 if stage.slug == "02_hypothesis_generation":
                     write_hypothesis_manifest(paths, stage_markdown)
+                    self._amend_preregistration(
+                        paths, "Stage 02 was re-run and rewrote the hypothesis manifest."
+                    )
                 if stage.slug == "07_writing":
                     self._generate_writing_review(paths)
                 validation_errors = validate_stage_markdown(stage_markdown, stage=stage, paths=paths, artifact_roots=self.artifact_roots) + validate_stage_artifacts(stage, paths)
@@ -1399,6 +1412,9 @@ class ResearchManager:
                     stage_markdown = read_text(repair_result.stage_file_path)
                     if stage.slug == "02_hypothesis_generation":
                         write_hypothesis_manifest(paths, stage_markdown)
+                        self._amend_preregistration(
+                            paths, "Stage 02 was re-run and rewrote the hypothesis manifest."
+                        )
                     validation_errors = validate_stage_markdown(stage_markdown, stage=stage, paths=paths, artifact_roots=self.artifact_roots) + validate_stage_artifacts(stage, paths)
                     if validation_errors:
                         append_log_entry(
@@ -1512,6 +1528,8 @@ class ResearchManager:
                     attempt_no,
                     self._stage_file_paths(stage_markdown),
                 )
+                if stage.slug == "04_implementation":
+                    self._freeze_preregistration(paths)
                 if stage.slug == "07_writing":
                     output_format = selected_output_format(paths)
                     if self._research_diagram:
@@ -1611,6 +1629,31 @@ class ResearchManager:
         template = load_prompt_template(self.prompt_dir, stage, output_format=selected_output_format(paths))
         stage_template = format_stage_template(template, stage, paths)
         handoff_context = build_handoff_context(paths, upto_stage=stage)
+
+        # A run can arrive at Stage 05 without ever passing through Stage 04's
+        # approval — resume, --redo-stage, or a --project-root bootstrap that
+        # entered above Stage 02. Freeze here too, so the hypotheses are fixed
+        # before results exist on every route in.
+        if stage.number >= 5:
+            self._freeze_preregistration(paths)
+
+        # No hypotheses at all is a different problem from unfrozen ones, and
+        # the stage that first needs them is the one that has to fix it.
+        if stage.number >= 3 and not paths.hypothesis_manifest.exists():
+            stage_template = (
+                stage_template.rstrip()
+                + "\n\n# Missing Hypotheses (resolve before anything else)\n\n"
+                "This run has no hypotheses on record: Stage 02 did not run, most likely "
+                "because the run was adopted from an existing project. Adopting a codebase "
+                "does not adopt a research question.\n\n"
+                "Before doing this stage's own work, write "
+                f"`{paths.hypothesis_manifest.resolve()}` in the Stage 02 format: typed "
+                "`theoretical_propositions`, `empirical_hypotheses` and `paper_claims` "
+                "entries, each with `id` and `statement`, and every empirical hypothesis "
+                "carrying a `decision_rule` stating in advance what would count as support "
+                "and what would count as refutation. Derive them from the goal and the "
+                "existing project; do not invent a hypothesis the work is not testing.\n"
+            )
         stage_template = (
             stage_template.rstrip()
             + "\n\n## Run Configuration\n\n"
@@ -1684,6 +1727,27 @@ class ResearchManager:
                 "- Treat **Empirical Hypotheses** as the claims that downstream implementation, experimentation, and analysis should test.\n"
                 "- Treat **Paper Claims (Provisional)** as narrative framing only until evidence supports them.\n\n"
                 + hypothesis_context
+                + "\n"
+            )
+
+        # From Stage 05 on, the frozen preregistration supersedes the Stage 02
+        # context above as the thing the run is accountable to. It is injected
+        # separately and worded as a constraint rather than as background,
+        # because the whole point is that it cannot be renegotiated.
+        prereg = load_preregistration(paths)
+        if prereg is not None and stage.number >= 5:
+            stage_template = (
+                stage_template.rstrip()
+                + "\n\n# Preregistered Hypotheses (frozen — not editable)\n\n"
+                + format_preregistration_for_prompt(prereg)
+                + "\n"
+            )
+        outcomes_context = format_outcomes_for_prompt(paths) if stage.number >= 7 else ""
+        if outcomes_context:
+            stage_template = (
+                stage_template.rstrip()
+                + "\n\n# Hypothesis Verdicts\n\n"
+                + outcomes_context
                 + "\n"
             )
 
@@ -2187,6 +2251,55 @@ class ResearchManager:
         if manifest is None:
             raise RuntimeError(f"Could not load run manifest from {paths.run_manifest}")
         return format_manifest_status(manifest)
+
+    def _freeze_preregistration(self, paths: RunPaths) -> None:
+        """Fix the hypothesis set before any result exists.
+
+        Stage 04 approval is the honest boundary: the design and the code are
+        settled, nothing has been measured. Everything downstream is then
+        adjudicated against this, and a later change to the hypotheses has to
+        arrive as a recorded amendment rather than a quiet edit.
+        """
+        prereg = freeze_preregistration(paths)
+        if prereg is None:
+            append_log_entry(
+                paths.logs,
+                "preregistration not_frozen",
+                (
+                    "No hypothesis manifest was available to freeze. Stage 05 onward will "
+                    "report this as a validation problem, because the run has nothing "
+                    "falsifiable on record from before the experiments."
+                ),
+            )
+            return
+        append_log_entry(
+            paths.logs,
+            "preregistration frozen",
+            (
+                f"Froze {len(prereg.adjudicated_ids)} empirical hypotheses before "
+                f"{prereg.frozen_before_stage}.\n"
+                f"digest: {prereg.digest}\n"
+                f"ids: {', '.join(prereg.adjudicated_ids) or 'none'}"
+            ),
+        )
+
+    def _amend_preregistration(self, paths: RunPaths, reason: str) -> None:
+        """Re-freeze after a legitimate revision, keeping the previous digest."""
+        if load_preregistration(paths) is None:
+            return
+        amended = amend_preregistration(paths, reason)
+        if amended is None or not amended.amendments:
+            return
+        append_log_entry(
+            paths.logs,
+            "preregistration amended",
+            (
+                f"The hypothesis set was revised after freezing.\n"
+                f"reason: {reason}\n"
+                f"amendments on record: {len(amended.amendments)}\n"
+                f"digest: {amended.digest}"
+            ),
+        )
 
     def _install_skills(self, paths: RunPaths) -> list[str]:
         """Put the agent skill pack where the operator's CLI will find it.

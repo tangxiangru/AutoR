@@ -72,6 +72,9 @@ class RunPaths:
     results_dir: Path
     experiment_manifest: Path
     hypothesis_manifest: Path
+    preregistration: Path
+    hypothesis_outcomes: Path
+    claim_provenance: Path
     writing_dir: Path
     report_dir: Path
     report_file: Path
@@ -242,6 +245,9 @@ def build_run_paths(run_root: Path) -> RunPaths:
         results_dir=workspace_root / "results",
         experiment_manifest=workspace_root / "results" / "experiment_manifest.json",
         hypothesis_manifest=workspace_root / "notes" / "hypothesis_manifest.json",
+        preregistration=workspace_root / "notes" / "preregistration.json",
+        hypothesis_outcomes=workspace_root / "results" / "hypothesis_outcomes.json",
+        claim_provenance=workspace_root / "artifacts" / "claim_provenance.json",
         writing_dir=workspace_root / "writing",
         report_dir=workspace_root / "report",
         report_file=workspace_root / "report" / "report.md",
@@ -1122,6 +1128,17 @@ def validate_stage_artifacts(stage: StageSpec, paths: RunPaths) -> list[str]:
             )
 
     if stage.number >= 5:
+        # The scientific-validity chain, distinct from the artifact gates around
+        # it: the hypotheses were frozen before results existed (05), every one
+        # of them got a verdict backed by an artifact (06), and every claim the
+        # manuscript makes traces to a supported hypothesis or is labelled
+        # exploratory (07). Without these, nothing in the pipeline notices a
+        # hypothesis that was quietly rewritten to match the result.
+        from .preregistration import validate_preregistration
+
+        for problem in validate_preregistration(paths):
+            problems.append(f"{stage.stage_title} {problem}")
+
         if _count_files_with_suffixes(paths.results_dir, RESULT_SUFFIXES) == 0:
             problems.append(
                 f"{stage.stage_title} requires machine-readable result artifacts under workspace/results."
@@ -1137,6 +1154,11 @@ def validate_stage_artifacts(stage: StageSpec, paths: RunPaths) -> list[str]:
                 problems.append(f"{stage.stage_title}: {problem}")
 
     if stage.number >= 6:
+        from .preregistration import validate_hypothesis_outcomes
+
+        for problem in validate_hypothesis_outcomes(paths):
+            problems.append(f"{stage.stage_title} {problem}")
+
         if _count_files_with_suffixes(paths.figures_dir, FIGURE_SUFFIXES) == 0:
             problems.append(
                 f"{stage.stage_title} requires figure artifacts under workspace/figures."
@@ -1147,6 +1169,12 @@ def validate_stage_artifacts(stage: StageSpec, paths: RunPaths) -> list[str]:
             problems.append(
                 f"{stage.stage_title} requires figures produced or updated during the current stage execution."
             )
+
+    if stage.number >= 7:
+        from .preregistration import validate_claim_provenance
+
+        for problem in validate_claim_provenance(paths):
+            problems.append(f"{stage.stage_title} {problem}")
 
     if stage.number >= 7 and selected_output_format(paths) == "markdown":
         problems.extend(

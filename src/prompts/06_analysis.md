@@ -38,11 +38,52 @@ The markdown at `{{STAGE_OUTPUT_PATH}}` must follow the required output structur
 Additional expectations for this stage:
 
 - `Key Results` should include:
+  - the verdict on each preregistered hypothesis, by identifier
   - the main conclusions supported by the evidence
   - unsupported or weakened claims
   - important caveats, limitations, or threats to interpretation
   - what the writing stage should emphasize or avoid
 - `Files Produced` should list analysis artifacts, derived tables, or figures.
+
+## Preregistration (required)
+
+The hypotheses in `workspace/notes/preregistration.json` were frozen before any result
+existed. You must not edit, reword, narrow or drop them.
+
+Write `{{WORKSPACE_RESULTS_DIR}}/hypothesis_outcomes.json`:
+
+```json
+{
+  "generated_at": "<ISO timestamp>",
+  "preregistration_digest": "<copy the digest field from preregistration.json verbatim>",
+  "outcomes": [
+    {
+      "id": "H1",
+      "verdict": "supported | refuted | inconclusive | not_tested",
+      "rationale": "why the evidence produces this verdict, against H1's own decision rule",
+      "evidence": ["results/main_metrics.json"]
+    }
+  ],
+  "exploratory_findings": [
+    {"statement": "...", "evidence": ["results/..."]}
+  ]
+}
+```
+
+Rules:
+
+- Every preregistered empirical hypothesis needs exactly one entry. A hypothesis the
+  experiments never reached is `not_tested` — omitting it is not an option.
+- `supported` and `refuted` require at least one `evidence` path that exists in the run.
+- Apply each hypothesis's own decision rule. If the result does not clear the bar the
+  hypothesis set in advance, the verdict is `refuted` or `inconclusive`, whatever the
+  result looks like otherwise.
+- **`refuted` is a successful analysis.** Do not reinterpret a hypothesis so it comes
+  out supported, and do not soften a refutation into `inconclusive` to keep the paper
+  positive. A refutation that is recorded honestly is worth more than a confirmation
+  that was arranged.
+- Findings the data suggested but the run did not predict go in `exploratory_findings`,
+  never in `outcomes`.
 - `Suggestions for Refinement` should focus on claim calibration, extra validation, or improved analysis clarity.
 
 ## Important Constraints

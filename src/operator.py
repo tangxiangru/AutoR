@@ -716,6 +716,38 @@ Original stderr:
             )
 
         if stage.number >= 6:
+            # Stage 06+: a verdict on every preregistered hypothesis. The fake
+            # verdict is deliberately `refuted` — the placeholder result (0.61
+            # vs 0.74, a 13-point gap on two rows with one seed) does not clear
+            # the decision rule the fake Stage 02 wrote, and a stub that always
+            # confirms its own hypothesis would model exactly the failure the
+            # preregistration exists to catch.
+            from .preregistration import load_preregistration
+
+            prereg = load_preregistration(paths)
+            if prereg is not None:
+                _write_json(
+                    paths.hypothesis_outcomes,
+                    {
+                        "generated_at": self._now(),
+                        "preregistration_digest": prereg.digest,
+                        "outcomes": [
+                            {
+                                "id": identifier,
+                                "verdict": "refuted",
+                                "rationale": (
+                                    "Placeholder adjudication from fake-operator mode. The stub "
+                                    "result does not clear this hypothesis's decision rule, and "
+                                    "no real measurement was taken."
+                                ),
+                                "evidence": ["results/fake_results.json"],
+                            }
+                            for identifier in prereg.adjudicated_ids
+                        ],
+                        "exploratory_findings": [],
+                    },
+                )
+
             # Stage 06+: figures. SVG keeps this a text write with no encoder.
             _write(
                 paths.figures_dir / "fig1_fake_comparison.svg",
@@ -724,6 +756,27 @@ Original stderr:
                 '<rect x="90" y="30" width="40" height="70" fill="#444"/>'
                 '<text x="20" y="115" font-size="10">fake baseline vs treatment</text>'
                 "</svg>\n",
+            )
+
+        if stage.number >= 7:
+            # Every claim traces to evidence. With the fake hypothesis refuted,
+            # the only honest status left is exploratory — which is the point:
+            # the stub cannot manufacture a confirmatory claim.
+            _write_json(
+                paths.claim_provenance,
+                {
+                    "claims": [
+                        {
+                            "claim": (
+                                "Placeholder finding produced by fake-operator mode; no "
+                                "measurement supports it."
+                            ),
+                            "status": "exploratory",
+                            "hypothesis_id": "",
+                            "evidence": ["results/fake_results.json"],
+                        }
+                    ]
+                },
             )
 
         if stage.number >= 7 and selected_output_format(paths) == "markdown":
@@ -1092,6 +1145,8 @@ Original stderr:
                 "### Empirical Hypotheses\n"
                 "- **H1**: Adding retrieval will improve long-context task accuracy by at least 8 points.\n"
                 "  - Depends on: T1\n"
+                "  - Decision rule: supported if retrieval-on beats retrieval-off by more than 8 "
+                "accuracy points on the held-out split; refuted if the gap is 8 points or less.\n"
                 "  - Verification: Compare retrieval-on vs retrieval-off on the benchmark suite.\n\n"
                 "### Paper Claims (Provisional)\n"
                 "- **C1**: Retrieval is a practical way to stabilize long-context reasoning.\n"

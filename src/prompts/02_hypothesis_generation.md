@@ -53,7 +53,17 @@ Additional expectations for this stage:
   - `- Depends on: ...`
   - `- Verification: ...`
   - `- Status: ...`
+- Every `Empirical Hypothesis` **must** carry a `- Decision rule: ...` line stating, in
+  advance, what observation would count as support and what observation would count as
+  refutation. Write it so that someone who has not seen the results could apply it.
+  - Good: `- Decision rule: supported if retrieval beats the long-context baseline by
+    >3 accuracy points on the held-out split across >=5 seeds; refuted if the gap is
+    <=0 or within one standard deviation.`
+  - Not a decision rule: `- Decision rule: we will evaluate whether retrieval helps.`
 - `Empirical Hypotheses` should be falsifiable and directly testable by later stages.
+  These hypotheses are **frozen** when Stage 04 is approved, before any result exists,
+  and Stage 06 must return a verdict on each one. Write hypotheses you are willing to
+  have refuted; a refuted hypothesis is a result, and the run records it as one.
 - `Paper Claims (Provisional)` should remain narrative-level and explicitly provisional.
 - `Files Produced` should list any hypothesis artifacts created.
 - Ensure `Files Produced` includes `workspace/notes/hypothesis_manifest.json` as the typed-claim artifact for downstream stages.

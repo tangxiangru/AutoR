@@ -245,6 +245,37 @@ Minimum bar:
 - Where the run reproduces published work, state the comparison explicitly: the published number,
   your number, and whether they agree.
 
+## Claim Provenance (required)
+
+Every claim the manuscript makes must be traceable to what the run actually established.
+Write `{{WORKSPACE_ARTIFACTS_DIR}}/claim_provenance.json`:
+
+```json
+{
+  "claims": [
+    {
+      "claim": "the sentence as it appears in the manuscript",
+      "status": "confirmatory | exploratory",
+      "hypothesis_id": "H1",
+      "evidence": ["results/main_metrics.json"]
+    }
+  ]
+}
+```
+
+Rules:
+
+- `confirmatory` means the run predicted this before running the experiment. It requires a
+  `hypothesis_id` whose verdict in `hypothesis_outcomes.json` is `supported`. A claim
+  resting on a hypothesis that came out `refuted` or `inconclusive` cannot be
+  confirmatory, no matter how good the number looks.
+- `exploratory` is for anything the data suggested after the fact. It needs evidence but
+  no hypothesis, and the manuscript must present it as exploratory in its own prose —
+  not just in this file.
+- Every claim needs at least one `evidence` path that exists in the run.
+- If a preregistered hypothesis was refuted, say so in the manuscript. A paper that
+  quietly drops its own refuted prediction is the failure this file exists to catch.
+
 ## Stage Output Requirements
 
 The markdown at `{{STAGE_OUTPUT_PATH}}` must follow the required output structure exactly.
