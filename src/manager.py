@@ -41,6 +41,7 @@ from .intake import (
 from .artifact_index import format_artifact_index_for_prompt, write_artifact_index
 from .experiment_manifest import format_experiment_manifest_for_prompt, write_experiment_manifest
 from .hypothesis_manifest import write_hypothesis_manifest
+from .validity_review import ValidityReviewer, format_findings_for_prompt
 from .preregistration import (
     amend_preregistration,
     format_outcomes_for_prompt,
@@ -1538,6 +1539,7 @@ class ResearchManager:
                 )
                 if stage.slug == "04_implementation":
                     self._freeze_preregistration(paths)
+                self._run_validity_review(paths, stage, stage_markdown)
                 if stage.slug == "07_writing":
                     output_format = selected_output_format(paths)
                     if self._research_diagram:
@@ -1750,6 +1752,15 @@ class ResearchManager:
                 + format_preregistration_for_prompt(prereg)
                 + "\n"
             )
+        findings_context = format_findings_for_prompt(paths, stage)
+        if findings_context:
+            stage_template = (
+                stage_template.rstrip()
+                + "\n\n# Adversarial Validity Findings (each must be answered)\n\n"
+                + findings_context
+                + "\n"
+            )
+
         outcomes_context = format_outcomes_for_prompt(paths) if stage.number >= 7 else ""
         if outcomes_context:
             stage_template = (
@@ -2259,6 +2270,54 @@ class ResearchManager:
         if manifest is None:
             raise RuntimeError(f"Could not load run manifest from {paths.run_manifest}")
         return format_manifest_status(manifest)
+
+    def _run_validity_review(self, paths: RunPaths, stage: StageSpec, stage_markdown: str) -> None:
+        """Attack the result once the stage that produced it is approved.
+
+        Separate from the approval gate on purpose: that one asks whether the
+        stage did its work, and an agent asked to do both jobs at once reliably
+        does the easier one. This has no authority to approve or reject — the
+        next stage simply has to answer what it raises.
+        """
+        from .validity_review import REVIEWED_STAGE_NUMBERS
+
+        if stage.number not in REVIEWED_STAGE_NUMBERS:
+            return
+        self.ui.show_status(
+            f"Adversarial validity review of {stage.stage_title}...", level="info"
+        )
+        try:
+            findings = ValidityReviewer(self.operator, ui=self.ui).review(
+                paths=paths, stage=stage, stage_markdown=stage_markdown
+            )
+        except Exception as exc:  # noqa: BLE001 - a failed critique must not lose the stage
+            append_log_entry(
+                paths.logs,
+                f"{stage.slug} validity_review_failed",
+                f"The adversarial validity review did not run: {exc}",
+            )
+            self.ui.show_status(
+                "Validity review did not run; the stage stands unchallenged.", level="warn"
+            )
+            return
+        append_log_entry(
+            paths.logs,
+            f"{stage.slug} validity_review",
+            (
+                f"Adversarial review raised {len(findings)} findings.\n"
+                + "\n".join(
+                    f"- {item.identifier} ({item.severity} {item.category}): {item.finding}"
+                    for item in findings
+                )
+            ),
+        )
+        if findings:
+            critical = sum(1 for item in findings if item.severity == "critical")
+            self.ui.show_status(
+                f"Validity review raised {len(findings)} findings ({critical} critical). "
+                "The next stage must answer each one.",
+                level="warn",
+            )
 
     def _freeze_preregistration(self, paths: RunPaths) -> None:
         """Fix the hypothesis set before any result exists.

@@ -1144,6 +1144,13 @@ def validate_stage_artifacts(
         for problem in validate_literature_evidence(paths):
             problems.append(f"{stage.stage_title}: {problem}")
 
+    # Answering the previous stage's adversarial review. Self-selecting: only
+    # Stage 06 (answering 05) and Stage 07 (answering 06) owe anything.
+    from .validity_review import validate_validity_response
+
+    for problem in validate_validity_response(paths, stage):
+        problems.append(f"{stage.stage_title} {problem}")
+
     if stage.number >= 3:
         if count_in("data", paths.data_dir, MACHINE_DATA_SUFFIXES) == 0:
             problems.append(

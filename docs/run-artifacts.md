@@ -556,6 +556,50 @@ Stage 06's verdict on every preregistered hypothesis.
 
 Validated by `validate_hypothesis_outcomes` and `validate_outcome_statistics`.
 
+### `workspace/reviews/validity_review_<stage>.json` and `validity_response_<stage>.json`
+
+The adversarial pass. After Stage 05 and Stage 06 are approved, a reviewer with
+the opposite instruction from the approval gate — *explain why this result is
+wrong* — reads the run and files specific, checkable objections.
+
+```json
+{
+  "reviewed_stage": "05_experimentation",
+  "reviewer_failed": false,
+  "findings": [
+    {
+      "id": "V1",
+      "category": "confound",
+      "severity": "critical",
+      "finding": "Both conditions were tuned on the split that reports the headline number.",
+      "why_it_matters": "The gap may be selection, not the intervention.",
+      "what_would_settle_it": "Re-tune on a development split and re-report."
+    }
+  ]
+}
+```
+
+The reviewer cannot approve, reject or edit anything. What it produces is owed
+an answer: Stage 06 must write `validity_response_05_experimentation.json`, and
+Stage 07 must answer Stage 06's review.
+
+```json
+{"responses": [{"id": "V1", "status": "addressed | rebutted | accepted_limitation",
+  "explanation": "what changed, or why the objection does not hold",
+  "evidence": "the artifact or change (required when addressed)"}]}
+```
+
+Dismissing an objection is legitimate and deliberately cheap — `rebutted` with
+an argument is a complete answer, and so is `accepted_limitation`. There is no
+`noted`. What is refused is silence, because a finding nobody responded to is
+indistinguishable in the run directory from one nobody raised.
+
+A reviewer that crashed records `reviewer_failed: true`. An empty finding list
+from a failed critique would read as "nothing wrong".
+
+Validated by `validate_validity_response` in
+[`src/validity_review.py`](../src/validity_review.py).
+
 ### `workspace/artifacts/claim_provenance.json`
 
 Stage 07's map from each claim in the manuscript to what established it.
