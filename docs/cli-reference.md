@@ -148,6 +148,18 @@ The two modes differ in which Stage 07 prompt is loaded, which artifacts the
 stage gate requires, and whether a `paper_package/` bundle is produced after
 approval. See [Stage Contract](stage-contract.md#artifact-requirements).
 
+### Review panel
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--review-panel` | off | Replace the single reviewer agent with a deliberating panel: independent round, cross-examination on disagreement, then a chair synthesis. Implies `--approval-mode agent`. |
+| `--panel-roles ROLE...` | all five | Seat only these roles, in this order: `pi`, `domain`, `method`, `repro`, `skeptic`. The first seat chairs unless `pi` is present. An unknown name is an error. |
+| `--panel-rounds N` | `2` | Maximum deliberation rounds. Round 1 is always independent; later rounds run only on disagreement. |
+| `--persona PATH` | — | Markdown description of the researcher the panel stands in for, injected into every seat so they hold one consistent bar. |
+
+A blocking objection from any member cannot be approved over — the chair's approval is
+converted to a refinement in code. Full description in [Review Panel](review-panel.md).
+
 ### Stopping early
 
 | Flag | Default | Description |
