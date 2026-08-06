@@ -7,6 +7,7 @@ import io
 import json
 import os
 import tempfile
+import subprocess
 import sys
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -1345,3 +1346,197 @@ class SearchRetryAndTimeoutTest(unittest.TestCase):
         )
         self.assertEqual(captured.get("project"), "p")
         self.assertEqual(captured["http_options"].timeout, web_search_module.SEARCH_TIMEOUT_MS)
+
+
+class WebSearchModePersistenceTest(unittest.TestCase):
+    """`--web-search` was the only backend selection not recorded in run_config.json.
+
+    operator, model, venue, codex_sandbox, approval_mode, review_operator, review_model
+    and output_format are all persisted and reconciled on resume. This one was re-derived
+    from the ambient environment every time, so a resumed run could silently change what
+    it told the operator about the deployment -- and with Vertex ADC in the mix, the input
+    to that decision is an expiring credential.
+    """
+
+    def _paths(self, tmp):
+        from src.utils import build_run_paths, ensure_run_layout
+
+        paths = build_run_paths(Path(tmp) / "run")
+        ensure_run_layout(paths)
+        return paths
+
+    def test_the_mode_round_trips_through_the_config(self) -> None:
+        from src.utils import load_run_config, save_run_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = self._paths(tmp)
+            for mode in ("auto", "gemini", "native"):
+                with self.subTest(mode=mode):
+                    save_run_config(paths, {"web_search": mode})
+                    self.assertEqual(load_run_config(paths)["web_search"], mode)
+
+    def test_a_legacy_config_without_the_key_reads_as_auto(self) -> None:
+        """Runs created before this existed must keep working."""
+        from src.utils import load_run_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = self._paths(tmp)
+            paths.run_config.write_text(json.dumps({"model": "sonnet", "operator": "claude"}))
+            self.assertEqual(load_run_config(paths)["web_search"], "auto")
+
+    def test_a_bogus_persisted_mode_is_clamped(self) -> None:
+        from src.utils import load_run_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = self._paths(tmp)
+            paths.run_config.write_text(json.dumps({"web_search": "sideways"}))
+            self.assertEqual(load_run_config(paths)["web_search"], "auto")
+
+    def test_the_default_config_carries_the_key(self) -> None:
+        from src.utils import default_run_config
+
+        self.assertEqual(default_run_config()["web_search"], "auto")
+
+    def test_ensure_preserves_the_recorded_mode_when_no_flag_is_given(self) -> None:
+        from src.utils import ensure_run_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = self._paths(tmp)
+            ensure_run_config(paths, model="sonnet", web_search="gemini")
+            self.assertEqual(ensure_run_config(paths, model="sonnet")["web_search"], "gemini")
+
+    def test_an_explicit_flag_overrides_the_recorded_mode(self) -> None:
+        from src.utils import ensure_run_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = self._paths(tmp)
+            ensure_run_config(paths, model="sonnet", web_search="gemini")
+            self.assertEqual(
+                ensure_run_config(paths, model="sonnet", web_search="native")["web_search"],
+                "native",
+            )
+
+    def test_it_is_persisted_beside_every_other_selection(self) -> None:
+        """A field the writer drops is a field the resume cannot reconcile."""
+        from src.utils import default_run_config, load_run_config, save_run_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = self._paths(tmp)
+            save_run_config(paths, default_run_config())
+            written = json.loads(paths.run_config.read_text())
+        for key in ("operator", "model", "venue", "codex_sandbox", "approval_mode", "web_search"):
+            self.assertIn(key, written)
+        self.assertEqual(set(load_run_config(paths)) - {"created_at"}, set(written) - {"created_at"})
+
+
+class NormalizeWebSearchModeTest(unittest.TestCase):
+    def test_known_modes_survive(self) -> None:
+        from src.utils import normalize_web_search_mode
+
+        for mode in ("auto", "gemini", "native"):
+            self.assertEqual(normalize_web_search_mode(mode), mode)
+
+    def test_case_and_padding_are_tolerated(self) -> None:
+        from src.utils import normalize_web_search_mode
+
+        self.assertEqual(normalize_web_search_mode("  GEMINI "), "gemini")
+
+    def test_anything_else_falls_back_to_auto(self) -> None:
+        from src.utils import normalize_web_search_mode
+
+        for value in (None, "", "sideways", 7, [], {"a": 1}):
+            with self.subTest(value=value):
+                self.assertEqual(normalize_web_search_mode(value), "auto")
+
+    def test_the_cli_accepts_exactly_the_modes_the_config_can_store(self) -> None:
+        """A flag value the config cannot store would be silently downgraded on resume."""
+        from src.utils import WEB_SEARCH_MODE_CHOICES, normalize_web_search_mode
+
+        for mode in WEB_SEARCH_MODE_CHOICES:
+            with self.subTest(mode=mode):
+                with patch.object(sys, "argv", ["main.py", "--web-search", mode, "--goal", "g"]):
+                    args = autor_main.parse_args()
+                self.assertEqual(args.web_search, mode)
+                self.assertEqual(normalize_web_search_mode(args.web_search), mode)
+
+    def test_the_cli_rejects_a_mode_the_config_would_clamp(self) -> None:
+        with patch.object(sys, "argv", ["main.py", "--web-search", "sideways", "--goal", "g"]):
+            with redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    autor_main.parse_args()
+
+    def test_omitting_the_flag_is_distinguishable_from_passing_auto(self) -> None:
+        """Without this, a resume could not tell "keep what the run recorded" from
+        "the user asked for auto", and the recorded mode would be overwritten every time."""
+        with patch.object(sys, "argv", ["main.py", "--goal", "g"]):
+            self.assertIsNone(autor_main.parse_args().web_search)
+        with patch.object(sys, "argv", ["main.py", "--goal", "g", "--web-search", "auto"]):
+            self.assertEqual(autor_main.parse_args().web_search, "auto")
+
+
+class WebSearchModeReachesTheRunTest(unittest.TestCase):
+    """End to end through the real CLI: the mode has to survive to run_config.json.
+
+    The unit tests above prove `src/utils.py` can round-trip the field. These prove the
+    manager actually hands it over and that the resume branch reconciles it -- the two
+    seams where dropping it is invisible, because the run still works and just searches
+    differently than it was told to.
+    """
+
+    REPO_ROOT = Path(__file__).resolve().parent.parent
+
+    def _run_cli(self, runs_dir: Path, *extra: str, stdin: str = "6\n"):
+        return subprocess.run(
+            [sys.executable, "main.py", "--fake-operator", "--runs-dir", str(runs_dir), *extra],
+            cwd=self.REPO_ROOT,
+            input=stdin,
+            text=True,
+            capture_output=True,
+        )
+
+    @staticmethod
+    def _recorded(runs_dir: Path) -> dict:
+        run_root = sorted(p for p in runs_dir.iterdir() if p.is_dir())[-1]
+        return json.loads((run_root / "run_config.json").read_text()), run_root
+
+    def test_a_new_run_records_the_mode_it_was_started_with(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runs_dir = Path(tmp) / "runs"
+            result = self._run_cli(runs_dir, "--goal", "record the mode", "--web-search", "native")
+            self.assertEqual(result.returncode, 1, msg=result.stderr)
+            config, _ = self._recorded(runs_dir)
+        self.assertEqual(config["web_search"], "native")
+
+    def test_a_new_run_without_the_flag_records_the_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runs_dir = Path(tmp) / "runs"
+            result = self._run_cli(runs_dir, "--goal", "default mode")
+            self.assertEqual(result.returncode, 1, msg=result.stderr)
+            config, _ = self._recorded(runs_dir)
+        self.assertEqual(config["web_search"], "auto")
+
+    def test_a_resume_without_the_flag_keeps_the_recorded_mode(self) -> None:
+        """This is the defect: the mode used to be re-derived from the environment on
+        every resume, so a run started with --web-search native could quietly start
+        telling operators that WebSearch is disabled halfway through."""
+        with tempfile.TemporaryDirectory() as tmp:
+            runs_dir = Path(tmp) / "runs"
+            self._run_cli(runs_dir, "--goal", "resume keeps mode", "--web-search", "native")
+            config, run_root = self._recorded(runs_dir)
+            self.assertEqual(config["web_search"], "native")
+
+            result = self._run_cli(runs_dir, "--resume-run", run_root.name)
+            self.assertEqual(result.returncode, 1, msg=result.stderr)
+            config, _ = self._recorded(runs_dir)
+        self.assertEqual(config["web_search"], "native")
+
+    def test_a_resume_with_the_flag_overrides_the_recorded_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runs_dir = Path(tmp) / "runs"
+            self._run_cli(runs_dir, "--goal", "resume overrides", "--web-search", "native")
+            _, run_root = self._recorded(runs_dir)
+
+            result = self._run_cli(runs_dir, "--resume-run", run_root.name, "--web-search", "auto")
+            self.assertEqual(result.returncode, 1, msg=result.stderr)
+            config, _ = self._recorded(runs_dir)
+        self.assertEqual(config["web_search"], "auto")

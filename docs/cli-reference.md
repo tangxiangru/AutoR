@@ -108,12 +108,18 @@ overnight job.
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--web-search {auto,gemini,native}` | `auto` | Which search path the operators use. `gemini` routes searches through the Gemini API's Google Search grounding via `tools/web_search.py`; `native` leaves the backend's own tool in charge; `auto` picks Gemini when it can actually run and falls back to native otherwise. |
+| `--web-search {auto,gemini,native}` | `auto`, or the recorded mode when resuming | Which search path the operators use. `gemini` routes searches through the Gemini API's Google Search grounding via `tools/web_search.py`; `native` leaves the backend's own tool in charge; `auto` picks Gemini when it can actually run and falls back to native otherwise. |
 
 Set `gemini` on deployments where the built-in `WebSearch` tool is disabled —
 notably **Claude Code on Vertex AI** — otherwise Stage 01 has no way to search
 and will either stall or fabricate citations. See
 [ResearchClawBench → Web search](researchclawbench.md#web-search-on-deployments-where-websearch-is-disabled).
+
+The mode is persisted in `run_config.json` and reconciled on resume, like every other
+backend selection. The **mode** is stored, never the resolved backend: `auto` is a
+question about the current environment, and freezing today's answer would make a
+resumed run assert something about the deployment that may no longer be true. A run
+recorded before this field existed reads as `auto`.
 
 #### What "can actually run" means
 
