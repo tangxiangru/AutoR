@@ -289,6 +289,21 @@ class ScriptedSmokeOperator:
             produced.append(relative_to_run(result_path, paths.run_root))
 
         if stage.number >= 6:
+            write_text(
+                paths.round_decision,
+                json.dumps(
+                    {
+                        "decision": "converged",
+                        "rationale": "The smoke comparison clears the decision rule the round declared.",
+                        "what_we_learned": "Retrieval exceeded the retrieval-off baseline by the declared margin.",
+                        "what_changes_next": "",
+                        "negative_result": False,
+                    }
+                ),
+            )
+            produced.append(relative_to_run(paths.round_decision, paths.run_root))
+
+        if stage.number >= 6:
             from src.preregistration import load_preregistration
 
             prereg = load_preregistration(paths)

@@ -74,6 +74,8 @@ class RunPaths:
     hypothesis_manifest: Path
     preregistration: Path
     experimental_protocol: Path
+    research_rounds: Path
+    round_decision: Path
     hypothesis_outcomes: Path
     claim_provenance: Path
     writing_dir: Path
@@ -248,6 +250,8 @@ def build_run_paths(run_root: Path) -> RunPaths:
         hypothesis_manifest=workspace_root / "notes" / "hypothesis_manifest.json",
         preregistration=workspace_root / "notes" / "preregistration.json",
         experimental_protocol=workspace_root / "notes" / "experimental_protocol.json",
+        research_rounds=workspace_root / "notes" / "research_rounds.json",
+        round_decision=workspace_root / "notes" / "round_decision.json",
         hypothesis_outcomes=workspace_root / "results" / "hypothesis_outcomes.json",
         claim_provenance=workspace_root / "artifacts" / "claim_provenance.json",
         writing_dir=workspace_root / "writing",
@@ -1169,9 +1173,12 @@ def validate_stage_artifacts(
 
     # Answering the previous stage's adversarial review. Self-selecting: only
     # Stage 06 (answering 05) and Stage 07 (answering 06) owe anything.
+    from .research_rounds import validate_round_decision
     from .validity_review import validate_validity_response
 
     for problem in validate_validity_response(paths, stage):
+        problems.append(f"{stage.stage_title} {problem}")
+    for problem in validate_round_decision(paths, stage):
         problems.append(f"{stage.stage_title} {problem}")
 
     if stage.number >= 3:

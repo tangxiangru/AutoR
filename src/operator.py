@@ -821,6 +821,30 @@ Original stderr:
                     },
                 )
 
+            # Stage 06+: close the round. The fake hypothesis came out refuted,
+            # so the only honest way to converge is to declare the refutation
+            # the result. A stub that claimed convergence on a supported
+            # hypothesis it never had would model the failure this gate exists
+            # to catch.
+            _write_json(
+                paths.round_decision,
+                {
+                    "decision": "converged",
+                    "rationale": (
+                        "fake-operator mode measures nothing, so no further round would "
+                        "produce a different outcome. Closing the round rather than "
+                        "spending budget on a stub."
+                    ),
+                    "what_we_learned": (
+                        "Nothing about the research question. The run exercised the workflow "
+                        "end to end and the preregistered hypothesis was not supported by the "
+                        "placeholder result."
+                    ),
+                    "what_changes_next": "",
+                    "negative_result": True,
+                },
+            )
+
             # Stage 06+: answer whatever the adversarial reviewer raised against
             # the previous stage. The fake response is `accepted_limitation`,
             # because the fake finding (a single run of a two-row split) is

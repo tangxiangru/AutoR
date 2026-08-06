@@ -43,6 +43,15 @@ from .artifact_index import format_artifact_index_for_prompt, write_artifact_ind
 from .experiment_manifest import format_experiment_manifest_for_prompt, write_experiment_manifest
 from .hypothesis_manifest import write_hypothesis_manifest
 from .validity_review import ValidityReviewer, format_findings_for_prompt
+from .research_rounds import (
+    ROUND_CLOSING_STAGE_NUMBER,
+    read_round_decision,
+    format_round_status,
+    format_rounds_for_prompt,
+    load_rounds,
+    record_round,
+    resume_stage_slug_for,
+)
 from .preregistration import (
     amend_preregistration,
     format_outcomes_for_prompt,
@@ -136,6 +145,7 @@ class ResearchManager:
         review_model: str | None = None,
         unattended: bool = False,
         max_auto_skips: int = 3,
+        max_rounds: int = 1,
         max_stage_attempts: int = MAX_STAGE_ATTEMPTS,
         web_search_context: str | None = None,
         web_search_mode: str | None = None,
@@ -160,6 +170,10 @@ class ResearchManager:
         self._jump_target_stage: StageSpec | None = None
         self.unattended = unattended
         self.max_auto_skips = max_auto_skips
+        #: How many times Stages 03-06 may run. 1 keeps the historical
+        #: single-pass behaviour; the round decision is recorded either way,
+        #: so a one-round run still says whether it converged or just stopped.
+        self.max_rounds = max(1, int(max_rounds))
         # Retries are the cheapest quality lever there is: each one re-runs the stage with the
         # previous attempt's validation errors attached. The ceiling exists to bound a runaway
         # loop, not to save money, so callers with time to spend should raise it.
@@ -1548,6 +1562,8 @@ class ResearchManager:
                 if stage.slug == "04_implementation":
                     self._freeze_preregistration(paths)
                 self._run_validity_review(paths, stage, stage_markdown)
+                if stage.number == ROUND_CLOSING_STAGE_NUMBER:
+                    self._close_round(paths, stage)
                 if stage.slug == "07_writing":
                     output_format = selected_output_format(paths)
                     if self._research_diagram:
@@ -1760,6 +1776,15 @@ class ResearchManager:
                 + format_preregistration_for_prompt(prereg)
                 + "\n"
             )
+        rounds_context = format_rounds_for_prompt(paths)
+        if rounds_context and stage.number >= 2:
+            stage_template = (
+                stage_template.rstrip()
+                + "\n\n# Earlier Research Rounds\n\n"
+                + rounds_context
+                + "\n"
+            )
+
         findings_context = format_findings_for_prompt(paths, stage)
         if findings_context:
             stage_template = (
@@ -2332,6 +2357,76 @@ class ResearchManager:
         if manifest is None:
             raise RuntimeError(f"Could not load run manifest from {paths.run_manifest}")
         return format_manifest_status(manifest)
+
+    def _close_round(self, paths: RunPaths, stage: StageSpec) -> None:
+        """End the round and, if it asked for another and the budget allows, start one.
+
+        The decision is recorded whatever the budget is. A run that wanted
+        another round and could not have one should say so — the alternative is
+        a record indistinguishable from a run that converged.
+        """
+        rounds_so_far = len(load_rounds(paths))
+        pending = read_round_decision(paths)
+        decision = str((pending or {}).get("decision") or "").strip()
+        resume_slug = resume_stage_slug_for(decision)
+        budget_left = rounds_so_far + 1 < self.max_rounds
+        act = bool(resume_slug) and budget_left
+
+        entry = record_round(
+            paths,
+            acted_on=act or not resume_slug,
+            budget_note=(
+                ""
+                if act or not resume_slug
+                else f"round budget spent ({rounds_so_far + 1}/{self.max_rounds})"
+            ),
+        )
+        if entry is None:
+            return
+
+        append_log_entry(
+            paths.logs,
+            f"{stage.slug} round_closed",
+            (
+                f"Round {entry.number} decision: {entry.decision}"
+                + (" (negative result)" if entry.negative_result else "")
+                + f"\nVerdicts: {entry.hypothesis_verdicts or 'none recorded'}"
+                f"\nRationale: {entry.rationale}"
+                + (f"\nNot acted on: {entry.budget_note}" if entry.budget_note else "")
+            ),
+        )
+
+        if not resume_slug:
+            self.ui.show_status(
+                f"Round {entry.number} closed: {entry.decision}"
+                + (" (negative result)" if entry.negative_result else ""),
+                level="info" if entry.decision == "converged" else "warn",
+            )
+            return
+
+        if not budget_left:
+            self.ui.show_status(
+                f"Round {entry.number} wanted to {entry.decision}, but the round budget "
+                f"({self.max_rounds}) is spent. Continuing to writing with that on the record. "
+                "Raise --max-rounds to let the run iterate.",
+                level="warn",
+            )
+            return
+
+        target = next(item for item in STAGES if item.slug == resume_slug)
+        self.ui.show_status(
+            f"Round {entry.number} chose {entry.decision}. Starting round {entry.number + 1} "
+            f"from {target.stage_title}.",
+            level="warn",
+        )
+        self._rollback_and_jump(
+            paths=paths,
+            current_stage=stage,
+            target_stage=target,
+            reason=(
+                f"Round {entry.number} concluded {entry.decision}: {entry.rationale}"
+            ),
+        )
 
     def _run_validity_review(self, paths: RunPaths, stage: StageSpec, stage_markdown: str) -> None:
         """Attack the result once the stage that produced it is approved.
