@@ -638,3 +638,52 @@ class ExportOnlyMetadataTest(unittest.TestCase):
         for key in ("task_id", "run_id", "timestamp", "status", "duration_seconds"):
             self.assertIn(key, meta, key)
         self.assertEqual(meta["status"], "completed")
+
+
+class RecoveredDurationTest(unittest.TestCase):
+    """A run killed by a signal never recorded its duration; zero is the wrong answer.
+
+    The leaderboard derives cost per task from duration, so a multi-hour run recovered
+    as `duration_seconds: 0` is published as having cost nothing.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.workspace = Path(self._tmp.name) / "Physics_003_20260806_052405"
+        self.workspace.mkdir()
+        ensure_workspace_layout(self.workspace)
+        self.paths = build_run_paths(runs_dir_for(self.workspace) / "20260806_052441")
+        ensure_run_layout(self.paths)
+        write_text(self.paths.user_input, "goal")
+        write_text(self.paths.memory, "# Memory\n")
+        write_text(self.paths.stages_dir / "06_analysis.md", "# Stage 06\n\n" + ("Analysis. " * 200))
+
+    def _age_run_tree(self, seconds: int) -> None:
+        import os
+
+        first = self.paths.user_input
+        now = os.path.getmtime(first)
+        os.utime(first, (now - seconds, now - seconds))
+
+    def _meta(self) -> dict:
+        return json.loads((self.workspace / "_meta.json").read_text(encoding="utf-8"))
+
+    def test_duration_is_recovered_from_the_run_tree_span(self) -> None:
+        self._age_run_tree(4000)
+        rcb_agent.main(["--workspace", str(self.workspace), "--export-only", "--no-synthesis"])
+        self.assertGreater(self._meta()["duration_seconds"], 3000)
+
+    def test_a_recorded_duration_still_wins_over_the_estimate(self) -> None:
+        self._age_run_tree(4000)
+        (self.workspace / "_meta.json").write_text(
+            json.dumps({"task_id": "Physics_003", "status": "running", "duration_seconds": 777}),
+            encoding="utf-8",
+        )
+        rcb_agent.main(["--workspace", str(self.workspace), "--export-only", "--no-synthesis"])
+        self.assertEqual(self._meta()["duration_seconds"], 777)
+
+    def test_a_recovered_run_is_never_reported_as_free(self) -> None:
+        self._age_run_tree(4000)
+        rcb_agent.main(["--workspace", str(self.workspace), "--export-only", "--no-synthesis"])
+        self.assertNotEqual(self._meta()["duration_seconds"], 0)
