@@ -644,6 +644,50 @@ Original stderr:
             + chunk(b"IEND", b"")
         )
 
+    @staticmethod
+    def _answer_validity_findings(paths: RunPaths, stage: StageSpec) -> None:
+        """Answer the previous stage's validity findings, honestly.
+
+        Fake mode's single finding — one run of a two-row synthetic split — is
+        entirely correct and the stub cannot fix it, so the honest disposition
+        is `accepted_limitation`. A stub that rebutted a true objection would
+        model the failure the reviewer exists to catch.
+        """
+        from .validity_review import (
+            load_findings,
+            reviewed_stage_for,
+            validity_response_path,
+        )
+
+        reviewed = reviewed_stage_for(stage)
+        if reviewed is None:
+            return
+        findings = load_findings(paths, reviewed)
+        if not findings:
+            return
+        write_text(
+            validity_response_path(paths, reviewed),
+            json.dumps(
+                {
+                    "responses": [
+                        {
+                            "id": item.identifier,
+                            "status": "accepted_limitation",
+                            "explanation": (
+                                "fake-operator mode cannot address this objection, and the "
+                                "objection is correct: nothing in this run was measured. "
+                                "Recorded as a standing limitation rather than rebutted."
+                            ),
+                            "evidence": "",
+                        }
+                        for item in findings
+                    ]
+                },
+                indent=2,
+            )
+            + "\n",
+        )
+
     def _write_fake_stage_artifacts(self, stage: StageSpec, paths: RunPaths) -> list[Path]:
         """Produce the artifacts ``validate_stage_artifacts`` requires at this stage.
 
@@ -777,6 +821,12 @@ Original stderr:
                     },
                 )
 
+            # Stage 06+: answer whatever the adversarial reviewer raised against
+            # the previous stage. The fake response is `accepted_limitation`,
+            # because the fake finding (a single run of a two-row split) is
+            # entirely correct and the stub cannot fix it.
+            self._answer_validity_findings(paths, stage)
+
             # Stage 06+: figures. SVG keeps this a text write with no encoder.
             _write(
                 paths.figures_dir / "fig1_fake_comparison.svg",
@@ -788,6 +838,8 @@ Original stderr:
             )
 
         if stage.number >= 7:
+            self._answer_validity_findings(paths, stage)
+
             # Every claim traces to evidence. With the fake hypothesis refuted,
             # the only honest status left is exploratory — which is the point:
             # the stub cannot manufacture a confirmatory claim.
