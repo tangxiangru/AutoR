@@ -144,6 +144,7 @@ class ResearchManager:
         self.review_model = review_model or getattr(reviewer, "model", getattr(operator, "model", "unknown"))
         self._redo_start_stage: StageSpec | None = None
         self._research_diagram: bool = False
+        self._final_stage: StageSpec | None = None
         self._jump_target_stage: StageSpec | None = None
         self.unattended = unattended
         self.max_auto_skips = max_auto_skips
@@ -160,8 +161,10 @@ class ResearchManager:
         project_root: Path | None = None,
         paper_corpus: Path | None = None,
         output_format: str | None = None,
+        final_stage: StageSpec | None = None,
     ) -> bool:
         self._research_diagram = research_diagram
+        self._final_stage = final_stage
         paths = self._create_run(
             user_goal, venue=venue, resources=resources, output_format=output_format
         )
@@ -210,8 +213,10 @@ class ResearchManager:
         venue: str | None = None,
         research_diagram: bool = False,
         output_format: str | None = None,
+        final_stage: StageSpec | None = None,
     ) -> bool:
         self._research_diagram = research_diagram
+        self._final_stage = final_stage
         paths = build_run_paths(run_root)
         ensure_run_layout(paths)
         # Reinstalled on resume so a run picks up skill edits without needing a
@@ -366,12 +371,18 @@ class ResearchManager:
         paths: RunPaths,
         start_stage: StageSpec | None,
     ) -> list[StageSpec]:
+        # A run that only has to produce a scored deliverable has no reason to pay for the
+        # stages after it; the caller says where the deliverable is finished.
+        last = self._final_stage.number if self._final_stage is not None else STAGES[-1].number
+
         if start_stage is not None:
-            return [stage for stage in STAGES if stage.number >= start_stage.number]
+            return [stage for stage in STAGES if start_stage.number <= stage.number <= last]
 
         manifest = ensure_run_manifest(paths)
         pending: list[StageSpec] = []
         for stage in STAGES:
+            if stage.number > last:
+                break
             entry = next(entry for entry in manifest.stages if entry.slug == stage.slug)
             if entry.settled:
                 continue

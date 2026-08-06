@@ -75,13 +75,54 @@ After the pipeline finishes — **whether or not it succeeded** — the adapter 
 | Benchmark path | Source |
 |:---|:---|
 | `report/report.md` | see below |
-| `report/images/*.png` | `workspace/report/images` first, then `figures`, `writing`, `results`, `artifacts` (PNG only) |
+| `report/images/*.png` | `workspace/report/images` first, then `figures`, `writing`, `results`, `artifacts` (PNG only, capped — see below) |
 | `code/` | `workspace/code` |
-| `outputs/` | `workspace/results` and `workspace/notes` |
+| `outputs/` | `workspace/results` and `workspace/notes`, **images excluded** |
 
 Run-tree figures under `report/images/` keep their filenames, because those are the names
 `report.md` references. A same-named figure swept up from elsewhere is the one that gets
 qualified.
+
+#### The five image slots
+
+This is where most of the score is. Across the 40 shipped tasks, 91 of 154 checklist items
+are `type: image` and they carry **60.6% of total weight** (median 62%; images are the
+majority of weight in 25 of 40 tasks). The scorer shows the judge at most five agent images
+per item:
+
+```python
+for search_dir in [workspace / "outputs", workspace / "report"]:   # outputs first
+    for ext in IMAGE_EXTENSIONS:
+        images.extend(search_dir.rglob(f"*{ext}"))                 # filesystem order
+...
+for img in generated_images[:5]:
+```
+
+Two consequences drive the export:
+
+1. **`outputs/` is drained before `report/`.** A diagnostic plot left in `workspace/results`
+   would take a slot from a figure the report argues with, so images are excluded from the
+   `outputs/` mirror entirely. The machine-readable results still go across.
+2. **`rglob` order is filesystem order, not alphabetical.** Naming cannot influence which
+   five survive. The only lever is publishing no more than five — so `collect_figures`
+   enforces `MAX_REPORT_FIGURES`, picks by the report's own reference order, and prunes
+   anything else already at the benchmark path. A figure the report references is never
+   pruned; Stage 07's gate is what keeps a run from arriving over budget.
+
+A sixth figure does not add a sixth chance to match. It randomises which five are seen.
+
+#### Reference papers
+
+Every task ships curated PDFs in `related_work/`. They are registered as run resources, so
+they land in `workspace/literature/` where Stage 01 reads them, and each one is named
+individually in the goal contract. Without this the literature survey searches the web and
+cannot cite the very work it is reproducing.
+
+#### Where the run stops
+
+`--final-stage` defaults to `07_writing`. Stage 08 produces posters, slides, release notes
+and readiness checklists that the judge never opens; the wall-clock is better spent on
+analysis. Pass `--final-stage 08_dissemination` for the full workflow.
 
 The report comes from the first of four paths that yields real content:
 
@@ -92,7 +133,9 @@ The report comes from the first of four paths that yields real content:
 3. **`synthesized`** — one extra operator call converts the approved artifacts into the
    benchmark's markdown format. This is what a `latex` run uses.
 4. **`fallback`** — pure-Python assembly from the approved stage summaries, with any
-   auto-skipped stages named explicitly.
+   auto-skipped stages named explicitly. AutoR's own control-loop headings
+   (`Your Options`, `Decision Ledger`, `Previously Approved Stage Summaries`) are stripped:
+   a judge told to be skeptical reads them as an agent's run log, not as research.
 
 A partial report scores better than no report, so a crashed or incomplete pipeline still
 exports everything it produced. The exit code tracks whether a report reached the harness,
@@ -107,13 +150,14 @@ not whether every stage was approved.
 | Figures | `workspace/report/images/*.png`, referenced as `images/<name>.png` | `workspace/figures`, `\includegraphics` |
 | Triage artifact | `artifacts/report_review.json` | `artifacts/layout_review.json` |
 | Also required | `citation_verification.json`, `self_review.json` | same, plus `build_log.txt` and a `.bib` |
+| Figure budget | at most 5, all referenced | none |
 | Post-approval | — | `writing/paper_package/` bundle |
 
 The markdown gates are not "a file exists". Stage 07 fails and retries if `report.md` is
 shorter than 1,200 characters, references no figures, still holds placeholder text, or
 carries a figure reference that is absolute, remote, unrenderable, or points at a file that
-is not there. A broken figure link is the expensive defect here: the judge reads the prose
-promising a figure and is shown nothing.
+is not there, or publishes more than five figures. A broken figure link is the expensive
+defect here: the judge reads the prose promising a figure and is shown nothing.
 
 ### 3. Streams progress
 
@@ -207,6 +251,8 @@ The search model defaults to `gemini-2.5-flash` and is overridable with
                          Stage 07's deliverable. Default: markdown, which writes
                          report/report.md directly. Use latex to produce the paper package
                          and leave the report to the synthesis step.
+--final-stage STAGE      Stop after this stage. Default: 07_writing, because Stage 08
+                         produces nothing the judge reads.
 --web-search {auto,gemini,native}
 --no-synthesis           Skip the operator-backed report synthesis pass.
 --export-only            Re-export the latest run without re-running the pipeline. Use this

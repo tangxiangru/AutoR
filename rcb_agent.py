@@ -37,6 +37,7 @@ from src.operator import ClaudeOperator  # noqa: E402
 from src.operator_codex import CodexOperator  # noqa: E402
 from src.rcb import (  # noqa: E402
     BenchmarkResult,
+    collect_reference_resources,
     infer_task_id,
     write_run_meta,
     ReportSynthesizer,
@@ -54,12 +55,16 @@ from src.utils import (  # noqa: E402
     DEFAULT_VENUE,
     OUTPUT_FORMAT_CLI_CHOICES,
     resolve_output_format,
+    resolve_stage,
     resolve_venue_key,
 )
 from src.web_search import resolve_web_search_context, web_search_notice  # noqa: E402
 
 
 DEFAULT_STAGE_TIMEOUT = 3600
+#: The benchmark scores report/report.md, which Stage 07 writes. Everything after it is
+#: wall-clock spent on artifacts the judge never opens.
+DEFAULT_FINAL_STAGE = "07_writing"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -116,6 +121,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "is the file the benchmark scores; 'latex' produces the paper package instead and "
              "leaves the report to the export step. "
              f"Defaults to {DEFAULT_OUTPUT_FORMAT}.",
+    )
+    parser.add_argument(
+        "--final-stage",
+        default=DEFAULT_FINAL_STAGE,
+        metavar="STAGE",
+        help="Stop after this stage. Defaults to "
+             f"{DEFAULT_FINAL_STAGE}: the benchmark scores report/report.md, and Stage 08 "
+             "(dissemination) only produces posters, slides and release notes that the judge "
+             "never reads. Pass '08_dissemination' to run the full workflow.",
     )
     parser.add_argument(
         "--stage-timeout",
@@ -272,6 +286,8 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
             venue=resolve_venue_key(args.venue),
             skip_intake=not args.intake,
             output_format=output_format,
+            resources=collect_reference_resources(workspace) or None,
+            final_stage=resolve_stage(args.final_stage),
         )
     except Exception:  # noqa: BLE001 - a crashed pipeline must still export what it produced
         emit_event({"type": "error", "where": "pipeline", "traceback": traceback.format_exc()})
