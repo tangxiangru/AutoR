@@ -121,6 +121,32 @@ question about the current environment, and freezing today's answer would make a
 resumed run assert something about the deployment that may no longer be true. A run
 recorded before this field existed reads as `auto`.
 
+#### How the agent reaches it
+
+With `--operator claude`, search is handed over as a **real MCP tool**,
+`mcp__autor-search__web_search`, not as a prompt paragraph asking the agent to
+remember to run a script. AutoR adds `--mcp-config` pointing at a config it writes
+to `operator_state/mcp_config.json` inside the run, so the run records what tools
+its agent was given, not only what it was told.
+
+Two things follow from it being a tool rather than an instruction:
+
+- **The model reaches for it.** A tool in the tool list competes far better than a
+  paragraph in a long prompt.
+- **Every search is legible in the trace.** `logs_raw.jsonl` shows a named call with
+  structured arguments, instead of an opaque shell command indistinguishable from
+  the hundreds of others a stage runs.
+
+A failed or ungrounded search comes back as an MCP tool *error* rather than a
+protocol error, so the model can read the reason and retry instead of the call
+simply ending.
+
+`--strict-mcp-config` is deliberately **not** passed: that would also drop whatever
+MCP servers you have configured for your own environment.
+
+`--operator codex` gets the shell command instead, which remains the documented
+fallback and is what `tools/web_search.py` is for.
+
 #### What "can actually run" means
 
 Injecting the search block tells every stage prompt that the built-in `WebSearch`
