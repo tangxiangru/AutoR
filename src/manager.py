@@ -117,6 +117,9 @@ class ResearchManager:
         approval_mode: str = "manual",
         review_operator: str | None = None,
         review_model: str | None = None,
+        unattended: bool = False,
+        max_auto_skips: int = 3,
+        web_search_context: str | None = None,
     ) -> None:
         self.project_root = project_root
         self.runs_dir = runs_dir
@@ -133,6 +136,10 @@ class ResearchManager:
         self._redo_start_stage: StageSpec | None = None
         self._research_diagram: bool = False
         self._jump_target_stage: StageSpec | None = None
+        self.unattended = unattended
+        self.max_auto_skips = max_auto_skips
+        self.auto_skipped_stages: list[str] = []
+        self.web_search_context = web_search_context
 
     def run(
         self,
@@ -1625,12 +1632,14 @@ class ResearchManager:
                 intake_context_text=intake_context_text,
                 attempt_no=attempt_no,
                 previous_validation_errors=previous_validation_errors,
+                web_search_context=self.web_search_context,
             )
 
         user_request = read_text(paths.user_input)
         return build_prompt(
             stage, stage_template, user_request, approved_memory, handoff_context, revision_feedback,
             intake_context_text=intake_context_text,
+            web_search_context=self.web_search_context,
         )
 
     def _display_stage_output(self, stage: StageSpec, markdown: str) -> None:
@@ -1804,6 +1813,14 @@ class ResearchManager:
         attempt_no: int,
         last_validation_errors: list[str],
     ) -> bool:
+        if self.unattended:
+            return self._handle_unattended_stage_exhaustion(
+                paths=paths,
+                stage=stage,
+                attempt_no=attempt_no,
+                last_validation_errors=last_validation_errors,
+            )
+
         input_is_tty = getattr(self.ui.input_stream, "isatty", lambda: False)()
         if not input_is_tty:
             return False
@@ -1856,6 +1873,74 @@ class ResearchManager:
             if choice == "3":
                 return False
             self.ui.show_status("Invalid choice. Enter 1, 2, or 3.", level="warn")
+
+    def _handle_unattended_stage_exhaustion(
+        self,
+        *,
+        paths: RunPaths,
+        stage: StageSpec,
+        attempt_no: int,
+        last_validation_errors: list[str],
+    ) -> bool:
+        """Recover from an exhausted stage with no human available to choose.
+
+        Aborting here would throw away every earlier stage, so a bounded number of stages are
+        auto-skipped instead. The skip is promoted as an explicit skip summary, which keeps the
+        downstream stages honest about what is missing.
+        """
+        errors_note = (
+            "\n".join(f"- {problem}" for problem in last_validation_errors)
+            if last_validation_errors
+            else "- (no validation errors were recorded)"
+        )
+
+        if len(self.auto_skipped_stages) >= self.max_auto_skips:
+            append_log_entry(
+                paths.logs,
+                f"{stage.slug} unattended_abort",
+                (
+                    "Unattended run aborted: the auto-skip budget is exhausted.\n"
+                    f"auto_skip_budget: {self.max_auto_skips}\n"
+                    f"already_skipped: {', '.join(self.auto_skipped_stages)}\n"
+                    f"last validation errors:\n{errors_note}"
+                ),
+            )
+            self.ui.show_status(
+                (
+                    f"{stage.stage_title} exhausted its retries and the unattended auto-skip budget "
+                    f"({self.max_auto_skips}) is already spent. Aborting."
+                ),
+                level="error",
+            )
+            return False
+
+        self.auto_skipped_stages.append(stage.slug)
+        append_log_entry(
+            paths.logs,
+            f"{stage.slug} unattended_auto_skip",
+            (
+                "Unattended run auto-skipped this stage after bounded retries were exhausted.\n"
+                f"auto_skip_used: {len(self.auto_skipped_stages)}/{self.max_auto_skips}\n"
+                f"last validation errors:\n{errors_note}"
+            ),
+        )
+        self.ui.show_status(
+            (
+                f"{stage.stage_title} exhausted its retries. Unattended mode auto-skipped it "
+                f"({len(self.auto_skipped_stages)}/{self.max_auto_skips}) and will continue."
+            ),
+            level="warn",
+        )
+        return self._skip_stage(
+            paths=paths,
+            stage=stage,
+            attempt_no=attempt_no,
+            reason=(
+                "Unattended mode auto-skipped this stage after the bounded retry window was "
+                "exhausted. No human was available to choose a recovery action. "
+                "Downstream stages must treat this stage's output as missing, not as approved work."
+            ),
+        )
 
     def _parse_stage_jump_command(self, command_text: str, current_stage: StageSpec) -> StageSpec | None:
         parts = command_text.strip().split(maxsplit=1)

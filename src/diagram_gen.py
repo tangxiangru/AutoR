@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-import os
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -43,23 +42,14 @@ def _get_gemini_client():
 
 
 def _resolve_api_key() -> str | None:
-    """Resolve Gemini API key from env vars or config file (never hardcoded)."""
-    for env_var in ("GOOGLE_API_KEY", "GEMINI_API_KEY"):
-        val = os.environ.get(env_var, "").strip()
-        if val:
-            return val
+    """Resolve Gemini API key from env vars or config file (never hardcoded).
 
-    config_path = Path(__file__).resolve().parent.parent / "configs" / "diagram_config.yaml"
-    if config_path.exists():
-        import yaml
-        with open(config_path, "r", encoding="utf-8") as fh:
-            cfg = yaml.safe_load(fh) or {}
-        api_keys = cfg.get("api_keys", {})
-        for key_name in ("google_api_key", "gemini_api_key"):
-            val = (api_keys.get(key_name) or "").strip()
-            if val:
-                return val
-    return None
+    Delegates to :func:`src.web_search.resolve_gemini_api_key` so diagram generation and
+    web search cannot disagree about where a Gemini key lives.
+    """
+    from .web_search import resolve_gemini_api_key
+
+    return resolve_gemini_api_key()
 
 
 # ---------------------------------------------------------------------------

@@ -11,6 +11,7 @@ from src.operator import ClaudeOperator
 from src.operator_codex import CodexOperator
 from src.operator_protocol import OperatorProtocol
 from src.terminal_ui import TerminalUI
+from src.web_search import build_web_search_prompt_section, resolve_gemini_api_key
 from src.utils import (
     CODEX_SANDBOX_CHOICES,
     DEFAULT_CODEX_SANDBOX,
@@ -28,6 +29,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--goal",
         help="Research goal. If omitted, the goal is collected from terminal input.",
+    )
+    parser.add_argument(
+        "--goal-file",
+        metavar="PATH",
+        help="Read the research goal from a file instead of --goal or terminal input. "
+             "Useful for unattended runs whose goal is too long for a shell argument.",
     )
     parser.add_argument(
         "--runs-dir",
@@ -69,7 +76,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--full-auto",
         action="store_true",
-        help="Shortcut for --approval-mode agent. AutoR will use a strict reviewer agent instead of waiting for manual approval.",
+        help="Shortcut for --approval-mode agent plus --unattended. AutoR will use a strict reviewer "
+             "agent instead of waiting for manual approval, and will never block on terminal input.",
+    )
+    parser.add_argument(
+        "--unattended",
+        action="store_true",
+        help="Never block on terminal input. Interactive prompts become hard errors instead of "
+             "waiting for a human, and an exhausted stage is auto-skipped rather than aborting the run. "
+             "Implied by --full-auto and by --approval-mode agent.",
+    )
+    parser.add_argument(
+        "--max-auto-skips",
+        type=int,
+        default=3,
+        help="In unattended mode, the maximum number of stages that may be auto-skipped after "
+             "exhausting their retry budget before the run aborts. Defaults to 3.",
     )
     parser.add_argument(
         "--review-operator",
@@ -79,6 +101,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--review-model",
         help="Model alias or full model name for the automated reviewer backend. Defaults to the reviewer backend default.",
+    )
+    parser.add_argument(
+        "--web-search",
+        choices=["auto", "gemini", "native"],
+        default="auto",
+        help=(
+            "How operators should search the web. 'gemini' routes searches through the Gemini "
+            "API's Google Search grounding via tools/web_search.py, which is required on "
+            "deployments where the built-in WebSearch tool is disabled (for example Claude Code "
+            "on Vertex AI). 'native' leaves the backend's own search tool in charge. 'auto' "
+            "(default) uses Gemini when a Gemini API key is available and falls back to native."
+        ),
     )
     parser.add_argument(
         "--venue",
@@ -208,6 +242,49 @@ def resolve_resume_run(runs_dir: Path, value: str) -> Path:
     return run_root
 
 
+def resolve_unattended(args: argparse.Namespace) -> bool:
+    """Decide whether this invocation is allowed to block on terminal input.
+
+    `--full-auto` and `--approval-mode agent` both replace the human approval gate with a
+    reviewer agent, so neither has anyone left to answer a prompt.
+    """
+    return bool(args.unattended or args.full_auto or args.approval_mode == "agent")
+
+
+def resolve_web_search_context(mode: str) -> str | None:
+    """Return the prompt block for the Gemini search tool, or None to keep native search.
+
+    'auto' degrades to native search when no Gemini key is configured, so the default path
+    never advertises a tool that would fail on first use.
+    """
+    if mode == "native":
+        return None
+    if mode == "auto" and not resolve_gemini_api_key():
+        return None
+    return build_web_search_prompt_section()
+
+
+def resolve_goal(args: argparse.Namespace, *, unattended: bool) -> str:
+    if args.goal and args.goal_file:
+        raise ValueError("--goal and --goal-file are mutually exclusive.")
+
+    if args.goal_file:
+        goal = Path(args.goal_file).expanduser().read_text(encoding="utf-8").strip()
+        if not goal:
+            raise ValueError(f"Goal file is empty: {args.goal_file}")
+        return goal
+
+    if args.goal:
+        return args.goal.strip()
+
+    if unattended:
+        raise ValueError(
+            "Unattended runs cannot prompt for a research goal. Pass --goal or --goal-file."
+        )
+
+    return read_user_goal()
+
+
 def read_user_goal() -> str:
     print("Enter your research goal. Finish with an empty line on a new line:")
     lines: list[str] = []
@@ -254,7 +331,9 @@ def main() -> int:
     args = parse_args()
     repo_root = Path(__file__).resolve().parent
     runs_dir = repo_root / args.runs_dir
-    ui = TerminalUI()
+    unattended = resolve_unattended(args)
+    web_search_context = resolve_web_search_context(args.web_search)
+    ui = TerminalUI(interactive=not unattended)
     ui.show_banner()
 
     if args.resume_run:
@@ -276,6 +355,9 @@ def main() -> int:
             model = (existing_model if existing_model != "unknown" else None) or default_model_for_operator(operator_name)
         codex_sandbox = args.codex_sandbox or existing_config.get("codex_sandbox") or DEFAULT_CODEX_SANDBOX
         approval_mode = "agent" if args.full_auto else (args.approval_mode or existing_config.get("approval_mode") or "manual")
+        if approval_mode == "agent":
+            unattended = True
+            ui.interactive = False
         review_operator = (args.review_operator or existing_config.get("review_operator") or operator_name).strip().lower()
         existing_review_model = existing_config.get("review_model")
         if args.review_model:
@@ -313,6 +395,9 @@ def main() -> int:
             approval_mode=approval_mode,
             review_operator=review_operator,
             review_model=review_model,
+            unattended=unattended,
+            max_auto_skips=args.max_auto_skips,
+            web_search_context=web_search_context,
         )
         return 0 if manager.resume_run(
             run_root,
@@ -355,16 +440,21 @@ def main() -> int:
         approval_mode=approval_mode,
         review_operator=review_operator,
         review_model=review_model,
+        unattended=unattended,
+        max_auto_skips=args.max_auto_skips,
+        web_search_context=web_search_context,
     )
 
-    goal = args.goal.strip() if args.goal else read_user_goal()
+    goal = resolve_goal(args, unattended=unattended)
     skip_intake = args.skip_intake or not sys.stdin.isatty()
 
-    # Collect resources: from --resources flag, and optionally from interactive prompt
+    # Collect resources: from --resources flag, and optionally from interactive prompt.
+    # The interactive prompt is skipped unattended even on a TTY: RCB-style harnesses hand the
+    # agent the launching terminal's stdin, so this prompt would otherwise silently block.
     resources: list[ResourceEntry] = []
     if args.resources:
         resources = _build_resource_entries(args.resources)
-    if not skip_intake and sys.stdin.isatty():
+    if not skip_intake and not unattended and sys.stdin.isatty():
         resources = collect_resource_paths_from_ui(ui, initial_resources=args.resources)
 
     project_root_arg = Path(args.project_root).expanduser().resolve() if args.project_root else None

@@ -13,6 +13,7 @@ docs/
 docs/*
 !docs/tutorial_zh.md
 !docs/tutorial_en.md
+!docs/researchclawbench.md
 !docs/ui-design/
 !docs/ui-design/**
 docs/ui-design/.DS_Store

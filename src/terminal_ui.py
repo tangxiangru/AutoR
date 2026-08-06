@@ -9,6 +9,17 @@ import unicodedata
 from typing import Any, TextIO
 
 
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+class UnattendedInputError(RuntimeError):
+    """Raised when an unattended run reaches a prompt that would block on a human.
+
+    Unattended AutoR must never wait on stdin. Any prompt that survives is a bug in
+    the automation path, so it fails loudly with the prompt text instead of hanging.
+    """
+
+
 class TerminalUI:
     RESET = "\x1b[0m"
     BOLD = "\x1b[1m"
@@ -27,9 +38,11 @@ class TerminalUI:
         self,
         output_stream: TextIO = sys.stdout,
         input_stream: TextIO = sys.stdin,
+        interactive: bool = True,
     ) -> None:
         self.output_stream = output_stream
         self.input_stream = input_stream
+        self.interactive = interactive
 
     def show_run_started(self, run_root: str, model: str, venue: str, resumed: bool = False) -> None:
         action = "Resume Run" if resumed else "Start Run"
@@ -826,6 +839,11 @@ class TerminalUI:
         return min(max(columns, 20), 118)
 
     def _read_line(self, prompt: str = "") -> str:
+        if not self.interactive:
+            raise UnattendedInputError(
+                "AutoR is running unattended and cannot answer an interactive prompt: "
+                + (ANSI_ESCAPE_RE.sub("", prompt).strip() or "(unlabelled prompt)")
+            )
         if prompt:
             self._write(prompt)
         line = self.input_stream.readline()
@@ -844,6 +862,8 @@ class TerminalUI:
         return os.environ.get("TERM", "").lower() != "dumb"
 
     def _interactive_input_available(self) -> bool:
+        if not self.interactive:
+            return False
         return hasattr(self.input_stream, "isatty") and self.input_stream.isatty()
 
     def _read_key(self) -> str:

@@ -287,10 +287,12 @@ AI handles execution load; humans steer the research when direction actually mat
 | Resume the latest run | `python main.py --resume-run latest` |
 | Redo a stage inside the same run | `python main.py --resume-run 20260329_210252 --redo-stage 03` |
 | Roll back to a stage inside the same run | `python main.py --resume-run 20260329_210252 --rollback-stage 03` |
+| Search the web where the agent's own `WebSearch` is disabled | `python main.py --web-search gemini --goal "Your research goal here"` |
+| Benchmark AutoR on ResearchClawBench | `python rcb_agent.py --workspace <WORKSPACE> --prompt <PROMPT>` |
 
 If `--venue` is omitted, AutoR defaults to `neurips_2025`.
 
-`--full-auto` does not change the stage pipeline. It only replaces the manual approval menu with a strict reviewer agent. This is useful for unattended sweeps, overnight runs, and dry-run automation, but the default human-reviewed mode is still the recommended path for serious research work.
+`--full-auto` does not change the stage pipeline. It only replaces the manual approval menu with a strict reviewer agent, and puts the run into unattended mode so it never blocks on terminal input. This is useful for unattended sweeps, overnight runs, and dry-run automation, but the default human-reviewed mode is still the recommended path for serious research work.
 
 For Codex-backed runs, AutoR defaults to `--codex-sandbox workspace-write`. If a verified remote experiment needs SSH or external GPU access, use `--codex-sandbox danger-full-access` intentionally. This grants the Codex backend unrestricted local/remote execution ability, so it should not be the default for untrusted tasks.
 
@@ -434,6 +436,17 @@ flowchart TD
 - Stages 01-08 use the standard six-action review menu: `1 / 2 / 3` continue with an AI refinement suggestion, `4` continues with custom feedback, `5` approves, and `6` aborts.
 
 The stage loop is controlled by AutoR, not by Claude.
+
+### Unattended runs
+
+`--full-auto` (or `--unattended`) removes the human entirely, which is what benchmark harnesses and overnight sweeps need:
+
+- The reviewer agent decides every approval, including the Stage 00 intake flow.
+- The resource prompt is skipped even on a TTY. Pass resources with `--resources` instead.
+- A stage that exhausts its retry budget is auto-skipped rather than aborting the run, bounded by `--max-auto-skips` (default 3). The skip is promoted as an explicit skip summary so downstream stages know the work is missing.
+- Any interactive prompt still reachable raises `UnattendedInputError` instead of waiting on stdin — a prompt added later fails on its first unattended run rather than silently hanging an overnight job.
+
+`python rcb_agent.py` runs AutoR against a [ResearchClawBench](https://github.com/InternScience/ResearchClawBench) workspace on this basis and exports the benchmark's deliverables (`report/report.md`, `report/images/`, `code/`, `outputs/`). See [docs/researchclawbench.md](docs/researchclawbench.md).
 
 ## ✅ Validation Bar
 
