@@ -101,7 +101,13 @@ from .stage_graph import (
 from .diagram_gen import post_writing_diagram_hook
 from .terminal_ui import TerminalUI
 from .platform.foundry import generate_paper_package, generate_release_package
-from .ideation_panel import IdeationPanel, format_pool_for_prompt, record_idea_pool
+from .ideation_panel import (
+    IdeationPanel,
+    format_pool_for_prompt,
+    load_idea_pool,
+    measure_adoption,
+    record_idea_pool,
+)
 from .writing_manifest import (
     build_writing_manifest,
     format_manifest_for_prompt,
@@ -577,6 +583,21 @@ class ResearchManager:
 
         record_idea_pool(paths, pool, stage, attempt_no)
         return format_pool_for_prompt(pool)
+
+    def _measure_pool_adoption(self, paths: RunPaths, stage: StageSpec, stage_markdown: str) -> None:
+        """Record which pooled hypotheses the approved stage actually built on.
+
+        Runs whether or not this run seated an ideation panel — a pool written by an earlier
+        resumed attempt still deserves its outcome measured. Best-effort throughout: the
+        stage is already approved, and nothing here may unapprove it.
+        """
+        try:
+            pool = load_idea_pool(paths)
+            if pool is None or not pool.distinct:
+                return
+            record_idea_pool(paths, measure_adoption(pool, stage_markdown), stage, 0)
+        except Exception as exc:  # noqa: BLE001 - measurement must not disturb an approval
+            append_log_entry(paths.logs, f"{stage.slug} idea_pool_adoption_failed", str(exc))
 
     def _generate_writing_review(self, paths: RunPaths) -> dict[str, object]:
         """Produce the Stage 07 triage artifact that matches this run's output format.
@@ -1831,6 +1852,8 @@ class ResearchManager:
                     attempt_no,
                     self._stage_file_paths(stage_markdown),
                 )
+                if stage.slug == "02_hypothesis_generation":
+                    self._measure_pool_adoption(paths, stage, stage_markdown)
                 if stage.slug == "04_implementation":
                     self._freeze_preregistration(paths)
                 self._run_validity_review(paths, stage, stage_markdown)

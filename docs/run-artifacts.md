@@ -822,6 +822,20 @@ Required: non-empty string `overall_status`; booleans `pdf_available` and
 Validated by `validate_layout_review` in
 [`src/writing_manifest.py`](../src/writing_manifest.py).
 
+### `workspace/notes/idea_pool.json`
+
+Written only when `--ideation-panel` is active. The Stage 02 candidate pool, with every
+proposal, which ones were folded in as restatements, their novelty/feasibility/relevance
+scores, and an `effect` block.
+
+`effect` answers two separate questions. Before Stage 02 is approved it can only report
+whether the panel **widened** anything (`added_by_other_proposers`); afterwards it also
+reports whether anything was **used** (`adopted`, `adopted_from_other_proposers`,
+`adoption_measured`). Its `verdict` is one sentence, written to be unflattering when that is
+the truth. A readable `idea_pool.md` sits beside it.
+
+See [Ideation Panel](ideation-panel.md).
+
 ### `workspace/reviews/panel/`
 
 Written only when `--review-panel` is active. Per gate, `<stage>_attempt_NN.json` and a

@@ -142,6 +142,8 @@ class Candidate:
     feasibility: float | None = None
     relevance: float | None = None
     duplicate_of: str | None = None
+    #: Filled after Stage 02 is approved: did the stage actually build on this candidate?
+    adopted: bool | None = None
 
     @property
     def mean_score(self) -> float | None:
@@ -173,6 +175,10 @@ class IdeaPool:
             key=lambda c: (c.mean_score is None, -(c.mean_score or 0.0)),
         )
 
+    @property
+    def adoption_measured(self) -> bool:
+        return any(candidate.adopted is not None for candidate in self.distinct)
+
     def effect(self) -> dict[str, Any]:
         """What the extra proposers added over the first one.
 
@@ -195,7 +201,18 @@ class IdeaPool:
             "abstentions": len(self.abstentions),
             "unreachable": len(self.unreachable),
             "proposer_calls": self.proposer_calls,
-            "verdict": _pool_verdict(len(distinct), len(added), self.proposer_calls),
+            "adoption_measured": self.adoption_measured,
+            "adopted": sum(1 for c in distinct if c.adopted),
+            "adopted_from_baseline_proposer": sum(1 for c in from_baseline if c.adopted),
+            "adopted_from_other_proposers": sum(1 for c in added if c.adopted),
+            "verdict": _pool_verdict(
+                distinct=len(distinct),
+                added=len(added),
+                calls=self.proposer_calls,
+                adoption_measured=self.adoption_measured,
+                adopted=sum(1 for c in distinct if c.adopted),
+                adopted_from_others=sum(1 for c in added if c.adopted),
+            ),
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -208,18 +225,56 @@ class IdeaPool:
         }
 
 
-def _pool_verdict(distinct: int, added: int, calls: int) -> str:
+def _pool_verdict(
+    *,
+    distinct: int,
+    added: int,
+    calls: int,
+    adoption_measured: bool = False,
+    adopted: int = 0,
+    adopted_from_others: int = 0,
+) -> str:
+    """One sentence about what the panel produced, and — once known — what was used.
+
+    Widening and being useful are different claims, and the multi-agent feedback literature
+    turns on the distinction: authors ranking reports measured *perceived* usefulness "rather
+    than realized improvement", and AgentPanel's own conclusion is that its ideas "remain
+    speculative candidates that require expert validation". Until Stage 02 has actually been
+    approved this can only report the first claim, and it says which one it is making.
+    """
     if distinct == 0:
         return "No candidate hypotheses survived; the stage proceeds without a pool."
+
     if added == 0:
-        return (
+        widened = (
             f"All {distinct} distinct hypotheses came from the baseline proposer; the other "
             f"proposers restated it, at {calls} proposer calls. On this run the panel widened "
             "nothing — consider --ideation-lenses with fewer seats, or dropping it."
         )
+    else:
+        widened = (
+            f"{added} of {distinct} distinct hypotheses came from proposers beyond the "
+            f"baseline, at {calls} proposer calls."
+        )
+
+    if not adoption_measured:
+        return widened + " Whether any of them were used is not yet measured."
+    if adopted == 0:
+        return (
+            widened
+            + " Stage 02 adopted none of them and generated its own hypotheses instead, so the "
+            "pool cost its calls and changed nothing."
+        )
+    if adopted_from_others == 0:
+        return (
+            widened
+            + f" Stage 02 adopted {adopted}, all from the baseline proposer — a single pass "
+            "would have supplied everything the stage used."
+        )
     return (
-        f"{added} of {distinct} distinct hypotheses came from proposers beyond the baseline, "
-        f"at {calls} proposer calls."
+        widened
+        + f" Stage 02 adopted {adopted}, {adopted_from_others} of them from proposers beyond "
+        "the baseline."
     )
 
 
@@ -527,6 +582,76 @@ def _excerpt(path) -> str:
 # ---------------------------------------------------------------------------
 # Artifacts and prompt injection
 # ---------------------------------------------------------------------------
+
+
+#: A pooled hypothesis counts as adopted when some paragraph of the approved stage summary
+#: overlaps it this much. Lower than :data:`DUPLICATE_THRESHOLD` on purpose: a stage that took
+#: a candidate is expected to sharpen and re-word it, not paste it, so the bar for "this is the
+#: same hypothesis, developed" sits below the bar for "these two proposers said one thing".
+ADOPTION_THRESHOLD = 0.35
+
+
+def _paragraphs(markdown: str) -> list[str]:
+    """Split an approved stage summary into the units a hypothesis could live in."""
+    blocks: list[str] = []
+    for block in re.split(r"\n\s*\n", markdown):
+        cleaned = re.sub(r"^[#>\-*\d.\s]+", "", block.strip())
+        if len(cleaned) >= 40:
+            blocks.append(cleaned)
+    return blocks
+
+
+def measure_adoption(pool: IdeaPool, stage_markdown: str, threshold: float = ADOPTION_THRESHOLD) -> IdeaPool:
+    """Mark which pooled candidates the approved stage actually built on.
+
+    This is the measurement both papers say is missing. Havranek and Irsova had authors rank
+    *perceived* usefulness and note plainly that it is not realized improvement; AgentPanel
+    ends on its ideas being "speculative candidates that require expert validation". A pool
+    that widened the options and was then ignored has not helped, and until this runs the pool
+    cannot tell those two outcomes apart.
+
+    Deliberately textual and local rather than a model call. Asking a model whether a stage
+    used an idea it was shown invites it to say yes, which is the failure this measurement
+    exists to detect.
+    """
+    blocks = _paragraphs(stage_markdown)
+    measured: list[Candidate] = []
+    for candidate in pool.candidates:
+        if candidate.duplicate_of is not None:
+            measured.append(candidate)
+            continue
+        best = max((similarity(candidate.statement, block) for block in blocks), default=0.0)
+        measured.append(Candidate(**{**candidate.__dict__, "adopted": best >= threshold}))
+    pool.candidates = measured
+    return pool
+
+
+def load_idea_pool(paths: RunPaths) -> IdeaPool | None:
+    """Rebuild the pool written earlier in this stage, or None when there is not one."""
+    path = paths.notes_dir / IDEA_POOL_FILENAME
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(read_text(path))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict) or not isinstance(payload.get("candidates"), list):
+        return None
+
+    fields = set(Candidate.__dataclass_fields__)
+    candidates = [
+        Candidate(**{key: value for key, value in raw.items() if key in fields})
+        for raw in payload["candidates"]
+        if isinstance(raw, dict) and raw.get("statement")
+    ]
+    effect = payload.get("effect") if isinstance(payload.get("effect"), dict) else {}
+    return IdeaPool(
+        candidates=candidates,
+        abstentions=list(payload.get("abstained") or []),
+        unreachable=list(payload.get("unreachable") or []),
+        proposer_calls=int(effect.get("proposer_calls") or 0),
+        baseline_proposer=str(effect.get("baseline_proposer") or ""),
+    )
 
 
 def record_idea_pool(paths: RunPaths, pool: IdeaPool, stage: StageSpec, attempt_no: int) -> dict[str, Any]:

@@ -82,6 +82,36 @@ of one claim score 0.60–0.78, a related-but-distinct claim about the same vari
 0.28, unrelated claims score 0.00. Titles are excluded from the comparison, because two
 proposers naming one idea differently is exactly the collapse this has to catch.
 
+## Was any of it used?
+
+Widening the pool and being useful are different claims, and the literature turns on the
+distinction. Havranek and Irsova had authors rank *perceived* usefulness and say plainly it is
+"not realized improvement". AgentPanel ends on its ideas being "speculative candidates that
+require expert validation".
+
+So once Stage 02 is approved, each pooled candidate is checked against the approved summary and
+marked adopted or not. The verdict then stops describing the pool and starts describing the
+outcome:
+
+| Outcome | Verdict says |
+| --- | --- |
+| Not yet approved | "...Whether any of them were used is not yet measured." |
+| Stage adopted none | "...Stage 02 adopted none of them and generated its own hypotheses instead, so the pool cost its calls and changed nothing." |
+| Only baseline adopted | "...Stage 02 adopted 2, all from the baseline proposer — a single pass would have supplied everything the stage used." |
+| Others adopted | "...Stage 02 adopted 3, 2 of them from proposers beyond the baseline." |
+
+The check is textual and local, not a model call. Asking a model whether a stage used an idea
+it was shown invites it to say yes, which is the failure this measurement exists to detect.
+
+The adoption bar (0.35) sits **below** the duplicate bar (0.5) on purpose: a stage that took a
+candidate is expected to sharpen and reword it, not paste it. Blocks shorter than 40 characters
+are excluded, and that floor is load-bearing rather than hygiene — against a hypothesis with
+few content words, the fragment "Reported class-size effect" scores 0.57, so without the floor
+a section heading would read as adoption.
+
+Measurement is best-effort and runs after approval: nothing here can unapprove a stage, and a
+run that never seated a panel is a no-op.
+
 ## Cost
 
 `lenses + 1` calls per Stage 02 attempt — six by default, once per attempt. Cheaper than the
@@ -94,6 +124,11 @@ review panel, which pays per gate.
 - **Scoring is one call over the whole pool**, not independent critics per candidate. It orders
   material a later reader judges anyway; paying per candidate would spend more on ranking the
   pool than on generating it.
-- **A widened pool is not a better hypothesis.** AgentPanel measured candidate quality, not
-  downstream research outcomes, and neither does this. If `added_by_other_proposers` stays 0
-  across your runs, the honest reading is that one proposer was enough.
+- **Adoption is not impact.** Knowing Stage 02 built on a candidate says nothing about whether
+  the resulting research was better. AgentPanel measured candidate quality, not downstream
+  outcomes, and this measures uptake, not outcomes either. It closes one gap, not the gap.
+- **Textual adoption can be fooled both ways.** A stage that adopts an idea and rewrites it
+  completely reads as non-adoption; a stage that rejects an idea while discussing it at length
+  can read as adoption. The numbers are a signal across runs, not a verdict on one.
+- **If `adopted` stays 0 across your runs**, the honest reading is that Stage 02 does better
+  from the goal and literature alone, and the panel should be turned off.
