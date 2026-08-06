@@ -138,6 +138,7 @@ class ResearchManager:
         max_auto_skips: int = 3,
         max_stage_attempts: int = MAX_STAGE_ATTEMPTS,
         web_search_context: str | None = None,
+        web_search_mode: str | None = None,
         artifact_roots: list[Path] | None = None,
     ) -> None:
         self.project_root = project_root
@@ -165,6 +166,10 @@ class ResearchManager:
         self.max_stage_attempts = max_stage_attempts
         self.auto_skipped_stages: list[str] = []
         self.web_search_context = web_search_context
+        # The *mode* is recorded in run_config so a resume reconciles it the way it does
+        # every other backend selection, instead of silently re-deciding from whatever
+        # credentials happen to be in the environment that day.
+        self.web_search_mode = web_search_mode
         # Extra roots a stage may legitimately write to, beyond the run tree. A benchmark
         # workspace is one: its output contract points stages at paths outside runs/.
         self.artifact_roots = artifact_roots or []
@@ -258,6 +263,7 @@ class ResearchManager:
             review_model=self.review_model,
             codex_sandbox=getattr(self.operator, "codex_sandbox", None),
             output_format=output_format,
+            web_search=self.web_search_mode,
         )
         ensure_run_manifest(paths)
         if not paths.user_input.exists():
@@ -372,6 +378,7 @@ class ResearchManager:
             review_model=self.review_model,
             codex_sandbox=getattr(self.operator, "codex_sandbox", None),
             output_format=output_format,
+            web_search=self.web_search_mode,
         )
         initialize_run_manifest(paths)
         write_artifact_index(paths)

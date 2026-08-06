@@ -336,6 +336,22 @@ def normalize_codex_sandbox(value: Any) -> str:
     return DEFAULT_CODEX_SANDBOX
 
 
+WEB_SEARCH_MODE_CHOICES = ("auto", "gemini", "native")
+DEFAULT_WEB_SEARCH_MODE = "auto"
+
+
+def normalize_web_search_mode(value: Any) -> str:
+    """Clamp a persisted web-search mode to a known one.
+
+    The *mode* is stored, never the resolved backend: `auto` is a question about the
+    current environment, and freezing today's answer into the run would make a resumed run
+    assert something about the deployment that may no longer be true.
+    """
+    if isinstance(value, str) and value.strip().lower() in WEB_SEARCH_MODE_CHOICES:
+        return value.strip().lower()
+    return DEFAULT_WEB_SEARCH_MODE
+
+
 def default_run_config() -> dict[str, Any]:
     """The configuration a run falls back to when run_config.json is absent or unreadable."""
     return {
@@ -347,6 +363,7 @@ def default_run_config() -> dict[str, Any]:
         "review_operator": "claude",
         "review_model": "sonnet",
         "codex_sandbox": DEFAULT_CODEX_SANDBOX,
+        "web_search": DEFAULT_WEB_SEARCH_MODE,
     }
 
 
@@ -360,6 +377,7 @@ def initialize_run_config(
     review_model: str | None = None,
     codex_sandbox: str | None = None,
     output_format: str | None = None,
+    web_search: str | None = None,
 ) -> dict[str, Any]:
     normalized_operator = operator.strip().lower() if operator.strip() else "claude"
     normalized_review_operator = (
@@ -380,6 +398,7 @@ def initialize_run_config(
             or ("default" if normalized_review_operator == "codex" else "sonnet")
         ),
         "codex_sandbox": normalize_codex_sandbox(codex_sandbox),
+        "web_search": normalize_web_search_mode(web_search),
         "created_at": datetime.now().isoformat(timespec="seconds"),
     }
     write_text(paths.run_config, json.dumps(config, indent=2, ensure_ascii=False))
@@ -424,6 +443,7 @@ def load_run_config(paths: RunPaths) -> dict[str, Any]:
             else ("default" if normalized_review_operator == "codex" else "sonnet")
         ),
         "codex_sandbox": normalize_codex_sandbox(codex_sandbox),
+        "web_search": normalize_web_search_mode(payload.get("web_search")),
     }
     created_at = payload.get("created_at")
     if isinstance(created_at, str) and created_at.strip():
@@ -448,6 +468,7 @@ def save_run_config(paths: RunPaths, config: dict[str, Any]) -> None:
             or ("default" if normalized_review_operator == "codex" else "sonnet")
         ),
         "codex_sandbox": normalize_codex_sandbox(config.get("codex_sandbox")),
+        "web_search": normalize_web_search_mode(config.get("web_search")),
     }
     created_at = config.get("created_at")
     if isinstance(created_at, str) and created_at.strip():
@@ -467,6 +488,7 @@ def ensure_run_config(
     review_model: str | None = None,
     codex_sandbox: str | None = None,
     output_format: str | None = None,
+    web_search: str | None = None,
 ) -> dict[str, Any]:
     current = load_run_config(paths)
     effective_operator = operator or current.get("operator") or "claude"
@@ -482,6 +504,7 @@ def ensure_run_config(
             "default" if effective_review_operator == "codex" else "sonnet"
         ),
         "codex_sandbox": normalize_codex_sandbox(codex_sandbox or current.get("codex_sandbox")),
+        "web_search": normalize_web_search_mode(web_search or current.get("web_search")),
         "created_at": current.get("created_at") or datetime.now().isoformat(timespec="seconds"),
     }
     save_run_config(paths, updated)

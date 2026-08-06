@@ -348,6 +348,7 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
         max_auto_skips=args.max_auto_skips,
         max_stage_attempts=args.max_attempts,
         web_search_context=resolve_web_search_context(args.web_search, readiness=readiness),
+        web_search_mode=args.web_search,
         # Stages are told to keep code/, outputs/ and report/images/ up to date in the
         # benchmark workspace, so 'Files Produced' must resolve against it too.
         artifact_roots=[workspace],

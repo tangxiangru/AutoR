@@ -83,6 +83,7 @@ The settings the run was started with, so a resume reproduces them.
   "review_operator": "claude",
   "review_model": "sonnet",
   "codex_sandbox": "workspace-write",
+  "web_search": "auto",
   "created_at": "2026-03-30T10:12:22"
 }
 ```
@@ -97,6 +98,7 @@ The settings the run was started with, so a resume reproduces them.
 | `review_operator` | `claude` or `codex`; defaults to `operator`. |
 | `review_model` | Reviewer model; defaults to `sonnet` (Claude) or `default` (Codex). |
 | `codex_sandbox` | `read-only`, `workspace-write`, or `danger-full-access`. |
+| `web_search` | `auto`, `gemini`, or `native`. The mode, not the resolved backend. Absent in runs created before it existed, and read as `auto`. |
 | `created_at` | ISO-8601 to the second. Preserved across rewrites. |
 
 A missing or corrupt file falls back to defaults rather than failing the run.
