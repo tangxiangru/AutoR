@@ -22,11 +22,13 @@ from src.utils import (
     DEFAULT_CODEX_SANDBOX,
     DEFAULT_OUTPUT_FORMAT,
     DEFAULT_VENUE,
+    WEB_SEARCH_MODE_CHOICES,
     OUTPUT_FORMAT_CLI_CHOICES,
     MAX_STAGE_ATTEMPTS,
     STAGES,
     build_run_paths,
     load_run_config,
+    normalize_web_search_mode,
     resolve_output_format,
     resolve_stage,
     resolve_venue_key,
@@ -165,8 +167,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--web-search",
-        choices=["auto", "gemini", "native"],
-        default="auto",
+        choices=list(WEB_SEARCH_MODE_CHOICES),
         help=(
             "How operators should search the web. 'gemini' routes searches through the Gemini "
             "API's Google Search grounding via tools/web_search.py, which is required on "
@@ -405,6 +406,24 @@ def _build_resource_entries(paths: list[str]) -> list[ResourceEntry]:
     return entries
 
 
+def resolve_search_context(ui: TerminalUI, *, mode: str, operator: str, codex_sandbox: str) -> str | None:
+    """Decide the search path, announce it, and refuse a request that cannot work.
+
+    Called once per branch rather than once up front, because the answer depends on the
+    operator and sandbox -- and on resume those come from run_config, which is not read
+    until inside the branch.
+    """
+    readiness = assess_search_readiness(operator=operator, codex_sandbox=codex_sandbox)
+    notice, level = web_search_notice(mode, readiness=readiness)
+    ui.show_status(notice, level=level)
+    if mode == "gemini" and readiness.hard_blocker:
+        raise ValueError(
+            f"--web-search gemini cannot work here: {readiness.hard_blocker} "
+            "Fix it, or use --web-search auto to fall back to native search."
+        )
+    return resolve_web_search_context(mode, readiness=readiness)
+
+
 def main() -> int:
     args = parse_args()
     repo_root = Path(__file__).resolve().parent
@@ -413,23 +432,6 @@ def main() -> int:
     persona_text = load_persona(args.persona)
     ui = TerminalUI(interactive=not unattended)
     ui.show_banner()
-
-    # Assessed against the operator this run will actually use, because the sandbox the
-    # search subprocess inherits is part of whether the tool can run at all. Resolved
-    # before the resume branch reads run_config, so a resumed run that switches backends
-    # re-derives it below.
-    readiness = assess_search_readiness(
-        operator=(args.operator or "claude"),
-        codex_sandbox=args.codex_sandbox,
-    )
-    web_search_context = resolve_web_search_context(args.web_search, readiness=readiness)
-    notice, level = web_search_notice(args.web_search, readiness=readiness)
-    ui.show_status(notice, level=level)
-    if args.web_search == "gemini" and readiness.hard_blocker:
-        raise ValueError(
-            f"--web-search gemini cannot work here: {readiness.hard_blocker} "
-            "Fix it, or use --web-search auto to fall back to native search."
-        )
 
     if args.resume_run:
         start_stage = resolve_stage(args.redo_stage)
@@ -476,6 +478,10 @@ def main() -> int:
             ) or default_model_for_operator(review_operator)
         venue = resolve_venue_key(args.venue or existing_config["venue"])
         output_format = resolve_output_format(args.output_format or existing_config.get("output_format"))
+        web_search_mode = normalize_web_search_mode(args.web_search or existing_config.get("web_search"))
+        web_search_context = resolve_search_context(
+            ui, mode=web_search_mode, operator=operator_name, codex_sandbox=codex_sandbox
+        )
         operator = create_operator(
             operator_name,
             model=model,
@@ -511,6 +517,7 @@ def main() -> int:
             max_rounds=args.max_rounds,
             max_stage_attempts=args.max_attempts,
             web_search_context=web_search_context,
+            web_search_mode=web_search_mode,
         )
         return 0 if manager.resume_run(
             run_root,
@@ -530,6 +537,10 @@ def main() -> int:
     review_model = args.review_model or default_model_for_operator(review_operator)
     venue = resolve_venue_key(args.venue or DEFAULT_VENUE)
     output_format = resolve_output_format(args.output_format or DEFAULT_OUTPUT_FORMAT)
+    web_search_mode = normalize_web_search_mode(args.web_search)
+    web_search_context = resolve_search_context(
+        ui, mode=web_search_mode, operator=operator_name, codex_sandbox=codex_sandbox
+    )
     final_stage = resolve_stage(args.final_stage)
     operator = create_operator(
         operator_name,
@@ -566,6 +577,7 @@ def main() -> int:
         max_rounds=args.max_rounds,
         max_stage_attempts=args.max_attempts,
         web_search_context=web_search_context,
+        web_search_mode=web_search_mode,
     )
 
     goal = resolve_goal(args, unattended=unattended)
