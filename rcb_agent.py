@@ -184,6 +184,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "five prompts against one model are five correlated reads wearing five hats.",
     )
     parser.add_argument(
+        "--effort-tiers",
+        action="store_true",
+        help="Run each stage as routine or deliberative rather than treating them alike. A "
+             "routine stage gets a lean prompt, a single reviewer, and no escalation offer; a "
+             "deliberative one gets everything configured. Each stage declares what the next "
+             "needs, and a routine stage that keeps failing is promoted automatically.",
+    )
+    parser.add_argument(
         "--deliberation",
         action="store_true",
         help="Let a stage stop and pull in a panel when it hits a genuine crux. The agent "
@@ -541,6 +549,17 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
             ui=ui,
             stage_timeout=args.stage_timeout,
             max_deliberations=args.max_deliberations,
+        )
+
+    if args.effort_tiers:
+        from src.effort import EffortPlan
+
+        manager.effort_plan = EffortPlan(enabled=True)
+        manager.solo_reviewer = (
+            reviewer if isinstance(reviewer, AutomatedReviewer)
+            else AutomatedReviewer(review_backend, model=review_model,
+                                   fake_mode=args.fake_operator, ui=ui,
+                                   stage_timeout=args.stage_timeout)
         )
 
     pipeline_completed = False

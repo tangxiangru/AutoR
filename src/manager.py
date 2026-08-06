@@ -121,6 +121,13 @@ from .deliberation import (
     read_requests,
     record_resolution,
 )
+from .effort import (
+    DELIBERATIVE,
+    EffortPlan,
+    parse_declaration,
+    record_plan,
+    tier_notice,
+)
 from .ideation_panel import (
     IdeationPanel,
     format_pool_for_prompt,
@@ -236,6 +243,9 @@ class ResearchManager:
         self._final_stage: StageSpec | None = None
         self.ideation_panel: IdeationPanel | None = None
         self.crux_panel: CruxPanel | None = None
+        self.effort_plan = EffortPlan(enabled=False)
+        #: A plain reviewer kept alongside a panel, so a routine stage can be gated cheaply.
+        self.solo_reviewer: AutomatedReviewer | None = None
         self._crux_resolutions: list[Any] = []
         self._pending_comments: list[Any] = []
         self._open_comments: list[Any] = []
@@ -798,6 +808,10 @@ class ResearchManager:
         except Exception as exc:  # noqa: BLE001 - measurement must not derail the stage
             append_log_entry(paths.logs, f"{stage.slug} anchored_revision_failed", str(exc))
 
+    def _stage_after(self, stage: StageSpec) -> StageSpec | None:
+        """The next stage in the fixed order, for the tier declaration to name."""
+        return next((later for later in STAGES if later.number == stage.number + 1), None)
+
     def _settle_cruxes(self, paths: RunPaths, stage: StageSpec, attempt_no: int) -> str | None:
         """Deliberate any crux the agent raised, and send the stage back with the answers.
 
@@ -849,6 +863,55 @@ class ResearchManager:
             "the answers are below under `Resolved Cruxes`. Apply them and revise the parts of "
             "the stage that depended on your working answer, leaving the rest alone."
         )
+
+    def _settle_effort(
+        self, paths: RunPaths, stage: StageSpec, attempt_no: int, stage_markdown: str
+    ) -> None:
+        """Record what this stage cost, and let it set the next stage's tier."""
+        try:
+            self.effort_plan.note_outcome(
+                stage,
+                attempts=attempt_no,
+                # Uncontested means it cleared its gate without anyone asking for a change.
+                contested=attempt_no > 1,
+            )
+            following = self._stage_after(stage)
+            declaration = parse_declaration(stage_markdown)
+            if following is not None and declaration is not None:
+                tier, reason = declaration
+                self.effort_plan.declare(
+                    following.slug,
+                    tier,
+                    reason or f"Declared by {stage.stage_title}.",
+                )
+                append_log_entry(
+                    paths.logs,
+                    f"{stage.slug} effort_declaration",
+                    f"{following.slug}: {tier}" + (f" — {reason}" if reason else ""),
+                )
+            record_plan(paths, self.effort_plan)
+        except Exception as exc:  # noqa: BLE001 - tiering must never disturb an approval
+            append_log_entry(paths.logs, f"{stage.slug} effort_failed", str(exc))
+
+    def _note_effort_failure(self, paths: RunPaths, stage: StageSpec) -> None:
+        """A failed gate. Promote a routine stage that keeps failing."""
+        if not self.effort_plan.enabled:
+            return
+        try:
+            if self.effort_plan.note_failure(stage):
+                self.ui.show_status(
+                    f"{stage.stage_title} was running as routine and keeps failing; "
+                    "promoting it to deliberative.",
+                    level="warn",
+                )
+                append_log_entry(
+                    paths.logs,
+                    f"{stage.slug} effort_promoted",
+                    self.effort_plan.decision_for(stage).reason,
+                )
+            record_plan(paths, self.effort_plan)
+        except Exception as exc:  # noqa: BLE001
+            append_log_entry(paths.logs, f"{stage.slug} effort_failed", str(exc))
 
     def _generate_writing_review(self, paths: RunPaths) -> dict[str, object]:
         """Produce the Stage 07 triage artifact that matches this run's output format.
@@ -2067,6 +2130,11 @@ class ResearchManager:
                 suggestions=suggestions,
             )
 
+            # A refusal is the signal that this stage is harder than the previous one
+            # expected; enough of them promote a routine stage to deliberative.
+            if choice not in {"5", "6"}:
+                self._note_effort_failure(paths, stage)
+
             if choice in {"1", "2", "3"}:
                 selected = suggestions[int(choice) - 1]
                 revision_feedback = (
@@ -2136,6 +2204,8 @@ class ResearchManager:
                     attempt_no - polish_rounds,
                     self._stage_file_paths(stage_markdown),
                 )
+                if self.effort_plan.enabled:
+                    self._settle_effort(paths, stage, attempt_no, stage_markdown)
                 if stage.slug == "02_hypothesis_generation":
                     self._measure_pool_adoption(paths, stage, stage_markdown)
                 if stage.slug == "04_implementation":
@@ -2284,13 +2354,22 @@ class ResearchManager:
             stage_template = stage_template.rstrip() + "\n\n" + inbound + "\n"
         self._record_inbound_channels(paths, stage, delivered)
 
+        routine = self.effort_plan.is_routine(stage)
+        if self.effort_plan.enabled:
+            stage_template = (
+                stage_template.rstrip()
+                + "\n\n"
+                + tier_notice(stage, self.effort_plan.tier_for(stage), self._stage_after(stage))
+                + "\n"
+            )
+
         # The crux-panel blocks stay outside the channel registry on purpose.
         # `escalation_offer` carries no heading of its own, and the resolutions
         # block consumes one-shot state — it clears `_crux_resolutions` after
         # rendering. A registry entry declares who reads what; a builder that
         # mutates the manager is a different kind of thing, and filing it as a
         # channel would make the registry mean less than it does.
-        if self.crux_panel is not None:
+        if self.crux_panel is not None and not routine:
             stage_template = (
                 stage_template.rstrip()
                 + "\n\n"
@@ -2375,7 +2454,12 @@ class ResearchManager:
             f"Automated reviewer is auditing {stage.stage_title}...",
             level="info",
         )
-        decision = self.reviewer.review_stage(
+        reviewer = self.reviewer
+        if self.effort_plan.is_routine(stage) and self.solo_reviewer is not None:
+            # A panel deliberating over execution work is the expensive configuration landing
+            # where its benefit does not.
+            reviewer = self.solo_reviewer
+        decision = reviewer.review_stage(
             paths=paths,
             stage=stage,
             attempt_no=attempt_no,

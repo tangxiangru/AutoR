@@ -198,6 +198,15 @@ converted to a refinement in code. Each run also writes
 baseline so it can report that it did not earn its cost. Full description, including the
 pre-registered evidence against multi-agent deliberation, in [Review Panel](review-panel.md).
 
+### Effort tiers
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--effort-tiers` | off | Run each stage as `routine` or `deliberative` instead of treating them alike. Routine gets a lean prompt, a single reviewer, and no escalation offer. Each stage declares what the next needs; a routine stage that fails twice is promoted automatically. |
+
+Off means exactly the previous behaviour. Both directions of mis-spending are recorded in
+`workspace/reviews/effort.json`. Full description in [Effort Tiers](effort-tiers.md).
+
 ### Crux deliberation
 
 | Flag | Default | Description |

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from src.approval_agent import AutomatedReviewer
 from src.deliberation import DEFAULT_MAX_DELIBERATIONS
+from src.effort import EffortPlan
 from src.review_panel import (
     DEFAULT_PANEL,
     ReviewPanel,
@@ -163,6 +164,14 @@ def parse_args() -> argparse.Namespace:
              "(for example: pi=opus skeptic=codex:default). Seats left unassigned use the "
              "reviewer default. Heterogeneity is the lever with the best evidence behind it: "
              "five prompts against one model are five correlated reads wearing five hats.",
+    )
+    parser.add_argument(
+        "--effort-tiers",
+        action="store_true",
+        help="Run each stage as routine or deliberative rather than treating them alike. A "
+             "routine stage gets a lean prompt, a single reviewer, and no escalation offer; a "
+             "deliberative one gets everything configured. Each stage declares what the next "
+             "needs, and a routine stage that keeps failing is promoted automatically.",
     )
     parser.add_argument(
         "--deliberation",
@@ -745,6 +754,21 @@ def resolve_search_context(ui: TerminalUI, *, mode: str, operator: str, codex_sa
 
 
 
+
+def configure_effort(manager, args, *, backend_name: str, model: str, ui: TerminalUI, fake_mode: bool,
+                     stage_timeout: int) -> None:
+    """Turn on effort tiering, and give routine stages a cheap gate to use."""
+    if not getattr(args, "effort_tiers", False):
+        return
+    manager.effort_plan = EffortPlan(enabled=True)
+    if isinstance(manager.reviewer, AutomatedReviewer):
+        manager.solo_reviewer = manager.reviewer
+    elif manager.reviewer is not None:
+        # A panel is seated, so build the plain reviewer a routine stage falls back to.
+        manager.solo_reviewer = AutomatedReviewer(
+            backend_name, model=model, fake_mode=fake_mode, ui=ui, stage_timeout=stage_timeout
+        )
+
 def create_crux_panel(args, *, backend_name: str, model: str, ui: TerminalUI):
     """Build the crux deliberation panel, or None when it is not requested."""
     if not getattr(args, "deliberation", False):
@@ -900,6 +924,10 @@ def main() -> int:
         manager.crux_panel = create_crux_panel(
             args, backend_name=review_operator, model=review_model, ui=ui
         )
+        configure_effort(
+            manager, args, backend_name=review_operator, model=review_model, ui=ui,
+            fake_mode=args.fake_operator, stage_timeout=args.stage_timeout,
+        )
         completed = manager.resume_run(
             run_root,
             start_stage=start_stage or rollback_stage,
@@ -981,6 +1009,10 @@ def main() -> int:
     )
     manager.crux_panel = create_crux_panel(
         args, backend_name=review_operator, model=review_model, ui=ui
+    )
+    configure_effort(
+        manager, args, backend_name=review_operator, model=review_model, ui=ui,
+        fake_mode=args.fake_operator, stage_timeout=args.stage_timeout,
     )
 
     goal = resolve_goal(args, unattended=unattended)

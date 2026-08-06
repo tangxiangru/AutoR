@@ -17,6 +17,7 @@ detail behind it.
 | Send back one passage instead of the whole stage | [Anchored Review Comments](stage-comments.md) |
 | Widen Stage 02's hypotheses with a panel that proposes instead of deciding | [Ideation Panel](ideation-panel.md) |
 | Let a stage stop and think hard when it hits a genuine crux | [Raising a Crux](deliberation.md) |
+| Spend effort where the research needs it instead of evenly | [Effort Tiers](effort-tiers.md) |
 | Configure venues, backends, sandboxes, or API keys | [Configuration](configuration.md) |
 | Use or script the browser UI | [Studio Guide & HTTP API](studio.md) |
 | Understand how the code is organized | [Architecture](architecture.md) |
