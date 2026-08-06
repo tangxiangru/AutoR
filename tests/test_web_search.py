@@ -13,6 +13,13 @@ import main as autor_main
 from src.utils import STAGES, build_prompt
 from src.web_search import (
     DEFAULT_SEARCH_MODEL,
+    DEFAULT_VERTEX_LOCATION,
+    DEFAULT_VERTEX_SEARCH_MODEL,
+    dedupe_by_url,
+    is_unresolved_redirect,
+    resolve_backend,
+    resolve_source_url,
+    vertex_credentials_available,
     resolve_web_search_context,
     web_search_notice,
     SearchResult,
@@ -319,3 +326,139 @@ class WebSearchModeTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class VertexBackendTest(unittest.TestCase):
+    """Vertex AI is the path that matters on deployments where WebSearch is disabled."""
+
+    def _no_key(self):
+        return patch("src.web_search.DIAGRAM_CONFIG_PATH", Path("/nonexistent/diagram.yaml"))
+
+    def _adc(self, available: bool):
+        return patch("src.web_search.vertex_credentials_available", return_value=available)
+
+    def test_vertex_is_used_when_a_project_and_adc_exist_but_no_key(self) -> None:
+        with patch.dict(os.environ, {"GOOGLE_CLOUD_PROJECT": "p1"}, clear=True), self._no_key(), self._adc(True):
+            backend = resolve_backend()
+        self.assertIsNotNone(backend)
+        self.assertEqual(backend.kind, "vertex")
+        self.assertEqual(backend.project, "p1")
+        self.assertEqual(backend.location, DEFAULT_VERTEX_LOCATION)
+        self.assertEqual(backend.model, DEFAULT_VERTEX_SEARCH_MODEL)
+
+    def test_an_explicit_api_key_wins_over_an_inherited_vertex_project(self) -> None:
+        env = {"GEMINI_API_KEY": "k", "GOOGLE_CLOUD_PROJECT": "p1"}
+        with patch.dict(os.environ, env, clear=True), self._adc(True):
+            backend = resolve_backend()
+        self.assertEqual(backend.kind, "api_key")
+        self.assertEqual(backend.model, DEFAULT_SEARCH_MODEL)
+
+    def test_backend_env_var_forces_vertex_over_a_key(self) -> None:
+        env = {"GEMINI_API_KEY": "k", "GOOGLE_CLOUD_PROJECT": "p1", "AUTOR_WEB_SEARCH_BACKEND": "vertex"}
+        with patch.dict(os.environ, env, clear=True), self._adc(True):
+            self.assertEqual(resolve_backend().kind, "vertex")
+
+    def test_backend_env_var_forces_the_api_key_over_vertex(self) -> None:
+        env = {"GEMINI_API_KEY": "k", "GOOGLE_CLOUD_PROJECT": "p1", "AUTOR_WEB_SEARCH_BACKEND": "api_key"}
+        with patch.dict(os.environ, env, clear=True), self._adc(True):
+            self.assertEqual(resolve_backend().kind, "api_key")
+
+    def test_a_project_without_credentials_is_not_a_backend(self) -> None:
+        with patch.dict(os.environ, {"GOOGLE_CLOUD_PROJECT": "p1"}, clear=True), self._no_key(), self._adc(False):
+            self.assertIsNone(resolve_backend())
+
+    def test_the_claude_vertex_project_is_inherited_as_a_last_resort(self) -> None:
+        with patch.dict(os.environ, {"ANTHROPIC_VERTEX_PROJECT_ID": "sercan"}, clear=True), self._no_key(), self._adc(True):
+            self.assertEqual(resolve_backend().project, "sercan")
+
+    def test_an_explicit_project_var_beats_the_inherited_one(self) -> None:
+        env = {"AUTOR_VERTEX_PROJECT": "mine", "ANTHROPIC_VERTEX_PROJECT_ID": "inherited"}
+        with patch.dict(os.environ, env, clear=True), self._no_key(), self._adc(True):
+            self.assertEqual(resolve_backend().project, "mine")
+
+    def test_an_explicit_model_overrides_the_vertex_default(self) -> None:
+        with patch.dict(os.environ, {"GOOGLE_CLOUD_PROJECT": "p"}, clear=True), self._no_key(), self._adc(True):
+            self.assertEqual(resolve_backend("gemini-x").model, "gemini-x")
+
+    def test_the_notice_reports_vertex_rather_than_warning(self) -> None:
+        with patch.dict(os.environ, {"GOOGLE_CLOUD_PROJECT": "p1"}, clear=True), self._no_key(), self._adc(True):
+            message, level = web_search_notice("auto")
+        self.assertEqual(level, "info")
+        self.assertIn("Vertex AI", message)
+        self.assertIn("p1", message)
+
+    def test_auto_injects_the_prompt_block_on_a_vertex_only_box(self) -> None:
+        """The regression this whole path exists for: no API key, but search does work."""
+        with patch.dict(os.environ, {"GOOGLE_CLOUD_PROJECT": "p1"}, clear=True), self._no_key(), self._adc(True):
+            self.assertIsNotNone(resolve_web_search_context("auto"))
+
+    def test_credentials_probe_never_returns_a_token(self) -> None:
+        self.assertIsInstance(vertex_credentials_available(), bool)
+
+
+class RedirectResolutionTest(unittest.TestCase):
+    STUB = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/ABC"
+
+    def test_a_non_redirect_url_is_returned_untouched_without_a_request(self) -> None:
+        with patch("urllib.request.urlopen", side_effect=AssertionError("should not be called")):
+            self.assertEqual(resolve_source_url("https://arxiv.org/abs/1"), "https://arxiv.org/abs/1")
+
+    def test_a_failed_resolution_keeps_the_source_rather_than_dropping_it(self) -> None:
+        with patch("urllib.request.urlopen", side_effect=OSError("boom")):
+            self.assertEqual(resolve_source_url(self.STUB), self.STUB)
+
+    def test_an_unresolved_stub_is_flagged_as_not_citable(self) -> None:
+        self.assertTrue(is_unresolved_redirect(self.STUB))
+        self.assertFalse(is_unresolved_redirect("https://arxiv.org/abs/1"))
+        body = format_response_markdown(
+            WebSearchResponse("q", "m", "a", "vertex", [SearchResult("x", self.STUB)])
+        )
+        self.assertIn("not citable", body)
+
+    def test_the_prompt_tells_operators_not_to_cite_an_unresolved_stub(self) -> None:
+        self.assertIn("unresolved redirect", build_web_search_prompt_section())
+
+
+class DedupeByUrlTest(unittest.TestCase):
+    def test_two_redirects_resolving_to_one_page_collapse(self) -> None:
+        """Dedup has to happen after resolution: distinct stubs reach the same source."""
+        merged = dedupe_by_url([
+            SearchResult("github.com", "https://github.com/a", ""),
+            SearchResult("github.com", "https://github.com/a", "a longer snippet"),
+        ])
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0].snippet, "a longer snippet")
+
+    def test_distinct_urls_are_preserved_in_order(self) -> None:
+        merged = dedupe_by_url([
+            SearchResult("a", "https://a"),
+            SearchResult("b", "https://b"),
+        ])
+        self.assertEqual([r.url for r in merged], ["https://a", "https://b"])
+
+
+class BackendJsonTest(unittest.TestCase):
+    def test_json_output_records_which_backend_answered(self) -> None:
+        payload = WebSearchResponse("q", "gemini-3.6-flash", "a", "vertex", []).to_dict()
+        self.assertEqual(payload["backend"], "vertex")
+        self.assertEqual(payload["model"], "gemini-3.6-flash")
+
+    def test_markdown_names_vertex_as_the_provider(self) -> None:
+        body = format_response_markdown(WebSearchResponse("q", "m", "a", "vertex", []))
+        self.assertIn("Vertex AI", body)
+
+    def test_markdown_names_the_gemini_api_for_key_backed_runs(self) -> None:
+        body = format_response_markdown(WebSearchResponse("q", "m", "a", "api_key", []))
+        self.assertIn("Gemini API", body)
+
+
+class NoBackendTest(unittest.TestCase):
+    def test_the_error_names_both_ways_to_configure_search(self) -> None:
+        with patch.dict(os.environ, {}, clear=True), \
+             patch("src.web_search.DIAGRAM_CONFIG_PATH", Path("/nonexistent/diagram.yaml")), \
+             patch("src.web_search.vertex_credentials_available", return_value=False):
+            with self.assertRaises(WebSearchError) as caught:
+                gemini_web_search("anything")
+        message = str(caught.exception)
+        self.assertIn("GEMINI_API_KEY", message)
+        self.assertIn("application-default", message)
