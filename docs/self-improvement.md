@@ -281,7 +281,39 @@ edge's priority moved by one step** — enough to be attributable, which a varia
 that reshuffled five edges would not be. The child explains itself in the archive:
 the numbers that justified it are in its note.
 
-Three refusals hold this together:
+### The composition of a run is not allowed to be the improvement
+
+A stage's score is a weighted mean over the criteria that apply to it, and later
+stages face strictly more of them — Stage 02 is scored on five criteria worth 11,
+Stage 06 on eight worth 18, including `numeric_fidelity`, the hardest. So the *set
+of stages a run reached* is a free parameter of the objective.
+
+On a real completed run the gap is not subtle:
+
+| Run reached | Mean fitness |
+| --- | --- |
+| stages 01-02 | 0.986 |
+| stages 01-04 | 0.913 |
+| all eight | 0.822 |
+
+Pool those and **"stop early" is worth eight times what a promotion needs**. The
+archive would have found it, and promoted whichever topology halted soonest — a
+system whose measured self-improvement consists of producing less.
+
+The fix is a *comparability basis*: the rubric version plus the exact set of stages
+measured. Two runs may only be contrasted within a basis, per-basis contrasts are
+pooled rather than the raw means, and a basis with only one arm contributes nothing
+— it carries no contrast, so counting its runs would inflate the number that
+decides believability without adding anything to the delta. Promotion is a
+head-to-head within each basis, and a challenger that loses on *any* composition is
+refused: winning on average while losing on one shape of run is the signature of a
+variant that traded one kind of run for another.
+
+This is the same rule the archive already applied to rubric versions, generalised.
+Two numbers that do not measure the same thing are not two measurements of one
+thing.
+
+Three further refusals hold this together:
 
 - **Below `min_observations` on each side, nothing is acted on.** A variant that
   beat the incumbent once beat it once.

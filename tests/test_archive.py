@@ -93,10 +93,76 @@ class ArchiveTests(unittest.TestCase):
         self.seed(
             [record(f"old{i}", edges={BACK: 1}, fitness=0.99, rubric_version="0") for i in range(5)]
             + [record("new", edges={BACK: 1}, fitness=0.4)]
+            + [record("newctl", edges={FORWARD: 1}, fitness=0.5)]
         )
         payoff = edge_payoffs(self.archive.runs())[BACK]
-        self.assertEqual(payoff.taken_runs, 1)
+        self.assertEqual((payoff.taken_runs, payoff.skipped_runs), (1, 1))
         self.assertAlmostEqual(payoff.taken_mean, 0.4, places=6)
+
+    # -- the composition of a run is not allowed to be the improvement --------
+
+    def test_a_run_that_stopped_early_is_not_compared_against_one_that_finished(self) -> None:
+        """The Goodhart hole this closes, measured on real scores.
+
+        A stage's score is a weighted mean over the criteria that apply to it, and
+        later stages face strictly more of them. On a real completed run, mean
+        fitness over stages 01-02 is 0.986 against 0.822 over all eight. Pool those
+        and "stop early" is worth eight times what a promotion needs — so the
+        archive would find it, and promote whatever topology halts soonest.
+        """
+        short = RunRecord(
+            run_id="short", variant_id="baseline", rubric_version=RUBRIC_VERSION,
+            edges={BACK: 1}, stage_fitness={"01_literature_survey": 0.97, "02_hypothesis_generation": 1.0},
+            route="", steps=2, revisits=0, agent_directed=0, recorded_at="t",
+        )
+        long_runs = [
+            RunRecord(
+                run_id=f"long{i}", variant_id="baseline", rubric_version=RUBRIC_VERSION,
+                edges={FORWARD: 1},
+                stage_fitness={f"0{n}_s": 0.80 for n in range(1, 9)},
+                route="", steps=8, revisits=0, agent_directed=0, recorded_at="t",
+            )
+            for i in range(3)
+        ]
+        self.seed([short, *long_runs])
+
+        self.assertNotEqual(short.basis, long_runs[0].basis)
+        payoff = edge_payoffs(self.archive.runs()).get(BACK)
+        self.assertEqual(
+            (payoff.taken_runs, payoff.skipped_runs),
+            (0, 0),
+            msg="a two-stage run was contrasted against eight-stage runs",
+        )
+
+    def test_a_basis_with_only_one_arm_contributes_no_observations(self) -> None:
+        """It carries no contrast, so counting its runs would inflate the number
+        that decides believability without adding anything to the delta."""
+        self.seed([record(f"a{i}", edges={BACK: 1}, fitness=0.9) for i in range(5)])
+        payoff = edge_payoffs(self.archive.runs())[BACK]
+        self.assertEqual((payoff.taken_runs, payoff.skipped_runs), (0, 0))
+        self.assertFalse(payoff.believable(3))
+
+    def test_a_challenger_that_loses_on_any_composition_is_not_promoted(self) -> None:
+        """Winning on average while losing on some composition is the signature of a
+        variant that traded one kind of run for another."""
+        self.archive._save_variants([BASELINE_VARIANT, Variant("challenger", "adaptive")])
+        wide = {f"0{n}_s": 0.0 for n in range(1, 9)}
+        narrow = {"01_a": 0.0, "02_b": 0.0}
+
+        def run(name, variant, shape, value):
+            return RunRecord(
+                run_id=name, variant_id=variant, rubric_version=RUBRIC_VERSION, edges={},
+                stage_fitness={k: value for k in shape}, route="", steps=len(shape),
+                revisits=0, agent_directed=0, recorded_at="t",
+            )
+
+        self.seed(
+            [run(f"bw{i}", "baseline", wide, 0.50) for i in range(3)]
+            + [run(f"cw{i}", "challenger", wide, 0.90) for i in range(3)]
+            + [run(f"bn{i}", "baseline", narrow, 0.90) for i in range(3)]
+            + [run(f"cn{i}", "challenger", narrow, 0.50) for i in range(3)]
+        )
+        self.assertFalse(self.archive.promote("challenger"))
 
     def test_a_partial_run_is_averaged_over_what_it_measured(self) -> None:
         """A run stopped at Stage 07 by `--final-stage` did not fail Stage 08."""
