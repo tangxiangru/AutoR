@@ -65,14 +65,36 @@ DEFAULT_MIN_GAIN = 0.005
 #: and stopping on the first flat round would never reach the merge.
 DEFAULT_PATIENCE = 2
 
-#: Rounds per stage when evolution is on and no budget is given. Chosen so a
-#: default run pays for a first draft, one targeted fix, and a merge.
-DEFAULT_ROUNDS = 3
+#: Polish rounds per stage when nothing is specified.
+#:
+#: Two rather than three because the third is almost never the one that pays: a
+#: stage responds to its first targeted fix or it does not, and :attr:`patience`
+#: stops a flat stage before the budget does anyway. Two leaves room for the merge
+#: round that a Pareto frontier occasionally earns.
+DEFAULT_ROUNDS = 2
 
 
 @dataclass(frozen=True)
 class EvolutionConfig:
-    enabled: bool = False
+    """What the improvement loop is allowed to spend.
+
+    Split into two settings because they cost completely different things, and
+    conflating them was making the cheap half opt-in for no reason.
+
+    ``measure`` scores every valid draft, runs the champion ratchet, rejects a
+    round that moved a verdict, and writes the ledger. All of that is disk reads —
+    :mod:`src.rubric` never calls a backend — so it is on by default. A run that
+    measures and never polishes still gets the property that matters most: the
+    draft that gets promoted is the best one the run produced, not the last one.
+
+    ``rounds`` buys further attempts at a stage that already passed validation.
+    Each one is a full stage execution, so this is where the money goes, and it is
+    the number to turn down.
+    """
+
+    #: Score every draft and run the ratchet. Free; off only for a caller who wants
+    #: the old behaviour exactly.
+    measure: bool = True
     #: Polish rounds allowed per stage, beyond the first draft. These do not consume
     #: the stage's repair budget: a stage that is being improved is not a stage that
     #: is failing, and charging improvement rounds against `--max-attempts` would
@@ -83,14 +105,23 @@ class EvolutionConfig:
     #: Stages to evolve. Empty means all of them.
     stages: tuple[str, ...] = ()
 
+    @property
+    def enabled(self) -> bool:
+        """Whether this config does anything at all.
+
+        Kept so a caller can ask the question without knowing which of the two
+        settings turned it off.
+        """
+        return self.measure
+
     def applies_to(self, stage: StageSpec) -> bool:
-        if not self.enabled:
+        if not self.measure:
             return False
         return not self.stages or stage.slug in self.stages
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "enabled": self.enabled,
+            "measure": self.measure,
             "rounds": self.rounds,
             "min_gain": self.min_gain,
             "patience": self.patience,
@@ -361,25 +392,62 @@ class EvolutionController:
     def should_continue(self, paths: RunPaths, stage: StageSpec) -> bool:
         """Whether another polish round is worth paying for.
 
-        Two independent stops. The budget bounds the spend; the patience counter
-        stops a stage that has stopped responding, which is the common case — most
-        stages are done after one targeted fix, and the remaining rounds would be
-        spent rewording a draft that is already at the ceiling of what the rubric
-        can see.
+        Four stops, and the last one is what makes this affordable to leave on. The
+        budget bounds the spend and the patience counter stops a stage that has
+        stopped responding — but both of those only fire *after* a round has been
+        paid for. :meth:`recoverable_headroom` fires before: if no criterion has a
+        named shortfall worth ``min_gain``, there is nothing for a round to do, and
+        AutoR would be buying a stage execution to reword a draft that is already at
+        the ceiling of what the rubric can see. A clean stage costs nothing.
         """
         if not self.config.applies_to(stage):
+            return False
+        if self.config.rounds <= 0:
             return False
         state = self.state(paths, stage)
         if state.rounds_spent >= self.config.rounds:
             return False
         if state.flat_rounds >= self.config.patience:
             return False
-        if state.champion is not None and state.champion.total >= 1.0 - 1e-9:
+        if state.champion is None:
             return False
-        return True
+        if state.champion.total >= 1.0 - 1e-9:
+            return False
+        return self.recoverable_headroom(state.champion) >= self.config.min_gain
+
+    def recoverable_headroom(self, champion: StageScore) -> float:
+        """How much of the total a round could plausibly recover.
+
+        Weighted over criteria that are both below full marks *and* carry a named
+        shortfall. A criterion scoring 0.6 with nothing to say about what would
+        raise it is not headroom — it is a measurement the rubric cannot turn into
+        an instruction, and a round aimed at it produces churn.
+        """
+        total_weight = sum(item.weight for item in champion.criteria) or 1.0
+        return (
+            sum(
+                (1.0 - item.score) * item.weight
+                for item in champion.criteria
+                if item.score < 1.0 and item.shortfall
+            )
+            / total_weight
+        )
 
     def begin_round(self, paths: RunPaths, stage: StageSpec) -> None:
         self.state(paths, stage).rounds_spent += 1
+
+    def begin_stage(self, paths: RunPaths, stage: StageSpec) -> None:
+        """Give a stage a fresh round budget each time the run enters it.
+
+        The champion deliberately survives — that is the ratchet, and a revisit's
+        first draft replaces it only by being `directed`, which it is. The *budget*
+        does not survive: a stage re-entered because a later stage found a problem
+        is doing new work, and charging it for the rounds its previous visit spent
+        would leave the visit that actually needs improvement with nothing.
+        """
+        state = self.state(paths, stage)
+        state.rounds_spent = 0
+        state.flat_rounds = 0
 
     def next_directive(self, paths: RunPaths, stage: StageSpec) -> str:
         """The instruction for the next polish round.

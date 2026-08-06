@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 from src.approval_agent import ReviewDecision
 from src.intake import load_intake_context
+from src.evolution import EvolutionConfig
 from src.manager import ResearchManager
 from src.manifest import load_run_manifest
 from src.project_bootstrap import StageAssessment
@@ -671,6 +672,12 @@ class ManagerSmokeTests(unittest.TestCase):
             runs_dir=runs_dir,
             operator=operator,
             output_stream=io.StringIO(),
+            # Improvement rounds off: these tests count operator invocations to
+            # measure the retry, session-reuse and round mechanics, and a polish
+            # round is an invocation that is none of those. Measuring stays on, so
+            # the ratchet is still exercised; `tests/test_graph_walk.py` is where
+            # the rounds themselves are tested.
+            evolution=EvolutionConfig(rounds=0),
         )
         return runs_dir, operator, manager
 
@@ -826,6 +833,7 @@ class ManagerSmokeTests(unittest.TestCase):
                 approval_mode="agent",
                 review_operator="claude",
                 review_model="sonnet",
+                evolution=EvolutionConfig(rounds=0),
             )
             paths = manager._create_run("Smoke-test automated approval mode.", venue="neurips_2025")
 

@@ -121,17 +121,39 @@ class RouterTests(unittest.TestCase):
 
     # -- refusals ------------------------------------------------------------
 
-    def test_a_blocked_move_is_refused_and_falls_forward(self) -> None:
-        """Writing is closed until the hypotheses are adjudicated, and an agent
-        asked where to go next reaches for the deliverable."""
+    def test_a_blocked_move_is_refused_even_when_the_fallback_goes_there_anyway(self) -> None:
+        """Writing is closed until the hypotheses are adjudicated, and an agent asked
+        where to go next reaches for the deliverable.
+
+        The run still ends up at Stage 07, because the default is always the forward
+        edge and taking it with the precondition unmet beats halting with nothing —
+        the stage's own validation is the correctness gate and will refuse a write-up
+        of unadjudicated hypotheses. What must not survive is the *attribution*: this
+        was not the agent's decision, the refusal is on the record with the reason,
+        and the route says the precondition was unmet. Otherwise the archive later
+        learns from a step labelled as a considered choice that was nothing of the
+        kind.
+        """
         prereg_support.write_hypothesis_manifest(self.paths)
         prereg_support.freeze_preregistration(self.paths)
         decision, _ = self.choose(
             json.dumps({"target": "07_writing", "reason": "The results look conclusive."})
         )
-        self.assertNotEqual(decision.target, "07_writing")
         self.assertFalse(decision.agent_directed)
         self.assertIn("07_writing", decision.refusal)
+        self.assertIn(prereg_support.HYPOTHESIS_ID, decision.refusal)
+
+    def test_a_default_taken_with_its_guard_failing_says_so_on_the_route(self) -> None:
+        """A step recorded as an ordinary advance when its precondition was unmet is
+        a mislabelled observation, and the archive learns from these."""
+        prereg_support.write_hypothesis_manifest(self.paths)
+        prereg_support.freeze_preregistration(self.paths)
+        decision = StageRouter(None, mode="off").choose(
+            paths=self.paths, stage=STAGE_06, graph=self.graph, state=GraphState()
+        )
+        self.assertEqual(decision.target, "07_writing")
+        self.assertIn("precondition unmet", decision.reason)
+        self.assertIn(prereg_support.HYPOTHESIS_ID, decision.reason)
 
     def test_a_move_that_does_not_exist_is_refused(self) -> None:
         decision, _ = self.choose(json.dumps({"target": "04_implementation", "reason": "Rebuild."}))

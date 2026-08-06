@@ -349,19 +349,44 @@ def normalize_codex_sandbox(value: Any) -> str:
 #: How the run moves between stages. ``linear`` is the historical sequence, one
 #: edge out of each node. ``adaptive`` adds the backward moves and lets the run
 #: return to an earlier stage when a later one shows it has to.
-DEFAULT_STAGE_GRAPH = "linear"
+#:
+#: Adaptive is the default because the failure it prevents is the expensive one: a
+#: run that reaches Stage 06, discovers the design cannot answer the question, and
+#: writes it up anyway because there was nowhere else to go. `--stage-graph linear`
+#: restores the strict sequence.
+DEFAULT_STAGE_GRAPH = "adaptive"
 STAGE_GRAPH_CHOICES = ("linear", "adaptive")
 
 #: Who picks the edge. ``off`` always takes the graph's default, which on a linear
 #: topology is the only one. ``auto`` asks the backend wherever more than one move
 #: is live; ``agent`` asks at every node.
-DEFAULT_ROUTING_MODE = "off"
+#:
+#: ``auto`` is the default: it asks only where the answer can differ, so a linear
+#: run never pays for it, and an adaptive run pays a short prompt at the handful of
+#: nodes with a real choice. The stage that just ran is the only party that knows
+#: whether its results decided anything, and not asking it throws that away.
+DEFAULT_ROUTING_MODE = "auto"
 ROUTING_MODE_CHOICES = ("off", "auto", "agent")
 
-#: Self-improvement rounds per stage. Zero is off, which is the default: the loop
-#: costs a backend call per round, and a caller who has not asked for it should not
-#: be paying for it.
-DEFAULT_EVOLVE_ROUNDS = 0
+#: Polish rounds per stage. See :class:`src.evolution.EvolutionConfig` — this is the
+#: half that costs backend calls, and it is bounded further by a headroom check, so
+#: a stage the rubric has nothing to say about spends none of it.
+DEFAULT_EVOLVE_ROUNDS = 2
+
+#: Whether every valid draft is scored and the champion ratchet runs. Free: the
+#: rubric reads the run off disk and never calls a backend. Persisted alongside the
+#: rounds budget so a resumed run keeps the arrangement it started under.
+DEFAULT_EVOLVE_MEASURE = True
+
+#: Whether the cross-run archive is allowed to change the topology a run uses, as
+#: opposed to merely recording what the run did.
+#:
+#: Off by default, and the split is the point. Recording is free and builds the only
+#: dataset that could ever justify a change. Steering means a run silently uses a
+#: different topology from the one the operator asked for, and "the harness quietly
+#: rerouted itself on run 47" is not a surprise a research tool gets to spring on
+#: someone. Turn it on deliberately, once the archive has something to say.
+DEFAULT_ARCHIVE_STEER = False
 
 
 def normalize_walk_settings(source: "Mapping[str, Any]") -> dict[str, Any]:
@@ -379,10 +404,14 @@ def normalize_walk_settings(source: "Mapping[str, Any]") -> dict[str, Any]:
         rounds_value = max(0, int(rounds))
     except (TypeError, ValueError):
         rounds_value = DEFAULT_EVOLVE_ROUNDS
+    measure = source.get("evolve_measure")
+    steer = source.get("archive_steer")
     return {
         "stage_graph": graph if graph in STAGE_GRAPH_CHOICES else DEFAULT_STAGE_GRAPH,
         "routing_mode": routing if routing in ROUTING_MODE_CHOICES else DEFAULT_ROUTING_MODE,
         "evolve_rounds": rounds_value,
+        "evolve_measure": DEFAULT_EVOLVE_MEASURE if measure is None else bool(measure),
+        "archive_steer": DEFAULT_ARCHIVE_STEER if steer is None else bool(steer),
     }
 WEB_SEARCH_MODE_CHOICES = ("auto", "gemini", "native")
 DEFAULT_WEB_SEARCH_MODE = "auto"
@@ -1869,6 +1898,31 @@ def _has_recent_files_with_suffixes(directory: Path, suffixes: set[str], cutoff_
 
 def _count_non_markdown_files(directory: Path) -> int:
     return sum(1 for path in _existing_files(directory) if path.suffix.lower() not in {".md", ".txt"})
+
+
+def _polish_count_path(paths: RunPaths, stage: StageSpec) -> Path:
+    return paths.operator_state_dir / f"{stage.slug}.polish_count.txt"
+
+
+def read_polish_count(paths: RunPaths, stage: StageSpec) -> int:
+    """Improvement rounds this stage has spent, across every entry into it.
+
+    Persisted for the same reason the attempt count is: a stage can be entered more
+    than once — a resume, a rollback, a graph revisit — and the attempt number keeps
+    counting up across all of them. Subtracting a per-entry polish counter from a
+    run-wide attempt number would under-report retries on the second visit, which is
+    exactly the number the fake-pipeline gate reads to notice an artifact gate that
+    fake mode cannot clear.
+    """
+    path = _polish_count_path(paths, stage)
+    if not path.exists():
+        return 0
+    text = read_text(path).strip()
+    return int(text) if text.isdigit() else 0
+
+
+def write_polish_count(paths: RunPaths, stage: StageSpec, count: int) -> None:
+    write_text(_polish_count_path(paths, stage), str(count))
 
 
 def read_attempt_count(paths: RunPaths, stage: StageSpec) -> int:

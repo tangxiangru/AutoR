@@ -31,7 +31,7 @@ class RatchetTests(unittest.TestCase):
         self.paths = build_run_paths(Path(self._tmp.name) / "run")
         ensure_run_layout(self.paths)
         write_text(self.paths.user_input, "goal")
-        self.controller = EvolutionController(EvolutionConfig(enabled=True, rounds=3))
+        self.controller = EvolutionController(EvolutionConfig(rounds=3))
         self.build_run()
 
     def build_run(self) -> None:
@@ -159,7 +159,7 @@ class RatchetTests(unittest.TestCase):
     # -- round scheduling ----------------------------------------------------
 
     def test_the_round_budget_is_respected(self) -> None:
-        controller = EvolutionController(EvolutionConfig(enabled=True, rounds=2))
+        controller = EvolutionController(EvolutionConfig(rounds=2))
         self.controller = controller
         self.offer(stage_markdown(STAGE_06, key_results="Things improved."), 1, polish=False)
         spent = 0
@@ -172,7 +172,7 @@ class RatchetTests(unittest.TestCase):
     def test_a_stage_that_stops_responding_stops_being_polished(self) -> None:
         """Most stages are done after one targeted fix. Spending the rest of the
         budget rewording a draft at the ceiling is the common waste."""
-        controller = EvolutionController(EvolutionConfig(enabled=True, rounds=8, patience=2))
+        controller = EvolutionController(EvolutionConfig(rounds=8, patience=2))
         self.controller = controller
         self.offer(stage_markdown(STAGE_06), 1, polish=False)
         flat = stage_markdown(STAGE_06, key_results="Things improved.")
@@ -191,7 +191,7 @@ class RatchetTests(unittest.TestCase):
 
     def test_a_config_that_excludes_a_stage_does_not_polish_it(self) -> None:
         controller = EvolutionController(
-            EvolutionConfig(enabled=True, rounds=3, stages=("05_experimentation",))
+            EvolutionConfig(rounds=3, stages=("05_experimentation",))
         )
         self.assertFalse(controller.should_continue(self.paths, STAGE_06))
 
@@ -203,7 +203,7 @@ class RatchetTests(unittest.TestCase):
         strong = stage_markdown(STAGE_06)
         self.offer(strong, 1, polish=False)
 
-        resumed = EvolutionController(EvolutionConfig(enabled=True, rounds=3))
+        resumed = EvolutionController(EvolutionConfig(rounds=3))
         state = resumed.state(self.paths, STAGE_06)
         self.assertIsNotNone(state.champion)
 
@@ -227,7 +227,7 @@ class RatchetTests(unittest.TestCase):
             self.controller.stage_dir(self.paths, STAGE_06) / "champion.json",
             json.dumps(stale.to_dict()),
         )
-        fresh = EvolutionController(EvolutionConfig(enabled=True, rounds=1))
+        fresh = EvolutionController(EvolutionConfig(rounds=1))
         self.assertIsNone(fresh.state(self.paths, STAGE_06).champion)
 
     def test_the_run_summary_omits_stages_that_were_never_measured(self) -> None:

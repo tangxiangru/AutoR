@@ -44,7 +44,7 @@ exist.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -128,15 +128,29 @@ def _guard_runnable_code(paths: RunPaths, state: "GraphState") -> GuardResult:
 
 
 def _guard_results_exist(paths: RunPaths, state: "GraphState") -> GuardResult:
+    """Results on disk, and the manifest that indexes them.
+
+    ``result_artifacts`` is the key :mod:`src.experiment_manifest` actually writes.
+    An earlier version of this guard looked for ``experiments``, which nothing in
+    AutoR has ever produced — so the guard could not be satisfied by any run, and
+    the forward move out of Stage 05 was permanently closed. A precondition no real
+    run can meet is not a strict gate, it is a broken one.
+    """
     count = _count_files_with_suffixes(paths.results_dir, RESULT_SUFFIXES)
     manifest = _load_json(paths.experiment_manifest)
-    has_manifest = isinstance(manifest, dict) and bool(manifest.get("experiments"))
-    if count and has_manifest:
-        return GuardResult(True, f"{count} result artifact(s) and a populated experiment manifest")
+    indexed = manifest.get("result_artifacts") if isinstance(manifest, dict) else None
+    if count and indexed:
+        return GuardResult(
+            True, f"{count} result artifact(s), {len(indexed)} indexed in the experiment manifest"
+        )
+    if not count:
+        return GuardResult(
+            False, "no experiment has produced a machine-readable result under workspace/results"
+        )
     return GuardResult(
         False,
-        "no experiment has produced a machine-readable result under workspace/results "
-        "with a matching entry in experiment_manifest.json",
+        "results exist but experiment_manifest.json indexes none of them, so nothing "
+        "downstream can tell which experiment produced what",
     )
 
 
@@ -465,6 +479,12 @@ def save_graph_state(paths: RunPaths, state: GraphState) -> None:
 # ----------------------------------------------------------------------------
 
 
+#: Why a move is unavailable. The distinction decides whether the walk may fall
+#: through it: a guard is a statement about the *research* and can be overridden as
+#: a last resort, while a budget is a statement about the *run* and cannot.
+BLOCK_KINDS = ("guard", "visits", "steps")
+
+
 @dataclass(frozen=True)
 class Move:
     """An edge the run is allowed to take right now, and why."""
@@ -476,6 +496,9 @@ class Move:
     #: closed will route to what opens it, whereas an agent shown a shorter menu
     #: will pick the wrong item off it and never know what it missed.
     blocked_because: str = ""
+    blocked_kind: str = ""
+    #: Taken because nothing else was available, with its guard still failing.
+    last_resort: bool = False
 
     @property
     def admissible(self) -> bool:
@@ -544,17 +567,21 @@ class StageGraph:
                     continue
 
             guard = edge.guard_fn()(paths, state)
-            blocked = ""
+            blocked, kind = "", ""
             if not guard.ok:
-                blocked = guard.reason
+                blocked, kind = guard.reason, "guard"
             elif edge.target != FINISH and state.visits(edge.target) >= state.max_visits:
-                blocked = (
+                blocked, kind = (
                     f"{edge.target} has already been entered {state.visits(edge.target)} times, "
-                    f"which is the per-stage limit"
+                    f"which is the per-stage limit",
+                    "visits",
                 )
             elif state.steps >= state.max_steps:
-                blocked = f"the run has taken {state.steps} steps, which is the limit for this graph"
-            results.append(Move(edge, guard, blocked))
+                blocked, kind = (
+                    f"the run has taken {state.steps} steps, which is the limit for this graph",
+                    "steps",
+                )
+            results.append(Move(edge, guard, blocked, kind))
         return results
 
     def admissible_moves(self, paths: RunPaths, slug: str, state: GraphState, **kwargs: Any) -> list[Move]:
@@ -563,13 +590,64 @@ class StageGraph:
     def default_move(self, paths: RunPaths, slug: str, state: GraphState, **kwargs: Any) -> Move | None:
         """What AutoR takes when nothing chooses: the lowest-priority live edge.
 
-        Priority 0 is the advance edge at every node, so with all guards passing
-        this reproduces the old sequence exactly.
+        **The default is always the forward edge.** Not merely the lowest-priority
+        live one: a backward move is only ever correct as a deliberate choice with a
+        reason attached, and the router refuses an unreasoned one for exactly that
+        reason. A default that could silently reverse the run would be able to do
+        what no explicit decision is allowed to do.
+
+        **When nothing is live, the forward edge is taken anyway.** A guard is a
+        routing preference, not a correctness gate — the correctness gate is the
+        stage's own validation, which is unchanged and still refuses a Stage 07
+        that writes up unadjudicated hypotheses. Treating a failed guard as an
+        absolute barrier would mean a run that genuinely cannot satisfy it bounces
+        between backward edges until its visit budget runs out and then halts with
+        nothing, where the linear pipeline would have produced a deliverable and
+        failed the stage gate honestly. Halting is not the safer outcome; it is the
+        same refusal with the evidence thrown away.
+
+        A budget block is different and is never overridden: a guard says something
+        about the research, a budget says something about the run, and the run
+        stopping is exactly what a budget is for.
         """
-        moves = self.admissible_moves(paths, slug, state, **kwargs)
-        if not moves:
+        moves = self.moves(paths, slug, state, **kwargs)
+        by_rank = lambda move: (move.edge.priority, move.edge.target)  # noqa: E731
+        forward = [move for move in moves if move.edge.kind in {"advance", "finish"}]
+
+        live_forward = [move for move in forward if move.admissible]
+        if live_forward:
+            return min(live_forward, key=by_rank)
+
+        # A budget said stop. Unlike a guard, that is not a statement about the
+        # research and there is nothing to route around.
+        if any(move.blocked_kind in {"steps", "visits"} for move in forward):
             return None
-        return min(moves, key=lambda move: (move.edge.priority, move.edge.target))
+
+        # Forward is shut by a guard, and the default does **not** go back.
+        #
+        # It is tempting: the backward edges exist for exactly this, and the guard
+        # message reads like a reason. It is wrong, and observably so. Stage 04's
+        # forward guard fails when `workspace/code` holds nothing executable; the
+        # only backward edge out of 04 goes to 03, and study design is not the stage
+        # that writes code. The default would send the run somewhere that cannot fix
+        # the thing that blocked it, attach the guard's message as though it were a
+        # justification, and do it again next time round.
+        #
+        # Which backward edge addresses a given block is a judgement about the
+        # research, not a computation over the graph. That is the agent's call, and
+        # the whole arrangement here is that AutoR decides what is *possible* and the
+        # agent decides what is *sensible*. So the default advances with the
+        # precondition unmet and lets the stage's own validation — unchanged, and
+        # still refusing a Stage 07 that writes up unadjudicated hypotheses — be the
+        # correctness gate it always was. A guard is a routing preference; the gate
+        # is the gate.
+        if forward:
+            return replace(min(forward, key=by_rank), last_resort=True)
+
+        # No forward edge is declared here at all. Only reachable on a hand-built
+        # topology; the shipped ones give every node one.
+        live = [move for move in moves if move.admissible]
+        return min(live, key=by_rank) if live else None
 
     def repeats_a_previous_reason(self, state: GraphState, target: str, reason: str) -> bool:
         """Whether this exact justification has already sent the run to ``target``.

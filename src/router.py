@@ -123,7 +123,7 @@ class StageRouter:
             return RoutingDecision(
                 default.target,
                 default.edge.kind,
-                default.edge.rationale,
+                _default_reason(default, moves),
                 default_target,
                 agent_directed=False,
             )
@@ -195,6 +195,7 @@ class StageRouter:
             agent_directed=False,
             refusal=detail,
         )
+
 
     # -- the ask -------------------------------------------------------------
 
@@ -309,6 +310,23 @@ class StageRouter:
             "- Choose `finish` only if the run has produced what it set out to produce.",
         ]
         return "\n".join(sections)
+
+
+def _default_reason(default: Move, moves: list[Move]) -> str:
+    """Why the graph took this edge with nobody asked.
+
+    The default is always a forward move, so there are two cases: it was open, or it
+    was taken with its precondition unmet because nothing else could be. The second
+    has to say so on the route — the archive later learns from these, and a step
+    recorded as an ordinary advance when the guard was failing is a mislabelled
+    observation.
+    """
+    if default.last_resort:
+        return (
+            f"No move out of this stage is open and there is nowhere left to go back to, so the "
+            f"run advances with the precondition unmet: {default.guard.reason}"
+        )
+    return default.edge.rationale
 
 
 def _read(path: Path) -> str:

@@ -21,7 +21,8 @@ from src.evolution import EvolutionConfig
 from src.manager import ResearchManager
 from src.manifest import load_run_manifest
 from src.router import RoutingDecision
-from src.stage_graph import FINISH, StageGraph, load_graph_state
+from src.rubric import score_stage
+from src.stage_graph import FINISH, GUARDS, GraphState, StageGraph, load_graph_state
 from src.utils import STAGES, build_run_paths, load_run_config, read_text
 from tests.test_manager_smoke import REPO_ROOT, ScriptedSmokeOperator
 
@@ -74,11 +75,16 @@ class GraphWalkTests(unittest.TestCase):
         self.assertEqual(len(roots), 1)
         return build_run_paths(roots[0])
 
-    # -- the default has to be what it always was ----------------------------
+    # -- what a run that asks for nothing gets -------------------------------
 
-    def test_a_default_run_still_walks_01_through_08(self) -> None:
-        """The regression that would matter most. A run that asked for nothing new
-        must produce the same route it always did, through the new engine."""
+    def test_the_default_run_is_adaptive_and_still_reaches_the_end(self) -> None:
+        """The default topology can go back, but nothing pushes it back on its own.
+
+        Every backward move needs a reason, and nobody supplies one here, so the
+        route is the plain sequence. This is the regression that would matter most:
+        turning the graph on by default must not change where an ordinary run ends
+        up, only what it is *able* to do.
+        """
         _operator, manager = self.build()
         self.assertTrue(self.drive(manager))
 
@@ -86,15 +92,49 @@ class GraphWalkTests(unittest.TestCase):
         state = load_graph_state(paths)
         self.assertEqual([visit.stage for visit in state.path], [stage.slug for stage in STAGES])
         self.assertEqual(state.path[-1].chose, FINISH)
-        self.assertFalse(any(visit.agent_directed for visit in state.path))
+        self.assertEqual(load_run_config(paths)["stage_graph"], "adaptive")
+        self.assertEqual(load_run_config(paths)["routing_mode"], "auto")
+
+    def test_an_explicit_linear_run_walks_the_strict_sequence(self) -> None:
+        _operator, manager = self.build(stage_graph=StageGraph.linear())
+        self.assertTrue(self.drive(manager))
+        paths = self.only_run()
+        self.assertEqual(
+            [visit.stage for visit in load_graph_state(paths).path],
+            [stage.slug for stage in STAGES],
+        )
         self.assertEqual(load_run_config(paths)["stage_graph"], "linear")
 
-    def test_a_default_run_never_calls_the_router(self) -> None:
-        """`routing off` is the default, and a default that quietly spent a backend
-        call per stage boundary would be a cost nobody asked for."""
-        _operator, manager = self.build()
+    def test_routing_off_never_calls_the_router(self) -> None:
+        """The escape hatch has to actually be an escape hatch: a run that turned
+        routing off must not spend a backend call per stage boundary."""
+        _operator, manager = self.build(routing_mode="off")
         with patch.object(manager.router, "_ask", side_effect=AssertionError("router was asked")):
             self.assertTrue(self.drive(manager))
+
+    def test_a_router_that_cannot_be_reached_does_not_derail_the_walk(self) -> None:
+        """Routing is on by default, so its failure mode is now everyone's.
+
+        The backend here has none of the private methods the router calls, which is
+        the harshest version of "the routing call did not work". The run has to come
+        out the same as one that never asked.
+        """
+        _operator, manager = self.build()
+        self.assertTrue(self.drive(manager))
+        state = load_graph_state(self.only_run())
+        self.assertEqual([visit.stage for visit in state.path], [stage.slug for stage in STAGES])
+        self.assertFalse(any(visit.agent_directed for visit in state.path))
+
+    def test_the_default_move_is_never_a_backward_one(self) -> None:
+        """A revisit taken by default carries no reason, and the router refuses an
+        unreasoned revisit. A default able to do what no explicit decision may do
+        would be the one path around that rule.
+        """
+        _operator, manager = self.build()
+        self.assertTrue(self.drive(manager))
+        for visit in load_graph_state(self.only_run()).path:
+            if not visit.agent_directed:
+                self.assertNotEqual(visit.kind, "revisit", msg=f"{visit.stage} reversed by default")
 
     # -- the walk follows the router -----------------------------------------
 
@@ -189,6 +229,56 @@ class GraphWalkTests(unittest.TestCase):
         self.assertLessEqual(state.steps, 6)
         self.assertIn("step limit", state.halted_because)
 
+    # -- the checks have to be satisfiable -----------------------------------
+
+    def test_every_guard_passes_on_a_completed_run(self) -> None:
+        """A precondition no real run can meet is not a strict gate, it is a broken one.
+
+        This is the test that was missing. Two checks shipped reading keys nothing
+        in AutoR writes — `experiment_manifest.experiments`, which does not exist
+        (the real key is `result_artifacts`), and a
+        `workspace/literature/evidence_ledger.json` that no writer produces. Both
+        failed silently on every run: the forward move out of Stage 05 was
+        permanently shut and the reproducibility criterion permanently docked, and
+        nothing anywhere said so, because a guard that always fails looks exactly
+        like a guard protecting you from something.
+
+        Asserting against a run driven all the way through, rather than against a
+        fixture, is the point — a fixture would have been built from the same wrong
+        assumption as the code.
+        """
+        _operator, manager = self.build(stage_graph=StageGraph.linear(), routing_mode="off")
+        self.assertTrue(self.drive(manager))
+        paths = self.only_run()
+
+        failing = {
+            name: fn(paths, GraphState()).reason
+            for name, fn in sorted(GUARDS.items())
+            if not fn(paths, GraphState()).ok
+        }
+        self.assertEqual(failing, {}, msg=f"guards unsatisfiable by a completed run: {failing}")
+
+    def test_every_reproducibility_check_passes_on_a_completed_run(self) -> None:
+        """The same trap on the rubric side: a criterion that can never reach 1.00
+        is a constant subtracted from every score, not a measurement."""
+        _operator, manager = self.build(stage_graph=StageGraph.linear(), routing_mode="off")
+        self.assertTrue(self.drive(manager))
+        paths = self.only_run()
+
+        shortfalls = {}
+        for stage in STAGES:
+            score = score_stage(
+                paths=paths,
+                stage=stage,
+                markdown=read_text(paths.stage_file(stage)),
+            )
+            item = score.by_key.get("reproducibility")
+            if item is not None and item.score < 1.0:
+                shortfalls[stage.slug] = item.observed
+        self.assertEqual(
+            shortfalls, {}, msg=f"validity-chain checks unsatisfiable by a completed run: {shortfalls}"
+        )
+
     # -- settings survive a resume -------------------------------------------
 
     def test_the_walk_settings_are_preserved_on_resume(self) -> None:
@@ -197,7 +287,7 @@ class GraphWalkTests(unittest.TestCase):
         _operator, manager = self.build(
             stage_graph=StageGraph.adaptive(),
             routing_mode="auto",
-            evolution=EvolutionConfig(enabled=True, rounds=2),
+            evolution=EvolutionConfig(rounds=2),
         )
         self.drive(manager)
         paths = self.only_run()
@@ -209,7 +299,7 @@ class GraphWalkTests(unittest.TestCase):
     # -- evolution through the real loop -------------------------------------
 
     def test_evolution_promotes_the_champion_and_writes_a_ledger(self) -> None:
-        _operator, manager = self.build(evolution=EvolutionConfig(enabled=True, rounds=2))
+        _operator, manager = self.build(evolution=EvolutionConfig(rounds=2))
         self.assertTrue(self.drive(manager))
 
         paths = self.only_run()
@@ -236,7 +326,7 @@ class GraphWalkTests(unittest.TestCase):
         would otherwise look like one that was thrashing, and would have nothing
         left if a later round did break something."""
         _operator, manager = self.build(
-            evolution=EvolutionConfig(enabled=True, rounds=3), max_stage_attempts=2
+            evolution=EvolutionConfig(rounds=3), max_stage_attempts=2
         )
         self.assertTrue(self.drive(manager))
         paths = self.only_run()

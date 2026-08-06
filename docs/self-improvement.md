@@ -7,24 +7,40 @@ topology accumulates across runs.
 This page is the whole mechanism: what each part does, what it refuses to do, and
 why the refusals are the load-bearing half.
 
-Everything here is off by default. A run that passes none of these flags walks 01
-through 08 exactly as it always did — through the same engine, which is what keeps
-the default path exercised by every test of the new one.
+All of it is on by default. The strict 01-through-08 sequence is still there and
+still runs through the same engine — which is what keeps it exercised by every test
+of the adaptive path.
 
 ```bash
-# The stages as a graph, with the agent choosing the move out of each node.
-python main.py --goal "..." --stage-graph adaptive --routing auto
+# Everything below is what this does.
+python main.py --goal "..."
 
-# Measured improvement rounds inside each stage.
-python main.py --goal "..." --evolve --evolve-rounds 3
+# What the archive has learned across runs so far.
+python main.py --archive-report
 
-# Both, plus a cross-run archive that learns which moves pay.
-python main.py --goal "..." --stage-graph adaptive --routing auto \
-               --evolve --archive ~/.autor/archive
+# Spend more on improvement, or none at all.
+python main.py --goal "..." --evolve-rounds 4
+python main.py --goal "..." --evolve-rounds 0     # measure and ratchet, no extra passes
 
-# What the archive has learned so far.
-python main.py --archive ~/.autor/archive --archive-report
+# Opt out entirely.
+python main.py --goal "..." --stage-graph linear --routing off --no-evolve --no-archive
 ```
+
+### What each default costs
+
+| | Default | Backend calls it adds |
+| --- | --- | --- |
+| `--stage-graph adaptive` | on | none |
+| `--routing auto` | on | one short prompt per node with more than one live move |
+| measuring + the ratchet | on | **none** — the rubric reads the run off disk |
+| `--evolve-rounds 2` | on | up to two stage executions per stage, none where the rubric sees no headroom |
+| archive recording | on | none |
+| `--archive-steer` | **off** | none |
+
+The split between measuring and polishing is the reason the defaults are
+defensible. They were one setting to begin with, which made the free half opt-in
+for no reason: a run that never polishes still gets the property that matters most,
+that the promoted draft is the best one rather than the most recent.
 
 ---
 
@@ -73,15 +89,43 @@ halt on is already a stage validation error with a better message. Two gates ove
 one condition is one gate too many, and the one that fires second is the one
 nobody maintains.
 
+### A guard is a routing preference, not a gate
+
+A closed edge is removed from the *menu the agent chooses from*. It is not removed
+from the graph. When a guard has closed the forward edge and nobody has chosen
+anything else, the run advances anyway, and the route records that the precondition
+was unmet.
+
+This looks like a hole and is the opposite of one. The correctness gate is the
+stage's own validation, which is unchanged and still refuses a Stage 07 that writes
+up unadjudicated hypotheses. Treating the guard as an absolute barrier would mean a
+run that genuinely cannot satisfy it produces *nothing*, where the linear pipeline
+would have produced a deliverable and failed the gate honestly. Halting is not the
+safer outcome; it is the same refusal with the evidence thrown away.
+
+**The default never goes backward.** That was tried and it was wrong, observably:
+Stage 04's forward guard fails when `workspace/code` holds nothing executable, the
+only backward edge out of Stage 04 leads to study design, and study design is not
+the stage that writes code. The default would have sent the run somewhere that
+could not fix what blocked it, attached the guard's message as though it were a
+justification, and done it again next time round. Which backward edge addresses a
+given block is a judgement about the research, not a computation over the graph —
+so it belongs to the agent, and a run nobody is steering goes straight down the
+pipeline.
+
+A budget block is different and is never overridden. A guard says something about
+the research; a budget says something about the run, and the run stopping is what a
+budget is for.
+
 ---
 
 ## 2. Routing
 
 `src/router.py`
 
-`--routing auto` asks the backend to choose wherever more than one move is live.
-On a linear graph that is never, so `auto` costs nothing there. `--routing agent`
-asks at every node.
+`--routing auto`, the default, asks the backend to choose wherever more than one
+move is live. On a linear graph that is never, so `auto` costs nothing there.
+`--routing agent` asks at every node; `--routing off` always takes the default.
 
 The division of labour is the point:
 
@@ -125,7 +169,8 @@ draft replaces the old one. Nothing compared the two. A refinement that dropped 
 resolving file reference or replaced a measured number with a hedge was promoted
 on exactly the same terms as one that fixed something. "Refine" was a hope.
 
-`--evolve` supplies the missing ordering.
+Measuring supplies the missing ordering, and it is on by default because it costs
+nothing to have.
 
 ### The rubric
 
@@ -195,8 +240,20 @@ that is *failing*. Charging improvement rounds to the repair budget would make a
 stage being made better look like one that was thrashing, and would leave nothing
 if a later round broke something.
 
-Rounds stop at `--evolve-rounds`, or after two consecutive rounds with no gain.
-Most stages are done after one targeted fix.
+Rounds stop at `--evolve-rounds`, after two consecutive rounds with no gain, or —
+before any round is paid for — when no criterion has a shortfall worth `min_gain`.
+That last stop is what makes the default affordable: the other two only fire *after*
+a stage execution has been bought, so without it a clean stage would pay two rounds
+to reword a draft already at the ceiling of what the rubric can see.
+
+A stage re-entered by a backward move gets a fresh round budget. Its champion
+survives — that is the ratchet — but a stage doing new work because a later stage
+found a problem should not be charged for the rounds its previous visit spent.
+
+`--fake-operator` runs spend no rounds at all. A scripted operator emits the same
+draft whatever the directive says, so every round would be bought, measured as a
+regression and reverted. Measuring still happens, which is how the fake pipeline
+keeps exercising the ratchet and the ledger.
 
 ---
 
@@ -240,6 +297,17 @@ Three refusals hold this together:
 Parents are sampled by fitness with a novelty bonus for under-observed variants.
 Pure fitness-proportional sampling locks onto whatever won first and stops
 generating the observations that would overturn it.
+
+### Recording is on; steering is not
+
+The archive records every run by default, because recording is free and it is the
+only thing that could ever justify a change to the topology — and it cannot be
+built retroactively. Whether it is allowed to *act* on what it records is a
+separate question with a separate flag, `--archive-steer`, and that one is off.
+
+A run silently using a different topology from the one the operator asked for is
+not a surprise a research tool gets to spring on anyone. Turn steering on
+deliberately, once `--archive-report` shows the archive has something to say.
 
 ---
 
