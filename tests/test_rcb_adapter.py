@@ -9,6 +9,8 @@ from pathlib import Path
 import rcb_agent
 from src.rcb import (
     MIN_REPORT_CHARS,
+    infer_task_id,
+    write_run_meta,
     RCB_WORKSPACE_DIRS,
     ReportSynthesizer,
     build_benchmark_goal,
@@ -373,3 +375,61 @@ class SkippedStageNamesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RunMetaTest(ExportTestBase):
+    """`_meta.json` is what makes a directly-launched run scoreable and submittable."""
+
+    def test_meta_has_every_field_the_leaderboard_importer_requires(self) -> None:
+        # Mirrors import_leaderboard_only_runs.py's validation.
+        path = write_run_meta(
+            self.workspace,
+            task_id="Physics_003",
+            run_id="20260806_033337",
+            status="completed",
+            duration_seconds=1234,
+            model="opus",
+        )
+        meta = json.loads(path.read_text(encoding="utf-8"))
+        for key in ("task_id", "run_id", "timestamp", "status", "duration_seconds", "model", "agent_name"):
+            self.assertIn(key, meta, key)
+        self.assertEqual(meta["status"], "completed")
+        self.assertEqual(meta["task_id"], "Physics_003")
+        self.assertEqual(meta["duration_seconds"], 1234)
+        self.assertEqual(meta["agent_name"], "AutoR")
+
+    def test_existing_harness_fields_survive_an_update(self) -> None:
+        (self.workspace / "_meta.json").write_text(
+            json.dumps({"agent_cmd": "python3 rcb_agent.py", "agent_name": "AutoR", "status": "running"}),
+            encoding="utf-8",
+        )
+        path = write_run_meta(
+            self.workspace, task_id="Physics_003", run_id="r1",
+            status="completed", duration_seconds=10, model="opus",
+        )
+        meta = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(meta["agent_cmd"], "python3 rcb_agent.py")
+        self.assertEqual(meta["status"], "completed")
+
+    def test_corrupt_existing_meta_does_not_break_the_write(self) -> None:
+        (self.workspace / "_meta.json").write_text("not json at all", encoding="utf-8")
+        path = write_run_meta(
+            self.workspace, task_id="T_000", run_id="r1",
+            status="completed", duration_seconds=1, model="opus",
+        )
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["task_id"], "T_000")
+
+    def test_task_id_is_inferred_from_the_workspace_name(self) -> None:
+        self.assertEqual(infer_task_id(Path("/x/Physics_003_20260806_033337")), "Physics_003")
+        self.assertEqual(infer_task_id(Path("/x/Astronomy_000_20260319_184609")), "Astronomy_000")
+
+    def test_a_workspace_not_named_by_the_harness_yields_no_task_id(self) -> None:
+        self.assertIsNone(infer_task_id(Path("/x/my-scratch-dir")))
+        self.assertIsNone(infer_task_id(Path("/x/Physics_003")))
+
+    def test_a_run_with_no_report_is_recorded_as_failed(self) -> None:
+        path = write_run_meta(
+            self.workspace, task_id="T_000", run_id="r1",
+            status="failed", duration_seconds=5, model="opus",
+        )
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["status"], "failed")

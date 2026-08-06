@@ -116,6 +116,73 @@ class BenchmarkResult:
 
 
 # ---------------------------------------------------------------------------
+# Run metadata
+# ---------------------------------------------------------------------------
+
+
+def write_run_meta(
+    workspace: Path,
+    *,
+    task_id: str | None,
+    run_id: str,
+    status: str,
+    duration_seconds: int,
+    model: str,
+    agent_name: str = "AutoR",
+    extra: dict[str, Any] | None = None,
+) -> Path:
+    """Write the ``_meta.json`` ResearchClawBench reads for a run.
+
+    The harness writes this itself when it launches the agent, but a run started directly
+    (``python rcb_agent.py`` in a workspace) has no one to write it. Without it the run
+    cannot be scored by ``evaluation.score`` or imported into the leaderboard, whose
+    importer requires ``status == "completed"`` plus ``task_id`` and ``duration_seconds``.
+
+    An existing file is updated rather than replaced, so fields the harness already set —
+    notably ``agent_cmd`` — survive.
+    """
+    meta_path = workspace / "_meta.json"
+    meta: dict[str, Any] = {}
+    if meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            meta = {}
+        if not isinstance(meta, dict):
+            meta = {}
+
+    meta.update(
+        {
+            "task_id": task_id or meta.get("task_id") or infer_task_id(workspace),
+            "run_id": meta.get("run_id") or run_id,
+            "timestamp": meta.get("timestamp") or run_id.rsplit("_", 2)[-1],
+            "status": status,
+            "workspace": str(workspace),
+            "agent_name": meta.get("agent_name") or agent_name,
+            "duration_seconds": duration_seconds,
+            "model": model,
+        }
+    )
+    if extra:
+        meta.update(extra)
+
+    meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+    return meta_path
+
+
+def infer_task_id(workspace: Path) -> str | None:
+    """Recover the task id from a workspace directory named ``<TaskId>_<timestamp>``.
+
+    Benchmark workspaces are named ``Physics_003_20260806_033337``: the task id is
+    everything before the trailing date and time components.
+    """
+    parts = workspace.resolve().name.rsplit("_", 2)
+    if len(parts) == 3 and parts[1].isdigit() and parts[2].isdigit():
+        return parts[0]
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Workspace and goal
 # ---------------------------------------------------------------------------
 
