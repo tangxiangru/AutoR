@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .operator import ClaudeOperator
+from .review_policy import format_policy_for_prompt, load_policy
 from .operator_codex import CodexOperator
 from .terminal_ui import TerminalUI
 from .utils import (
@@ -227,7 +228,8 @@ class AutomatedReviewer:
             f"- experiment manifest: `{paths.experiment_manifest.resolve()}`\n"
             f"- stage draft under review: `{paths.stage_tmp_file(stage).resolve()}`\n"
             f"- approved stage path: `{paths.stage_file(stage).resolve()}`\n\n"
-            "# Suggested Refinements\n\n"
+            + self._standing_rules_block(paths)
+            + "# Suggested Refinements\n\n"
             f"1. {suggestions[0]}\n"
             f"2. {suggestions[1]}\n"
             f"3. {suggestions[2]}\n\n"
@@ -246,6 +248,17 @@ class AutomatedReviewer:
             "# Recent Log Excerpt\n\n"
             f"{self._read_excerpt(paths.logs, max_chars=5000, tail=True)}\n"
         )
+
+    def _standing_rules_block(self, paths: RunPaths) -> str:
+        """Render the rules earlier reviews produced, so this review inherits them.
+
+        This is what makes the gate strictly harder as a run proceeds: a correction demanded
+        once is checked on every stage after it.
+        """
+        rendered = format_policy_for_prompt(load_policy(paths))
+        if not rendered:
+            return ""
+        return "# Standing Review Rules (learned earlier in this run)\n\n" + rendered + "\n\n"
 
     def _read_excerpt(self, path: Path, *, max_chars: int, tail: bool = False) -> str:
         if not path.exists():
