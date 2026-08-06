@@ -61,7 +61,7 @@ from .evolution import load_run_fitness
 from .router import routing_summary
 from .rubric import RUBRIC_VERSION
 from .stage_graph import Edge, StageGraph
-from .utils import RunPaths, append_jsonl, read_text, write_text
+from .utils import RunPaths, append_jsonl, load_run_config, read_text, write_text
 
 
 ARCHIVE_VERSION = "1"
@@ -88,7 +88,9 @@ NOVELTY_WEIGHT = 0.35
 # ----------------------------------------------------------------------------
 
 
-def comparability_basis(rubric_version: str, stage_fitness: "Mapping[str, float]") -> str:
+def comparability_basis(
+    topology: str, rubric_version: str, stage_fitness: "Mapping[str, float]"
+) -> str:
     """The key two runs must share before their fitness may be compared at all.
 
     A stage's score is a weighted mean over the criteria that apply to it, and later
@@ -106,7 +108,7 @@ def comparability_basis(rubric_version: str, stage_fitness: "Mapping[str, float]
     to rubric versions — two numbers that do not measure the same thing are not two
     measurements of one thing.
     """
-    return f"v{rubric_version}|" + "-".join(sorted(stage_fitness))
+    return f"{topology or 'unknown'}|v{rubric_version}|" + "-".join(sorted(stage_fitness))
 
 
 @dataclass(frozen=True)
@@ -118,6 +120,18 @@ class RunRecord:
     #: is two observations of it, which is what the payoff arithmetic wants.
     edges: dict[str, int]
     stage_fitness: dict[str, float]
+    #: The topology this run walked. Part of the basis: a linear run never had the
+    #: revisit edges, so counting it as a run that "reached the node and declined"
+    #: puts a run that was never offered the choice into the control arm. Measured,
+    #: that flips the sign — three adaptive runs taking `06->05` at 0.60 against
+    #: three declining at 0.70 reads as +0.100 once six linear runs at 0.40 are
+    #: pooled in, when the answer is -0.100.
+    topology: str
+    #: ``live`` or ``fake``. A fake operator emits scripted drafts, so its scores
+    #: measure the script. Recorded rather than dropped — a fake run is the only
+    #: end-to-end exercise of the ``RunPaths -> RunRecord`` seam — but never pooled
+    #: into an estimate.
+    provenance: str
     route: str
     steps: int
     revisits: int
@@ -143,7 +157,12 @@ class RunRecord:
 
     @property
     def basis(self) -> str:
-        return comparability_basis(self.rubric_version, self.stage_fitness)
+        return comparability_basis(self.topology, self.rubric_version, self.stage_fitness)
+
+    @property
+    def usable(self) -> bool:
+        """Whether this row may enter an estimate."""
+        return self.rubric_version == RUBRIC_VERSION and self.provenance == "live"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -152,6 +171,8 @@ class RunRecord:
             "rubric_version": self.rubric_version,
             "edges": dict(self.edges),
             "stage_fitness": dict(self.stage_fitness),
+            "topology": self.topology,
+            "provenance": self.provenance,
             "mean_fitness": round(self.mean_fitness, 4),
             "route": self.route,
             "steps": self.steps,
@@ -172,6 +193,11 @@ class RunRecord:
                 for k, v in (payload.get("stage_fitness") or {}).items()
                 if isinstance(v, (int, float))
             },
+            # A row written before these existed knows neither, and must not be
+            # assumed into either: an unknown topology forms its own basis, and an
+            # unknown provenance is not `live`.
+            topology=str(payload.get("topology") or ""),
+            provenance=str(payload.get("provenance") or "unknown"),
             route=str(payload.get("route") or ""),
             steps=int(payload.get("steps") or 0),
             revisits=int(payload.get("revisits") or 0),
@@ -309,7 +335,7 @@ def edge_payoffs(
     all. Passing the declared set makes it appear with ``taken_runs == 0``, which
     is what :meth:`Archive.unexplored_edges` needs in order to notice it.
     """
-    usable = [record for record in records if record.rubric_version == RUBRIC_VERSION]
+    usable = [record for record in records if record.usable]
     payoffs: dict[str, EdgePayoff] = {}
 
     edges = {edge for record in usable for edge in record.edges} | set(known_edges or ())
@@ -394,7 +420,20 @@ class Archive:
                 continue
             if isinstance(payload, dict):
                 records.append(RunRecord.from_dict(payload))
-        return records
+
+        # One row per run, keeping the last.
+        #
+        # `record_into_archive` fires on both the fresh and the resume path, and the
+        # run id is the run directory's name, so a resumed run is recorded twice and
+        # a twice-resumed run three times. Duplicates are free observations: they
+        # push `taken_runs` and `skipped_runs` past `min_observations` without any
+        # new evidence, which is the one number standing between a coincidence and a
+        # topology change. Measured on the archive this repo's own review left
+        # behind: 415 rows, 327 distinct runs.
+        deduped: dict[str, RunRecord] = {}
+        for record in records:
+            deduped[record.run_id] = record
+        return list(deduped.values())
 
     def variants(self) -> list[Variant]:
         if not self.variants_file.exists():
@@ -423,7 +462,13 @@ class Archive:
 
     # -- recording -----------------------------------------------------------
 
-    def record_run(self, paths: RunPaths, *, variant_id: str = "baseline") -> RunRecord | None:
+    def record_run(
+        self,
+        paths: RunPaths,
+        *,
+        variant_id: str = "baseline",
+        provenance: str = "live",
+    ) -> RunRecord | None:
         """Append a finished run's route and fitness. Returns ``None`` if unmeasured.
 
         A run with no evolution summary contributes nothing: without per-stage
@@ -441,6 +486,8 @@ class Archive:
             rubric_version=RUBRIC_VERSION,
             edges={str(k): int(v) for k, v in (summary.get("edges") or {}).items()},
             stage_fitness=fitness,
+            topology=str(load_run_config(paths).get("stage_graph") or ""),
+            provenance=provenance,
             route=str(summary.get("route") or ""),
             steps=int(summary.get("steps") or 0),
             revisits=int(summary.get("revisits") or 0),
@@ -456,7 +503,7 @@ class Archive:
         """Observation count and mean fitness per variant, current rubric only."""
         buckets: dict[str, list[float]] = {}
         for record in self.runs():
-            if record.rubric_version != RUBRIC_VERSION:
+            if not record.usable:
                 continue
             buckets.setdefault(record.variant_id, []).append(record.mean_fitness)
         return {key: (len(values), _mean(values)) for key, values in buckets.items()}
@@ -465,7 +512,7 @@ class Archive:
         """Per-variant fitness, kept separate by comparability basis."""
         buckets: dict[str, dict[str, list[float]]] = {}
         for record in self.runs():
-            if record.rubric_version != RUBRIC_VERSION:
+            if not record.usable:
                 continue
             buckets.setdefault(record.basis, {}).setdefault(record.variant_id, []).append(
                 record.mean_fitness
@@ -476,15 +523,29 @@ class Archive:
         }
 
     def incumbent(self) -> Variant:
-        """The promoted variant with the best measured mean, or the baseline."""
-        fitness = self.variant_fitness()
+        """The promoted variant that beats the baseline by the most, within a basis.
+
+        Ranking promoted variants by a pooled mean would reintroduce, one function
+        along, the confounding :func:`comparability_basis` exists to remove — and it
+        matters more here than it looks, because the incumbent is both the parent
+        :meth:`propose_variant` mutates and the comparison target inside
+        :meth:`promote`. A basis-matched head-to-head against an incumbent chosen by
+        a composition-confounded mean is a matched test with an unmatched control.
+        """
         promoted = [item for item in self.variants() if item.promoted]
         if not promoted:
             return BASELINE_VARIANT
-        return max(
-            promoted,
-            key=lambda item: fitness.get(item.variant_id, (0, 0.0))[1],
-        )
+        by_basis = self.variant_fitness_by_basis()
+
+        def margin(variant: Variant) -> float:
+            margins = [
+                per[variant.variant_id][1] - per[BASELINE_VARIANT.variant_id][1]
+                for per in by_basis.values()
+                if variant.variant_id in per and BASELINE_VARIANT.variant_id in per
+            ]
+            return _mean(margins) if margins else 0.0
+
+        return max(promoted, key=lambda item: (margin(item), item.generation))
 
     def sample_parent(self, *, seed: int | None = None) -> Variant:
         """Pick a variant to run next: mostly the good ones, sometimes an unproven one.

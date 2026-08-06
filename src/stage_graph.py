@@ -371,6 +371,28 @@ REVISIT_EDGES: tuple[Edge, ...] = (
 class Visit:
     stage: str
     entered_at: str
+    #: The targets that were live at the moment of choosing, and why the others
+    #: were not.
+    #:
+    #: Recorded because it is the difference between "this edge was taken" and
+    #: "this edge was offered and taken". Without it the archive's control arm pools
+    #: four unrelated states — the guard was shut, `--final-stage` pruned the edge,
+    #: the visit budget was spent, or the run was on a topology where the edge does
+    #: not exist — and calls all of them "did not take it". The guards read the same
+    #: disk predicates the rubric scores, so that pooling makes the guard a selection
+    #: mechanism on the outcome, which is the textbook way to measure a difference
+    #: that is not there.
+    #:
+    #: It costs nothing: `StageRouter.choose` computes both lists and discards them.
+    #: And it cannot be recovered afterwards — re-evaluating a guard needs the
+    #: workspace as it was at that moment, which the next stage has already changed.
+    offered: tuple[str, ...] = ()
+    blocked: dict[str, str] = field(default_factory=dict)
+    #: True when the move did not go through the router at all: a `/back`, a rollback
+    #: after retry exhaustion, or a research-round decision. These had no choice set,
+    #: and an estimator that counted them as decisions where nothing else was on
+    #: offer would be reading an operator's intervention as evidence about an edge.
+    bypassed: bool = False
     #: Filled in when the run leaves. An unfinished visit is the record of where a
     #: run was interrupted, which is what a resume needs.
     left_at: str = ""
@@ -396,6 +418,9 @@ class Visit:
             "default_choice": self.default_choice,
             "agent_directed": self.agent_directed,
             "score_total": self.score_total,
+            "offered": list(self.offered),
+            "blocked": dict(self.blocked),
+            "bypassed": self.bypassed,
         }
 
     @classmethod
@@ -411,6 +436,14 @@ class Visit:
             default_choice=str(payload.get("default_choice") or ""),
             agent_directed=bool(payload.get("agent_directed")),
             score_total=float(total) if isinstance(total, (int, float)) else None,
+            # Absent means empty, so a stage_graph.json written before these fields
+            # existed still loads — as a visit with no recorded choice set, which is
+            # exactly what it is and what every estimator should exclude.
+            offered=tuple(str(item) for item in payload.get("offered", []) if str(item)),
+            blocked={
+                str(k): str(v) for k, v in (payload.get("blocked") or {}).items() if str(k)
+            },
+            bypassed=bool(payload.get("bypassed")),
         )
 
 
@@ -694,6 +727,9 @@ def leave(
     default_choice: str,
     agent_directed: bool,
     score_total: float | None,
+    offered: "Sequence[str]" = (),
+    blocked: Mapping[str, str] | None = None,
+    bypassed: bool = False,
 ) -> None:
     if not state.path:
         return
@@ -705,6 +741,9 @@ def leave(
     visit.default_choice = default_choice
     visit.agent_directed = agent_directed
     visit.score_total = score_total
+    visit.offered = tuple(offered)
+    visit.blocked = dict(blocked or {})
+    visit.bypassed = bypassed
     save_graph_state(paths, state)
 
 
