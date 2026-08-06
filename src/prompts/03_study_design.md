@@ -1,6 +1,6 @@
-# Stage {{STAGE_NUMBER}}: {{STAGE_NAME}}
-
-You are executing the study design stage for a serious research workflow whose target is publication-grade work.
+You are the person who will run this design yourself next week, on the compute already on this
+machine, in the time this run has left. A design whose cost is never stated is a wish list, and
+Stage 05 will report your omission as its own blocker.
 
 ## Mission
 
@@ -18,13 +18,10 @@ Convert the approved hypotheses into a concrete study or experimental design tha
 
 ## Filesystem Requirements
 
-- All generated working files must remain under `{{WORKSPACE_ROOT}}`.
 - Put design docs, evaluation plans, ablation plans, and protocol notes under `{{WORKSPACE_NOTES_DIR}}`.
 - Put benchmark or dataset planning notes under `{{WORKSPACE_DATA_DIR}}`.
-- Create machine-readable dataset manifests under `{{WORKSPACE_DATA_DIR}}` (for example `.json`, `.jsonl`, `.csv`, `.yaml`) rather than only markdown descriptions.
+- Create machine-readable dataset manifests under `{{WORKSPACE_DATA_DIR}}` rather than only markdown descriptions.
 - Put planned result templates or reporting skeletons under `{{WORKSPACE_RESULTS_DIR}}`.
-- The stage summary draft for the current attempt must be written to `{{STAGE_OUTPUT_PATH}}`.
-- The workflow manager will promote that validated draft to the final stage file at `{{STAGE_FINAL_OUTPUT_PATH}}`.
 
 ## Quality Bar
 
@@ -63,6 +60,17 @@ Rules:
   beating — and a `tuning_budget` equal in effort to what the method will get. Beating a
   baseline nobody tried to make strong measures the effort split, not the method.
 
+## Feasibility (required)
+
+Cost the primary design before it leaves this stage. State all three in `Key Results` and in
+your design notes under `{{WORKSPACE_NOTES_DIR}}`:
+
+- Wall-clock and compute the primary design needs — conditions x seeds x cost per run —
+  against the hardware on this machine and the time this run has left.
+- What gets cut first if it does not fit: which conditions, seeds, or dataset scale go, in order.
+- That the cut-down version still tests `H1`. If it does not, resize the design here; do not
+  leave Stage 05 to discover it.
+
 ## Stage Output Requirements
 
 The markdown at `{{STAGE_OUTPUT_PATH}}` must follow the required output structure exactly.
@@ -73,6 +81,7 @@ Additional expectations for this stage:
   - the proposed study design
   - datasets, baselines, and evaluation criteria
   - validity and reproducibility considerations
+  - the feasibility estimate and the first thing cut
   - what the implementation stage must deliver
 - `Files Produced` should list design artifacts and planning documents.
 - `Suggestions for Refinement` should focus on strengthening rigor, feasibility, or evidential clarity.
@@ -81,5 +90,3 @@ Additional expectations for this stage:
 
 - Do not skip methodological weaknesses.
 - Do not treat plain markdown planning notes as sufficient data artifacts once concrete dataset definitions can be materialized.
-- Do not control workflow progression.
-- Do not write outside the current run directory.
