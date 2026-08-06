@@ -88,6 +88,27 @@ NOVELTY_WEIGHT = 0.35
 # ----------------------------------------------------------------------------
 
 
+def comparability_basis(rubric_version: str, stage_fitness: "Mapping[str, float]") -> str:
+    """The key two runs must share before their fitness may be compared at all.
+
+    A stage's score is a weighted mean over the criteria that apply to it, and later
+    stages face strictly more of them: Stage 02 is scored on five criteria worth 11,
+    Stage 06 on eight worth 18, including `numeric_fidelity`, which is the hardest.
+    So the *set of stages a run reached* is a free parameter of the objective. On a
+    real completed run the difference is not subtle — mean fitness over stages 01-02
+    is 0.986 against 0.822 over all eight, a gap eight times the margin a promotion
+    needs.
+
+    Left alone, that makes "stop early" the cheapest available improvement, and the
+    archive would find it: a topology variant whose runs halt at Stage 03 would be
+    measured as a large gain and promoted for it. Encoding the composition in the
+    comparison key is the fix, and it is the same rule the archive already applies
+    to rubric versions — two numbers that do not measure the same thing are not two
+    measurements of one thing.
+    """
+    return f"v{rubric_version}|" + "-".join(sorted(stage_fitness))
+
+
 @dataclass(frozen=True)
 class RunRecord:
     run_id: str
@@ -110,10 +131,19 @@ class RunRecord:
         Averaged over measured stages rather than over all eight: a run stopped at
         Stage 07 by ``--final-stage`` did not fail Stage 08, and counting an absent
         stage as a zero would make every partial run look like a bad topology.
+
+        The consequence is that this number is only meaningful *within* a
+        :func:`comparability_basis`. Nothing here may be compared against a run that
+        measured a different set of stages, and every consumer below goes through
+        :attr:`basis` to make sure it is not.
         """
         if not self.stage_fitness:
             return 0.0
         return sum(self.stage_fitness.values()) / len(self.stage_fitness)
+
+    @property
+    def basis(self) -> str:
+        return comparability_basis(self.rubric_version, self.stage_fitness)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -290,9 +320,31 @@ def edge_payoffs(
             for record in usable
             if any(key.split("->", 1)[0] == source for key in record.edges)
         ]
-        taken = [record.mean_fitness for record in reached if edge in record.edges]
-        skipped = [record.mean_fitness for record in reached if edge not in record.edges]
-        payoffs[edge] = EdgePayoff(edge, len(taken), len(skipped), _mean(taken), _mean(skipped))
+        # Compare within a basis, then pool the per-basis contrasts. Pooling the raw
+        # means instead would let the *composition* of each arm supply the delta: an
+        # arm of runs that stopped at Stage 03 is scored on the easy criteria only,
+        # and would beat an arm of runs that finished for a reason that has nothing
+        # to do with the edge.
+        bases = {record.basis for record in reached}
+        taken_means: list[float] = []
+        skipped_means: list[float] = []
+        taken_runs = skipped_runs = 0
+        for basis in sorted(bases):
+            arm = [record for record in reached if record.basis == basis]
+            taken = [record.mean_fitness for record in arm if edge in record.edges]
+            skipped = [record.mean_fitness for record in arm if edge not in record.edges]
+            if not taken or not skipped:
+                # A basis with only one arm carries no contrast. Counting its runs
+                # would inflate the observation count that decides believability
+                # without contributing anything to the delta.
+                continue
+            taken_runs += len(taken)
+            skipped_runs += len(skipped)
+            taken_means.append(_mean(taken))
+            skipped_means.append(_mean(skipped))
+        payoffs[edge] = EdgePayoff(
+            edge, taken_runs, skipped_runs, _mean(taken_means), _mean(skipped_means)
+        )
     return payoffs
 
 
@@ -408,6 +460,20 @@ class Archive:
                 continue
             buckets.setdefault(record.variant_id, []).append(record.mean_fitness)
         return {key: (len(values), _mean(values)) for key, values in buckets.items()}
+
+    def variant_fitness_by_basis(self) -> dict[str, dict[str, tuple[int, float]]]:
+        """Per-variant fitness, kept separate by comparability basis."""
+        buckets: dict[str, dict[str, list[float]]] = {}
+        for record in self.runs():
+            if record.rubric_version != RUBRIC_VERSION:
+                continue
+            buckets.setdefault(record.basis, {}).setdefault(record.variant_id, []).append(
+                record.mean_fitness
+            )
+        return {
+            basis: {key: (len(values), _mean(values)) for key, values in per_variant.items()}
+            for basis, per_variant in buckets.items()
+        }
 
     def incumbent(self) -> Variant:
         """The promoted variant with the best measured mean, or the baseline."""
@@ -598,16 +664,33 @@ class Archive:
         Two independent conditions, and the observation count is the one that does
         the work: a challenger that beat the incumbent once beat it once.
         """
-        fitness = self.variant_fitness()
         challenger = self.variant(variant_id)
         if challenger is None or challenger.promoted:
             return False
-        observations, mean = fitness.get(variant_id, (0, 0.0))
-        if observations < self.min_observations:
-            return False
         incumbent = self.incumbent()
-        _, incumbent_mean = fitness.get(incumbent.variant_id, (0, 0.0))
-        if mean - incumbent_mean < self.min_gain:
+        if incumbent.variant_id == variant_id:
+            return False
+
+        # Head-to-head within each basis, then require the challenger to have won
+        # enough of them. Comparing pooled means would let the challenger win by
+        # having been run on easier compositions — and "runs that stopped early" is
+        # the easiest composition there is, which makes it the cheapest thing for a
+        # topology to learn.
+        by_basis = self.variant_fitness_by_basis()
+        observations = 0
+        margins: list[float] = []
+        for per_variant in by_basis.values():
+            mine = per_variant.get(variant_id)
+            theirs = per_variant.get(incumbent.variant_id)
+            if mine is None or theirs is None:
+                continue
+            observations += mine[0]
+            margins.append(mine[1] - theirs[1])
+        if observations < self.min_observations or not margins:
+            return False
+        if min(margins) < self.min_gain:
+            # Winning on average while losing on some composition is the signature
+            # of a variant that traded one kind of run for another.
             return False
 
         updated = [
