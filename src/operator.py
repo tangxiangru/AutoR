@@ -251,7 +251,6 @@ Rules:
 Required markdown structure:
 # Stage X: <name>
 ## Objective
-## Previously Approved Stage Summaries
 ## What I Did
 ## Key Results
 ## Files Produced
@@ -266,7 +265,7 @@ Required markdown structure:
 Required completion behavior:
 1. Read the current stage file if it exists.
 2. Overwrite it with a complete markdown document in the exact structure above.
-3. Ensure both `## Previously Approved Stage Summaries` and `## Your Options` are present.
+3. Ensure `## Your Options` is present and matches the fixed six lines exactly.
 4. Ensure there is no `[In progress]`, `[Pending]`, `[TODO]`, `[TBD]`, or similar unfinished marker anywhere in the file.
 5. After writing, respond only with a short confirmation that you rewrote the file.
 
@@ -1108,8 +1107,6 @@ Original stderr:
                 "## Objective\n"
                 "Introduce AutoR during a fake-mode smoke test while demonstrating the terminal UI, "
                 "stage summary contract, and approval loop.\n\n"
-                "## Previously Approved Stage Summaries\n"
-                f"{previous_summaries}\n\n"
                 "## What I Did\n"
                 f"- Entered fake-operator mode so the full terminal workflow could be demonstrated without calling {agent_label}.\n"
                 "- Generated a short markdown introduction to AutoR for recording and smoke-test purposes.\n"
@@ -1191,8 +1188,6 @@ Original stderr:
                 f"# Stage {stage.number:02d}: {stage.display_name}\n\n"
                 "## Objective\n"
                 "Validate the literature-survey workflow using a minimal claim-to-source ledger.\n\n"
-                "## Previously Approved Stage Summaries\n"
-                f"{previous_summaries}\n\n"
                 "## What I Did\n"
                 f"- Executed fake-operator mode instead of invoking {agent_label}.\n"
                 f"- Wrote supporting source and claim ledgers to `{relative_to_run(sources_path, paths.run_root)}` and `{relative_to_run(claims_path, paths.run_root)}`.\n"
@@ -1242,8 +1237,6 @@ Original stderr:
                 f"# Stage {stage.number:02d}: {stage.display_name}\n\n"
                 "## Objective\n"
                 "Validate the Stage 02 workflow using typed propositions, empirical hypotheses, and provisional paper claims.\n\n"
-                "## Previously Approved Stage Summaries\n"
-                f"{previous_summaries}\n\n"
                 "## What I Did\n"
                 f"- Executed fake-operator mode instead of invoking {agent_label}.\n"
                 f"- Wrote supporting hypothesis notes to `{relative_to_run(hypotheses_path, paths.run_root)}`.\n"
@@ -1300,8 +1293,6 @@ Original stderr:
                 "## Objective\n"
                 f"Validate the workflow path for {stage.display_name} and confirm that the "
                 "manager, operator, and filesystem contracts are functioning.\n\n"
-                "## Previously Approved Stage Summaries\n"
-                f"{previous_summaries}\n\n"
                 "## What I Did\n"
                 f"- Executed fake-operator mode instead of invoking {agent_label}.\n"
                 f"- Created a placeholder artifact at `{relative_to_run(note_path, paths.run_root)}`.\n"
