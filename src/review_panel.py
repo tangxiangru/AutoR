@@ -642,6 +642,7 @@ class ReviewPanel:
             verdicts.append(
                 self._verdict_from_output(
                     role=role,
+                    stage_markdown=stage_markdown,
                     member=member,
                     exit_code=exit_code,
                     stdout_text=stdout_text,
@@ -654,6 +655,7 @@ class ReviewPanel:
         self,
         *,
         role: PanelRole,
+        stage_markdown: str = "",
         member: AutomatedReviewer,
         exit_code: int,
         stdout_text: str,
@@ -689,7 +691,7 @@ class ReviewPanel:
                 abstained=True,
             )
 
-        decision = member.parse_decision(stdout_text)
+        decision = member.parse_decision(stdout_text, markdown=stage_markdown)
         blocking = bool(payload.get("blocking")) if isinstance(payload, dict) else False
         concerns: tuple[str, ...] = ()
         if isinstance(payload, dict) and isinstance(payload.get("concerns"), list):
@@ -778,7 +780,7 @@ class ReviewPanel:
                 reason=f"Panel chair could not be reached (exit code {exit_code}); "
                 "falling back to the panel's own objections.",
             )
-        return chair.parse_decision(stdout_text)
+        return chair.parse_decision(stdout_text, markdown=stage_markdown)
 
     def _enforce_blocking_objections(self, deliberation: PanelDeliberation) -> ReviewDecision:
         """Refuse approval while a blocking objection stands.

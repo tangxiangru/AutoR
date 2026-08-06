@@ -33,6 +33,8 @@ def record(
     fitness: float,
     variant_id: str = "baseline",
     rubric_version: str | None = None,
+    topology: str = "adaptive",
+    provenance: str = "live",
 ) -> RunRecord:
     return RunRecord(
         run_id=run_id,
@@ -40,6 +42,8 @@ def record(
         rubric_version=rubric_version or RUBRIC_VERSION,
         edges=edges,
         stage_fitness={"05_experimentation": fitness, "06_analysis": fitness},
+        topology=topology,
+        provenance=provenance,
         route="",
         steps=len(edges),
         revisits=0,
@@ -113,6 +117,7 @@ class ArchiveTests(unittest.TestCase):
         short = RunRecord(
             run_id="short", variant_id="baseline", rubric_version=RUBRIC_VERSION,
             edges={BACK: 1}, stage_fitness={"01_literature_survey": 0.97, "02_hypothesis_generation": 1.0},
+            topology="adaptive", provenance="live",
             route="", steps=2, revisits=0, agent_directed=0, recorded_at="t",
         )
         long_runs = [
@@ -120,6 +125,7 @@ class ArchiveTests(unittest.TestCase):
                 run_id=f"long{i}", variant_id="baseline", rubric_version=RUBRIC_VERSION,
                 edges={FORWARD: 1},
                 stage_fitness={f"0{n}_s": 0.80 for n in range(1, 9)},
+                topology="adaptive", provenance="live",
                 route="", steps=8, revisits=0, agent_directed=0, recorded_at="t",
             )
             for i in range(3)
@@ -152,7 +158,8 @@ class ArchiveTests(unittest.TestCase):
         def run(name, variant, shape, value):
             return RunRecord(
                 run_id=name, variant_id=variant, rubric_version=RUBRIC_VERSION, edges={},
-                stage_fitness={k: value for k in shape}, route="", steps=len(shape),
+                stage_fitness={k: value for k in shape}, topology="adaptive",
+                provenance="live", route="", steps=len(shape),
                 revisits=0, agent_directed=0, recorded_at="t",
             )
 
@@ -172,6 +179,8 @@ class ArchiveTests(unittest.TestCase):
             rubric_version=RUBRIC_VERSION,
             edges={},
             stage_fitness={"01_literature_survey": 0.8},
+            topology="adaptive",
+            provenance="live",
             route="",
             steps=1,
             revisits=0,
@@ -186,6 +195,58 @@ class ArchiveTests(unittest.TestCase):
             handle.write("{not json at all\n")
         self.seed([record("b", edges={BACK: 1}, fitness=0.8)])
         self.assertEqual([item.run_id for item in self.archive.runs()], ["a", "b"])
+
+    def test_a_linear_run_is_not_in_the_control_arm_of_an_edge_it_never_had(self) -> None:
+        """The sign flip. A linear run never had the revisit edge, so counting it as
+        a run that "reached the node and declined" puts a run that was never offered
+        the choice into the control arm — and the answer comes out backwards.
+        """
+        self.seed(
+            [record(f"t{i}", edges={BACK: 1}, fitness=0.60) for i in range(3)]
+            + [record(f"d{i}", edges={FORWARD: 1}, fitness=0.70) for i in range(3)]
+            + [
+                record(f"L{i}", edges={FORWARD: 1}, fitness=0.40, topology="linear")
+                for i in range(6)
+            ]
+        )
+        payoff = edge_payoffs(self.archive.runs())[BACK]
+        self.assertEqual((payoff.taken_runs, payoff.skipped_runs), (3, 3))
+        self.assertAlmostEqual(payoff.delta, -0.10, places=6)
+
+    def test_a_run_recorded_twice_counts_once(self) -> None:
+        """`record_into_archive` fires on the fresh path and the resume path, and the
+        run id is the run directory. A resumed run would otherwise be two free
+        observations, pushing the count past `min_observations` with no new evidence.
+        """
+        self.seed([record("same", edges={BACK: 1}, fitness=0.5) for _ in range(3)])
+        self.assertEqual(len(self.archive.runs()), 1)
+
+    def test_a_fake_run_is_kept_and_never_estimated_from(self) -> None:
+        """A fake operator's scores measure the script. Recorded — it is the only
+        end-to-end exercise of this seam — and excluded from every estimate."""
+        self.seed(
+            [record(f"f{i}", edges={BACK: 1}, fitness=0.99, provenance="fake") for i in range(6)]
+            + [record(f"g{i}", edges={FORWARD: 1}, fitness=0.10, provenance="fake") for i in range(6)]
+        )
+        self.assertEqual(len(self.archive.runs()), 12)
+        self.assertEqual(self.archive.variant_fitness(), {})
+        # Not merely zeroed — absent. A fake run contributes no edge to the
+        # estimator's domain, so there is nothing for a payoff to be computed over.
+        self.assertNotIn(BACK, edge_payoffs(self.archive.runs()))
+        self.assertIsNone(self.archive.propose_variant())
+
+    def test_a_row_written_before_provenance_existed_is_not_assumed_live(self) -> None:
+        import json as _json
+
+        legacy = record("old", edges={BACK: 1}, fitness=0.9).to_dict()
+        legacy.pop("provenance")
+        legacy.pop("topology")
+        self.archive.runs_file.parent.mkdir(parents=True, exist_ok=True)
+        with self.archive.runs_file.open("a", encoding="utf-8") as handle:
+            handle.write(_json.dumps(legacy) + "\n")
+        loaded = self.archive.runs()[0]
+        self.assertEqual(loaded.provenance, "unknown")
+        self.assertFalse(loaded.usable)
 
     # -- variation -----------------------------------------------------------
 

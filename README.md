@@ -44,7 +44,7 @@ and the stage after each must answer every finding in writing or the gate refuse
 scored and a refinement that does not improve is reverted. Every stage still stops at an approval
 gate, and by default that gate is you.
 
-"Recursive" is six mechanisms, each of them a file you can open:
+"Recursive" is eight mechanisms, each of them a file you can open:
 
 | Move | What runs | Where |
 | --- | --- | --- |
@@ -53,7 +53,9 @@ gate, and by default that gate is you.
 | **Refute** | An adversarial pass asks why the result is wrong across ten named failure modes — confound, leakage, `metric_cherry_picking`, `effect_within_noise`, six more; a round can close as `converged`, `refine_design`, `new_hypothesis` or `abandon` | [`validity_review.py`](src/validity_review.py) · 512L<br />[`research_rounds.py`](src/research_rounds.py) · 320L |
 | **Critique** | Five seats review independently, cross-examine anonymised, then converge; a blocking objection is turned into a refusal in code against the panel's own chair, and a different model family audits the approval as a veto | [`review_panel.py`](src/review_panel.py) · 1223L<br />[`cross_reviewer.py`](src/cross_reviewer.py) · 239L |
 | **Iterate** | Every valid draft is scored against a rubric read off disk; the champion is kept and a losing polish round is reverted before anyone reads it; a draft that loses on the weighted total but is non-dominated on the criterion vector is kept anyway | [`rubric.py`](src/rubric.py) · 926L<br />[`evolution.py`](src/evolution.py) · 692L<br />[`pareto.py`](src/pareto.py) · 212L |
-| **Learn** | Each finished run records its route and measured fitness; a fitness comparison is keyed on the set of stages the run actually measured, so a run cannot score well by stopping early | [`archive.py`](src/archive.py) · 784L |
+| **Learn** | Each finished run records its route and measured fitness; a fitness comparison is keyed on the set of stages the run actually measured, so a run cannot score well by stopping early | [`archive.py`](src/archive.py) · 862L |
+| **Deliberate** | A stage that hits a genuine crux stops, names the question, and pulls in theorist / empiricist / critic / pragmatist plus an expert brief, then continues with an answer that names its own falsifier; budgeted, and measured against what the agent already believed | [`deliberation.py`](src/deliberation.py) · 640L |
+| **Localise** | A reviewer quotes the passage it objects to instead of refusing the whole stage; the revision is told to change only those spans and is diffed against them, so "preserve the correct parts" is measured rather than hoped for | [`stage_comments.py`](src/stage_comments.py) · 375L |
 
 Three of those six are on for every run: **Test**, **Refute**, and **Iterate** (`--evolve` defaults
 on). **Propose** needs `--ideation-panel`; **Critique** needs `--review-panel` and `--cross-review`;
@@ -207,6 +209,7 @@ scope. "Make each one refutable" is advice about a gate that now exists.
 | Give the panel a researcher persona to stand in for | `python main.py --review-panel --persona docs/persona-example.md --goal "..."` |
 | Seat the panel across different models | `python main.py --review-panel --panel-models pi=opus skeptic=codex:default --goal "..."` |
 | Widen Stage 02's hypotheses with a proposer panel | `python main.py --ideation-panel --goal "..."` |
+| Let a stage stop and think hard at a crux | `python main.py --deliberation --goal "..."` |
 | Choose the execution backend and model | `python main.py --operator claude --model opus` or `python main.py --operator codex --model default` |
 | Choose the reviewer backend separately | `python main.py --full-auto --review-operator claude --review-model opus` |
 | Allow Codex-backed SSH / remote GPU execution | `python main.py --operator codex --codex-sandbox danger-full-access --goal "Your research goal here"` |

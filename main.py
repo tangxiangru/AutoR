@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from src.approval_agent import AutomatedReviewer
+from src.deliberation import DEFAULT_MAX_DELIBERATIONS
 from src.review_panel import (
     DEFAULT_PANEL,
     ReviewPanel,
@@ -162,6 +163,33 @@ def parse_args() -> argparse.Namespace:
              "(for example: pi=opus skeptic=codex:default). Seats left unassigned use the "
              "reviewer default. Heterogeneity is the lever with the best evidence behind it: "
              "five prompts against one model are five correlated reads wearing five hats.",
+    )
+    parser.add_argument(
+        "--deliberation",
+        action="store_true",
+        help="Let a stage stop and pull in a panel when it hits a genuine crux. The agent "
+             "names the question, finishes with its working answer, and a focused panel "
+             "resolves it for the next pass. Most steps are execution; this is for the few "
+             "that are not.",
+    )
+    parser.add_argument(
+        "--max-deliberations",
+        type=int,
+        default=DEFAULT_MAX_DELIBERATIONS,
+        help="Cruxes a run may escalate before the budget is refused. Scarcity is what makes "
+             f"'think hard here' mean anything. Defaults to {DEFAULT_MAX_DELIBERATIONS}.",
+    )
+    parser.add_argument(
+        "--deliberation-voices",
+        nargs="+",
+        metavar="VOICE",
+        help="Seat only these voices: theorist, empiricist, critic, pragmatist.",
+    )
+    parser.add_argument(
+        "--deliberation-models",
+        nargs="+",
+        metavar="VOICE=MODEL",
+        help="Assign a model per voice, as voice=model or voice=backend:model.",
     )
     parser.add_argument(
         "--ideation-panel",
@@ -659,6 +687,7 @@ def record_into_archive(
     manager: ResearchManager,
     variant_id: str,
     ui: TerminalUI,
+    args: argparse.Namespace,
 ) -> None:
     """Fold a finished run into the archive, and let it propose and promote.
 
@@ -669,7 +698,14 @@ def record_into_archive(
     if archive is None or manager.last_run_paths is None:
         return
     try:
-        record = archive.record_run(manager.last_run_paths, variant_id=variant_id)
+        record = archive.record_run(
+            manager.last_run_paths,
+            variant_id=variant_id,
+            # A fake operator's scores measure the script, not the research. Kept in
+            # the archive — it is the only end-to-end exercise of this seam — and
+            # excluded from every estimate.
+            provenance="fake" if args.fake_operator else "live",
+        )
         if record is None:
             ui.show_status(
                 "Nothing was recorded in the archive: this run has no measured stages. "
@@ -707,6 +743,23 @@ def resolve_search_context(ui: TerminalUI, *, mode: str, operator: str, codex_sa
     return resolve_web_search_context(mode, readiness=readiness)
 
 
+
+
+def create_crux_panel(args, *, backend_name: str, model: str, ui: TerminalUI):
+    """Build the crux deliberation panel, or None when it is not requested."""
+    if not getattr(args, "deliberation", False):
+        return None
+    from src.deliberation import CruxPanel, apply_voice_models, resolve_voices
+
+    return CruxPanel(
+        apply_voice_models(resolve_voices(args.deliberation_voices), args.deliberation_models),
+        backend_name=backend_name,
+        model=model,
+        fake_mode=args.fake_operator,
+        ui=ui,
+        stage_timeout=args.stage_timeout,
+        max_deliberations=args.max_deliberations,
+    )
 
 def create_ideation_panel(args, *, backend_name: str, model: str, ui: TerminalUI):
     """Build the Stage 02 proposer panel, or None when it is not requested."""
@@ -844,6 +897,9 @@ def main() -> int:
         manager.ideation_panel = create_ideation_panel(
             args, backend_name=review_operator, model=review_model, ui=ui
         )
+        manager.crux_panel = create_crux_panel(
+            args, backend_name=review_operator, model=review_model, ui=ui
+        )
         completed = manager.resume_run(
             run_root,
             start_stage=start_stage or rollback_stage,
@@ -853,7 +909,7 @@ def main() -> int:
             output_format=output_format,
             final_stage=final_stage,
         )
-        record_into_archive(archive, manager, variant_id, ui)
+        record_into_archive(archive, manager, variant_id, ui, args)
         return 0 if completed else 1
 
     operator_name = (args.operator or "claude").strip().lower()
@@ -923,6 +979,9 @@ def main() -> int:
     manager.ideation_panel = create_ideation_panel(
         args, backend_name=review_operator, model=review_model, ui=ui
     )
+    manager.crux_panel = create_crux_panel(
+        args, backend_name=review_operator, model=review_model, ui=ui
+    )
 
     goal = resolve_goal(args, unattended=unattended)
     skip_intake = args.skip_intake or not sys.stdin.isatty()
@@ -950,7 +1009,7 @@ def main() -> int:
         output_format=output_format,
         final_stage=final_stage,
     )
-    record_into_archive(archive, manager, variant_id, ui)
+    record_into_archive(archive, manager, variant_id, ui, args)
     return 0 if completed else 1
 
 

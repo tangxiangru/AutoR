@@ -5,7 +5,7 @@ from datetime import datetime
 import shutil
 import sys
 from pathlib import Path
-from typing import TextIO
+from typing import Any, TextIO
 
 from .bootstrap import (
     bootstrap_profile_exists,
@@ -57,6 +57,8 @@ from .prompt_fragments import compose_stage_template
 from .validity_review import ValidityReviewer, format_findings_for_prompt
 from .research_rounds import (
     ROUND_CLOSING_STAGE_NUMBER,
+    Round,
+    latest_round,
     read_round_decision,
     format_round_status,
     format_rounds_for_prompt,
@@ -90,6 +92,12 @@ from .manifest import (
 from .operator_protocol import OperatorProtocol
 from .evolution import EvolutionConfig, EvolutionController
 from .router import StageRouter, format_decision
+from .stage_comments import (
+    assess_revision,
+    build_comment_feedback,
+    carry_forward as carry_forward_comments,
+    record_round as record_comment_round,
+)
 from .stage_graph import (
     FINISH as GRAPH_FINISH,
     GraphState,
@@ -104,6 +112,14 @@ from .stage_graph import (
 from .diagram_gen import post_writing_diagram_hook
 from .terminal_ui import TerminalUI
 from .platform.foundry import generate_paper_package, generate_release_package
+from .deliberation import (
+    CruxPanel,
+    clear_requests,
+    escalation_offer,
+    format_resolution_for_prompt,
+    read_requests,
+    record_resolution,
+)
 from .ideation_panel import (
     IdeationPanel,
     format_pool_for_prompt,
@@ -213,6 +229,12 @@ class ResearchManager:
         self._research_diagram: bool = False
         self._final_stage: StageSpec | None = None
         self.ideation_panel: IdeationPanel | None = None
+        self.crux_panel: CruxPanel | None = None
+        self._crux_resolutions: list[Any] = []
+        self._pending_comments: list[Any] = []
+        self._open_comments: list[Any] = []
+        self._commented_draft: str = ""
+        self._comment_round_attempt: int = 0
         self._jump_target_stage: StageSpec | None = None
         self.unattended = unattended
         self.max_auto_skips = max_auto_skips
@@ -460,6 +482,10 @@ class ResearchManager:
                     default_choice="",
                     agent_directed=False,
                     score_total=None,
+                    # No choice set: the move was already made by the time the walk
+                    # saw it. Marked so an estimator excludes it rather than reading
+                    # an operator's intervention as evidence about an edge.
+                    bypassed=True,
                 )
                 stage = target
                 continue
@@ -485,8 +511,44 @@ class ResearchManager:
         save_graph_state(paths, state)
         return self._complete_run(paths, state=state)
 
+    def _run_was_abandoned(self, paths: RunPaths) -> "Round | None":
+        """The closed round that concluded the question cannot be answered, if any."""
+        final = latest_round(paths)
+        return final if final is not None and final.decision == "abandon" else None
+
     def _complete_run(self, paths: RunPaths, state: "GraphState | None" = None) -> bool:
         route = format_route(state) if state is not None else ""
+
+        # A run that concluded it cannot answer its question reached the end of the
+        # graph legitimately, and it did not produce what it set out to produce.
+        # `completed` and `cancelled` are both wrong, and `cancelled` is the worse
+        # of the two: it is what an abort writes, so the honest outcome would be
+        # indistinguishable from a crash in every downstream reader.
+        abandoned = self._run_was_abandoned(paths)
+        if abandoned is not None:
+            append_log_entry(
+                paths.logs,
+                "run_abandoned",
+                f"Round {abandoned.number} concluded `abandon`: {abandoned.rationale}"
+                + (f"\nRoute: {route}" if route else ""),
+            )
+            update_manifest_run_status(
+                paths,
+                run_status="abandoned",
+                last_event="run.abandoned",
+                current_stage_slug=None,
+                completed_at=datetime.now().isoformat(timespec="seconds"),
+            )
+            self.ui.show_status(
+                f"Run abandoned after round {abandoned.number}: {abandoned.rationale}",
+                level="warn",
+            )
+            self._print(
+                "Run stopped: the question cannot be answered with the resources available. "
+                "That conclusion is recorded in workspace/notes/research_rounds.json."
+            )
+            return True
+
         append_log_entry(
             paths.logs,
             "run_complete",
@@ -537,6 +599,8 @@ class ResearchManager:
             default_choice=decision.default_target,
             agent_directed=decision.agent_directed,
             score_total=score.total if score is not None else None,
+            offered=decision.offered,
+            blocked=decision.blocked,
         )
         if decision.agent_directed or decision.refusal:
             self.ui.show_status(format_decision(decision), level="info")
@@ -623,6 +687,125 @@ class ResearchManager:
             record_idea_pool(paths, measure_adoption(pool, stage_markdown), stage, 0)
         except Exception as exc:  # noqa: BLE001 - measurement must not disturb an approval
             append_log_entry(paths.logs, f"{stage.slug} idea_pool_adoption_failed", str(exc))
+
+    def _begin_comment_round(
+        self, paths: RunPaths, stage: StageSpec, attempt_no: int, stage_markdown: str
+    ) -> str:
+        """Turn anchored comments into a revision instruction and remember what was asked."""
+        comments = self._pending_comments
+        self._pending_comments = []
+        self._open_comments = comments
+        self._commented_draft = stage_markdown
+        # One logical round is one ledger entry: the comments are raised against this
+        # attempt's draft, and the revision that answers them arrives as the next attempt.
+        # Recording both under the attempt they were raised on keeps them together.
+        self._comment_round_attempt = attempt_no
+        record_comment_round(paths, stage, attempt_no, comments)
+
+        unanchored = [c for c in comments if c.status == "unanchored"]
+        if unanchored:
+            # A reviewer quoting text the draft does not contain is objecting to something it
+            # imagined. Say so rather than passing it on as an instruction.
+            self.ui.show_status(
+                f"{len(unanchored)} review comment(s) quoted text not present in the draft; "
+                "they were dropped.",
+                level="warn",
+            )
+        append_log_entry(
+            paths.logs,
+            f"{stage.slug} attempt {attempt_no} anchored_comments",
+            "\n".join(
+                f"[{c.severity}] {c.comment_id} ({c.status}): {c.comment}" for c in comments
+            ),
+        )
+        return build_comment_feedback(comments)
+
+    def _close_comment_round(
+        self, paths: RunPaths, stage: StageSpec, attempt_no: int, stage_markdown: str
+    ) -> None:
+        """Diff the new draft against the comments that asked for it.
+
+        Asking for a targeted revision is cheap; knowing whether one happened is the point.
+        Comments whose passage never moved are carried into the next round rather than
+        quietly expiring.
+        """
+        if not self._open_comments:
+            return
+        comments = self._open_comments
+        before = self._commented_draft
+        round_attempt = self._comment_round_attempt or attempt_no
+        self._open_comments = []
+        self._commented_draft = ""
+        self._comment_round_attempt = 0
+        try:
+            outcome = assess_revision(before, stage_markdown, comments)
+            record_comment_round(paths, stage, round_attempt, comments, outcome)
+            self._pending_comments = carry_forward_comments(comments, outcome)
+            append_log_entry(
+                paths.logs,
+                f"{stage.slug} attempt {attempt_no} anchored_revision",
+                outcome.verdict(),
+            )
+            if outcome.collateral_ratio >= 0.5 and outcome.collateral_lines_changed:
+                self.ui.show_status(
+                    f"Targeted revision rewrote {outcome.collateral_lines_changed} line(s) no "
+                    "comment asked about.",
+                    level="warn",
+                )
+        except Exception as exc:  # noqa: BLE001 - measurement must not derail the stage
+            append_log_entry(paths.logs, f"{stage.slug} anchored_revision_failed", str(exc))
+
+    def _settle_cruxes(self, paths: RunPaths, stage: StageSpec, attempt_no: int) -> str | None:
+        """Deliberate any crux the agent raised, and send the stage back with the answers.
+
+        Returns the revision instruction when a deliberation ran, or None to let the stage
+        proceed to its gate untouched. Best-effort: a panel that cannot be reached must not
+        strand a stage that already produced a usable draft.
+        """
+        if self.crux_panel is None:
+            return None
+        try:
+            requests = read_requests(paths, stage)
+        except Exception:  # noqa: BLE001 - a malformed escalation costs the escalation only
+            requests = []
+        if not requests:
+            return None
+        clear_requests(paths)
+
+        resolutions = []
+        for request in requests:
+            if self.crux_panel.budget_left == 0:
+                append_log_entry(
+                    paths.logs,
+                    f"{stage.slug} crux_budget_spent",
+                    f"Refused to deliberate: {request.question}",
+                )
+                self.ui.show_status(
+                    "Deliberation budget is spent; the remaining crux was not escalated.",
+                    level="warn",
+                )
+                break
+            self.ui.show_status(f"{stage.stage_title} raised a crux: {request.question}", level="info")
+            try:
+                resolution = self.crux_panel.deliberate(
+                    paths=paths, stage=stage, attempt_no=attempt_no, request=request
+                )
+            except Exception as exc:  # noqa: BLE001 - never strand a usable draft
+                append_log_entry(paths.logs, f"{stage.slug} crux_failed", str(exc))
+                continue
+            if resolution is None:
+                continue
+            record_resolution(paths, stage, resolution)
+            resolutions.append(resolution)
+
+        if not resolutions:
+            return None
+        self._crux_resolutions = resolutions
+        return (
+            "Continue the current stage conversation. A panel resolved the crux(es) you raised; "
+            "the answers are below under `Resolved Cruxes`. Apply them and revise the parts of "
+            "the stage that depended on your working answer, leaving the rest alone."
+        )
 
     def _generate_writing_review(self, paths: RunPaths) -> dict[str, object]:
         """Produce the Stage 07 triage artifact that matches this run's output format.
@@ -1769,6 +1952,18 @@ class ResearchManager:
 
             stage_markdown = read_text(result.stage_file_path)
 
+            # If the previous round sent back quoted passages, check what came back against
+            # them before anyone decides anything.
+            self._close_comment_round(paths, stage, attempt_no, stage_markdown)
+
+            # The agent may have stopped and asked for help on a specific question.
+            crux_feedback = self._settle_cruxes(paths, stage, attempt_no)
+            if crux_feedback is not None:
+                revision_feedback = crux_feedback
+                continue_session = True
+                attempt_no += 1
+                continue
+
             # The draft is valid. Measure it, and decide whether it may stand.
             if self.evolution is not None and self.evolution.config.applies_to(stage):
                 outcome = self.evolution.consider(
@@ -1841,6 +2036,14 @@ class ResearchManager:
                 continue
 
             if choice == "4":
+                if self._pending_comments:
+                    # A local refusal: send back the quoted passages, not the whole stage.
+                    revision_feedback = self._begin_comment_round(
+                        paths, stage, attempt_no, stage_markdown
+                    )
+                    continue_session = True
+                    attempt_no += 1
+                    continue
                 if auto_feedback is not None:
                     custom_feedback = auto_feedback
                 else:
@@ -2038,6 +2241,28 @@ class ResearchManager:
             stage_template = stage_template.rstrip() + "\n\n" + inbound + "\n"
         self._record_inbound_channels(paths, stage, delivered)
 
+        # The crux-panel blocks stay outside the channel registry on purpose.
+        # `escalation_offer` carries no heading of its own, and the resolutions
+        # block consumes one-shot state — it clears `_crux_resolutions` after
+        # rendering. A registry entry declares who reads what; a builder that
+        # mutates the manager is a different kind of thing, and filing it as a
+        # channel would make the registry mean less than it does.
+        if self.crux_panel is not None:
+            stage_template = (
+                stage_template.rstrip()
+                + "\n\n"
+                + escalation_offer(paths, self.crux_panel.budget_left)
+                + "\n"
+            )
+        if self._crux_resolutions:
+            stage_template = (
+                stage_template.rstrip()
+                + "\n\n## Resolved Cruxes\n\n"
+                + format_resolution_for_prompt(self._crux_resolutions)
+                + "\n"
+            )
+            self._crux_resolutions = []
+
         approved_memory = read_text(paths.memory)
         if self._redo_start_stage is not None and stage.number >= self._redo_start_stage.number:
             approved_memory = filtered_approved_memory(approved_memory, max_stage_number=stage.number - 1)
@@ -2141,6 +2366,9 @@ class ResearchManager:
         if cross is not None:
             return cross
 
+        # The tuple contract is (choice, feedback); anchored comments ride alongside it so
+        # the refine path can send back a passage instead of the whole stage.
+        self._pending_comments = list(decision.comments or [])
         return decision.choice, decision.feedback or None
 
     def _settle_obligations(

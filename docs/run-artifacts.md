@@ -355,7 +355,7 @@ alongside the report.
 
 | Path | Contents |
 | --- | --- |
-| `stage_graph.json` | Every visit: the stage, when it was entered and left, the move chosen out of it, its kind, the stated reason, what AutoR would have chosen, whether the agent chose it, and the rubric total at the time. |
+| `stage_graph.json` | Every visit: the stage, when it was entered and left, the move chosen out of it, its kind, the stated reason, what AutoR would have chosen, whether the agent chose it, the rubric total at the time, **the targets that were live at the moment of choosing (`offered`) and why the rest were not (`blocked`, target → `guard`/`visits`/`steps`)**, and whether the move bypassed the router entirely (`bypassed` — a `/back`, a rollback, or a research-round decision). The choice set cannot be reconstructed afterwards: re-evaluating a guard needs the workspace as it was at that moment. |
 | `improvement_ledger.jsonl` | One row per measured round: stage, attempt, per-criterion scores, delta against the champion, the verdict (`first`, `promoted`, `frontier`, `regressed`, `directed`, `verdict_drift`), whether the draft was reverted, and the verdict digest. |
 | `routing_refusals.jsonl` | Every agent routing choice AutoR refused, why, and which edge it fell back to. |
 | `summary.json` | The settled champion score per stage. This is what the cross-run archive reads. |
@@ -825,6 +825,32 @@ Required: non-empty string `overall_status`; booleans `pdf_available` and
 
 Validated by `validate_layout_review` in
 [`src/writing_manifest.py`](../src/writing_manifest.py).
+
+### `workspace/reviews/deliberations.json`
+
+Written when a stage raises a crux under `--deliberation`. Every question escalated, the
+expert brief, each voice's position and self-objection, and the resolution with its falsifier
+and surviving dissent.
+
+`summary.confirmed_the_agents_answer` is the one to read: escalations where the panel simply
+agreed with what the agent already had are escalations that were not needed.
+
+See [Raising a Crux](deliberation.md).
+
+### `workspace/reviews/comment_ledger.json`
+
+Written when a reviewer anchors its objections to quoted passages. One entry per review round,
+each holding the comments raised and — once the revision arrives — what happened to them.
+
+| Field | Meaning |
+| --- | --- |
+| `comments_addressed` | Quoted passages that actually changed. |
+| `comments_left_untouched` | Passages that did not, carried into the next round. |
+| `comments_quoting_absent_text` | Comments whose quote was not in the draft; dropped rather than sent on. |
+| `lines_changed_on_target` / `lines_changed_as_collateral` | Whether the revision stayed local. |
+| `collateral_ratio` | 0.0 for a targeted patch; 0.5 and up means the stage was rewritten, not patched. |
+
+See [Anchored Review Comments](stage-comments.md).
 
 ### `workspace/notes/idea_pool.json`
 

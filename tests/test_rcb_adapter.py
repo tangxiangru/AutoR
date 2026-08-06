@@ -581,3 +581,109 @@ class ManagerArtifactDirWiringTest(unittest.TestCase):
         self.assertEqual(manager.artifact_dirs["figures"], [ws / "report" / "images"])
         # The read-only benchmark input must never appear.
         self.assertNotIn(ws / "data", manager.artifact_dirs["data"])
+
+
+class ExportOnlyMetadataTest(unittest.TestCase):
+    """A recovered run must be as scoreable as a normal one, or recovery is half done.
+
+    `--export-only` exists for the case where a run was killed rather than returning —
+    exactly the case where `_meta.json` was never written. Without this the recovered
+    workspace still reads `status: running`, and both `evaluation.score` and the
+    leaderboard importer refuse it.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.workspace = Path(self._tmp.name) / "Physics_003_20260806_052405"
+        self.workspace.mkdir()
+        ensure_workspace_layout(self.workspace)
+        self.paths = build_run_paths(runs_dir_for(self.workspace) / "20260806_052441")
+        ensure_run_layout(self.paths)
+        write_text(self.paths.user_input, "goal")
+        write_text(self.paths.memory, "# Memory\n")
+        write_text(self.paths.stages_dir / "06_analysis.md", "# Stage 06\n\n" + ("Real analysis. " * 150))
+
+    def _meta(self) -> dict:
+        return json.loads((self.workspace / "_meta.json").read_text(encoding="utf-8"))
+
+    def test_a_recovered_run_is_marked_completed_not_running(self) -> None:
+        (self.workspace / "_meta.json").write_text(
+            json.dumps({"task_id": "Physics_003", "status": "running"}), encoding="utf-8"
+        )
+        self.assertEqual(rcb_agent.main(["--workspace", str(self.workspace), "--export-only", "--no-synthesis"]), 0)
+        meta = self._meta()
+        self.assertEqual(meta["status"], "completed")
+        self.assertTrue(meta.get("recovered"))
+        self.assertEqual(meta["task_id"], "Physics_003")
+
+    def test_the_original_duration_survives_recovery(self) -> None:
+        """The run took hours; the export took seconds. Cost is derived from this."""
+        (self.workspace / "_meta.json").write_text(
+            json.dumps({"task_id": "Physics_003", "status": "running", "duration_seconds": 4321}),
+            encoding="utf-8",
+        )
+        rcb_agent.main(["--workspace", str(self.workspace), "--export-only", "--no-synthesis"])
+        self.assertEqual(self._meta()["duration_seconds"], 4321)
+
+    def test_a_run_with_no_prior_meta_still_gets_one(self) -> None:
+        rcb_agent.main(["--workspace", str(self.workspace), "--export-only", "--no-synthesis"])
+        meta = self._meta()
+        self.assertEqual(meta["task_id"], "Physics_003")
+        self.assertIsNotNone(meta["duration_seconds"])
+
+    def test_the_recovered_workspace_satisfies_the_leaderboard_importer(self) -> None:
+        rcb_agent.main(["--workspace", str(self.workspace), "--export-only", "--no-synthesis"])
+        meta = self._meta()
+        for key in ("task_id", "run_id", "timestamp", "status", "duration_seconds"):
+            self.assertIn(key, meta, key)
+        self.assertEqual(meta["status"], "completed")
+
+
+class RecoveredDurationTest(unittest.TestCase):
+    """A run killed by a signal never recorded its duration; zero is the wrong answer.
+
+    The leaderboard derives cost per task from duration, so a multi-hour run recovered
+    as `duration_seconds: 0` is published as having cost nothing.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.workspace = Path(self._tmp.name) / "Physics_003_20260806_052405"
+        self.workspace.mkdir()
+        ensure_workspace_layout(self.workspace)
+        self.paths = build_run_paths(runs_dir_for(self.workspace) / "20260806_052441")
+        ensure_run_layout(self.paths)
+        write_text(self.paths.user_input, "goal")
+        write_text(self.paths.memory, "# Memory\n")
+        write_text(self.paths.stages_dir / "06_analysis.md", "# Stage 06\n\n" + ("Analysis. " * 200))
+
+    def _age_run_tree(self, seconds: int) -> None:
+        import os
+
+        first = self.paths.user_input
+        now = os.path.getmtime(first)
+        os.utime(first, (now - seconds, now - seconds))
+
+    def _meta(self) -> dict:
+        return json.loads((self.workspace / "_meta.json").read_text(encoding="utf-8"))
+
+    def test_duration_is_recovered_from_the_run_tree_span(self) -> None:
+        self._age_run_tree(4000)
+        rcb_agent.main(["--workspace", str(self.workspace), "--export-only", "--no-synthesis"])
+        self.assertGreater(self._meta()["duration_seconds"], 3000)
+
+    def test_a_recorded_duration_still_wins_over_the_estimate(self) -> None:
+        self._age_run_tree(4000)
+        (self.workspace / "_meta.json").write_text(
+            json.dumps({"task_id": "Physics_003", "status": "running", "duration_seconds": 777}),
+            encoding="utf-8",
+        )
+        rcb_agent.main(["--workspace", str(self.workspace), "--export-only", "--no-synthesis"])
+        self.assertEqual(self._meta()["duration_seconds"], 777)
+
+    def test_a_recovered_run_is_never_reported_as_free(self) -> None:
+        self._age_run_tree(4000)
+        rcb_agent.main(["--workspace", str(self.workspace), "--export-only", "--no-synthesis"])
+        self.assertNotEqual(self._meta()["duration_seconds"], 0)

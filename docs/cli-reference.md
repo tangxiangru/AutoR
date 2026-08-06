@@ -198,6 +198,18 @@ converted to a refinement in code. Each run also writes
 baseline so it can report that it did not earn its cost. Full description, including the
 pre-registered evidence against multi-agent deliberation, in [Review Panel](review-panel.md).
 
+### Crux deliberation
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--deliberation` | off | Let a stage stop and pull in a panel when it hits a genuine crux. The agent names the question, finishes with its working answer, and the resolution reaches the next pass. |
+| `--max-deliberations N` | `3` | Cruxes a run may escalate. Scarcity is what makes "think hard here" mean anything. |
+| `--deliberation-voices VOICE...` | all four | `theorist`, `empiricist`, `critic`, `pragmatist`. |
+| `--deliberation-models VOICE=MODEL...` | - | Assign a model per voice. |
+
+The ledger records whether the panel changed the agent's answer or merely confirmed it. Full
+description in [Raising a Crux](deliberation.md).
+
 ### Ideation panel
 
 | Flag | Default | Description |

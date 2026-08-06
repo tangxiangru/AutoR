@@ -10,6 +10,7 @@ which it cannot.
 from __future__ import annotations
 
 import json
+import random
 import tempfile
 import unittest
 from pathlib import Path
@@ -54,12 +55,35 @@ class LinearTopologyTests(unittest.TestCase):
             current = move.target
         self.assertEqual(route, [stage.slug for stage in STAGES])
 
-    def test_no_forward_move_on_the_linear_graph_is_guarded(self) -> None:
-        """A guard on the only edge out of a node could only ever halt the run, and
-        the condition it would halt on is already a stage validation error with a
-        better message. Two gates over one condition is one too many."""
+    def test_no_advance_on_the_linear_graph_is_guarded(self) -> None:
+        """A guard on the only way *onward* from a node could only ever halt the run,
+        and the condition it would halt on is already a stage validation error with a
+        better message. Two gates over one condition is one too many.
+
+        The abandonment terminal is exempt and has to be: it is not the way onward,
+        it is a second exit whose guard is the entire point of it. A shut guard there
+        removes the edge rather than halting anything — which is the case on every
+        run that did not abandon, i.e. almost all of them.
+        """
         for edge in StageGraph.linear().edges:
-            self.assertEqual(edge.guard, "always", msg=f"{edge.source}->{edge.target} is guarded")
+            if edge.kind == "finish" and edge.guard != "always":
+                continue
+            self.assertEqual(
+                edge.guard, "always", msg=f"{edge.source}->{edge.target} is guarded"
+            )
+
+    def test_the_linear_graph_still_has_exactly_one_way_onward_from_each_node(self) -> None:
+        """The exemption above is only safe if it is narrow. `linear` may gain
+        terminals; it may not gain a choice of direction."""
+        graph = StageGraph.linear()
+        for stage in STAGES:
+            onward = [e for e in graph.out_edges(stage.slug) if e.kind == "advance"]
+            self.assertLessEqual(len(onward), 1, msg=f"{stage.slug} has {len(onward)} advances")
+            self.assertEqual(
+                [e for e in graph.out_edges(stage.slug) if e.kind == "revisit"],
+                [],
+                msg=f"{stage.slug} has a backward edge on the linear topology",
+            )
 
     def test_every_registered_guard_is_wired_to_an_edge(self) -> None:
         """A guard nobody wired is a check nobody runs.
@@ -90,6 +114,69 @@ class LinearTopologyTests(unittest.TestCase):
                 StageGraph.linear().admissible_moves(self.paths, stage.slug, state),
                 msg=f"{stage.slug} has no live move on an empty run",
             )
+
+
+class WhatEdgePriorityActuallyReachesTests(unittest.TestCase):
+    """What the archive's only learnable value can and cannot change.
+
+    `Variant.edge_priority` is the whole output of the cross-run learner, and the
+    honest statement of its reach is narrow: it orders the move table the agent is
+    shown, and that is currently all of it. `default_move` filters to forward edges
+    before ranking and every shipped node has exactly one, so no assignment of
+    priorities changes what a run does when nobody is steering.
+
+    Both halves are asserted on purpose. A test that only pinned "no difference"
+    would stay green if someone deleted `default_move` entirely; pinning that the
+    menu order *does* move is what makes this a measurement of a live channel rather
+    than a tautology about a dead one.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.paths = build_run_paths(Path(self._tmp.name) / "run")
+        ensure_run_layout(self.paths)
+
+    def _sweep(self, graph: StageGraph):
+        from src.archive import Variant
+
+        rng = random.Random(20260806)
+        keys = [f"{e.source}->{e.target}" for e in graph.edges]
+        default_changes = order_changes = comparisons = 0
+        for _ in range(50):
+            priorities = {key: rng.randint(0, 6) for key in keys}
+            mutated = Variant("sweep", graph.name, edge_priority=priorities).apply_to(graph)
+            for stage in STAGES:
+                comparisons += 1
+                before = graph.default_move(self.paths, stage.slug, GraphState())
+                after = mutated.default_move(self.paths, stage.slug, GraphState())
+                if (before is None) != (after is None) or (
+                    before is not None and after is not None and before.target != after.target
+                ):
+                    default_changes += 1
+                if [e.target for e in graph.out_edges(stage.slug)] != [
+                    e.target for e in mutated.out_edges(stage.slug)
+                ]:
+                    order_changes += 1
+        return default_changes, order_changes, comparisons
+
+    def test_priority_never_changes_what_the_run_does_by_default(self) -> None:
+        changed, _order, comparisons = self._sweep(StageGraph.adaptive())
+        self.assertEqual(
+            changed,
+            0,
+            msg=f"{changed}/{comparisons} default moves moved; the docs say priority orders the "
+            "menu, not the walk",
+        )
+
+    def test_priority_does_change_the_menu_the_agent_is_shown(self) -> None:
+        _changed, order, comparisons = self._sweep(StageGraph.adaptive())
+        self.assertGreater(
+            order,
+            0,
+            msg=f"0/{comparisons} menu orderings moved: edge priority now reaches nothing at all, "
+            "and the archive is learning a value with no consumer",
+        )
 
 
 class AdaptiveTopologyTests(unittest.TestCase):
@@ -228,6 +315,21 @@ class AdaptiveTopologyTests(unittest.TestCase):
         self.assertEqual(reloaded.path[0].chose, "02_hypothesis_generation")
         self.assertTrue(reloaded.path[0].agent_directed)
         self.assertAlmostEqual(reloaded.path[0].score_total or 0.0, 0.71)
+
+    def test_a_visit_written_before_the_choice_set_existed_still_loads(self) -> None:
+        """Absent means empty, not assumed. A `stage_graph.json` from before these
+        fields is a visit with no recorded choice set, which is exactly what it is
+        and what every estimator should exclude."""
+        legacy = {
+            "stage": "06_analysis",
+            "entered_at": "t",
+            "chose": "07_writing",
+            "kind": "advance",
+        }
+        visit = Visit.from_dict(legacy)
+        self.assertEqual(visit.offered, ())
+        self.assertEqual(visit.blocked, {})
+        self.assertFalse(visit.bypassed)
 
     def test_the_route_marks_backward_moves(self) -> None:
         state = GraphState(

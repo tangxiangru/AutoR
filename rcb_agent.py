@@ -22,6 +22,7 @@ Nothing here ever reads stdin. Any prompt that would block raises
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
 import traceback
@@ -57,6 +58,7 @@ from src.rcb import (  # noqa: E402
     runs_dir_for,
 )
 from src.terminal_ui import TerminalUI  # noqa: E402
+from src.deliberation import DEFAULT_MAX_DELIBERATIONS  # noqa: E402
 from src.utils import (  # noqa: E402
     DEFAULT_OUTPUT_FORMAT,
     DEFAULT_VENUE,
@@ -180,6 +182,33 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "(for example: pi=opus skeptic=codex:default). Seats left unassigned use the "
              "reviewer default. Heterogeneity is the lever with the best evidence behind it: "
              "five prompts against one model are five correlated reads wearing five hats.",
+    )
+    parser.add_argument(
+        "--deliberation",
+        action="store_true",
+        help="Let a stage stop and pull in a panel when it hits a genuine crux. The agent "
+             "names the question, finishes with its working answer, and a focused panel "
+             "resolves it for the next pass. Most steps are execution; this is for the few "
+             "that are not.",
+    )
+    parser.add_argument(
+        "--max-deliberations",
+        type=int,
+        default=DEFAULT_MAX_DELIBERATIONS,
+        help="Cruxes a run may escalate before the budget is refused. Scarcity is what makes "
+             f"'think hard here' mean anything. Defaults to {DEFAULT_MAX_DELIBERATIONS}.",
+    )
+    parser.add_argument(
+        "--deliberation-voices",
+        nargs="+",
+        metavar="VOICE",
+        help="Seat only these voices: theorist, empiricist, critic, pragmatist.",
+    )
+    parser.add_argument(
+        "--deliberation-models",
+        nargs="+",
+        metavar="VOICE=MODEL",
+        help="Assign a model per voice, as voice=model or voice=backend:model.",
     )
     parser.add_argument(
         "--ideation-panel",
@@ -309,6 +338,53 @@ def create_operator(
     )
 
 
+def _recorded_duration(workspace: Path, started_at: float) -> int:
+    """Keep a duration already on record rather than overwriting it with the export's.
+
+    A recovered run took as long as the run did. Replacing that with the seconds this
+    export took would report a multi-hour run as a ten-second one, and the leaderboard
+    derives cost from duration.
+    """
+    meta_path = workspace / "_meta.json"
+    if meta_path.exists():
+        try:
+            existing = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            existing = {}
+        if isinstance(existing, dict) and existing.get("duration_seconds"):
+            return int(existing["duration_seconds"])
+
+    # A run killed by a signal never recorded its own duration, so fall back to how
+    # long the run tree was being written for. Reporting this export's few seconds
+    # instead would put a multi-hour run on the leaderboard at zero cost, since cost
+    # per task is derived from duration.
+    measured = _run_tree_duration(workspace)
+    if measured is not None:
+        return measured
+    return round(time.monotonic() - started_at)
+
+
+def _run_tree_duration(workspace: Path) -> int | None:
+    """Wall-clock span of the AutoR run tree, from oldest to newest file.
+
+    An estimate, and deliberately a conservative one: it cannot see time spent before
+    the first file was written or after the last. Better than zero, and never larger
+    than the truth.
+    """
+    runs_root = runs_dir_for(workspace)
+    if not runs_root.exists():
+        return None
+    stamps = [
+        path.stat().st_mtime
+        for path in runs_root.rglob("*")
+        if path.is_file()
+    ]
+    if len(stamps) < 2:
+        return None
+    span = round(max(stamps) - min(stamps))
+    return span if span > 0 else None
+
+
 def run(args: argparse.Namespace) -> BenchmarkResult:
     started_at = time.monotonic()
     workspace = Path(args.workspace).expanduser().resolve()
@@ -371,6 +447,21 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
             workspace=workspace,
             pipeline_completed=False,
             synthesize=synthesizer,
+        )
+        # A recovered run needs the same record as a normal one, or the recovery is
+        # only half a recovery: `evaluation.score` and the leaderboard importer both
+        # refuse a workspace whose status is still "running". This is the path taken
+        # after a run is killed rather than returning — exactly when the metadata was
+        # never written — so leaving it out made --export-only unable to produce a
+        # scoreable workspace, which is the only reason it exists.
+        write_run_meta(
+            workspace,
+            task_id=infer_task_id(workspace),
+            run_id=paths.run_root.name,
+            status="completed" if export.report_path.exists() else "failed",
+            duration_seconds=_recorded_duration(workspace, started_at),
+            model=model,
+            extra={"report_source": export.report_source, "recovered": True},
         )
         return BenchmarkResult(
             workspace=workspace,
@@ -437,6 +528,19 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
             ui=ui,
             stage_timeout=args.stage_timeout,
             ideas_per_proposer=args.ideas_per_proposer,
+        )
+
+    if args.deliberation:
+        from src.deliberation import CruxPanel, apply_voice_models, resolve_voices
+
+        manager.crux_panel = CruxPanel(
+            apply_voice_models(resolve_voices(args.deliberation_voices), args.deliberation_models),
+            backend_name=review_backend,
+            model=review_model,
+            fake_mode=args.fake_operator,
+            ui=ui,
+            stage_timeout=args.stage_timeout,
+            max_deliberations=args.max_deliberations,
         )
 
     pipeline_completed = False

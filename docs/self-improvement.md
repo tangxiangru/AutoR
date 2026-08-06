@@ -281,6 +281,21 @@ edge's priority moved by one step** — enough to be attributable, which a varia
 that reshuffled five edges would not be. The child explains itself in the archive:
 the numbers that justified it are in its note.
 
+**What a priority actually reaches, stated honestly.** It orders the move table the
+routing agent is shown, and at present that is the whole of it. It does *not* change
+what a run does when nobody is steering: `default_move` filters to forward edges
+before ranking and every node has exactly one, so no assignment of priorities
+changes the walk. Measured over 50 random assignments across all 8 nodes: 0/400
+default moves move, 195/400 menu orderings do. Both halves are pinned by tests —
+the second because a test that only asserted "no difference" would stay green if
+the mechanism were deleted entirely.
+
+So the archive's influence today is advisory: it changes what the agent sees first,
+not what happens if the agent is not asked. That is a smaller claim than "the
+harness learns which edges pay", and it is the true one. Widening it is a decision
+about wiring a learned statistic into a decision, and it should not be taken until
+the estimator underneath is worth acting on.
+
 ### The composition of a run is not allowed to be the improvement
 
 A stage's score is a weighted mean over the criteria that apply to it, and later
@@ -316,7 +331,19 @@ thing.
 Three further refusals hold this together:
 
 - **Below `min_observations` on each side, nothing is acted on.** A variant that
-  beat the incumbent once beat it once.
+  beat the incumbent once beat it once. Be aware this bound is a guard rather than
+  a derivation: a two-sided permutation test over *n* per side attains at best
+  `2/C(2n,n)`, so `n=3` can reach `p=0.10` at best, and a family correction over 18
+  edges would demand far less. Three stops a single lucky run from moving the
+  topology; it does not license the claim.
+- **A run is only compared against runs that walked the same topology, measured the
+  same stages, and were driven by a real backend.** A fake operator's scores measure
+  the script. A linear run never had the revisit edges, so counting it as one that
+  "reached the node and declined" puts a run that was never offered the choice into
+  the control arm — measured, that flips the sign of the payoff.
+- **One row per run.** The archive is written on both the fresh and the resume path
+  and keyed by run directory, so a resumed run would otherwise be a second free
+  observation.
 - **Scores from different rubric versions are never compared.** A reweight would
   otherwise read as every archived run having improved overnight.
 - **A learned prior can only reorder preferences.** It cannot open a guarded edge,

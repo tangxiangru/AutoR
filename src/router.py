@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -70,6 +70,11 @@ class RoutingDecision:
     agent_directed: bool
     #: Why the agent's choice was not used, when it was not. Empty otherwise.
     refusal: str = ""
+    #: The targets that were live when this decision was made, and why the rest were
+    #: not. Carried through every return site so a refusal, a halt and an agreement
+    #: all record the same thing: what was actually on offer.
+    offered: tuple[str, ...] = ()
+    blocked: dict[str, str] = field(default_factory=dict)
 
     @property
     def finished(self) -> bool:
@@ -106,6 +111,11 @@ class StageRouter:
         live = [move for move in moves if move.admissible]
         default = graph.default_move(paths, stage.slug, state, final_stage=final_stage)
         default_target = default.target if default is not None else FINISH
+        # Computed here anyway; recorded rather than dropped. See `Visit.offered`.
+        offered = tuple(sorted(move.target for move in live))
+        blocked = {
+            move.target: move.blocked_kind for move in moves if move.blocked_kind
+        }
 
         if default is None:
             # Nothing is open. That is a real answer at Stage 08 and a halt anywhere
@@ -116,7 +126,10 @@ class StageRouter:
                 else f"no move out of {stage.slug} is available: "
                 + "; ".join(move.blocked_because for move in moves) or "the graph has no edge here"
             )
-            return RoutingDecision(FINISH, "finish", "No further move is available.", FINISH, False)
+            return RoutingDecision(
+                FINISH, "finish", "No further move is available.", FINISH, False,
+                offered=offered, blocked=blocked,
+            )
 
         should_ask = self.mode == "agent" or (self.mode == "auto" and len(live) > 1)
         if not should_ask or self.operator is None or self.fake_mode:
@@ -126,6 +139,8 @@ class StageRouter:
                 _default_reason(default, moves),
                 default_target,
                 agent_directed=False,
+                offered=offered,
+                blocked=blocked,
             )
 
         proposal = self._ask(paths=paths, stage=stage, moves=moves, state=state, score=score)
@@ -133,6 +148,7 @@ class StageRouter:
             return self._refuse(
                 paths, stage, default, default_target,
                 "the router produced no readable decision",
+                offered=offered, blocked=blocked,
             )
 
         target = str(proposal.get("target") or "").strip()
@@ -140,18 +156,21 @@ class StageRouter:
 
         chosen = next((move for move in live if move.edge.target == target), None)
         if chosen is None:
-            blocked = next((move for move in moves if move.edge.target == target), None)
+            unavailable = next((move for move in moves if move.edge.target == target), None)
             detail = (
-                f"`{target}` is not available: {blocked.blocked_because}"
-                if blocked is not None
+                f"`{target}` is not available: {unavailable.blocked_because}"
+                if unavailable is not None
                 else f"`{target}` is not a move out of {stage.slug}"
             )
-            return self._refuse(paths, stage, default, default_target, detail)
+            return self._refuse(
+                paths, stage, default, default_target, detail, offered=offered, blocked=blocked
+            )
 
         if not reason:
             return self._refuse(
                 paths, stage, default, default_target,
                 f"`{target}` was chosen with no stated reason",
+                offered=offered, blocked=blocked,
             )
 
         if chosen.edge.kind == "revisit" and graph.repeats_a_previous_reason(state, target, reason):
@@ -159,6 +178,7 @@ class StageRouter:
                 paths, stage, default, default_target,
                 f"the run has already gone back to `{target}` for this same reason and it was not "
                 "resolved; going again on the same grounds is a loop, not an iteration",
+                offered=offered, blocked=blocked,
             )
 
         append_log_entry(
@@ -166,7 +186,10 @@ class StageRouter:
             f"{stage.slug} route_chosen",
             f"target: {target}\nkind: {chosen.edge.kind}\ndefault: {default_target}\nreason: {reason}",
         )
-        return RoutingDecision(target, chosen.edge.kind, reason, default_target, agent_directed=True)
+        return RoutingDecision(
+            target, chosen.edge.kind, reason, default_target, agent_directed=True,
+            offered=offered, blocked=blocked,
+        )
 
     # -- refusal -------------------------------------------------------------
 
@@ -177,6 +200,9 @@ class StageRouter:
         default: Move,
         default_target: str,
         detail: str,
+        *,
+        offered: tuple[str, ...] = (),
+        blocked: dict[str, str] | None = None,
     ) -> RoutingDecision:
         append_log_entry(
             paths.logs,
@@ -194,6 +220,8 @@ class StageRouter:
             default_target,
             agent_directed=False,
             refusal=detail,
+            offered=offered,
+            blocked=dict(blocked or {}),
         )
 
 
