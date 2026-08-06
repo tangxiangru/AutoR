@@ -692,6 +692,7 @@ File boundaries:
 - [src/bootstrap.py](src/bootstrap.py) and [src/project_bootstrap.py](src/project_bootstrap.py): `--paper-corpus` and `--project-root` scanning.
 - [src/approval_agent.py](src/approval_agent.py): The strict reviewer agent used by `--full-auto`.
 - [src/backend/](src/backend) and [src/frontend/](src/frontend): AutoR Studio service, HTTP layer, and the browser UI.
+- [src/research_rounds.py](src/research_rounds.py): Stages 03-06 as a repeatable round, so a refuted hypothesis leads to a second round instead of a dead end. Bounded by `--max-rounds`.
 - [src/validity_review.py](src/validity_review.py): The adversarial pass after Stages 05 and 06 — asks why the result is wrong, and requires the next stage to answer every objection.
 - [src/preregistration.py](src/preregistration.py): Freezes the hypotheses before the experiments, adjudicates each one at Stage 06, and traces each manuscript claim back to a supported hypothesis at Stage 07.
 - [src/prompts/](src/prompts): Per-stage prompt templates.

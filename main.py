@@ -103,6 +103,19 @@ def parse_args() -> argparse.Namespace:
              "exhausting their retry budget before the run aborts. Defaults to 3.",
     )
     parser.add_argument(
+        "--max-rounds",
+        type=int,
+        default=1,
+        help=(
+            "How many times Stages 03-06 may run. A round ends when Stage 06 declares "
+            "whether the run converged, needs a better design, needs a new hypothesis, or "
+            "should be abandoned. Defaults to 1, which keeps the single-pass behaviour; the "
+            "decision is recorded either way, so a one-round run still says whether it "
+            "converged or merely stopped. Raise it to let a refuted hypothesis lead to a "
+            "second round."
+        ),
+    )
+    parser.add_argument(
         "--review-panel",
         action="store_true",
         help="Replace the single reviewer agent with a deliberating panel of role-differentiated "
@@ -495,6 +508,7 @@ def main() -> int:
             review_model=review_model,
             unattended=unattended,
             max_auto_skips=args.max_auto_skips,
+            max_rounds=args.max_rounds,
             max_stage_attempts=args.max_attempts,
             web_search_context=web_search_context,
         )
@@ -549,6 +563,7 @@ def main() -> int:
         review_model=review_model,
         unattended=unattended,
         max_auto_skips=args.max_auto_skips,
+        max_rounds=args.max_rounds,
         max_stage_attempts=args.max_attempts,
         web_search_context=web_search_context,
     )

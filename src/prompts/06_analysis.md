@@ -31,6 +31,38 @@ Interpret the available evidence rigorously and determine what claims the curren
 - Make uncertainty explicit.
 - Translate raw outputs into defensible takeaways.
 
+## Round Decision (required)
+
+Stages 03-06 form a research round. This stage closes it. Write
+`{{WORKSPACE_NOTES_DIR}}/round_decision.json`:
+
+```json
+{
+  "decision": "converged | refine_design | new_hypothesis | abandon",
+  "rationale": "why this is the right call given what the evidence showed",
+  "what_we_learned": "what this round established, including when the answer is that a prediction was wrong",
+  "what_changes_next": "what a further round would do differently (required unless converged or abandoned)",
+  "negative_result": false
+}
+```
+
+- `converged` — the run has what it needs; go and write it up.
+- `refine_design` — the hypotheses stand but the design could not test them properly.
+  The next round restarts at Stage 03.
+- `new_hypothesis` — the hypotheses were wrong in an informative way. The next round
+  restarts at Stage 02, and the preregistration records the change as an amendment.
+- `abandon` — the question cannot be answered with the resources available. Say so.
+
+A round that wants another one must say what would change. Repeating a design without
+changing what it got wrong produces the same result at full cost.
+
+**You may not declare `converged` when no preregistered hypothesis came out supported,
+unless you set `negative_result: true`.** A run whose contribution is the refutation is
+a real result and should say so plainly. What is not available is proceeding to write a
+paper as though something had been shown. If the round budget is already spent the run
+will continue regardless — but the record will say the round wanted to iterate, which is
+the honest version.
+
 ## Stage Output Requirements
 
 The markdown at `{{STAGE_OUTPUT_PATH}}` must follow the required output structure exactly.

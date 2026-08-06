@@ -450,6 +450,61 @@ as support, and what would count as refutation — stated before any experiment
 runs. A hypothesis with no decision rule cannot come out negative, which makes
 "falsifiable" a word rather than a property, and Stage 05 refuses the run.
 
+### `workspace/notes/research_rounds.json`
+
+Stages 03-06 form a **research round**: design, implement, experiment, analyse.
+Stage 06 closes it with a decision, and the ledger accumulates one entry per
+round.
+
+```json
+{
+  "rounds": [
+    {
+      "round": 1,
+      "decision": "refine_design",
+      "rationale": "The comparison was confounded by tuning on the reporting split.",
+      "what_we_learned": "The gap disappears once tuning and reporting use different splits.",
+      "what_changes_next": "Tune both arms on a held-out development split and re-run.",
+      "negative_result": false,
+      "hypothesis_verdicts": {"H1": "refuted"},
+      "acted_on": true,
+      "budget_note": ""
+    }
+  ]
+}
+```
+
+| decision | what happens |
+| --- | --- |
+| `converged` | continue to Stage 07 |
+| `refine_design` | same hypotheses, next round restarts at Stage 03 |
+| `new_hypothesis` | next round restarts at Stage 02; the preregistration records an amendment |
+| `abandon` | the run stops, and Stage 07 refuses to write up a question the run declared unanswerable |
+
+There is no `continue`: a round that wants another one has to say what would
+change, because repeating a design without changing what it got wrong produces
+the same result at full cost.
+
+**`converged` is refused when no preregistered hypothesis came out supported**,
+unless the round sets `negative_result: true`. A run whose contribution is the
+refutation is a real result and should say so plainly; a run that quietly
+proceeds to write a paper about nothing is the default failure without this
+rule.
+
+`acted_on: false` with a `budget_note` means the round wanted to iterate and
+`--max-rounds` was spent. The run continues to writing, but the record says it
+stopped rather than converged — a distinction the ledger would otherwise lose.
+
+Iteration is off by default (`--max-rounds 1`) because rounds multiply the cost
+of an unattended run. The decision is recorded either way.
+
+Stage 06's pending declaration lives at `workspace/notes/round_decision.json`
+and is consumed when the round closes, so a later round cannot inherit an
+earlier one's conclusion.
+
+Validated by `validate_round_decision` in
+[`src/research_rounds.py`](../src/research_rounds.py).
+
 ### `workspace/notes/preregistration.json`
 
 The hypothesis set, frozen. Written when Stage 04 is approved — design settled,

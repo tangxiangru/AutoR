@@ -75,7 +75,32 @@ def write_experimental_protocol(paths: RunPaths, *, planned_seeds: int = 5) -> N
     )
 
 
-def write_validity_chain(paths: RunPaths, *, evidence: str = "results/metrics.json") -> None:
+def write_round_decision(paths: RunPaths, *, decision: str = "converged", **overrides) -> None:
+    payload = {
+        "decision": decision,
+        "rationale": "The evidence settles the preregistered question for this round.",
+        "what_we_learned": "The treatment clears the decision rule the round declared in advance.",
+        "what_changes_next": "",
+        "negative_result": False,
+    }
+    payload.update(overrides)
+    write_text(paths.round_decision, json.dumps(payload))
+
+
+def close_round(paths: RunPaths, **kwargs) -> None:
+    """Declare and close a round, as Stage 06 approval would."""
+    from src.research_rounds import record_round
+
+    write_round_decision(paths, **kwargs)
+    record_round(paths, acted_on=True)
+
+
+def write_validity_chain(
+    paths: RunPaths,
+    *,
+    evidence: str = "results/metrics.json",
+    close_first_round: bool = True,
+) -> None:
     """Freeze hypotheses, adjudicate them, and trace one claim to the verdict.
 
     ``evidence`` is a workspace-relative path. It is created if the caller has
@@ -133,6 +158,10 @@ def write_validity_chain(paths: RunPaths, *, evidence: str = "results/metrics.js
             }
         ),
     )
+    # A run that reaches Stage 07 has closed at least one round. Tests that
+    # drive rounds themselves opt out.
+    if close_first_round:
+        close_round(paths)
 
 
 def reload_preregistration(paths: RunPaths):
