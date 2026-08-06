@@ -687,3 +687,37 @@ it loses the Studio's project groupings; the runs themselves are unaffected.
   checkpoints gets big.
 - **Read `logs.txt`, then `logs_raw.jsonl`, then `prompt_cache/`.** That is
   the fastest path from "the output is wrong" to "here is why".
+
+## `review_policy.json`
+
+The standing rules the approval gate has learned during this run. Written by
+[`src/review_policy.py`](../src/review_policy.py) whenever the reviewer demands a
+correction, and injected into every subsequent review prompt.
+
+```json
+{
+  "version": 1,
+  "rules": [
+    {
+      "rule_id": "R001",
+      "text": "The design lacks a stated power analysis and the sample size is unjustified.",
+      "origin_stage": "03_study_design",
+      "origin_attempt": 2,
+      "source": "refinement"
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `rule_id` | Stable identifier, referenced in the review prompt and the run log. |
+| `text` | The correction verbatim, as the reviewer worded it. |
+| `origin_stage` / `origin_attempt` | Which review produced the rule. This is what makes the mechanism auditable rather than assertable. |
+| `source` | `refinement` for a demanded correction, `rollback` for an approval that later proved wrong. Rollbacks are rendered first in the prompt. |
+
+Absent until the first correction is recorded. Approvals teach nothing and are not
+recorded. Rules are deduplicated on normalized text (casing, punctuation and stage numbers
+collapse) and the set is capped, so a reviewer restating one complaint cannot inflate it.
+A corrupt file is treated as an empty policy: the gate falls back to baseline strictness
+rather than taking the run down.
