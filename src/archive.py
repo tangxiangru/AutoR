@@ -684,8 +684,25 @@ class Archive:
         # closed, or the node is never reached — and nudging it changes nothing.
         # So exploration only has something to offer edges that lost the ordering.
         by_priority = {f"{e.source}->{e.target}": e.priority for e in base_graph.edges}
+
+        # An edge with no rival is not explorable. Preferring it changes nothing: a
+        # run reaching that node was going to take it anyway. `linear` is the case
+        # that makes this concrete — every node has exactly one way onward, so no
+        # reordering there can send a run anywhere it was not already going, and a
+        # proposal saying otherwise would buy a variant for a trial that cannot run.
+        #
+        # Terminals do not count as rivals. `06_analysis->finish` is live only when
+        # the round concluded the question cannot be answered, and in that case it is
+        # the only live forward move, so its priority relative to the writing edge
+        # decides nothing either.
+        rivals: dict[str, int] = {}
+        for edge in base_graph.edges:
+            if edge.kind in {"advance", "revisit"}:
+                rivals[edge.source] = rivals.get(edge.source, 0) + 1
         candidates = [
-            edge for edge in self.unexplored_edges(base_graph) if by_priority.get(edge, 0) > 0
+            edge
+            for edge in self.unexplored_edges(base_graph)
+            if by_priority.get(edge, 0) > 0 and rivals.get(edge.split("->", 1)[0], 0) > 1
         ]
         if not candidates:
             return None

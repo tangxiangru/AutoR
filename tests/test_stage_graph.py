@@ -55,12 +55,35 @@ class LinearTopologyTests(unittest.TestCase):
             current = move.target
         self.assertEqual(route, [stage.slug for stage in STAGES])
 
-    def test_no_forward_move_on_the_linear_graph_is_guarded(self) -> None:
-        """A guard on the only edge out of a node could only ever halt the run, and
-        the condition it would halt on is already a stage validation error with a
-        better message. Two gates over one condition is one too many."""
+    def test_no_advance_on_the_linear_graph_is_guarded(self) -> None:
+        """A guard on the only way *onward* from a node could only ever halt the run,
+        and the condition it would halt on is already a stage validation error with a
+        better message. Two gates over one condition is one too many.
+
+        The abandonment terminal is exempt and has to be: it is not the way onward,
+        it is a second exit whose guard is the entire point of it. A shut guard there
+        removes the edge rather than halting anything — which is the case on every
+        run that did not abandon, i.e. almost all of them.
+        """
         for edge in StageGraph.linear().edges:
-            self.assertEqual(edge.guard, "always", msg=f"{edge.source}->{edge.target} is guarded")
+            if edge.kind == "finish" and edge.guard != "always":
+                continue
+            self.assertEqual(
+                edge.guard, "always", msg=f"{edge.source}->{edge.target} is guarded"
+            )
+
+    def test_the_linear_graph_still_has_exactly_one_way_onward_from_each_node(self) -> None:
+        """The exemption above is only safe if it is narrow. `linear` may gain
+        terminals; it may not gain a choice of direction."""
+        graph = StageGraph.linear()
+        for stage in STAGES:
+            onward = [e for e in graph.out_edges(stage.slug) if e.kind == "advance"]
+            self.assertLessEqual(len(onward), 1, msg=f"{stage.slug} has {len(onward)} advances")
+            self.assertEqual(
+                [e for e in graph.out_edges(stage.slug) if e.kind == "revisit"],
+                [],
+                msg=f"{stage.slug} has a backward edge on the linear topology",
+            )
 
     def test_every_registered_guard_is_wired_to_an_edge(self) -> None:
         """A guard nobody wired is a check nobody runs.

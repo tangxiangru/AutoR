@@ -56,6 +56,8 @@ from .prompt_fragments import compose_stage_template
 from .validity_review import ValidityReviewer, format_findings_for_prompt
 from .research_rounds import (
     ROUND_CLOSING_STAGE_NUMBER,
+    Round,
+    latest_round,
     read_round_decision,
     format_round_status,
     format_rounds_for_prompt,
@@ -498,8 +500,44 @@ class ResearchManager:
         save_graph_state(paths, state)
         return self._complete_run(paths, state=state)
 
+    def _run_was_abandoned(self, paths: RunPaths) -> "Round | None":
+        """The closed round that concluded the question cannot be answered, if any."""
+        final = latest_round(paths)
+        return final if final is not None and final.decision == "abandon" else None
+
     def _complete_run(self, paths: RunPaths, state: "GraphState | None" = None) -> bool:
         route = format_route(state) if state is not None else ""
+
+        # A run that concluded it cannot answer its question reached the end of the
+        # graph legitimately, and it did not produce what it set out to produce.
+        # `completed` and `cancelled` are both wrong, and `cancelled` is the worse
+        # of the two: it is what an abort writes, so the honest outcome would be
+        # indistinguishable from a crash in every downstream reader.
+        abandoned = self._run_was_abandoned(paths)
+        if abandoned is not None:
+            append_log_entry(
+                paths.logs,
+                "run_abandoned",
+                f"Round {abandoned.number} concluded `abandon`: {abandoned.rationale}"
+                + (f"\nRoute: {route}" if route else ""),
+            )
+            update_manifest_run_status(
+                paths,
+                run_status="abandoned",
+                last_event="run.abandoned",
+                current_stage_slug=None,
+                completed_at=datetime.now().isoformat(timespec="seconds"),
+            )
+            self.ui.show_status(
+                f"Run abandoned after round {abandoned.number}: {abandoned.rationale}",
+                level="warn",
+            )
+            self._print(
+                "Run stopped: the question cannot be answered with the resources available. "
+                "That conclusion is recorded in workspace/notes/research_rounds.json."
+            )
+            return True
+
         append_log_entry(
             paths.logs,
             "run_complete",

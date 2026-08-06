@@ -23,7 +23,7 @@ from src.manifest import load_run_manifest
 from src.router import RoutingDecision
 from src.rubric import score_stage
 from src.stage_graph import FINISH, GUARDS, GraphState, StageGraph, load_graph_state
-from src.utils import STAGES, build_run_paths, load_run_config, read_text
+from src.utils import STAGES, build_run_paths, load_run_config, read_text, write_text
 from tests.test_manager_smoke import REPO_ROOT, ScriptedSmokeOperator
 
 
@@ -281,12 +281,26 @@ class GraphWalkTests(unittest.TestCase):
         self.assertTrue(self.drive(manager))
         paths = self.only_run()
 
+        # `round_abandoned` is exempt and must be: it opens the edge a run takes
+        # when it concludes the question cannot be answered, so a run that answered
+        # it is precisely the run that should not satisfy it. The exemption is a
+        # claim, so it is run as a control — `test_the_abandonment_guard_opens_on_a
+        # _run_that_abandons` below is the other half, and without it this exemption
+        # would be indistinguishable from the two broken guards this gate was
+        # written to catch.
+        outcome_specific = {"round_abandoned"}
         failing = {
             name: fn(paths, GraphState()).reason
             for name, fn in sorted(GUARDS.items())
-            if not fn(paths, GraphState()).ok
+            if name not in outcome_specific and not fn(paths, GraphState()).ok
         }
         self.assertEqual(failing, {}, msg=f"guards unsatisfiable by a completed run: {failing}")
+        for name in outcome_specific:
+            self.assertIn(name, GUARDS, msg=f"{name} is exempted but no longer exists")
+            self.assertFalse(
+                GUARDS[name](paths, GraphState()).ok,
+                msg=f"{name} is exempted as outcome-specific but passes on an ordinary run",
+            )
 
     def test_every_reproducibility_check_passes_on_a_completed_run(self) -> None:
         """The same trap on the rubric side: a criterion that can never reach 1.00
@@ -308,6 +322,89 @@ class GraphWalkTests(unittest.TestCase):
         self.assertEqual(
             shortfalls, {}, msg=f"validity-chain checks unsatisfiable by a completed run: {shortfalls}"
         )
+
+    # -- abandonment is an outcome, not a failure ----------------------------
+
+    def _abandon_at_analysis(self, manager) -> None:
+        """Make Stage 06 declare that the question cannot be answered."""
+        original = manager.operator.run_stage
+
+        def run_stage(stage, prompt, run_paths, attempt_no, continue_session=False):
+            result = original(stage, prompt, run_paths, attempt_no, continue_session)
+            if stage.number == 6:
+                write_text(
+                    run_paths.round_decision,
+                    json.dumps(
+                        {
+                            "decision": "abandon",
+                            "rationale": "The effect cannot be separated from tuning noise "
+                            "with the compute available.",
+                            "what_we_learned": "Every arm we can afford sits within noise of "
+                            "the baseline on this split.",
+                            "what_changes_next": "",
+                            "negative_result": False,
+                        }
+                    ),
+                )
+            return result
+
+        manager.operator.run_stage = run_stage
+
+    def test_an_abandoned_run_stops_instead_of_writing_up(self) -> None:
+        """The defect this closes, measured before and after.
+
+        `resume_stage_slug_for("abandon")` returns None, so the round decision had
+        nowhere to go: the walk advanced to Stage 07, `validate_round_decision`
+        refused it there, and the stage burned its entire retry budget. Measured on
+        this fixture beforehand: **10 operator calls at Stage 07**, every one
+        discarded, and the run recorded `cancelled` — the same status an abort
+        writes, so the most scientifically honest outcome a run can reach was
+        indistinguishable from a crash and was its most expensive.
+        """
+        operator, manager = self.build()
+        self._abandon_at_analysis(manager)
+        completed = self.drive(manager)
+
+        paths = self.only_run()
+        self.assertEqual(operator.invocations.get("07_writing", 0), 0)
+        self.assertEqual(operator.invocations.get("08_dissemination", 0), 0)
+
+        manifest = load_run_manifest(paths.run_manifest)
+        self.assertEqual(manifest.run_status, "abandoned")
+        self.assertTrue(
+            completed,
+            msg="a run that concluded its question cannot be answered did what it should; "
+            "reporting that as failure would make the honest outcome look like a crash",
+        )
+
+        route = load_graph_state(paths).path
+        self.assertEqual(route[-1].stage, STAGE_06.slug)
+        self.assertEqual(route[-1].chose, FINISH)
+
+    def test_abandonment_is_only_reachable_by_declaring_it(self) -> None:
+        """A conclusion reached because nothing else was available is not one the run
+        is entitled to. Every forward move out of Stage 06 is shut here, and the walk
+        must still not record that the run gave up."""
+        _operator, manager = self.build()
+        self.assertTrue(self.drive(manager))
+        paths = self.only_run()
+        self.assertEqual(load_run_manifest(paths.run_manifest).run_status, "completed")
+        self.assertNotIn(
+            FINISH,
+            [visit.chose for visit in load_graph_state(paths).path[:-1]],
+        )
+
+    def test_the_abandonment_guard_opens_on_a_run_that_abandons(self) -> None:
+        """The control for the exemption in `test_every_guard_passes_on_a_completed_run`.
+
+        Without this, exempting a guard from the satisfiability gate would be
+        indistinguishable from the two broken guards that gate was written to catch.
+        """
+        _operator, manager = self.build()
+        self._abandon_at_analysis(manager)
+        self.drive(manager)
+        paths = self.only_run()
+        self.assertTrue(GUARDS["round_abandoned"](paths, GraphState()).ok)
 
     # -- settings survive a resume -------------------------------------------
 

@@ -227,6 +227,60 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(rows[-1]["stage"], STAGE_06.slug)
         self.assertTrue(rows[-1]["fell_back_to"])
 
+    def test_the_agent_cannot_decline_the_run_s_own_abandonment(self) -> None:
+        """Making the terminal the *default* is not enough, and this is why.
+
+        The default is only what happens when nobody is asked, and `auto` — the
+        shipped default — asks wherever more than one move is live. Measured before
+        this rule existed: a run whose round concluded the question cannot be
+        answered still offered five live moves at Stage 06, so the backend was
+        consulted, and a backend answering "the refutation is the contribution" got
+        `07_writing` with `agent_directed=True` and no refusal. The run talked itself
+        out of its own finding.
+
+        A person may still overrule it — `/back` and `--rollback-stage` do not go
+        through the router at all.
+        """
+        self.adjudicate()
+        self.abandon()
+        operator = FakeRoutingOperator(
+            json.dumps({"target": "07_writing", "reason": "The refutation is the contribution."})
+        )
+        decision = StageRouter(operator, mode="auto").choose(
+            paths=self.paths, stage=STAGE_06, graph=self.graph, state=GraphState()
+        )
+        self.assertEqual(decision.target, FINISH)
+        self.assertFalse(decision.agent_directed)
+        self.assertEqual(operator.prompts, [], msg="the backend was asked about a settled question")
+
+    def test_every_other_move_is_recorded_as_moot_rather_than_guard_blocked(self) -> None:
+        """An estimator must be able to tell "this was shut by a research condition"
+        from "the run had already stopped"."""
+        self.adjudicate()
+        self.abandon()
+        decision = StageRouter(None, mode="off").choose(
+            paths=self.paths, stage=STAGE_06, graph=self.graph, state=GraphState()
+        )
+        self.assertEqual(set(decision.blocked.values()), {"concluded"})
+        self.assertIn("07_writing", decision.blocked)
+
+    def abandon(self) -> None:
+        from src.research_rounds import record_round
+
+        write_text(
+            self.paths.round_decision,
+            json.dumps(
+                {
+                    "decision": "abandon",
+                    "rationale": "The effect cannot be separated from tuning noise here.",
+                    "what_we_learned": "Every arm we can afford sits within noise of baseline.",
+                    "what_changes_next": "",
+                    "negative_result": False,
+                }
+            ),
+        )
+        record_round(self.paths, acted_on=True)
+
     # -- when to ask ---------------------------------------------------------
 
     def test_off_never_asks(self) -> None:
@@ -286,7 +340,11 @@ class RouterTests(unittest.TestCase):
         )
         self.assertIn("05_experimentation", decision.offered)
         self.assertIn("07_writing", decision.offered)
-        self.assertEqual(decision.blocked, {})
+        # The abandonment terminal is on the record as shut. That is the useful
+        # state to capture: an estimator has to be able to tell "the run could have
+        # stopped and did not" from "stopping was never on the table".
+        self.assertEqual(decision.blocked, {"finish": "guard"})
+        self.assertNotIn("finish", decision.offered)
 
     def test_the_choice_set_is_recorded_on_the_refusal_path_too(self) -> None:
         """A refusal is still an observation of what was on the table. Recording it
