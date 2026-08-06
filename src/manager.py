@@ -17,6 +17,14 @@ from .bootstrap import (
 )
 from .approval_agent import AutomatedReviewer, ReviewDecision
 from .cross_reviewer import GeminiCrossReviewer
+from .obligations import (
+    discharge_obligations,
+    format_for_stage_prompt,
+    ledger_summary,
+    load_ledger,
+    note_deferrals,
+    record_obligations,
+)
 from .review_policy import load_policy, policy_summary, record_correction
 from .project_bootstrap import (
     format_project_context_for_prompt,
@@ -94,7 +102,13 @@ from .stage_graph import (
 from .diagram_gen import post_writing_diagram_hook
 from .terminal_ui import TerminalUI
 from .platform.foundry import generate_paper_package, generate_release_package
-from .ideation_panel import IdeationPanel, format_pool_for_prompt, record_idea_pool
+from .ideation_panel import (
+    IdeationPanel,
+    format_pool_for_prompt,
+    load_idea_pool,
+    measure_adoption,
+    record_idea_pool,
+)
 from .writing_manifest import (
     build_writing_manifest,
     format_manifest_for_prompt,
@@ -592,6 +606,21 @@ class ResearchManager:
 
         record_idea_pool(paths, pool, stage, attempt_no)
         return format_pool_for_prompt(pool)
+
+    def _measure_pool_adoption(self, paths: RunPaths, stage: StageSpec, stage_markdown: str) -> None:
+        """Record which pooled hypotheses the approved stage actually built on.
+
+        Runs whether or not this run seated an ideation panel — a pool written by an earlier
+        resumed attempt still deserves its outcome measured. Best-effort throughout: the
+        stage is already approved, and nothing here may unapprove it.
+        """
+        try:
+            pool = load_idea_pool(paths)
+            if pool is None or not pool.distinct:
+                return
+            record_idea_pool(paths, measure_adoption(pool, stage_markdown), stage, 0)
+        except Exception as exc:  # noqa: BLE001 - measurement must not disturb an approval
+            append_log_entry(paths.logs, f"{stage.slug} idea_pool_adoption_failed", str(exc))
 
     def _generate_writing_review(self, paths: RunPaths) -> dict[str, object]:
         """Produce the Stage 07 triage artifact that matches this run's output format.
@@ -1861,6 +1890,8 @@ class ResearchManager:
                     attempt_no - polish_rounds,
                     self._stage_file_paths(stage_markdown),
                 )
+                if stage.slug == "02_hypothesis_generation":
+                    self._measure_pool_adoption(paths, stage, stage_markdown)
                 if stage.slug == "04_implementation":
                     self._freeze_preregistration(paths)
                 self._run_validity_review(paths, stage, stage_markdown)
@@ -2130,6 +2161,7 @@ class ResearchManager:
                 attempt_no=attempt_no,
                 previous_validation_errors=previous_validation_errors,
                 web_search_context=self.web_search_context,
+                obligations_context=format_for_stage_prompt(load_ledger(paths), stage),
             )
 
         user_request = read_text(paths.user_input)
@@ -2137,6 +2169,7 @@ class ResearchManager:
             stage, stage_template, user_request, approved_memory, handoff_context, revision_feedback,
             intake_context_text=intake_context_text,
             web_search_context=self.web_search_context,
+            obligations_context=format_for_stage_prompt(load_ledger(paths), stage),
         )
 
     def _display_stage_output(self, stage: StageSpec, markdown: str) -> None:
@@ -2204,6 +2237,7 @@ class ResearchManager:
         self._record_review_correction(
             paths=paths, stage=stage, attempt_no=attempt_no, decision=decision, suggestions=suggestions
         )
+        self._settle_obligations(paths=paths, stage=stage, attempt_no=attempt_no, decision=decision)
 
         cross = self._apply_cross_review(
             paths=paths, stage=stage, attempt_no=attempt_no, decision=decision,
@@ -2213,6 +2247,57 @@ class ResearchManager:
             return cross
 
         return decision.choice, decision.feedback or None
+
+    def _settle_obligations(
+        self,
+        *,
+        paths: RunPaths,
+        stage: StageSpec,
+        attempt_no: int,
+        decision: ReviewDecision,
+    ) -> None:
+        """Close the obligations this stage met, and record the ones it created.
+
+        Discharges are applied first: an approval that both settles an inherited debt and
+        raises a new one should not have the new one immediately counted as deferred.
+        Deferral is only recorded on approval, because a refused stage gets another attempt
+        at the same obligations and has not deferred anything yet.
+        """
+        closed = discharge_obligations(
+            paths, stage=stage, obligation_ids=decision.discharged, note=decision.reason
+        )
+        for obligation in closed:
+            append_log_entry(
+                paths.logs,
+                f"{stage.slug} attempt {attempt_no} obligation_discharged",
+                f"{obligation.obligation_id}: {obligation.text}",
+            )
+
+        approved = decision.choice == "5"
+        if approved:
+            deferred = note_deferrals(paths, stage=stage)
+            if deferred:
+                append_log_entry(
+                    paths.logs,
+                    f"{stage.slug} attempt {attempt_no} obligations_deferred",
+                    f"{deferred} obligation(s) carried past this stage without being discharged.",
+                )
+
+        added = record_obligations(paths, stage=stage, entries=decision.carry_forward)
+        for obligation in added:
+            target = obligation.target_stage or "any later stage"
+            append_log_entry(
+                paths.logs,
+                f"{stage.slug} attempt {attempt_no} obligation_recorded",
+                f"{obligation.obligation_id} -> {target}: {obligation.text}",
+            )
+
+        if closed or added:
+            self.ui.show_status(
+                f"Obligations: +{len(added)} new, {len(closed)} discharged; "
+                f"{ledger_summary(load_ledger(paths))}.",
+                level="info",
+            )
 
     def _apply_cross_review(
         self,

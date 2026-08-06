@@ -14,6 +14,7 @@ import unittest
 from pathlib import Path
 
 from src.ideation_panel import (
+    ADOPTION_THRESHOLD,
     DEFAULT_LENSES,
     DUPLICATE_THRESHOLD,
     IDEA_POOL_FILENAME,
@@ -23,7 +24,9 @@ from src.ideation_panel import (
     ProposerLens,
     apply_lens_models,
     format_pool_for_prompt,
+    load_idea_pool,
     mark_duplicates,
+    measure_adoption,
     record_idea_pool,
     resolve_lenses,
     similarity,
@@ -455,3 +458,228 @@ class ManagerIntegrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AdoptionTests(unittest.TestCase):
+    """Widening the pool and being used are different claims, and only one was measured.
+
+    Havranek and Irsova had authors rank perceived usefulness and say plainly it is "not
+    realized improvement"; AgentPanel ends on its ideas being "speculative candidates that
+    require expert validation". A pool that widened the options and was then ignored has not
+    helped, so the outcome is measured rather than assumed.
+    """
+
+    def _pool(self) -> IdeaPool:
+        return IdeaPool(
+            candidates=mark_duplicates([
+                _candidate("mechanism-1", "mechanism", _MECHANISM),
+                _candidate("null-1", "null", _UNRELATED),
+            ]),
+            baseline_proposer="mechanism",
+            proposer_calls=5,
+        )
+
+    def test_a_hypothesis_the_stage_developed_counts_as_adopted(self) -> None:
+        pool = measure_adoption(self._pool(), (
+            "# Stage 02\n\n## Key Results\n\n"
+            "H1: We hypothesise that remittance inflows increase consumption in credit-poor "
+            "households by relaxing their liquidity constraints, and will test it against the "
+            "transitory-income alternative.\n"
+        ))
+        by_id = {c.idea_id: c for c in pool.distinct}
+        self.assertTrue(by_id["mechanism-1"].adopted)
+        self.assertFalse(by_id["null-1"].adopted)
+
+    def test_a_stage_that_ignored_the_pool_is_reported_as_such(self) -> None:
+        pool = measure_adoption(self._pool(), (
+            "# Stage 02\n\n## Key Results\n\n"
+            "H1: Trade openness drives productivity convergence across regions, which we will "
+            "test with a gravity specification on the panel of bilateral flows.\n"
+        ))
+        effect = pool.effect()
+        self.assertTrue(effect["adoption_measured"])
+        self.assertEqual(effect["adopted"], 0)
+        self.assertIn("adopted none of them", effect["verdict"])
+        self.assertIn("cost its calls and changed nothing", effect["verdict"])
+
+    def test_adoption_only_from_the_baseline_says_a_single_pass_would_have_done(self) -> None:
+        pool = measure_adoption(self._pool(), (
+            "# Stage 02\n\n## Key Results\n\n"
+            "H1: Remittance inflows increase household consumption in credit-poor households "
+            "because they relax liquidity constraints.\n"
+        ))
+        self.assertIn("a single pass would have supplied", pool.effect()["verdict"])
+
+    def test_adoption_beyond_the_baseline_is_credited(self) -> None:
+        pool = measure_adoption(self._pool(), (
+            "# Stage 02\n\n## Key Results\n\n"
+            "H1: Remittance inflows increase consumption in credit-poor households by relaxing "
+            "liquidity constraints.\n\n"
+            "H2: The observed correlation may be a selection artifact, since households that "
+            "receive remittances differ systematically in unobserved ways; we will test this "
+            "with household fixed effects.\n"
+        ))
+        effect = pool.effect()
+        self.assertEqual(effect["adopted"], 2)
+        self.assertEqual(effect["adopted_from_other_proposers"], 1)
+        self.assertIn("1 of them from proposers beyond the baseline", effect["verdict"])
+
+    def test_before_measurement_the_verdict_does_not_claim_usefulness(self) -> None:
+        effect = self._pool().effect()
+        self.assertFalse(effect["adoption_measured"])
+        self.assertIn("not yet measured", effect["verdict"])
+
+    def test_a_duplicate_is_never_credited_with_adoption(self) -> None:
+        pool = IdeaPool(
+            candidates=mark_duplicates([
+                _candidate("mechanism-1", "mechanism", _MECHANISM),
+                _candidate("contrarian-1", "contrarian", _RESTATED),
+            ]),
+            baseline_proposer="mechanism",
+        )
+        measure_adoption(pool, f"# Stage 02\n\n## Key Results\n\n{_MECHANISM}\n")
+        folded = next(c for c in pool.candidates if c.duplicate_of is not None)
+        self.assertIsNone(folded.adopted)
+
+    def test_a_short_fragment_cannot_be_mistaken_for_adoption(self) -> None:
+        """The length floor is load-bearing, and this is the case that shows it.
+
+        A hypothesis with few content words is easy to falsely match: the fragment
+        "Reported class-size effect" scores 0.57 against the statement below, well over the
+        0.35 bar, purely because Jaccard's union is small. Only the length floor stops a
+        heading fragment from being read as the stage having adopted the idea.
+        """
+        short = "Publication bias inflates the reported class-size effect."
+        pool = IdeaPool(
+            candidates=[_candidate("a-1", "mechanism", short)],
+            baseline_proposer="mechanism",
+        )
+        # The fragment on its own would clear the bar; as a heading it must not.
+        self.assertGreater(similarity(short, "Reported class-size effect"), ADOPTION_THRESHOLD)
+
+        measure_adoption(pool, "# Stage 02\n\n## Reported class-size effect\n\n## Files Produced\n")
+
+        self.assertEqual(pool.effect()["adopted"], 0)
+
+    def test_boilerplate_headings_alone_are_never_adoption(self) -> None:
+        pool = measure_adoption(self._pool(), "# Stage 02\n\n## Key Results\n\n## Files Produced\n")
+        self.assertEqual(pool.effect()["adopted"], 0)
+
+
+class PoolRoundTripTests(unittest.TestCase):
+    def _written(self):
+        tmp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp_dir.cleanup)
+        paths = build_run_paths(Path(tmp_dir.name) / "run")
+        ensure_run_layout(paths)
+        write_text(paths.memory, "# Approved Run Memory\n")
+        pool = IdeaPool(
+            candidates=mark_duplicates([
+                _candidate("mechanism-1", "mechanism", _MECHANISM),
+                _candidate("contrarian-1", "contrarian", _RESTATED),
+                _candidate("null-1", "null", _UNRELATED),
+            ]),
+            abstentions=["regime"],
+            baseline_proposer="mechanism",
+            proposer_calls=5,
+        )
+        record_idea_pool(paths, pool, STAGE_02, 1)
+        return paths
+
+    def test_a_written_pool_can_be_read_back(self) -> None:
+        paths = self._written()
+        pool = load_idea_pool(paths)
+        self.assertIsNotNone(pool)
+        assert pool is not None
+        self.assertEqual(len(pool.distinct), 2)
+        self.assertEqual(pool.baseline_proposer, "mechanism")
+        self.assertEqual(pool.proposer_calls, 5)
+        self.assertEqual(pool.abstentions, ["regime"])
+
+    def test_duplicate_marks_survive_the_round_trip(self) -> None:
+        pool = load_idea_pool(self._written())
+        assert pool is not None
+        folded = next(c for c in pool.candidates if c.idea_id == "contrarian-1")
+        self.assertEqual(folded.duplicate_of, "mechanism-1")
+
+    def test_a_missing_or_corrupt_pool_reads_as_none(self) -> None:
+        tmp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp_dir.cleanup)
+        paths = build_run_paths(Path(tmp_dir.name) / "run")
+        ensure_run_layout(paths)
+        self.assertIsNone(load_idea_pool(paths))
+        write_text(paths.notes_dir / IDEA_POOL_FILENAME, "{ not json")
+        self.assertIsNone(load_idea_pool(paths))
+
+    def test_the_measured_outcome_is_written_back(self) -> None:
+        paths = self._written()
+        pool = load_idea_pool(paths)
+        assert pool is not None
+        measure_adoption(pool, f"# Stage 02\n\n## Key Results\n\n{_MECHANISM} We will test it.\n")
+        record_idea_pool(paths, pool, STAGE_02, 0)
+
+        payload = json.loads(read_text(paths.notes_dir / IDEA_POOL_FILENAME))
+        self.assertTrue(payload["effect"]["adoption_measured"])
+        self.assertEqual(payload["effect"]["adopted"], 1)
+        self.assertIn("a single pass would have supplied", payload["effect"]["verdict"])
+
+
+class AdoptionIntegrationTests(unittest.TestCase):
+    def _manager_and_paths(self):
+        import io as _io
+        from unittest.mock import MagicMock
+        from src.manager import ResearchManager
+
+        tmp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp_dir.cleanup)
+        runs_dir = Path(tmp_dir.name) / "runs"
+        runs_dir.mkdir()
+        paths = build_run_paths(runs_dir / "20260101_000000")
+        ensure_run_layout(paths)
+        write_text(paths.user_input, "Goal")
+        write_text(paths.memory, "# Approved Run Memory\n")
+        ensure_run_config(paths, model="sonnet", venue="neurips_2025")
+
+        operator = MagicMock()
+        operator.model = "sonnet"
+        operator.backend_name = "claude"
+        manager = ResearchManager(
+            project_root=Path(__file__).resolve().parent.parent,
+            runs_dir=runs_dir,
+            operator=operator,
+            ui=TerminalUI(output_stream=_io.StringIO(), interactive=False),
+        )
+        return manager, paths
+
+    def test_approving_stage_02_measures_the_pool(self) -> None:
+        manager, paths = self._manager_and_paths()
+        record_idea_pool(
+            paths,
+            IdeaPool(
+                candidates=mark_duplicates([_candidate("mechanism-1", "mechanism", _MECHANISM)]),
+                baseline_proposer="mechanism",
+                proposer_calls=5,
+            ),
+            STAGE_02,
+            1,
+        )
+
+        manager._measure_pool_adoption(
+            paths, STAGE_02,
+            f"# Stage 02\n\n## Key Results\n\n{_MECHANISM} We will test it against the alternative.\n",
+        )
+
+        payload = json.loads(read_text(paths.notes_dir / IDEA_POOL_FILENAME))
+        self.assertTrue(payload["effect"]["adoption_measured"])
+        self.assertEqual(payload["effect"]["adopted"], 1)
+
+    def test_a_run_with_no_pool_is_a_no_op(self) -> None:
+        manager, paths = self._manager_and_paths()
+        manager._measure_pool_adoption(paths, STAGE_02, "# Stage 02\n\nNo pool was ever written.\n")
+        self.assertFalse((paths.notes_dir / IDEA_POOL_FILENAME).exists())
+
+    def test_a_corrupt_pool_cannot_disturb_an_approval(self) -> None:
+        manager, paths = self._manager_and_paths()
+        write_text(paths.notes_dir / IDEA_POOL_FILENAME, "{ not json")
+        manager._measure_pool_adoption(paths, STAGE_02, "# Stage 02\n\nApproved.\n")
+        self.assertEqual(read_text(paths.notes_dir / IDEA_POOL_FILENAME), "{ not json\n")
