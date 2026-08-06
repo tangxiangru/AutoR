@@ -73,6 +73,7 @@ class RunPaths:
     experiment_manifest: Path
     hypothesis_manifest: Path
     preregistration: Path
+    experimental_protocol: Path
     hypothesis_outcomes: Path
     claim_provenance: Path
     writing_dir: Path
@@ -246,6 +247,7 @@ def build_run_paths(run_root: Path) -> RunPaths:
         experiment_manifest=workspace_root / "results" / "experiment_manifest.json",
         hypothesis_manifest=workspace_root / "notes" / "hypothesis_manifest.json",
         preregistration=workspace_root / "notes" / "preregistration.json",
+        experimental_protocol=workspace_root / "notes" / "experimental_protocol.json",
         hypothesis_outcomes=workspace_root / "results" / "hypothesis_outcomes.json",
         claim_provenance=workspace_root / "artifacts" / "claim_provenance.json",
         writing_dir=workspace_root / "writing",
@@ -1161,9 +1163,12 @@ def validate_stage_artifacts(
         # manuscript makes traces to a supported hypothesis or is labelled
         # exploratory (07). Without these, nothing in the pipeline notices a
         # hypothesis that was quietly rewritten to match the result.
+        from .experimental_protocol import validate_experimental_protocol
         from .preregistration import validate_preregistration
 
         for problem in validate_preregistration(paths):
+            problems.append(f"{stage.stage_title} {problem}")
+        for problem in validate_experimental_protocol(paths):
             problems.append(f"{stage.stage_title} {problem}")
 
         if count_in("results", paths.results_dir, RESULT_SUFFIXES) == 0:
@@ -1181,9 +1186,12 @@ def validate_stage_artifacts(
                 problems.append(f"{stage.stage_title}: {problem}")
 
     if stage.number >= 6:
+        from .experimental_protocol import validate_outcome_statistics
         from .preregistration import validate_hypothesis_outcomes
 
         for problem in validate_hypothesis_outcomes(paths):
+            problems.append(f"{stage.stage_title} {problem}")
+        for problem in validate_outcome_statistics(paths):
             problems.append(f"{stage.stage_title} {problem}")
 
         if count_in("figures", paths.figures_dir, FIGURE_SUFFIXES) == 0:

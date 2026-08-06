@@ -248,6 +248,26 @@ class ScriptedSmokeOperator:
             produced.append(relative_to_run(paths.hypothesis_manifest, paths.run_root))
 
         if stage.number >= 3:
+            write_text(
+                paths.experimental_protocol,
+                json.dumps(
+                    {
+                        "declared_at": "2026-04-08T00:00:00",
+                        "primary_metric": "held-out benchmark accuracy",
+                        "planned_seeds": 5,
+                        "baselines": [
+                            {
+                                "name": "retrieval-off long-context prompting",
+                                "why_competent": "the standard approach this method has to beat",
+                                "tuning_budget": "the same 20-configuration search the method gets",
+                            }
+                        ],
+                    }
+                ),
+            )
+            produced.append(relative_to_run(paths.experimental_protocol, paths.run_root))
+
+        if stage.number >= 3:
             data_path = paths.data_dir / "study_design.json"
             write_text(
                 data_path,
@@ -285,6 +305,11 @@ class ScriptedSmokeOperator:
                                     "verdict": "supported",
                                     "rationale": "Smoke adjudication against the frozen decision rule.",
                                     "evidence": ["results/metrics.json"],
+                                    "statistics": {
+                                        "n_seeds": 5,
+                                        "dispersion": 0.011,
+                                        "dispersion_type": "std",
+                                    },
                                 }
                                 for identifier in prereg.adjudicated_ids
                             ],

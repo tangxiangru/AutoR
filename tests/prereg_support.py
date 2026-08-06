@@ -55,6 +55,26 @@ def write_hypothesis_manifest(paths: RunPaths) -> None:
     )
 
 
+def write_experimental_protocol(paths: RunPaths, *, planned_seeds: int = 5) -> None:
+    write_text(
+        paths.experimental_protocol,
+        json.dumps(
+            {
+                "declared_at": "2026-04-08T00:00:00",
+                "primary_metric": "held-out accuracy",
+                "planned_seeds": planned_seeds,
+                "baselines": [
+                    {
+                        "name": "standard baseline",
+                        "why_competent": "the established approach the method has to beat to matter",
+                        "tuning_budget": "the same search budget the method receives",
+                    }
+                ],
+            }
+        ),
+    )
+
+
 def write_validity_chain(paths: RunPaths, *, evidence: str = "results/metrics.json") -> None:
     """Freeze hypotheses, adjudicate them, and trace one claim to the verdict.
 
@@ -69,6 +89,7 @@ def write_validity_chain(paths: RunPaths, *, evidence: str = "results/metrics.js
         write_text(evidence_path, json.dumps({"baseline": 0.61, "treatment": 0.74}))
 
     write_hypothesis_manifest(paths)
+    write_experimental_protocol(paths)
     prereg = freeze_preregistration(paths)
     if prereg is None:  # pragma: no cover - only if the manifest write failed
         raise AssertionError("preregistration did not freeze from the test manifest")
@@ -85,6 +106,11 @@ def write_validity_chain(paths: RunPaths, *, evidence: str = "results/metrics.js
                         "verdict": "supported",
                         "rationale": "The measured gap clears the preregistered decision rule.",
                         "evidence": [evidence],
+                        "statistics": {
+                            "n_seeds": 5,
+                            "dispersion": 0.011,
+                            "dispersion_type": "std",
+                        },
                     }
                     for identifier in prereg.adjudicated_ids
                 ],

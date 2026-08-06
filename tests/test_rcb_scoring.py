@@ -90,7 +90,13 @@ class FigureBudgetTests(unittest.TestCase):
         # the numbers should also be able to see which hypothesis they settle.
         self.assertEqual(
             exported,
-            ["hypothesis_manifest.json", "hypothesis_outcomes.json", "metrics.json", "preregistration.json"],
+            [
+                "experimental_protocol.json",
+                "hypothesis_manifest.json",
+                "hypothesis_outcomes.json",
+                "metrics.json",
+                "preregistration.json",
+            ],
         )
         # outputs/ is swept before report/, so an image there would take a judge slot.
         self.assertEqual(

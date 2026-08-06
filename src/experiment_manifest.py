@@ -72,6 +72,7 @@ RECORD_ARTIFACTS = frozenset(
         "results/hypothesis_outcomes.json",
         "notes/hypothesis_manifest.json",
         "notes/preregistration.json",
+        "notes/experimental_protocol.json",
     }
 )
 

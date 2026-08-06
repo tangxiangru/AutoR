@@ -33,6 +33,36 @@ Convert the approved hypotheses into a concrete study or experimental design tha
 - Avoid under-specified experimental plans.
 - If multiple designs are viable, explain which one is primary and why.
 
+## Experimental Protocol (required)
+
+Write `{{WORKSPACE_NOTES_DIR}}/experimental_protocol.json` before the design stage ends:
+
+```json
+{
+  "declared_at": "<ISO timestamp>",
+  "primary_metric": "held-out accuracy",
+  "planned_seeds": 5,
+  "baselines": [
+    {
+      "name": "long-context prompting",
+      "why_competent": "the standard approach for this task and the one the method must beat to matter",
+      "tuning_budget": "same prompt-search budget as the method: 20 configurations"
+    }
+  ]
+}
+```
+
+Rules:
+
+- Name the **primary metric** now. Choosing the metric after seeing the results is the
+  same defect as choosing the hypothesis after seeing them.
+- `planned_seeds` is how many independent runs the comparison will use. One run cannot
+  separate an effect from variance, and Stage 06 will refuse a verdict that rests on one
+  without an explicit justification.
+- Every baseline needs `why_competent` — an argument that this is a comparison worth
+  beating — and a `tuning_budget` equal in effort to what the method will get. Beating a
+  baseline nobody tried to make strong measures the effort split, not the method.
+
 ## Stage Output Requirements
 
 The markdown at `{{STAGE_OUTPUT_PATH}}` must follow the required output structure exactly.
