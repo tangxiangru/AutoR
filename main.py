@@ -11,7 +11,7 @@ from src.operator import ClaudeOperator
 from src.operator_codex import CodexOperator
 from src.operator_protocol import OperatorProtocol
 from src.terminal_ui import TerminalUI
-from src.web_search import build_web_search_prompt_section, resolve_gemini_api_key
+from src.web_search import resolve_web_search_context, web_search_notice
 from src.utils import (
     CODEX_SANDBOX_CHOICES,
     DEFAULT_CODEX_SANDBOX,
@@ -251,19 +251,6 @@ def resolve_unattended(args: argparse.Namespace) -> bool:
     return bool(args.unattended or args.full_auto or args.approval_mode == "agent")
 
 
-def resolve_web_search_context(mode: str) -> str | None:
-    """Return the prompt block for the Gemini search tool, or None to keep native search.
-
-    'auto' degrades to native search when no Gemini key is configured, so the default path
-    never advertises a tool that would fail on first use.
-    """
-    if mode == "native":
-        return None
-    if mode == "auto" and not resolve_gemini_api_key():
-        return None
-    return build_web_search_prompt_section()
-
-
 def resolve_goal(args: argparse.Namespace, *, unattended: bool) -> str:
     if args.goal and args.goal_file:
         raise ValueError("--goal and --goal-file are mutually exclusive.")
@@ -335,6 +322,8 @@ def main() -> int:
     web_search_context = resolve_web_search_context(args.web_search)
     ui = TerminalUI(interactive=not unattended)
     ui.show_banner()
+    notice, level = web_search_notice(args.web_search)
+    ui.show_status(notice, level=level)
 
     if args.resume_run:
         start_stage = resolve_stage(args.redo_stage)

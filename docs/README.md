@@ -48,6 +48,10 @@ detail behind it.
   [ResearchClawBench](https://github.com/InternScience/ResearchClawBench)
   adapter and its output contract, and the Gemini-backed web search used where
   the coding agent's own `WebSearch` tool is disabled.
+- **[researchclawbench-landscape.md](researchclawbench-landscape.md)** — how the
+  other agents on the ResearchClawBench leaderboard score, which of their
+  published numbers reproduce from the public data, and the same-model baseline
+  any AutoR result has to be quoted against.
 
 ### Internals
 

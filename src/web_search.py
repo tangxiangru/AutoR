@@ -215,6 +215,55 @@ def format_response_markdown(response: WebSearchResponse) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def resolve_web_search_context(mode: str) -> str | None:
+    """Return the prompt block for the Gemini search tool, or None to keep native search.
+
+    'auto' degrades to native search when no Gemini key is configured, so the default path
+    never advertises a tool that would fail on first use.
+    """
+    if mode == "native":
+        return None
+    if mode == "auto" and not resolve_gemini_api_key():
+        return None
+    return build_web_search_prompt_section()
+
+
+def web_search_notice(mode: str) -> tuple[str, str]:
+    """Describe the resolved search path as a ``(message, level)`` pair.
+
+    `auto` silently falling back to native search is the dangerous case: on a deployment
+    where the built-in `WebSearch` tool is disabled, the fallback is to a tool that does not
+    work, and Stage 01 goes looking for literature with nothing to search with. Saying so at
+    startup is the difference between a diagnosable run and one that quietly invents
+    citations.
+    """
+    has_key = bool(resolve_gemini_api_key())
+
+    if mode == "native":
+        return ("Web search: the backend's native tool.", "info")
+
+    if mode == "gemini":
+        if not has_key:
+            return (
+                "Web search: --web-search gemini was requested but no Gemini API key is "
+                "configured. Operators will be told to use tools/web_search.py and it will "
+                "fail on first use. Set GOOGLE_API_KEY or GEMINI_API_KEY.",
+                "error",
+            )
+        return (f"Web search: Gemini ({resolve_search_model(None)}).", "info")
+
+    if has_key:
+        return (f"Web search: Gemini ({resolve_search_model(None)}), selected automatically.", "info")
+
+    return (
+        "Web search: no Gemini API key found, falling back to the backend's native search. "
+        "If this deployment has WebSearch disabled (for example Claude Code on Vertex AI), "
+        "Stage 01 has no way to search at all. Set GOOGLE_API_KEY or GEMINI_API_KEY, or pass "
+        "--web-search native to silence this.",
+        "warn",
+    )
+
+
 def build_web_search_prompt_section(
     *,
     script_path: Path | None = None,

@@ -776,6 +776,7 @@ The [docs/](docs/) directory is the reference documentation. This README is the 
 | [Stage Contract](docs/stage-contract.md) | Exactly what a stage must produce to be accepted, as the code enforces it. |
 | [Studio Guide & API](docs/studio.md) | The browser workspace and its complete HTTP API. |
 | [ResearchClawBench](docs/researchclawbench.md) | Running with no human in the loop: unattended execution, the benchmark adapter and its output contract, and Gemini-backed web search. |
+| [ResearchClawBench Landscape](docs/researchclawbench-landscape.md) | How EvoScientist, ARIS Codex and MIRA actually score on the benchmark, which reported numbers reproduce, and the baseline any result must be quoted against. |
 
 **Internals**
 
