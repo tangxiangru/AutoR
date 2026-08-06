@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 import traceback
 from pathlib import Path
 
@@ -36,6 +37,8 @@ from src.operator import ClaudeOperator  # noqa: E402
 from src.operator_codex import CodexOperator  # noqa: E402
 from src.rcb import (  # noqa: E402
     BenchmarkResult,
+    infer_task_id,
+    write_run_meta,
     ReportSynthesizer,
     build_benchmark_goal,
     build_run_paths_for_workspace,
@@ -177,6 +180,7 @@ def create_operator(backend: str, *, model: str, codex_sandbox: str, fake_mode: 
 
 
 def run(args: argparse.Namespace) -> BenchmarkResult:
+    started_at = time.monotonic()
     workspace = Path(args.workspace).expanduser().resolve()
     if not workspace.exists():
         raise FileNotFoundError(f"Benchmark workspace does not exist: {workspace}")
@@ -292,6 +296,16 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
         pipeline_completed=pipeline_completed,
         auto_skipped_stages=manager.auto_skipped_stages,
         synthesize=synthesizer,
+    )
+    write_run_meta(
+        workspace,
+        task_id=infer_task_id(workspace),
+        run_id=paths.run_root.name,
+        # The harness scores the report, so a report is what "completed" means here.
+        status="completed" if export.report_path.exists() else "failed",
+        duration_seconds=round(time.monotonic() - started_at),
+        model=model,
+        extra={"report_source": export.report_source, "pipeline_completed": pipeline_completed},
     )
     return BenchmarkResult(
         workspace=workspace,
