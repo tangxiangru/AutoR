@@ -11,6 +11,7 @@ from .operator import ClaudeOperator
 from .obligations import format_for_review_prompt, load_ledger
 from .review_policy import format_policy_for_prompt, load_policy
 from .operator_codex import CodexOperator
+from .stage_comments import parse_comments
 from .terminal_ui import TerminalUI
 from .utils import (
     RunPaths,
@@ -101,6 +102,10 @@ class ReviewDecision:
     carry_forward: list[Any] = field(default_factory=list)
     #: Inherited obligation ids this stage actually discharged.
     discharged: list[str] = field(default_factory=list)
+    #: Comments anchored to quoted passages of the draft. When present, a refusal is local:
+    #: the revision is asked to change these spans and leave the rest alone, and the next
+    #: draft is diffed against them.
+    comments: list[Any] = field(default_factory=list)
 
 
 class AutomatedReviewer:
@@ -167,7 +172,7 @@ class AutomatedReviewer:
                 raw_response=stdout_text or stderr_text,
             )
 
-        return self._parse_decision(stdout_text)
+        return self._parse_decision(stdout_text, markdown=stage_markdown)
 
     def run_prompt(
         self,
@@ -236,9 +241,12 @@ class AutomatedReviewer:
         write_text(record_path, json.dumps(record, indent=2, ensure_ascii=False))
         return exit_code, stdout_text, stderr_text
 
-    def parse_decision(self, raw_response: str) -> ReviewDecision:
-        """Public alias: panel members parse the same decision grammar."""
-        return self._parse_decision(raw_response)
+    def parse_decision(self, raw_response: str, markdown: str = "") -> ReviewDecision:
+        """Public alias: panel members parse the same decision grammar.
+
+        *markdown* is the draft under review, needed to anchor quoted comments to it.
+        """
+        return self._parse_decision(raw_response, markdown=markdown)
 
     def _build_review_prompt(
         self,
@@ -262,6 +270,14 @@ class AutomatedReviewer:
             "- If one of the built-in suggestions already matches the right next move, select it.\n"
             "- Otherwise choose custom_feedback and write concrete reviewer instructions.\n"
             "- Use abort only if the run is blocked badly enough that automatic continuation would be irresponsible.\n\n"
+            "## Preferred: comment on specific passages\n\n"
+            "If your objections are to particular passages rather than to the stage as a whole, "
+            "return them as `comments`, each quoting the exact text you object to. A quoted "
+            "objection sends back only that passage; a bare `feedback` string re-runs the whole "
+            "stage and rerolls work nobody objected to.\n\n"
+            "Quote verbatim from the draft, long enough to be unambiguous (at least a full "
+            "clause). Do not quote text that is not there — a comment whose quote cannot be "
+            "found is recorded as unanchored and reaches nobody.\n\n"
             "Return JSON only, with no prose outside the JSON object:\n"
             '{"decision":"approve|suggestion_1|suggestion_2|suggestion_3|custom_feedback|abort",'
             '"feedback":"","reason":"",'
@@ -341,7 +357,7 @@ class AutomatedReviewer:
             return "..." + text[-(max_chars - 3):].lstrip()
         return truncate_text(text, max_chars=max_chars)
 
-    def _parse_decision(self, raw_response: str) -> ReviewDecision:
+    def _parse_decision(self, raw_response: str, markdown: str = "") -> ReviewDecision:
         payload = self._extract_json_payload(raw_response)
         if payload is None:
             return ReviewDecision(
@@ -368,6 +384,11 @@ class AutomatedReviewer:
 
         carry_forward = payload.get("carry_forward")
         discharged = payload.get("discharged")
+        comments = parse_comments(payload, author=self.backend_name, markdown=markdown) if markdown else []
+        if choice == "5":
+            # An approval does not send anything back, so a comment attached to one would be an
+            # instruction nobody will ever act on.
+            comments = []
         return ReviewDecision(
             choice=choice,
             decision_token=token,
@@ -376,6 +397,7 @@ class AutomatedReviewer:
             raw_response=raw_response,
             carry_forward=list(carry_forward) if isinstance(carry_forward, list) else [],
             discharged=[str(item) for item in discharged] if isinstance(discharged, list) else [],
+            comments=comments,
         )
 
     def _extract_json_payload(self, raw_response: str) -> dict[str, Any] | None:

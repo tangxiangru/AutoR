@@ -5,7 +5,7 @@ from datetime import datetime
 import shutil
 import sys
 from pathlib import Path
-from typing import TextIO
+from typing import Any, TextIO
 
 from .bootstrap import (
     bootstrap_profile_exists,
@@ -89,6 +89,12 @@ from .manifest import (
 from .operator_protocol import OperatorProtocol
 from .evolution import EvolutionConfig, EvolutionController
 from .router import StageRouter, format_decision
+from .stage_comments import (
+    assess_revision,
+    build_comment_feedback,
+    carry_forward as carry_forward_comments,
+    record_round as record_comment_round,
+)
 from .stage_graph import (
     FINISH as GRAPH_FINISH,
     GraphState,
@@ -212,6 +218,10 @@ class ResearchManager:
         self._research_diagram: bool = False
         self._final_stage: StageSpec | None = None
         self.ideation_panel: IdeationPanel | None = None
+        self._pending_comments: list[Any] = []
+        self._open_comments: list[Any] = []
+        self._commented_draft: str = ""
+        self._comment_round_attempt: int = 0
         self._jump_target_stage: StageSpec | None = None
         self.unattended = unattended
         self.max_auto_skips = max_auto_skips
@@ -622,6 +632,73 @@ class ResearchManager:
             record_idea_pool(paths, measure_adoption(pool, stage_markdown), stage, 0)
         except Exception as exc:  # noqa: BLE001 - measurement must not disturb an approval
             append_log_entry(paths.logs, f"{stage.slug} idea_pool_adoption_failed", str(exc))
+
+    def _begin_comment_round(
+        self, paths: RunPaths, stage: StageSpec, attempt_no: int, stage_markdown: str
+    ) -> str:
+        """Turn anchored comments into a revision instruction and remember what was asked."""
+        comments = self._pending_comments
+        self._pending_comments = []
+        self._open_comments = comments
+        self._commented_draft = stage_markdown
+        # One logical round is one ledger entry: the comments are raised against this
+        # attempt's draft, and the revision that answers them arrives as the next attempt.
+        # Recording both under the attempt they were raised on keeps them together.
+        self._comment_round_attempt = attempt_no
+        record_comment_round(paths, stage, attempt_no, comments)
+
+        unanchored = [c for c in comments if c.status == "unanchored"]
+        if unanchored:
+            # A reviewer quoting text the draft does not contain is objecting to something it
+            # imagined. Say so rather than passing it on as an instruction.
+            self.ui.show_status(
+                f"{len(unanchored)} review comment(s) quoted text not present in the draft; "
+                "they were dropped.",
+                level="warn",
+            )
+        append_log_entry(
+            paths.logs,
+            f"{stage.slug} attempt {attempt_no} anchored_comments",
+            "\n".join(
+                f"[{c.severity}] {c.comment_id} ({c.status}): {c.comment}" for c in comments
+            ),
+        )
+        return build_comment_feedback(comments)
+
+    def _close_comment_round(
+        self, paths: RunPaths, stage: StageSpec, attempt_no: int, stage_markdown: str
+    ) -> None:
+        """Diff the new draft against the comments that asked for it.
+
+        Asking for a targeted revision is cheap; knowing whether one happened is the point.
+        Comments whose passage never moved are carried into the next round rather than
+        quietly expiring.
+        """
+        if not self._open_comments:
+            return
+        comments = self._open_comments
+        before = self._commented_draft
+        round_attempt = self._comment_round_attempt or attempt_no
+        self._open_comments = []
+        self._commented_draft = ""
+        self._comment_round_attempt = 0
+        try:
+            outcome = assess_revision(before, stage_markdown, comments)
+            record_comment_round(paths, stage, round_attempt, comments, outcome)
+            self._pending_comments = carry_forward_comments(comments, outcome)
+            append_log_entry(
+                paths.logs,
+                f"{stage.slug} attempt {attempt_no} anchored_revision",
+                outcome.verdict(),
+            )
+            if outcome.collateral_ratio >= 0.5 and outcome.collateral_lines_changed:
+                self.ui.show_status(
+                    f"Targeted revision rewrote {outcome.collateral_lines_changed} line(s) no "
+                    "comment asked about.",
+                    level="warn",
+                )
+        except Exception as exc:  # noqa: BLE001 - measurement must not derail the stage
+            append_log_entry(paths.logs, f"{stage.slug} anchored_revision_failed", str(exc))
 
     def _generate_writing_review(self, paths: RunPaths) -> dict[str, object]:
         """Produce the Stage 07 triage artifact that matches this run's output format.
@@ -1770,6 +1847,10 @@ class ResearchManager:
 
             stage_markdown = read_text(result.stage_file_path)
 
+            # If the previous round sent back quoted passages, check what came back against
+            # them before anyone decides anything.
+            self._close_comment_round(paths, stage, attempt_no, stage_markdown)
+
             # The draft is valid. Measure it, and decide whether it may stand.
             if self.evolution is not None and self.evolution.config.applies_to(stage):
                 outcome = self.evolution.consider(
@@ -1842,6 +1923,14 @@ class ResearchManager:
                 continue
 
             if choice == "4":
+                if self._pending_comments:
+                    # A local refusal: send back the quoted passages, not the whole stage.
+                    revision_feedback = self._begin_comment_round(
+                        paths, stage, attempt_no, stage_markdown
+                    )
+                    continue_session = True
+                    attempt_no += 1
+                    continue
                 if auto_feedback is not None:
                     custom_feedback = auto_feedback
                 else:
@@ -2252,6 +2341,9 @@ class ResearchManager:
         if cross is not None:
             return cross
 
+        # The tuple contract is (choice, feedback); anchored comments ride alongside it so
+        # the refine path can send back a passage instead of the whole stage.
+        self._pending_comments = list(decision.comments or [])
         return decision.choice, decision.feedback or None
 
     def _settle_obligations(
