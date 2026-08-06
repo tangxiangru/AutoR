@@ -52,6 +52,7 @@ from .intake import (
 from .artifact_index import format_artifact_index_for_prompt, write_artifact_index
 from .experiment_manifest import format_experiment_manifest_for_prompt, write_experiment_manifest
 from .hypothesis_manifest import write_hypothesis_manifest
+from .prompt_fragments import compose_stage_template
 from .validity_review import ValidityReviewer, format_findings_for_prompt
 from .research_rounds import (
     ROUND_CLOSING_STAGE_NUMBER,
@@ -1993,8 +1994,13 @@ class ResearchManager:
         attempt_no: int = 1,
         previous_validation_errors: list[str] | None = None,
     ) -> str:
-        template = load_prompt_template(self.prompt_dir, stage, output_format=selected_output_format(paths))
-        stage_template = format_stage_template(template, stage, paths)
+        output_format = selected_output_format(paths)
+        template = load_prompt_template(self.prompt_dir, stage, output_format=output_format)
+        # Shared rules are composed in before substitution, so a fragment can use
+        # the same placeholder vocabulary as the templates without introducing a
+        # token of its own.
+        composed = compose_stage_template(template, stage, output_format)
+        stage_template = format_stage_template(composed, stage, paths)
         handoff_context = build_handoff_context(paths, upto_stage=stage)
 
         # A run can arrive at Stage 05 without ever passing through Stage 04's

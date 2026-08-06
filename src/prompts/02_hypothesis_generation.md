@@ -1,6 +1,4 @@
-# Stage {{STAGE_NUMBER}}: {{STAGE_NAME}}
-
-You are executing the hypothesis generation stage for a serious research workflow whose target is publication-grade work.
+An engineering goal in hypothesis clothing is the failure here — a decision rule that no plausible outcome could fail. State, for each empirical hypothesis, what the literature would predict and what result would surprise you; if no outcome would surprise anyone, it is not a hypothesis.
 
 ## Mission
 
@@ -18,11 +16,9 @@ Transform the approved literature-grounded context into strong, testable, non-tr
 
 ## Filesystem Requirements
 
-- All generated working files must remain under `{{WORKSPACE_ROOT}}`.
 - Put hypothesis notes, assumption maps, and decision matrices under `{{WORKSPACE_NOTES_DIR}}`.
 - Put any literature-linked support tables under `{{WORKSPACE_LITERATURE_DIR}}`.
-- The stage summary draft for the current attempt must be written to `{{STAGE_OUTPUT_PATH}}`.
-- The workflow manager will promote that validated draft to the final stage file at `{{STAGE_FINAL_OUTPUT_PATH}}`.
+- Write the stage summary draft for the current attempt to `{{STAGE_OUTPUT_PATH}}`. The workflow manager promotes that validated draft to the final stage file at `{{STAGE_FINAL_OUTPUT_PATH}}`; do not write there yourself.
 
 ## Quality Bar
 
@@ -64,7 +60,10 @@ Additional expectations for this stage:
   These hypotheses are **frozen** when Stage 04 is approved, before any result exists,
   and Stage 06 must return a verdict on each one. Write hypotheses you are willing to
   have refuted; a refuted hypothesis is a result, and the run records it as one.
-- `Paper Claims (Provisional)` should remain narrative-level and explicitly provisional.
+- `Paper Claims (Provisional)` are the sentences you would like to end up able to write:
+  an anchoring hazard, not a result. Keep them narrative-level and explicitly provisional.
+  Stage 07 has to spend a clause refusing to report them as findings, and no hypothesis
+  should be bent to protect one.
 - `Files Produced` should list any hypothesis artifacts created.
 - Ensure `Files Produced` includes `workspace/notes/hypothesis_manifest.json` as the typed-claim artifact for downstream stages.
 - `Suggestions for Refinement` should suggest ways to narrow, sharpen, or de-risk the hypotheses.
@@ -72,5 +71,3 @@ Additional expectations for this stage:
 ## Important Constraints
 
 - Do not produce generic "future work" statements in place of actual hypotheses.
-- Do not control workflow progression.
-- Do not write outside the current run directory.

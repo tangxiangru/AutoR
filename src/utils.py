@@ -800,11 +800,22 @@ def build_prompt(
             "# Intake Context (User-Provided Resources and Clarifications)",
             intake_context_text.strip(),
         ])
+    sections.extend(["# Approved Memory", approved_memory.strip() or "_None yet._"])
+
+    # The handoff is a strict subset of approved memory: `build_handoff_context`
+    # renders Objective / Key Results / Files Produced for the last four stages
+    # with the Decision Ledger stripped, and `render_approved_stage_entry` puts
+    # exactly those sections — plus What I Did — into memory for every approved
+    # stage. Sending both put ~350 words of verbatim duplicate into every prompt
+    # from Stage 04 on, half the prompt being prior-stage history by Stage 08.
+    # The continuation prompt still needs it, because that path sends no memory.
+    if not approved_memory.strip():
+        sections.extend([
+            "# Stage Handoff Context",
+            handoff_context.strip() or "No stage handoff summaries available yet.",
+        ])
+
     sections.extend([
-        "# Approved Memory",
-        approved_memory.strip() or "_None yet._",
-        "# Stage Handoff Context",
-        handoff_context.strip() or "No stage handoff summaries available yet.",
         "# Revision Feedback",
         revision_feedback.strip() if revision_feedback else "None.",
     ])

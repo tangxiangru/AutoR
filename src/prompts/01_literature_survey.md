@@ -1,6 +1,4 @@
-# Stage {{STAGE_NUMBER}}: {{STAGE_NAME}}
-
-You are executing the literature survey stage for a serious research workflow whose target is publication-grade work, not a toy demonstration.
+You are writing the Related Work section that an author of one of these papers will referee. The failure here is a gap asserted from what you failed to recall: every "no prior work does X" is a search result or it is not a finding. Record such claims in `claims.json` with the searches you ran and what they returned. Use the `citation-discipline` skill before you write `sources.json` — a reference recalled from memory is a fabrication Stage 07 has to retract.
 
 ## Mission
 
@@ -19,14 +17,13 @@ Given the user's research goal, build a high-quality research landscape overview
 
 ## Filesystem Requirements
 
-- All generated working files must remain under `{{WORKSPACE_ROOT}}`.
 - Put reading notes, paper summaries, bibliographic notes, and topic maps under `{{WORKSPACE_LITERATURE_DIR}}`.
-- Write `{{WORKSPACE_LITERATURE_DIR}}/sources.json` as a structured source catalog with stable `source_id` values.
-- Write `{{WORKSPACE_LITERATURE_DIR}}/claims.json` as a structured survey claim ledger whose `source_ids` point back to `sources.json`.
+- Write `{{WORKSPACE_LITERATURE_DIR}}/sources.json`: a `sources` list whose entries each carry a stable, unique `source_id` and a `title`.
+- Write `{{WORKSPACE_LITERATURE_DIR}}/claims.json`: a `claims` list whose entries each carry a `claim_id`, a `statement`, and a `source_ids` list naming entries that exist in `sources.json`.
+- A claim that an area is unexplored carries, in addition, the query strings you ran and what each returned. A gap you did not search for is not a gap, and it is the claim the rest of the run will rest on.
 - Put temporary thinking or unresolved questions under `{{WORKSPACE_NOTES_DIR}}`.
 - If you create structured survey tables, place them in `{{WORKSPACE_LITERATURE_DIR}}`.
-- The stage summary draft for the current attempt must be written to `{{STAGE_OUTPUT_PATH}}`.
-- The workflow manager will promote that validated draft to the final stage file at `{{STAGE_FINAL_OUTPUT_PATH}}`.
+- Write the stage summary draft for the current attempt to `{{STAGE_OUTPUT_PATH}}`. The workflow manager promotes that validated draft to the final stage file at `{{STAGE_FINAL_OUTPUT_PATH}}`; do not write there yourself.
 
 ## Quality Bar
 
@@ -44,7 +41,7 @@ Additional expectations for this stage:
 
 - `Objective` should describe the exact research question and survey objective.
 - `Previously Approved Stage Summaries` should summarize approved earlier context in readable form.
-- `What I Did` should explain how the literature landscape was mapped.
+- `What I Did` should explain how the literature landscape was mapped, including which searches you ran.
 - `Key Results` should include:
   - major research clusters or schools of thought
   - representative prior approaches
@@ -56,8 +53,5 @@ Additional expectations for this stage:
 
 ## Important Constraints
 
-- Do not control workflow progression.
-- Do not approve the stage yourself.
-- Do not write outside the current run directory.
 - Do not produce a shallow reading list in place of actual synthesis.
-- Do not leave substantive survey claims ungrounded when they belong in `claims.json`.
+- Every survey claim a later stage could act on belongs in `claims.json` with its `source_ids`. Do not decide on your own that a claim is too minor to record — the gap claim and the "standard baseline is X" claim are exactly the ones that get skipped.

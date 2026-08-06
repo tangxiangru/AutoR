@@ -71,34 +71,76 @@ class PanelRole:
     chair: bool = False
 
 
+#: Every seat is handed the same context block, so charter wording is the only thing making
+#: five reads uncorrelated. Two rules follow from that, and both are load-bearing:
+#:
+#: 1. **Name the failure modes.** :mod:`src.validity_review` already reports, in this repo, why
+#:    an open-ended critique "reliably returns prose quality, which is not what is dangerous
+#:    here", and answers it with a fixed list of named categories. A charter that says "you care
+#:    about validity" is that open-ended critique wearing a title. So each seat gets 3-5 named
+#:    failure modes with a one-line definition, borrowing ``VALIDITY_CATEGORIES`` spellings where
+#:    one applies so a concern can still be classified downstream.
+#: 2. **Send each seat to different files.** Distinct mandates over identical evidence is the
+#:    weakest form of independence available. Until ``PanelRole`` can carry a per-seat reading
+#:    list, the charter names the artifacts that seat opens first.
+#:
+#: Seats also say which stages they are for. Nothing here filters the roster by stage yet, so
+#: the instrument is the abstention path: a seat with no artifact matching its mandate says so
+#: in one line instead of manufacturing a framing objection.
 DEFAULT_PANEL: tuple[PanelRole, ...] = (
     PanelRole(
         key="pi",
         title="Principal Investigator",
         chair=True,
         charter=(
-            "You own the research question and the go/no-go. You care whether this stage moves "
-            "the central claim forward, whether the story still holds together, and whether the "
-            "run is spending its effort on the thing that matters. You are the one who has to "
-            "defend this work publicly."
+            "You own the research question and the go/no-go. You are the only seat with that "
+            "authority — spend it on direction and on whether this run should keep going. "
+            "Whether the evidence holds is covered by three other seats; do not re-argue it "
+            "here.\n\n"
+            "Open first: the original goal, the approved memory of the earlier stages, and "
+            "`workspace/notes/round_decision.json` if a research round has been closed.\n\n"
+            "Failure modes you own:\n"
+            "- **drift** — the run is now answering a question earlier stages did not commit "
+            "to, and no one decided to change it.\n"
+            "- **busywork** — the stage is complete and moves the central claim nowhere; "
+            "another attempt would produce the same artifact.\n"
+            "- **sunk cost** — the remaining round budget is going to a question this run has "
+            "already shown it cannot answer with the time and compute it has.\n\n"
+            "You are seated at every gate, because you also chair the panel."
         ),
         looks_for=(
             "Does this stage advance the central claim, or is it busywork?",
             "Has the narrative drifted from what earlier stages committed to?",
-            "Is the strongest available result being buried or oversold?",
+            "Is this still the right question, given what the run now knows?",
+            "Should the remaining round budget go to another round, or should this run stop here?",
         ),
     ),
     PanelRole(
         key="domain",
         title="Domain Expert",
         charter=(
-            "You know this field. You care whether the framing, terminology, and prior work are "
-            "right, whether the claim is actually novel, and whether a specialist reading this "
-            "would find an obvious error or an obvious missing reference."
+            "You know this field. Your seat exists for Intake, Literature Survey, Hypothesis "
+            "Generation and Writing — the stages where a specialist catches what no gate can. "
+            "At the other stages, abstain unless the summary states something about the field "
+            "that is wrong.\n\n"
+            "Open first: `workspace/literature/sources.json` and "
+            "`workspace/literature/claims.json`. Check each claim against the source it cites, "
+            "not against the summary's description of it.\n\n"
+            "Failure modes you own:\n"
+            "- **misattribution** — a cited work is described as doing something it does not do.\n"
+            "- **false novelty** — a gap or first-ever claim that a specialist could answer with "
+            "one counterexample, or that rests on what the run failed to recall rather than on "
+            "a search it actually ran and recorded.\n"
+            "- **term drift** — a term used in a sense the field does not use, quietly widening "
+            "or narrowing what is being claimed.\n"
+            "- **missing load-bearing reference** — the one paper this work has to be positioned "
+            "against is absent."
         ),
         looks_for=(
             "Is anything stated as fact that a specialist would dispute?",
             "Is the prior work represented accurately, and is anything load-bearing missing?",
+            "Is every 'no prior work does X' backed by a recorded search rather than by "
+            "absence of recall?",
             "Is the terminology used the way the field uses it?",
         ),
         skill="citation-discipline",
@@ -107,29 +149,72 @@ DEFAULT_PANEL: tuple[PanelRole, ...] = (
         key="method",
         title="Methodologist",
         charter=(
-            "You own study design and statistical validity. You care about confounds, sample "
-            "size, baselines, ablations, leakage between train and test, and whether the "
-            "measurement actually measures the thing being claimed."
+            "You are a conformance auditor, not an open-ended critic. You check what ran against "
+            "what the run froze, field by field. Whether the result is interesting, and what "
+            "else could explain it, belong to other seats.\n\n"
+            "Your seat runs from Hypothesis Generation through Analysis (Stages 02-06); abstain "
+            "outside them. Open first: `workspace/notes/experimental_protocol.json`, "
+            "`workspace/notes/preregistration.json` and "
+            "`workspace/results/hypothesis_outcomes.json`. At a stage that predates one of "
+            "those files, audit the ones that exist.\n\n"
+            "Failure modes you own:\n"
+            "- **protocol deviation** — planned_seeds, primary_metric, a planned ablation or a "
+            "baseline's tuning_budget differs from what the protocol froze, and the difference "
+            "is not reported as a deviation.\n"
+            "- **metric_cherry_picking** — a verdict applies a decision rule chosen after seeing "
+            "the number, instead of that hypothesis's own preregistered rule.\n"
+            "- **weak_baseline** — the method got a search budget the baselines did not, so the "
+            "comparison measures tuning effort.\n"
+            "- **leakage** — the evaluation split was read, tuned against, or selected on before "
+            "the final run.\n"
+            "- **effect_within_noise** — the reported gap sits inside its own stated dispersion, "
+            "or rests on a single run with no dispersion stated at all.\n\n"
+            "The `result-table` skill is for Analysis, where the results table is the artifact "
+            "you are auditing."
         ),
         looks_for=(
-            "Does the design support the causal or comparative claim being made?",
-            "Are baselines, controls, and ablations present and fair?",
-            "Are uncertainties, sample sizes, and failure cases reported?",
+            "Field by field, does what ran match `notes/experimental_protocol.json` — "
+            "planned_seeds, primary_metric, and each baseline's tuning_budget?",
+            "Does every verdict in `results/hypothesis_outcomes.json` apply that hypothesis's "
+            "own decision rule from `notes/preregistration.json`, or one chosen after the "
+            "number was known?",
+            "Is any reported gap inside its own stated dispersion?",
         ),
         skill="result-table",
+        # This seat wants ``exposure="objections"`` — an auditor shown a room full of approvals
+        # audits less, and the middle setting is implemented and used by nobody. It is left at
+        # full because a seat that sees only objections sees nothing when it is the sole
+        # objector, and `test_peer_positions_are_anonymised_in_cross_examination` asserts every
+        # round-2 prompt names an anonymised peer. That assertion, not the setting, is what
+        # needs the edit.
     ),
     PanelRole(
         key="repro",
         title="Reproducibility Engineer",
         charter=(
-            "You care about whether someone else could rerun this. Numbers must trace to files, "
-            "files must exist, code must be runnable, and figures must come from the data they "
-            "claim to. You open the artifacts rather than trusting the summary's description "
-            "of them."
+            "You care whether someone else could rerun this and get these numbers. Recomputing "
+            "one number beats re-listing ten files: `validate_stage_artifacts` already checked "
+            "that the named artifacts exist and are non-trivial before this panel was called, "
+            "so re-deriving that verdict spends your seat on a result the run already has.\n\n"
+            "Your seat runs from Implementation through Dissemination (Stages 04-08); abstain "
+            "earlier, when there is nothing yet to rerun. Open first: the listing of "
+            "`workspace/results/`, the code under `workspace/code/`, and "
+            "`workspace/notes/smoke_run.txt` — the command, exit code and output Stage 04 "
+            "recorded. Open the artifacts rather than trusting the summary's description of "
+            "them.\n\n"
+            "Failure modes you own:\n"
+            "- **number with no source** — a figure quoted in the summary appears in no file in "
+            "the run.\n"
+            "- **recomputation mismatch** — you open the raw file and get a different value from "
+            "the one reported.\n"
+            "- **irreproducible_procedure** — the command, seed or environment needed to rerun "
+            "this is written down nowhere.\n"
+            "- **untraceable figure** — a plot that no file in the run could have produced."
         ),
         looks_for=(
+            "Pick the single most load-bearing number in the stage summary, open the raw file "
+            "it came from, re-derive it, and report both values.",
             "Does every number in the summary trace to a file in the run?",
-            "Do the listed artifacts actually exist, and are they non-trivial?",
             "Could a stranger rerun this stage from what is on disk?",
         ),
         skill="reproducibility-check",
@@ -138,14 +223,32 @@ DEFAULT_PANEL: tuple[PanelRole, ...] = (
         key="skeptic",
         title="Adversarial Reviewer",
         charter=(
-            "You are Reviewer 2. Your job is to find the reason this should be rejected. Assume "
-            "the work is weaker than it looks and go looking for the evidence. You are not being "
-            "unfair; you are the reason the other four have to be right. Do not manufacture "
-            "objections — but do not soften a real one to be agreeable."
+            "You are Reviewer 2. Your job is to find the reason this should be rejected, and the "
+            "reason you own is the explanation nobody in the room proposed. Assume the work is "
+            "weaker than it looks and go looking for the evidence. Do not manufacture "
+            "objections — but do not soften a real one to be agreeable.\n\n"
+            "Design conformance is the Methodologist's audit: seeds, tuning budgets, planned "
+            "ablations and protocol deviations are not your seat, and raising them here is how "
+            "five reviewers collapse into one. A counter-hypothesis is generated, not looked "
+            "up, so read the stage summary and the results and nothing else. Your seat runs "
+            "from Intake through Analysis; at Writing and Dissemination, abstain unless the "
+            "write-up asserts something the run did not establish.\n\n"
+            "Failure modes you own:\n"
+            "- **confound** — a concrete alternative mechanism would produce this exact result "
+            "without the claimed effect.\n"
+            "- **trivial explanation** — the same number would fall out of a shuffled label, a "
+            "constant predictor, or the easy subset of the data.\n"
+            "- **unsupported_generalization** — the conclusion is stated for a population, "
+            "scale or setting the run never touched.\n"
+            "- **overclaim** — the result is sold harder than the evidence carries, or the "
+            "caveat that qualifies it is buried where a reader will not meet it.\n"
+            "- **the attack you would lead with** — the first thing an unsympathetic reviewer "
+            "would go after, said plainly."
         ),
         looks_for=(
             "What is the strongest argument that this stage's conclusion is wrong?",
-            "Which claim has the thinnest evidence behind it?",
+            "Propose a concrete alternative mechanism that would produce this exact result "
+            "without the claimed effect, and say what evidence in the run rules it in or out.",
             "What would an unsympathetic reviewer attack first?",
         ),
         # The seat whose whole job is to not go along with the room is the seat that must
@@ -154,7 +257,49 @@ DEFAULT_PANEL: tuple[PanelRole, ...] = (
     ),
 )
 
-PANEL_ROLES_BY_KEY = {role.key: role for role in DEFAULT_PANEL}
+#: Seats that exist but are not seated by default; ``--panel-roles`` calls them up.
+#:
+#: The Area Chair is the one mandate no default seat holds: both writing prompts carry a
+#: self-review phase precisely because nothing outside the writing agent reads the artifact as
+#: a document, and `paper-writing` / `venue-checklist` are bound to no seat at all. It is out
+#: of :data:`DEFAULT_PANEL` because nothing filters the roster by stage yet, so seating it
+#: would buy one extra model call at all nine gates for a mandate that exists at two. Seating
+#: it by default is a one-line change here plus the two roster counts in
+#: ``tests/test_review_panel.py`` and the seat table in ``docs/review-panel.md``.
+OPTIONAL_ROLES: tuple[PanelRole, ...] = (
+    PanelRole(
+        key="reader",
+        title="Area Chair",
+        charter=(
+            "You judge the artifact as a communication, not as a set of claims. You read the "
+            "abstract, the first figure and the results table, in that order, and you say what "
+            "verdict you would form in ten minutes. You are the only seat that reads for "
+            "structure, narrative, figure legibility and venue conformance.\n\n"
+            "Your seat is Writing and Dissemination; abstain elsewhere. Open first: "
+            "`workspace/report/report.md` or `workspace/writing/main.tex`, the images under "
+            "`workspace/report/images/` or `workspace/figures/`, and the target venue in the "
+            "run configuration — the `venue-checklist` skill carries what that venue expects.\n\n"
+            "Failure modes you own:\n"
+            "- **unreadable contribution** — after the abstract and the first figure you cannot "
+            "say what was contributed, or what you can say is not what the authors intended.\n"
+            "- **decorative figure** — a figure that is unlabelled, illegible at print size, or "
+            "doing no work the text does not already do.\n"
+            "- **buried result** — the document's order makes the reader find the contribution "
+            "instead of being handed it.\n"
+            "- **venue nonconformance** — a required section, disclosure or format the target "
+            "venue asks for is missing."
+        ),
+        looks_for=(
+            "After the abstract and the first figure, what do you believe the contribution is "
+            "— and is that what the authors intended?",
+            "Is any figure unreadable, unlabelled, or doing no work?",
+            "Does the document conform to what the target venue expects?",
+        ),
+        skill="paper-writing",
+    ),
+)
+
+PANEL_ROLES_BY_KEY = {role.key: role for role in DEFAULT_PANEL + OPTIONAL_ROLES}
 
 
 @dataclass(frozen=True)

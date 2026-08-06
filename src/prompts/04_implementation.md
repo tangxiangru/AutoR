@@ -1,6 +1,7 @@
-# Stage {{STAGE_NUMBER}}: {{STAGE_NAME}}
-
-You are executing the implementation stage for a serious research workflow whose target is publication-grade work.
+Pseudocode theater — code that has never been executed — is the failure here. Nothing in this
+stage counts until the pipeline has run end to end on the smallest real slice. Write the exact
+command, its exit code and the first ten lines of its output to
+`{{WORKSPACE_NOTES_DIR}}/smoke_run.txt`.
 
 ## Mission
 
@@ -16,12 +17,9 @@ Implement the approved study design in a way that supports reproducible experime
 
 ## Filesystem Requirements
 
-- All generated working files must remain under `{{WORKSPACE_ROOT}}`.
 - Put implementation files under `{{WORKSPACE_CODE_DIR}}`.
 - Put dataset loaders, transforms, metadata helpers, and machine-readable dataset manifests under `{{WORKSPACE_DATA_DIR}}` when relevant.
-- Put implementation notes or unresolved engineering concerns under `{{WORKSPACE_NOTES_DIR}}`.
-- The stage summary draft for the current attempt must be written to `{{STAGE_OUTPUT_PATH}}`.
-- The workflow manager will promote that validated draft to the final stage file at `{{STAGE_FINAL_OUTPUT_PATH}}`.
+- Put implementation notes, the smoke-run record, and unresolved engineering concerns under `{{WORKSPACE_NOTES_DIR}}`.
 
 ## Quality Bar
 
@@ -37,6 +35,7 @@ Additional expectations for this stage:
 
 - `Key Results` should include:
   - what was implemented
+  - the smoke run: the command, its exit code, and what it proves executes
   - what is runnable or partially runnable
   - major assumptions or missing pieces
   - what experimentation can now execute
@@ -47,5 +46,3 @@ Additional expectations for this stage:
 
 - Do not pretend unimplemented components exist.
 - Do not stop at prose-only implementation plans if concrete configs, manifests, scripts, or machine-readable artifacts can be produced.
-- Do not control workflow progression.
-- Do not write outside the current run directory.
