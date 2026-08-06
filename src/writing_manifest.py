@@ -7,6 +7,7 @@ import re
 
 from .artifact_index import indexed_artifacts_for_category, write_artifact_index
 from .utils import (
+    MAX_REPORT_FIGURES,
     MIN_REPORT_CHARS,
     PREFERRED_REPORT_IMAGE_SUFFIX,
     RENDERABLE_IMAGE_SUFFIXES,
@@ -328,12 +329,15 @@ def generate_report_review(paths: RunPaths) -> dict[str, object]:
     ]
     unreferenced = [path.name for path in available if path.resolve().as_posix() not in resolved_names]
 
+    over_budget = max(0, len(available) - MAX_REPORT_FIGURES)
+
     issue_counts = {
         "broken_image_links": len(broken),
         "non_relative_image_links": len(non_relative),
         "unrenderable_images": len(unrenderable),
         "non_png_images": len(non_preferred),
         "unreferenced_images": len(unreferenced),
+        "figures_over_budget": over_budget,
     }
     issue_counts["total"] = sum(issue_counts.values())
 
@@ -407,6 +411,19 @@ def generate_report_review(paths: RunPaths) -> dict[str, object]:
                 "evidence": non_preferred[:_REPORT_ISSUE_SAMPLE_LIMIT],
             }
         )
+    if over_budget:
+        issues.append(
+            {
+                "category": "figures_over_budget",
+                "severity": "critical",
+                "summary": (
+                    f"report/images/ holds {len(available)} figures, but only {MAX_REPORT_FIGURES} "
+                    "are shown to the reviewer and they are picked in filesystem order, not by "
+                    f"importance. {over_budget} figure(s) must go."
+                ),
+                "evidence": [path.name for path in available][:_REPORT_ISSUE_SAMPLE_LIMIT],
+            }
+        )
     if unreferenced:
         issues.append(
             {
@@ -428,6 +445,7 @@ def generate_report_review(paths: RunPaths) -> dict[str, object]:
         "report_char_count": len(report_text.strip()),
         "referenced_image_count": len(targets),
         "available_image_count": len(available),
+        "figure_budget": MAX_REPORT_FIGURES,
         "issue_counts": issue_counts,
         "issues": issues,
         "priority_fixes": _suggest_report_fixes(
@@ -438,6 +456,7 @@ def generate_report_review(paths: RunPaths) -> dict[str, object]:
             non_relative=len(non_relative),
             unrenderable=len(unrenderable),
             unreferenced=len(unreferenced),
+            over_budget=over_budget,
         ),
     }
     paths.artifacts_dir.mkdir(parents=True, exist_ok=True)
@@ -483,12 +502,18 @@ def _suggest_report_fixes(
     non_relative: int,
     unrenderable: int,
     unreferenced: int,
+    over_budget: int = 0,
 ) -> list[str]:
     fixes: list[str] = []
     if not report_exists:
         fixes.append("Write the research report to workspace/report/report.md before approval.")
     elif report_chars < MIN_REPORT_CHARS:
         fixes.append("Expand report.md with the actual methodology, quantitative results, and discussion.")
+    if over_budget:
+        fixes.append(
+            f"Cut {over_budget} figure(s): merge related panels into one composite, so at most "
+            f"{MAX_REPORT_FIGURES} remain in report/images/."
+        )
     if broken:
         fixes.append("Repair figure references that point at files missing from report/images/.")
     if non_relative:

@@ -19,10 +19,10 @@ from src.utils import (
     DEFAULT_VENUE,
     OUTPUT_FORMAT_CLI_CHOICES,
     STAGES,
-    StageSpec,
     build_run_paths,
     load_run_config,
     resolve_output_format,
+    resolve_stage,
     resolve_venue_key,
 )
 
@@ -131,6 +131,13 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--final-stage",
+        metavar="STAGE",
+        help="Stop after this stage slug or number instead of running the whole workflow "
+             "(for example '07_writing' or '7'). Useful when only the manuscript or report is "
+             "needed and the dissemination package is not.",
+    )
+    parser.add_argument(
         "--venue",
         help=(
             "Target venue profile for Stage 07 writing. "
@@ -229,21 +236,6 @@ def create_reviewer(
         ui=ui,
         stage_timeout=stage_timeout,
     )
-
-
-def resolve_stage(value: str | None) -> StageSpec | None:
-    if value is None:
-        return None
-
-    normalized = value.strip().lower()
-    if not normalized:
-        return None
-
-    for stage in STAGES:
-        if normalized in {stage.slug.lower(), str(stage.number), f"{stage.number:02d}"}:
-            return stage
-
-    raise ValueError(f"Unknown stage identifier: {value}")
 
 
 def resolve_resume_run(runs_dir: Path, value: str) -> Path:
@@ -345,8 +337,15 @@ def main() -> int:
     if args.resume_run:
         start_stage = resolve_stage(args.redo_stage)
         rollback_stage = resolve_stage(args.rollback_stage)
+        final_stage = resolve_stage(args.final_stage)
         if start_stage is not None and rollback_stage is not None:
             raise ValueError("--redo-stage and --rollback-stage are mutually exclusive.")
+        entry_stage = start_stage or rollback_stage
+        if final_stage is not None and entry_stage is not None and final_stage.number < entry_stage.number:
+            raise ValueError(
+                f"--final-stage {final_stage.slug} is before the requested entry stage "
+                f"{entry_stage.slug}; there would be nothing to run."
+            )
         run_root = resolve_resume_run(runs_dir, args.resume_run)
         paths = build_run_paths(run_root)
         existing_config = load_run_config(paths)
@@ -413,6 +412,7 @@ def main() -> int:
             rollback_stage=rollback_stage,
             research_diagram=args.research_diagram,
             output_format=output_format,
+            final_stage=final_stage,
         ) else 1
 
     operator_name = (args.operator or "claude").strip().lower()
@@ -423,6 +423,7 @@ def main() -> int:
     review_model = args.review_model or default_model_for_operator(review_operator)
     venue = resolve_venue_key(args.venue or DEFAULT_VENUE)
     output_format = resolve_output_format(args.output_format or DEFAULT_OUTPUT_FORMAT)
+    final_stage = resolve_stage(args.final_stage)
     operator = create_operator(
         operator_name,
         model=model,
@@ -478,6 +479,7 @@ def main() -> int:
         project_root=project_root_arg,
         paper_corpus=paper_corpus,
         output_format=output_format,
+        final_stage=final_stage,
     ) else 1
 
 

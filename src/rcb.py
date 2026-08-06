@@ -41,6 +41,7 @@ from __future__ import annotations
 import filecmp
 import hashlib
 import json
+import re
 import shutil
 import sys
 import uuid
@@ -48,13 +49,16 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, TextIO
 
+from .intake import ResourceEntry, classify_resource
 from .utils import (
     DEFAULT_OUTPUT_FORMAT,
+    MAX_REPORT_FIGURES,
     MIN_REPORT_CHARS,
     RunPaths,
     StageSpec,
     approved_stage_summaries,
     build_run_paths,
+    extract_markdown_image_targets,
     read_text,
     resolve_output_format,
     truncate_text,
@@ -68,6 +72,12 @@ RCB_WORKSPACE_DIRS = ("code", "outputs", "report", "report/images")
 #: Directory holding the AutoR run tree, kept inside the workspace so a run is self-contained.
 AUTOR_RUNS_DIRNAME = ".autor"
 
+#: Read-only inputs the harness stages into the workspace. ``related_work`` holds the
+#: reference papers the task was built from; ignoring them and searching the web instead is
+#: how a literature survey ends up unable to cite the very work it is reproducing.
+REFERENCE_DIRNAME = "related_work"
+DATA_DIRNAME = "data"
+
 #: Records which report AutoR last exported, so a re-export can tell its own output apart
 #: from one the agent wrote. A dotfile at the workspace root: the benchmark reads only
 #: report/, outputs/ and the metadata files it writes itself, so this stays invisible to it.
@@ -77,6 +87,11 @@ EXPORT_MARKER_NAME = ".autor_export.json"
 REPORT_STAGE = StageSpec(9, "09_benchmark_report", "Benchmark Report")
 
 FIGURE_SUFFIXES = (".png",)
+
+#: Every extension ResearchClawBench's scorer treats as an image, mirrored from its
+#: ``evaluation/config.py``. Anything in this set competes for the five judge slots, so a
+#: stray ``.svg`` costs as much as a real figure.
+JUDGE_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg"})
 
 #: Run-tree directories never mirrored into the benchmark workspace.
 EXPORT_SKIP_DIRS = frozenset({"__pycache__", ".git", ".ipynb_checkpoints", "node_modules"})
@@ -204,6 +219,20 @@ def build_benchmark_goal(
     to the AutoR run tree.
     """
     resolved = workspace.resolve()
+    papers = reference_papers(workspace)
+    reference_block = (
+        "## Reference Papers Supplied With This Task\n\n"
+        + (
+            f"`{resolved}/{REFERENCE_DIRNAME}/` holds {len(papers)} paper(s) that were selected "
+            "for this task. They have already been copied into the run's literature directory. "
+            "Read them before searching the web: they are the closest prior work to the study "
+            "you are reproducing, and the review you are scored against assumes familiarity "
+            "with them.\n\n"
+            + "\n".join(f"- `{REFERENCE_DIRNAME}/{path.relative_to(workspace / REFERENCE_DIRNAME)}`" for path in papers)
+            if papers
+            else "No reference papers were supplied with this task."
+        )
+    )
     report_instruction = (
         "Stage 07 (Writing) writes this file as its primary deliverable. Keep the copy here in "
         "sync with it."
@@ -243,10 +272,42 @@ def build_benchmark_goal(
                 "plausible-sounding claims with no evidence behind them. Length is not rewarded.\n\n"
                 f"{report_instruction}"
             ),
+            reference_block,
             "## Research Task",
             instructions.strip(),
         ]
     )
+
+
+def reference_papers(workspace: Path) -> list[Path]:
+    """The benchmark's shipped reference papers, if the harness staged any."""
+    root = workspace / REFERENCE_DIRNAME
+    if not root.is_dir():
+        return []
+    return [path for path in sorted(root.rglob("*")) if path.is_file() and not path.name.startswith(".")]
+
+
+def collect_reference_resources(workspace: Path) -> list[ResourceEntry]:
+    """Register ``related_work/`` as run resources so Stage 01 actually reads it.
+
+    The harness copies a curated set of papers into every workspace and AutoR's literature
+    survey has no other way to learn they exist. Routing them through the normal resource
+    intake puts the PDFs under ``workspace/literature/`` and their summary into the intake
+    context that every stage prompt carries.
+    """
+    entries: list[ResourceEntry] = []
+    for path in reference_papers(workspace):
+        resource_type, dest_dir = classify_resource(path)
+        entries.append(
+            ResourceEntry(
+                source_path=str(path.resolve()),
+                resource_type=resource_type,
+                dest_dir=dest_dir,
+                dest_relative="",
+                description=f"Reference paper supplied with the benchmark task ({path.name}).",
+            )
+        )
+    return entries
 
 
 # ---------------------------------------------------------------------------
@@ -267,10 +328,17 @@ def _iter_files(root: Path) -> list[Path]:
     return files
 
 
-def mirror_tree(source: Path, destination: Path) -> int:
-    """Copy every file under *source* into *destination*, preserving relative layout."""
+def mirror_tree(source: Path, destination: Path, *, skip_suffixes: frozenset[str] = frozenset()) -> int:
+    """Copy every file under *source* into *destination*, preserving relative layout.
+
+    *skip_suffixes* exists for one reason: the scorer sweeps ``outputs/`` for images *before*
+    it looks at ``report/``, so a diagnostic plot left in ``outputs/`` silently takes a slot
+    from a figure the report actually argues with.
+    """
     copied = 0
     for path in _iter_files(source):
+        if path.suffix.lower() in skip_suffixes:
+            continue
         target = destination / path.relative_to(source)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, target)
@@ -278,16 +346,15 @@ def mirror_tree(source: Path, destination: Path) -> int:
     return copied
 
 
-def collect_figures(paths: RunPaths, workspace: Path) -> list[str]:
-    """Copy run-tree PNGs into ``report/images/`` and return the report-relative names.
+def _figure_candidates(paths: RunPaths, images_dir: Path) -> list[tuple[str, Path]]:
+    """Every figure that could be published, as (name, source), best source first."""
+    candidates: list[tuple[str, Path]] = []
+    claimed: dict[str, Path] = {}
 
-    Figures already written straight to ``report/images/`` are included without being
-    recopied, so the goal contract and this fallback sweep cannot produce duplicates.
-    """
-    images_dir = workspace / "report" / "images"
-    images_dir.mkdir(parents=True, exist_ok=True)
-
-    names = {path.name for path in images_dir.iterdir() if path.is_file() and path.suffix.lower() in FIGURE_SUFFIXES}
+    for path in sorted(images_dir.iterdir()):
+        if path.is_file() and path.suffix.lower() in FIGURE_SUFFIXES:
+            claimed[path.name] = path
+            candidates.append((path.name, path))
 
     # The run tree's own report/images/ comes first: in markdown mode those are the figures the
     # report actually references by name, so they must keep their filenames. A same-named figure
@@ -303,19 +370,119 @@ def collect_figures(paths: RunPaths, workspace: Path) -> list[str]:
             if path.suffix.lower() not in FIGURE_SUFFIXES:
                 continue
             target_name = path.name
-            if target_name in names:
-                existing = images_dir / target_name
+            existing = claimed.get(target_name)
+            if existing is not None:
                 if filecmp.cmp(path, existing, shallow=False):
                     # The same figure, already exported by the pipeline itself.
                     continue
                 # A genuinely different figure sharing a basename: qualify rather than clobber.
                 target_name = f"{source_root.name}_{path.stem}{path.suffix}"
-                if target_name in names:
+                if target_name in claimed:
                     continue
-            shutil.copy2(path, images_dir / target_name)
-            names.add(target_name)
+            claimed[target_name] = path
+            candidates.append((target_name, path))
 
-    return sorted(names)
+    return candidates
+
+
+def collect_figures(paths: RunPaths, workspace: Path, report_text: str = "") -> list[str]:
+    """Publish at most :data:`MAX_REPORT_FIGURES` figures into ``report/images/``.
+
+    The scorer shows the judge five agent images per checklist item, picked by an unsorted
+    ``rglob``. Publishing a sixth does not add a sixth chance to match — it randomises which
+    five are seen, on the ~61% of the benchmark's weight that is image-graded. So the budget
+    is enforced here, and figures the report actually references win the slots.
+
+    A figure the report references is never dropped, even when that pushes past the budget:
+    breaking a live link is worse than overshooting, and Stage 07's own gate is what keeps a
+    markdown run from getting here with more than the budget in the first place.
+    """
+    images_dir = workspace / "report" / "images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+
+    candidates = _figure_candidates(paths, images_dir)
+    by_name = dict(candidates)
+
+    referenced: list[str] = []
+    for target in extract_markdown_image_targets(report_text):
+        name = Path(target.split("#", 1)[0].split("?", 1)[0].strip()).name
+        if name in by_name and name not in referenced:
+            referenced.append(name)
+
+    # A figure the report does not reference is one the writing stage judged not worth
+    # showing, and the rubric marks a superficially similar plot down rather than ignoring it.
+    # So unreferenced figures only fill slots when the report references nothing at all —
+    # a synthesized or fallback report, which is assembled from this list in the first place.
+    selected = list(referenced)
+    if not selected:
+        for name, _source in candidates:
+            if len(selected) >= MAX_REPORT_FIGURES:
+                break
+            selected.append(name)
+
+    for name in selected:
+        source = by_name[name]
+        destination = images_dir / name
+        if source.resolve() != destination.resolve():
+            shutil.copy2(source, destination)
+
+    # Anything already sitting at the benchmark path that did not make the cut would still be
+    # swept up by the scorer, so the budget has to be enforced on disk, not just on the list.
+    keep = set(selected)
+    for path in sorted(images_dir.iterdir()):
+        if path.is_file() and path.suffix.lower() in JUDGE_IMAGE_SUFFIXES and path.name not in keep:
+            path.unlink()
+
+    return sorted(keep)
+
+
+#: Stage-summary headings that exist for AutoR's own control loop. A judge reading them sees
+#: an agent's workflow log rather than research, and the rubric says to be skeptical.
+_WORKFLOW_ONLY_HEADINGS = (
+    "Previously Approved Stage Summaries",
+    "Decision Ledger",
+    "Suggestions for Refinement",
+    "Your Options",
+    "Files Produced",
+)
+
+#: How the surviving stage sections are presented as a research narrative.
+_STAGE_SECTION_TITLES = {
+    "01_literature_survey": "Background and Related Work",
+    "02_hypothesis_generation": "Hypotheses",
+    "03_study_design": "Study Design",
+    "04_implementation": "Implementation",
+    "05_experimentation": "Experiments",
+    "06_analysis": "Analysis",
+    "07_writing": "Findings",
+    "08_dissemination": "Dissemination",
+}
+
+
+def _research_body(stage_markdown: str) -> str:
+    """Strip AutoR's control-loop scaffolding from a stage summary.
+
+    What is left is the part that reads as research: what was done and what came out of it.
+    ``## Your Options / 1. Use suggestion 1 ... 6. Abort`` is not evidence of anything, and a
+    reviewer told to distrust AI output will read it as exactly the padding it is.
+    """
+    kept: list[str] = []
+    skipping = False
+    for line in stage_markdown.splitlines():
+        heading = re.match(r"^#{1,6}\s+(.*?)\s*$", line)
+        if heading is not None:
+            title = heading.group(1).strip()
+            if title.startswith("Stage ") or title in _WORKFLOW_ONLY_HEADINGS:
+                skipping = title in _WORKFLOW_ONLY_HEADINGS
+                continue
+            skipping = False
+            # Demote to keep the report's own H1/H2 hierarchy intact.
+            kept.append(f"### {title}")
+            continue
+        if not skipping:
+            kept.append(line)
+
+    return "\n".join(kept).strip()
 
 
 def build_fallback_report(
@@ -328,41 +495,47 @@ def build_fallback_report(
     """Assemble a report from approved stage summaries with no model call.
 
     This is deliberately honest rather than flattering: it says which stages were skipped,
-    because a report that hides a gap is worse than one the judge can calibrate against.
+    because a report that hides a gap is worse than one the judge can calibrate against. It is
+    also deliberately shaped like a research report rather than a run log — the stage files it
+    draws on are full of approval-workflow headings that would otherwise be scored as content.
     """
     sections: list[str] = ["# Research Report", ""]
 
     if not pipeline_completed:
         sections.extend(
             [
-                "> **Incomplete run.** The AutoR pipeline did not finish every stage. This report "
-                "was assembled from the stages that were approved.",
+                "> **Incomplete run.** The research pipeline did not finish every stage. This report "
+                "was assembled from the stages that were completed.",
                 "",
             ]
         )
     if auto_skipped_stages:
         sections.extend(
             [
-                "> **Auto-skipped stages:** " + ", ".join(auto_skipped_stages) + ".",
+                "> **Stages not completed:** " + ", ".join(auto_skipped_stages) + ".",
                 "",
             ]
         )
 
+    wrote_any = False
     for stage_path in sorted(paths.stages_dir.glob("*.md")) if paths.stages_dir.exists() else []:
         if stage_path.name.endswith(".tmp.md"):
             continue
-        body = read_text(stage_path).strip()
-        if body:
-            sections.extend([body, "", "---", ""])
+        body = _research_body(read_text(stage_path))
+        if not body:
+            continue
+        title = _STAGE_SECTION_TITLES.get(stage_path.stem, stage_path.stem.replace("_", " ").title())
+        sections.extend([f"## {title}", "", body, ""])
+        wrote_any = True
 
-    if len(sections) <= 2:
+    if not wrote_any:
         summaries = approved_stage_summaries(read_text(paths.memory)) if paths.memory.exists() else "None yet."
-        sections.extend([summaries if summaries != "None yet." else "_No approved stage output was produced._", ""])
+        sections.extend([summaries if summaries != "None yet." else "_No completed stage output was produced._", ""])
 
     if figures:
         sections.extend(["## Figures", ""])
         for name in figures:
-            sections.extend([f"![{Path(name).stem}](images/{name})", ""])
+            sections.extend([f"![{Path(name).stem.replace('_', ' ')}](images/{name})", ""])
 
     return "\n".join(sections).rstrip() + "\n"
 
@@ -413,11 +586,34 @@ def export_run(
     auto_skipped_stages = auto_skipped_stages or []
 
     code_files = mirror_tree(paths.code_dir, workspace / "code")
-    output_files = mirror_tree(paths.results_dir, workspace / "outputs")
-    output_files += mirror_tree(paths.notes_dir, workspace / "outputs" / "notes")
-    figures = collect_figures(paths, workspace)
+    # Images are deliberately withheld from outputs/: see mirror_tree's docstring.
+    output_files = mirror_tree(paths.results_dir, workspace / "outputs", skip_suffixes=JUDGE_IMAGE_SUFFIXES)
+    output_files += mirror_tree(
+        paths.notes_dir, workspace / "outputs" / "notes", skip_suffixes=JUDGE_IMAGE_SUFFIXES
+    )
 
     report_path = workspace / "report" / "report.md"
+
+    existing = read_text(report_path).strip() if report_path.exists() else ""
+    # A report AutoR exported on an earlier pass is not the agent's own work, and must not
+    # outrank a Stage 07 report written since. Without this check `--export-only` after an
+    # interrupted run keeps re-publishing the first fallback forever.
+    existing_is_ours = _matches_export_marker(workspace, existing)
+    # In markdown mode Stage 07's deliverable is workspace/report/report.md *inside the run
+    # tree*. Promoting it is the normal path, not a fallback: it is a validated, gate-checked
+    # report, so it outranks both a stub at the benchmark path and a fresh synthesis call.
+    stage_report = read_text(paths.report_file).strip() if paths.report_file.exists() else ""
+
+    if len(existing) >= MIN_REPORT_CHARS and not existing_is_ours:
+        chosen, winning_report = "agent", existing
+    elif len(stage_report) >= MIN_REPORT_CHARS:
+        chosen, winning_report = "stage", stage_report
+    else:
+        chosen, winning_report = None, ""
+
+    # Figure selection has to know which report it is serving: the five published figures are
+    # the ones that report references, and only that report can say which those are.
+    figures = collect_figures(paths, workspace, report_text=winning_report)
 
     def result(source: str) -> ExportResult:
         return ExportResult(
@@ -428,19 +624,9 @@ def export_run(
             output_files=output_files,
         )
 
-    existing = read_text(report_path).strip() if report_path.exists() else ""
-    # A report AutoR exported on an earlier pass is not the agent's own work, and must not
-    # outrank a Stage 07 report written since. Without this check `--export-only` after an
-    # interrupted run keeps re-publishing the first fallback forever.
-    existing_is_ours = _matches_export_marker(workspace, existing)
-    if len(existing) >= MIN_REPORT_CHARS and not existing_is_ours:
+    if chosen == "agent":
         return result("agent")
-
-    # In markdown mode Stage 07's deliverable is workspace/report/report.md *inside the run
-    # tree*. Promoting it is the normal path, not a fallback: it is a validated, gate-checked
-    # report, so it outranks both a stub at the benchmark path and a fresh synthesis call.
-    stage_report = read_text(paths.report_file).strip() if paths.report_file.exists() else ""
-    if len(stage_report) >= MIN_REPORT_CHARS:
+    if chosen == "stage":
         _publish_report(workspace, report_path, stage_report, "stage")
         return result("stage")
 

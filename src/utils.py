@@ -182,6 +182,16 @@ PREFERRED_REPORT_IMAGE_SUFFIX = ".png"
 #: Below this many characters ``report.md`` is a stub, not a deliverable.
 MIN_REPORT_CHARS = 1200
 
+#: How many figures may reach the judge.
+#:
+#: ResearchClawBench's scorer attaches at most five agent images per checklist item
+#: (``generated_images[:5]``), selected by an unsorted ``rglob`` over ``outputs/`` and then
+#: ``report/``. Filesystem order is not alphabetical, so naming cannot influence which five
+#: survive — the only way to choose them is to publish no more than five. Image items carry
+#: ~61% of the benchmark's total weight, so a sixth figure does not dilute the score, it
+#: randomises it.
+MAX_REPORT_FIGURES = 5
+
 #: ``![alt](target)``, tolerating an optional title and angle-bracketed targets.
 MARKDOWN_IMAGE_PATTERN = re.compile(
     r"!\[[^\]]*\]\(\s*(<[^>]*>|[^)\s]+)(?:\s+[\"'][^\"']*[\"'])?\s*\)"
@@ -470,6 +480,22 @@ def ensure_run_config(
     return updated
 
 
+def resolve_stage(value: str | None) -> StageSpec | None:
+    """Resolve a stage slug or number (``06_analysis``, ``6``, ``06``) to its spec."""
+    if value is None:
+        return None
+
+    normalized = value.strip().lower()
+    if not normalized:
+        return None
+
+    for stage in STAGES:
+        if normalized in {stage.slug.lower(), str(stage.number), f"{stage.number:02d}"}:
+            return stage
+
+    raise ValueError(f"Unknown stage identifier: {value}")
+
+
 def resolve_output_format(value: str | None) -> str:
     """Normalize a user-facing output-format name to a canonical key.
 
@@ -566,6 +592,7 @@ def format_stage_template(template: str, stage: StageSpec, paths: RunPaths) -> s
         "{{WORKSPACE_REPORT_FILE}}": str(paths.report_file.resolve()),
         "{{WORKSPACE_REPORT_IMAGES_DIR}}": str(paths.report_images_dir.resolve()),
         "{{OUTPUT_FORMAT}}": selected_output_format(paths),
+        "{{MAX_REPORT_FIGURES}}": str(MAX_REPORT_FIGURES),
         "{{WORKSPACE_FIGURES_DIR}}": str(paths.figures_dir.resolve()),
         "{{WORKSPACE_ARTIFACTS_DIR}}": str(paths.artifacts_dir.resolve()),
         "{{WORKSPACE_NOTES_DIR}}": str(paths.notes_dir.resolve()),
@@ -1054,10 +1081,18 @@ def validate_markdown_report(paths: RunPaths) -> list[str]:
                 f"report viewer. Save figures as {PREFERRED_REPORT_IMAGE_SUFFIX} instead."
             )
 
-    if _count_files_with_suffixes(paths.report_images_dir, RENDERABLE_IMAGE_SUFFIXES) == 0:
+    published = _count_files_with_suffixes(paths.report_images_dir, RENDERABLE_IMAGE_SUFFIXES)
+    if published == 0:
         problems.append(
             "requires at least one rendered figure under report/images/ "
             f"(save figures as {PREFERRED_REPORT_IMAGE_SUFFIX})."
+        )
+    elif published > MAX_REPORT_FIGURES:
+        problems.append(
+            f"report/images/ holds {published} figures but only {MAX_REPORT_FIGURES} reach the "
+            "reviewer, chosen in filesystem order rather than by importance. Merge related panels "
+            f"into one composite figure or delete the weakest, until at most {MAX_REPORT_FIGURES} "
+            "remain."
         )
 
     return problems

@@ -34,8 +34,15 @@ report/
     └── validation.png
 ```
 
+- **Publish at most {{MAX_REPORT_FIGURES}} figures.** A reviewer is shown only the first
+  {{MAX_REPORT_FIGURES}} images found in the report directory, in filesystem order — not in the
+  order you wrote them, and not by importance. A sixth figure does not add a sixth chance to be
+  credited; it makes it random which of yours are seen. Publishing fewer, denser figures is
+  strictly better than publishing more.
 - Save **every** figure under `{{WORKSPACE_REPORT_IMAGES_DIR}}` as a **PNG** file.
   PDF, EPS, SVG, TIFF, and BMP cannot be rendered by the report viewer and count as no figure at all.
+- Put nothing but figures in `report/images/`, and leave no plot behind in
+  `{{WORKSPACE_RESULTS_DIR}}` that you would rather the reviewer saw in the report.
 - Reference figures with paths **relative to `report.md`**: `![Main result](images/main_result.png)`.
   Never use an absolute path, a `file://` URL, or a path that escapes the report directory.
 - Analysis code belongs in `{{WORKSPACE_CODE_DIR}}`, intermediate and derived data in
@@ -113,44 +120,65 @@ Complete the stage in this order within a single stage conversation.
 
 ### Phase 2: Figures
 
-5. Generate every figure the report needs from the real data and results in the workspace, using a
-   script under `{{WORKSPACE_CODE_DIR}}` so the figure is reproducible.
-6. Save each one as PNG into `{{WORKSPACE_REPORT_IMAGES_DIR}}`, at a resolution that stays legible
-   when viewed on its own (`dpi=150` or better, with axis labels, units, and a legend).
-7. Do not generate decorative figures. Every image in `report/images/` should be referenced by the
-   report and should carry information a reviewer can check.
+Figures are the highest-value part of this deliverable. A reviewer grades them by putting your
+image side by side with the corresponding figure from the published study and asking whether
+yours shows the same thing. Plan them deliberately.
+
+5. Decide on **three to {{MAX_REPORT_FIGURES}} figures**, no more. Budget them against the claims
+   that matter: the data, the main result, and the evidence that the main result holds.
+6. **Make the first figure a composite summary panel.** This is the single highest-return figure
+   in the report. Build one multi-panel figure that carries the whole result at a glance:
+   - a 2x2 or 1x3 grid built with `plt.subplots`, each panel labelled `a)`, `b)`, `c)`, `d)` in
+     the panel title
+   - the primary measurement or map, plotted from the real data
+   - the key relationship, with the **experimental points overlaid on the fitted or predicted
+     curve**, and a legend naming both
+   - a final panel that is plain text: the headline numbers with their units and uncertainties
+     (`Dirac point: -0.043 eV`, `n = 2,000`, `R^2 = 0.94`), rendered with `ax.text` on
+     `ax.axis("off")`
+   Published summary figures look exactly like this, and a reviewer comparing against one will
+   find your equivalent panel inside it.
+7. Generate every figure from the real data and results in the workspace, using a script under
+   `{{WORKSPACE_CODE_DIR}}` so the figure is reproducible. Never draw a figure from numbers you
+   did not compute.
+8. Save each one as PNG into `{{WORKSPACE_REPORT_IMAGES_DIR}}` at `dpi=150` or better. Every axis
+   needs a label **and a unit**; every series needs a legend entry; every panel needs a title.
+   Assume the reviewer sees the image on its own, without the caption.
+9. Do not generate decorative figures, and do not publish a figure the report does not discuss.
+   An unreferenced image spends one of your {{MAX_REPORT_FIGURES}} slots on something no caption
+   defends.
 
 ### Phase 3: Drafting
 
-8. Write `{{WORKSPACE_REPORT_FILE}}` end to end in academic prose.
-9. Report concrete numbers, not adjectives. "Accuracy improved to 0.87 from a 0.81 baseline
+10. Write `{{WORKSPACE_REPORT_FILE}}` end to end in academic prose.
+11. Report concrete numbers, not adjectives. "Accuracy improved to 0.87 from a 0.81 baseline
    (n=2,000, 5-fold CV, ±0.02)" is scoreable; "performance improved substantially" is not.
-10. Every quantitative claim must trace to a file under `{{WORKSPACE_RESULTS_DIR}}` or a figure in
+12. Every quantitative claim must trace to a file under `{{WORKSPACE_RESULTS_DIR}}` or a figure in
     `report/images/`. Say where a number came from when it is not obvious.
-11. Distinguish verified empirical findings from provisional Stage 02 paper claims. Do not present
+13. Distinguish verified empirical findings from provisional Stage 02 paper claims. Do not present
     provisional claims as confirmed results.
-12. Embed each figure at the point in the narrative where it is discussed, with a caption that
+14. Embed each figure at the point in the narrative where it is discussed, with a caption that
     states what the reader should conclude from it:
     `![Held-out AUROC by model class; the proposed method leads across all five folds.](images/main_result.png)`
-13. Keep tables in markdown table syntax so they survive as text.
-14. Length is not rewarded. A reviewer explicitly penalizes padding, generic background, and
+15. Keep tables in markdown table syntax so they survive as text.
+16. Length is not rewarded. A reviewer explicitly penalizes padding, generic background, and
     well-written but shallow content. Cut anything that does not carry evidence.
 
 ### Phase 4: Quality Polish
 
-15. Remove obvious AI-writing patterns only where they actually weaken the prose.
-16. Run a reverse-outline style check: the first sentences of paragraphs should form a coherent
+17. Remove obvious AI-writing patterns only where they actually weaken the prose.
+18. Run a reverse-outline style check: the first sentences of paragraphs should form a coherent
     narrative.
-17. Check logic consistency:
+19. Check logic consistency:
     - no contradictions between introduction and results
     - no terminology drift
     - no claims in the abstract or introduction that lack support later
-18. Verify every figure reference resolves. Walk the list of `![...](images/...)` links and confirm
+20. Verify every figure reference resolves. Walk the list of `![...](images/...)` links and confirm
     each target file exists in `{{WORKSPACE_REPORT_IMAGES_DIR}}`.
 
 ### Phase 5: Evidence Audit
 
-19. Write `{{WORKSPACE_ARTIFACTS_DIR}}/citation_verification.json` summarizing:
+21. Write `{{WORKSPACE_ARTIFACTS_DIR}}/citation_verification.json` summarizing:
     - total citations
     - verified citations
     - unresolved citations
@@ -167,7 +195,7 @@ Citation discipline:
 
 ### Phase 6: Self-Review
 
-20. Score the draft on these dimensions:
+22. Score the draft on these dimensions:
     - narrative clarity
     - claims-evidence alignment
     - technical rigor
@@ -176,9 +204,9 @@ Citation discipline:
     - structure and flow
     - references and figures
     - completeness
-21. Classify issues as CRITICAL, MAJOR, or MINOR.
-22. Fix CRITICAL issues first, then the most important MAJOR issues.
-23. Write `{{WORKSPACE_ARTIFACTS_DIR}}/self_review.json` with:
+23. Classify issues as CRITICAL, MAJOR, or MINOR.
+24. Fix CRITICAL issues first, then the most important MAJOR issues.
+25. Write `{{WORKSPACE_ARTIFACTS_DIR}}/self_review.json` with:
     - per-dimension scores
     - overall score
     - issues found
@@ -189,11 +217,13 @@ Minimum bar:
 
 - the report has no CRITICAL unresolved issue
 - every figure reference resolves to a real PNG under `report/images/`
+- `report/images/` holds at most {{MAX_REPORT_FIGURES}} figures, and every one of them is
+  referenced by the report
 - the overall self-review shows the report is ready or near-ready for approval
 
 ### Phase 7: Stage Summary
 
-24. Write the stage summary draft to `{{STAGE_OUTPUT_PATH}}`.
+26. Write the stage summary draft to `{{STAGE_OUTPUT_PATH}}`.
 
 ## Filesystem Requirements
 
