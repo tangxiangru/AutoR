@@ -14,6 +14,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from src.evolution import EvolutionConfig
 from src.manager import ResearchManager
 from src.manifest import load_run_manifest
 from src.operator import ClaudeOperator
@@ -146,6 +147,9 @@ class TestRunStageMaxAttempts(unittest.TestCase):
             runs_dir=self.runs_dir,
             operator=self.operator,
             ui=self.ui,
+            # Improvement rounds off: this file measures the retry window and the
+            # recovery path, and a polish round is an operator call that is neither.
+            evolution=EvolutionConfig(rounds=0),
         )
 
     def tearDown(self):

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 import shutil
 import sys
@@ -102,6 +103,8 @@ from .writing_manifest import (
 )
 from .utils import (
     DEFAULT_REFINEMENT_SUGGESTIONS,
+    DEFAULT_ROUTING_MODE,
+    DEFAULT_STAGE_GRAPH,
     FIXED_STAGE_OPTIONS,
     INTAKE_STAGE,
     MAX_STAGE_ATTEMPTS,
@@ -134,6 +137,7 @@ from .utils import (
     strip_markdown_section,
     parse_refinement_suggestions,
     read_attempt_count,
+    read_polish_count,
     read_text,
     required_stage_output_template,
     selected_output_format,
@@ -141,6 +145,7 @@ from .utils import (
     validate_stage_artifacts,
     validate_stage_markdown,
     write_attempt_count,
+    write_polish_count,
     write_stage_handoff,
     write_text,
 )
@@ -166,10 +171,11 @@ class ResearchManager:
         web_search_mode: str | None = None,
         artifact_roots: list[Path] | None = None,
         stage_graph: StageGraph | None = None,
-        routing_mode: str = "off",
+        routing_mode: str = DEFAULT_ROUTING_MODE,
         evolution: EvolutionConfig | None = None,
         graph_max_steps: int | None = None,
         graph_max_visits: int | None = None,
+        archive_steer: bool = False,
         cross_reviewer: GeminiCrossReviewer | None = None,
     ) -> None:
         self.project_root = project_root
@@ -222,11 +228,11 @@ class ResearchManager:
             "results": [root / "outputs" for root in self.artifact_roots],
             "figures": [root / "report" / "images" for root in self.artifact_roots],
         }
-        # The stages are a graph. The default topology has exactly one edge out of
-        # each node, so a caller that asks for nothing gets the sequence AutoR has
-        # always run — through the same walk that the adaptive topology uses, so
-        # the default path keeps being exercised by every test of either.
-        self.stage_graph = stage_graph or StageGraph.linear()
+        # The stages are a graph. A caller that names no topology gets the adaptive
+        # one, which can go back when a later stage shows an earlier one was wrong.
+        # `StageGraph.linear()` is still a real graph through the same walk, so the
+        # strict sequence keeps being exercised by every test of either.
+        self.stage_graph = stage_graph or StageGraph.named(DEFAULT_STAGE_GRAPH)
         self.graph_max_steps = graph_max_steps
         self.graph_max_visits = graph_max_visits
         self.router = StageRouter(
@@ -234,7 +240,22 @@ class ResearchManager:
             mode=routing_mode,
             fake_mode=bool(getattr(operator, "fake_mode", False)),
         )
-        evolution_config = evolution or EvolutionConfig()
+        # Measuring is on unless a caller turns it off: scoring a draft and running
+        # the ratchet spends no backend call, and the property it buys — the draft
+        # that gets promoted is the best one the run produced rather than the last
+        # one — is the whole reason any of this exists.
+        requested_evolution = evolution if evolution is not None else EvolutionConfig()
+        # A fake operator cannot improve anything: it emits the same scripted draft
+        # whatever the directive says, so every round would be bought, measured as a
+        # regression and reverted. Applied here rather than at the CLI so the number
+        # the operator *asked* for is what reaches run_config.json — zeroing it there
+        # would mean resuming a fake run with a real backend silently inherited a
+        # budget of nothing.
+        evolution_config = (
+            replace(requested_evolution, rounds=0)
+            if getattr(operator, "fake_mode", False)
+            else requested_evolution
+        )
         self.evolution = (
             EvolutionController(
                 evolution_config,
@@ -251,7 +272,9 @@ class ResearchManager:
         self._walk_settings = {
             "stage_graph": self.stage_graph.name,
             "routing_mode": self.router.mode,
-            "evolve_rounds": evolution_config.rounds if evolution_config.enabled else 0,
+            "evolve_rounds": requested_evolution.rounds if requested_evolution.measure else 0,
+            "evolve_measure": requested_evolution.measure,
+            "archive_steer": archive_steer,
         }
 
     def run(
@@ -1429,8 +1452,15 @@ class ResearchManager:
         # that is *failing*. Charging them to the same budget would make a stage
         # that is being made better look like one that is thrashing, and would
         # leave nothing for the repair path if a later round did break something.
-        polish_rounds = 0
+        #
+        # Read from disk rather than started at zero: the attempt number is run-wide
+        # and a stage can be entered more than once, so a per-entry counter would
+        # under-report retries on the second visit.
+        polish_rounds = read_polish_count(paths, stage)
+        entry_polish_rounds = polish_rounds
         is_polish_round = False
+        if self.evolution is not None:
+            self.evolution.begin_stage(paths, stage)
         revision_feedback: str | None = None
         continue_session = False
         last_validation_errors: list[str] = []
@@ -1469,7 +1499,7 @@ class ResearchManager:
                 pass
 
         while True:
-            if loop_attempts - polish_rounds >= self.max_stage_attempts:
+            if loop_attempts - (polish_rounds - entry_polish_rounds) >= self.max_stage_attempts:
                 error = (
                     f"Exceeded {self.max_stage_attempts} attempts in the current stage run. "
                     f"Last validation errors: {'; '.join(last_validation_errors) or 'None recorded.'}"
@@ -1491,7 +1521,14 @@ class ResearchManager:
                     last_validation_errors=last_validation_errors,
                 )
             loop_attempts += 1
-            mark_stage_running_manifest(paths, stage, attempt_no)
+            # The manifest's `attempt_count` means "how many tries did this stage
+            # need" — a diagnostic for a gate the operator could not clear, and what
+            # `test_no_stage_needed_a_retry` reads to notice a new artifact gate that
+            # fake mode was never taught to satisfy. A polish round is not a try that
+            # failed, so it does not count here; the improvement ledger owns that
+            # accounting. Feeding both numbers into one field would leave neither
+            # question answerable.
+            mark_stage_running_manifest(paths, stage, attempt_no - polish_rounds)
             write_attempt_count(paths, stage, attempt_no)
             self._print(f"\nRunning {stage.stage_title} (attempt {attempt_no})...")
             prompt = self._build_stage_prompt(paths, stage, revision_feedback, continue_session,
@@ -1727,6 +1764,7 @@ class ResearchManager:
                     if directive:
                         self.evolution.begin_round(paths, stage)
                         polish_rounds += 1
+                        write_polish_count(paths, stage, polish_rounds)
                         is_polish_round = True
                         revision_feedback = directive
                         continue_session = True
@@ -1739,7 +1777,7 @@ class ResearchManager:
             mark_stage_human_review_manifest(
                 paths,
                 stage,
-                attempt_no,
+                attempt_no - polish_rounds,
                 self._stage_file_paths(stage_markdown),
             )
             append_log_entry(
@@ -1820,7 +1858,7 @@ class ResearchManager:
                 mark_stage_approved_manifest(
                     paths,
                     stage,
-                    attempt_no,
+                    attempt_no - polish_rounds,
                     self._stage_file_paths(stage_markdown),
                 )
                 if stage.slug == "04_implementation":

@@ -252,20 +252,22 @@ Neither flag does anything without `--resume-run`.
 
 ### Stage graph and self-improvement
 
-All of these are off by default. See [Recursive Self-Improvement](self-improvement.md)
-for the mechanism and the reasoning behind each refusal.
+On by default. See [Recursive Self-Improvement](self-improvement.md) for the
+mechanism and the reasoning behind each refusal.
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--stage-graph {linear,adaptive}` | `linear` | How the run moves between stages. `linear` is one edge out of each node, which is the sequence AutoR has always run. `adaptive` adds ten backward moves, so an analysis that exposes a design flaw can send the run to Stage 03 instead of writing up around it. The move into Stage 07 is guarded on every hypothesis having a verdict. Preserved on resume. |
-| `--routing {off,auto,agent}` | `off` | Who chooses the move out of a completed stage. `off` always takes the graph's default edge. `auto` asks the backend wherever more than one move is live — on a linear graph that is never, so it costs nothing there. `agent` asks at every node. AutoR decides which moves are available by evaluating guards against artifacts on disk; the backend only chooses among those, and a choice outside the menu falls back to the forward edge. Preserved on resume. |
+| `--stage-graph {linear,adaptive}` | `adaptive` | How the run moves between stages. `adaptive` is the eight stages as a directed graph with backward moves: an analysis that exposes a design flaw sends the run back to Stage 03 instead of writing up around it, and the move into Stage 07 stays closed until every hypothesis carries a verdict. `linear` restores the strict sequence — the same graph with the backward edges removed. Preserved on resume. |
+| `--routing {off,auto,agent}` | `auto` | Who chooses the move out of a completed stage. `auto` asks the backend only where more than one move is live, so a linear run never pays for it. `agent` asks at every node; `off` always takes the graph's default edge. AutoR decides which moves are available by evaluating guards against artifacts on disk; the backend only chooses among those, and a choice outside the menu falls back to the forward edge. Preserved on resume. |
 | `--graph-max-steps N` | `20` | Stage executions allowed in one walk. Only bites in adaptive mode; a linear walk cannot exceed eight. |
 | `--graph-max-visits N` | `3` | Times one stage may be entered. A revisit is a productive move; the fourth entry into the same stage is a loop. |
-| `--evolve` | off | Score each valid stage draft against a rigour rubric read off disk, then spend further rounds targeting the criteria that lost points. The best-scoring draft is promoted; a round that scores worse is reverted. A round that changes a hypothesis verdict is rejected outright. A revision a human asked for always stands. |
-| `--evolve-rounds N` | `3` with `--evolve` | Self-improvement rounds per stage. Implies `--evolve` when above zero. Budgeted separately from `--max-attempts`, which bounds a stage that is *failing* rather than one being improved. Rounds also stop after two consecutive rounds with no gain. Preserved on resume. |
-| `--evolve-stages STAGE [STAGE ...]` | all | Restrict self-improvement to these stage slugs or numbers, e.g. `06_analysis` or `5 6 7`. |
-| `--archive PATH` | — | Directory holding the cross-run topology archive. AutoR records this run's route and measured fitness there, compares each edge against runs that reached the same node and did not take it, and samples the topology it runs from what the archive has learned. Requires `--evolve`, which is what produces the fitness. A learned prior only reorders which move is preferred; it can never open a guarded edge. |
-| `--archive-report` | off | Print what the archive at `--archive` has learned, and exit. |
+| `--evolve` / `--no-evolve` | on | Score every valid draft against a rigour rubric read off disk and run the champion ratchet: the best-scoring draft is promoted, not the last one, and a self-initiated round that scores worse is reverted. Costs nothing — the rubric never calls a backend. `--no-evolve` restores the old behaviour, where whichever draft came last was promoted. Preserved on resume. |
+| `--evolve-rounds N` | `2` | Improvement rounds per stage beyond the first draft. This is the half that costs backend calls. A stage whose rubric has no shortfall worth acting on spends none of them, and a `--fake-operator` run spends none at all. Budgeted separately from `--max-attempts`, which bounds a stage that is failing rather than one being improved. `0` measures without polishing. Preserved on resume. |
+| `--evolve-stages STAGE [...]` | all | Restrict improvement rounds to these stage slugs or numbers, e.g. `06_analysis` or `5 6 7`. |
+| `--archive PATH` | `~/.autor/archive` | Where the cross-run archive lives. Each finished run records its route and measured fitness, and each edge is compared against runs that reached the same node and did not take it. Recording only. |
+| `--no-archive` | off | Do not record this run in the archive. |
+| `--archive-steer` / `--no-archive-steer` | **off** | Let the archive choose the topology this run uses, rather than only recording what it did. A run silently using a different topology from the one asked for is not a surprise a research tool gets to spring on anyone; turn this on once `--archive-report` shows the archive has something to say. A learned prior only reorders which move is preferred — it can never open a guarded edge. Preserved on resume. |
+| `--archive-report` | off | Print what the archive has learned, and exit. |
 
 ### Optional enhancements
 

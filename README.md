@@ -82,7 +82,7 @@ AutoR takes a different position: research is too important to hand over as a bl
 | Control model | Human approval by default, with an optional strict reviewer-agent gate for unattended runs |
 | Research unit | A reproducible run under `runs/<run_id>/` |
 | Workflow shape | Nine stages as a **directed graph** the run navigates; the linear sequence is one path through it |
-| Improvement | Drafts are measured and ratcheted, so a stage can only get better — and the score is blind to what the run concluded |
+| Improvement | On by default: drafts are measured and ratcheted, so a stage can only get better — and the score is blind to what the run concluded |
 | Quality bar | Artifact-backed outputs, not markdown-only summaries |
 | Recovery | Resume, redo-stage, rollback-stage, stage-local continuation |
 
@@ -142,7 +142,7 @@ It is:
 
 Latest mainline updates:
 
-- **2026-08-06**: Added recursive self-improvement. The nine stages are now a **directed graph** the run navigates (`--stage-graph adaptive`), with the agent choosing the move out of each node among the ones AutoR's guards leave open (`--routing auto`). Stage drafts are scored against a rigour rubric read off disk and iterated under a champion ratchet, so a stage can only improve (`--evolve`); a round that scores worse is reverted, and a round that changes a hypothesis verdict is rejected outright. An optional cross-run archive learns which moves pay (`--archive`). All of it is off by default: a run that passes none of these flags walks 01 through 08 exactly as before, through the same engine. See [Recursive Self-Improvement](docs/self-improvement.md).
+- **2026-08-06**: **Recursive self-improvement is now the default.** The nine stages are a **directed graph** the run navigates: an analysis that exposes a design flaw can send the run back to Stage 03 instead of writing up around it, and the move into Stage 07 stays closed until every hypothesis carries a verdict. The stage that just ran chooses the next move, among the ones AutoR's guards leave open. Every valid draft is scored against a rigour rubric read off disk and held to a champion ratchet, so the draft that gets promoted is the best one the run produced rather than the last one — that half costs nothing, because the rubric never calls a backend. Two improvement rounds per stage are budgeted on top, and a stage the rubric has nothing to say about spends none of them. A round that scores worse is reverted; a round that changes a hypothesis verdict is rejected outright. Each finished run records its route and measured fitness in a cross-run archive, which compares every graph edge against runs that reached the same node and did not take it. Opt out with `--stage-graph linear`, `--routing off`, `--no-evolve`, `--no-archive`. See [Recursive Self-Improvement](docs/self-improvement.md).
 - **2026-06-02**: Added a configurable Codex sandbox mode. Codex-backed runs still default to `workspace-write`, but users who intentionally need remote GPU or SSH execution can now opt into `--codex-sandbox danger-full-access`; the setting is persisted in `run_config.json` and preserved on resume.
 - **2026-05-10**: Refined the terminal-first run experience. Stage 00 now uses a dedicated clarification flow: the first intake pass asks the user questions one by one with selectable options, custom answers, and skip; the revised intake brief then uses a compact refine / approve / abort menu instead of showing the normal suggestion template. The terminal UI also keeps colored frames on wrapped body rows, handles long lines and wide characters more reliably, and the Codex backend now uses the current `--sandbox workspace-write` execution flag instead of the deprecated Codex CLI `--full-auto` flag.
 - **2026-04-20**: Added an optional `--full-auto` approval mode. The execution loop is unchanged, but the manual approval gate can now be replaced by a strict simulated reviewer agent backed by Claude or Codex, with reviewer settings persisted in `run_config.json`.
@@ -333,18 +333,22 @@ For Codex-backed runs, AutoR defaults to `--codex-sandbox workspace-write`. If a
 Valid stage identifiers include `03`, `3`, and `03_study_design`.
 
 ```bash
-# Let the run navigate its own topology: backward moves enabled, agent routing.
-python main.py --goal "..." --stage-graph adaptive --routing auto
+# Self-improvement is on by default. This run navigates the stage graph, scores
+# every draft, keeps the best, and records its route in ~/.autor/archive.
+python main.py --goal "..."
 
-# Measured self-improvement rounds inside each stage.
-python main.py --goal "..." --evolve --evolve-rounds 3
+# What the archive has learned across runs so far.
+python main.py --archive-report
 
-# Everything, plus a cross-run archive that learns which moves pay.
-python main.py --goal "..." --stage-graph adaptive --routing auto \
-               --evolve --archive ~/.autor/archive
+# Spend more on improvement, or none at all.
+python main.py --goal "..." --evolve-rounds 4
+python main.py --goal "..." --evolve-rounds 0     # measure and ratchet, no extra passes
 
-# What the archive has learned so far.
-python main.py --archive ~/.autor/archive --archive-report
+# Opt out entirely: the strict 01-through-08 sequence, last draft wins.
+python main.py --goal "..." --stage-graph linear --routing off --no-evolve --no-archive
+
+# Let the archive pick the topology, once it has something to say.
+python main.py --goal "..." --archive-steer
 ```
 
 ### Studio (browser UI)
@@ -464,9 +468,10 @@ flowchart TD
 
 ### The Stage Graph
 
-The nine stages are nodes in a directed graph. The default topology has one edge
-out of each node, which is the sequence above. `--stage-graph adaptive` adds the
-backward moves, and the run chooses.
+The nine stages are nodes in a directed graph, and that graph is what a run walks
+by default. Forward edges advance; backward edges exist for the conditions that
+actually occur in research. `--stage-graph linear` restores the strict sequence,
+which is the same graph with the backward edges removed.
 
 ```mermaid
 flowchart LR
@@ -496,26 +501,45 @@ be written up. That check is over artifacts on disk, so it is not something an
 agent can argue its way past — a gated edge is simply not on the menu it chooses
 from.
 
-A refusal or a routing failure falls back to the forward edge, so the worst case
-is the linear pipeline rather than a stall. Two budgets bound the walk:
-`--graph-max-visits` per stage and `--graph-max-steps` overall.
+**A backward move is only ever a deliberate choice.** The default is always the
+forward edge, and when a guard has closed it the default advances anyway and lets
+the stage's own validation — unchanged, and still refusing a Stage 07 that writes
+up unadjudicated hypotheses — be the gate it always was. A guard is a routing
+preference; the gate is the gate. So a refusal, a routing failure, or a run nobody
+is steering all come out as the linear pipeline rather than as a stall, and going
+back is something the run does on purpose or not at all.
+
+Two budgets bound the walk: `--graph-max-visits` per stage and `--graph-max-steps`
+overall.
 
 ### Self-Improvement Rounds
 
-With `--evolve`, a stage that produces a valid draft is measured against a rigour
-rubric read off disk — do the paths it names resolve, do the numbers it reports
-appear in a results file, did it produce artifacts during *this* execution, is the
-decision ledger four different things. AutoR then spends further rounds targeting
-the criteria that lost points.
+Every valid stage draft is measured against a rigour rubric read off disk — do the
+paths it names resolve, do the numbers it reports appear in a results file, did it
+produce artifacts during *this* execution, is the decision ledger four different
+things rather than one sentence four times.
 
-The best-scoring draft is what gets promoted. A round that scores worse is
-reverted, so a stage can only improve. A round that changes a hypothesis verdict
-is rejected outright, whatever it scored — the rubric is blind to what the run
-concluded, which removes the incentive, and the drift check removes the
-possibility.
+**Measuring is free and always on.** The rubric reads the run off disk and never
+calls a backend, so the property it buys costs nothing: the draft that gets
+promoted is the best one the run produced, not the last one. That is the half that
+was missing before — AutoR could iterate, but "later" was the only ordering it had,
+so a refinement that dropped a resolving reference was promoted on exactly the same
+terms as one that fixed something.
 
-A revision a *human* asked for always stands. The ratchet governs AutoR's own
-rounds, not the direction it is given.
+**Improvement rounds are the half that costs**, and they are budgeted separately
+from `--max-attempts`, which bounds a stage that is *failing* rather than one being
+improved. Two per stage by default, and a stage whose rubric has no shortfall worth
+acting on spends none of them — a round aimed at a criterion already at full marks
+produces churn, so AutoR does not buy one. `--evolve-rounds 0` measures without
+polishing; `--no-evolve` restores the old behaviour entirely.
+
+A round that scores worse is reverted, so a stage can only improve. A round that
+changes a hypothesis verdict is rejected outright, whatever it scored — the rubric
+is blind to what the run concluded, which removes the incentive, and the drift
+check removes the possibility.
+
+A revision a *human* asked for always stands, whatever it measures. The ratchet
+governs AutoR's own rounds, not the direction it is given.
 
 Full mechanism, and the reasoning behind each refusal, in
 [docs/self-improvement.md](docs/self-improvement.md).
@@ -889,11 +913,13 @@ A run with only markdown notes does not pass validation.
 
 - optional intake stage and resource ingestion
 - 9-stage workflow: optional intake plus eight formal research stages
-- the stages as a navigable directed graph, with guarded backward moves
-- agent-chosen routing constrained to the moves the guards leave open
-- measured self-improvement rounds under a champion ratchet
-- an outcome-blind rigour rubric, and verdict-drift rejection
-- an optional cross-run archive of topology variants and edge payoffs
+- the stages as a navigable directed graph, with guarded backward moves (default)
+- agent-chosen routing constrained to the moves the guards leave open (default)
+- an outcome-blind rigour rubric and a champion ratchet on every draft (default)
+- measured improvement rounds, budgeted and skipped where there is no headroom
+- verdict-drift rejection, so an improvement round cannot move a finding
+- a cross-run archive of routes and edge payoffs, recording by default and
+  steering only when asked
 - mandatory human approval after every stage
 - Claude Code or Codex as the execution layer
 - Stage 00 clarification Q&A plus a compact intake approval flow

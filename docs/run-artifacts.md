@@ -84,9 +84,11 @@ The settings the run was started with, so a resume reproduces them.
   "review_operator": "claude",
   "review_model": "sonnet",
   "codex_sandbox": "workspace-write",
-  "stage_graph": "linear",
-  "routing_mode": "off",
-  "evolve_rounds": 0,
+  "stage_graph": "adaptive",
+  "routing_mode": "auto",
+  "evolve_rounds": 2,
+  "evolve_measure": true,
+  "archive_steer": false,
   "web_search": "auto",
   "created_at": "2026-03-30T10:12:22"
 }
@@ -102,9 +104,11 @@ The settings the run was started with, so a resume reproduces them.
 | `review_operator` | `claude` or `codex`; defaults to `operator`. |
 | `review_model` | Reviewer model; defaults to `sonnet` (Claude) or `default` (Codex). |
 | `codex_sandbox` | `read-only`, `workspace-write`, or `danger-full-access`. |
-| `stage_graph` | `linear` (default) or `adaptive`. See [Recursive Self-Improvement](self-improvement.md). |
-| `routing_mode` | `off` (default), `auto`, or `agent`. Who chooses the move out of a completed stage. |
-| `evolve_rounds` | Self-improvement rounds per stage; `0` is off. |
+| `stage_graph` | `adaptive` (default) or `linear`. See [Recursive Self-Improvement](self-improvement.md). |
+| `routing_mode` | `auto` (default), `agent`, or `off`. Who chooses the move out of a completed stage. |
+| `evolve_measure` | Whether every valid draft is scored and the champion ratchet runs. `true` by default; costs no backend call. |
+| `evolve_rounds` | Improvement rounds per stage; `2` by default, `0` measures without polishing. |
+| `archive_steer` | Whether the cross-run archive may choose this run's topology, as opposed to only recording what it did. `false` by default. |
 | `web_search` | `auto`, `gemini`, or `native`. The mode, not the resolved backend. Absent in runs created before it existed, and read as `auto`. |
 | `created_at` | ISO-8601 to the second. Preserved across rewrites. |
 

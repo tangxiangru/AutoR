@@ -25,10 +25,17 @@ from src.web_search import (
     web_search_notice,
 )
 from src.archive import Archive, resolve_graph
+
+#: Where the cross-run archive lives when nobody says otherwise. Under the user's
+#: home rather than the checkout: it outlives any one clone, and an archive inside
+#: the repo would be wiped by the next fresh clone that was supposed to inherit it.
+DEFAULT_ARCHIVE_DIR = "~/.autor/archive"
 from src.evolution import DEFAULT_ROUNDS, EvolutionConfig
 from src.stage_graph import DEFAULT_MAX_STEPS, DEFAULT_MAX_VISITS
 from src.utils import (
     CODEX_SANDBOX_CHOICES,
+    DEFAULT_ROUTING_MODE,
+    DEFAULT_STAGE_GRAPH,
     DEFAULT_CODEX_SANDBOX,
     DEFAULT_OUTPUT_FORMAT,
     DEFAULT_VENUE,
@@ -316,21 +323,23 @@ def parse_args() -> argparse.Namespace:
         "--stage-graph",
         choices=list(STAGE_GRAPH_CHOICES),
         help=(
-            "How the run moves between stages. 'linear' (the default) runs 01 through 08 in "
-            "order, which is one edge out of every node. 'adaptive' adds the backward moves: "
-            "an analysis that exposes a design flaw can send the run back to Stage 03 instead "
-            "of writing up around it. Preserved when resuming."
+            f"How the run moves between stages. Defaults to '{DEFAULT_STAGE_GRAPH}', which is the "
+            "eight stages as a directed graph with backward moves: an analysis that exposes a "
+            "design flaw sends the run back to Stage 03 instead of writing up around it, and the "
+            "move into Stage 07 is closed until every hypothesis has a verdict. 'linear' restores "
+            "the strict 01-through-08 sequence. Preserved when resuming."
         ),
     )
     parser.add_argument(
         "--routing",
         choices=list(ROUTING_MODE_CHOICES),
         help=(
-            "Who chooses the move out of a completed stage. 'off' (the default) always takes "
-            "the graph's default edge. 'auto' asks the backend wherever more than one move is "
-            "available, which on a linear graph is never. 'agent' asks at every node. AutoR "
-            "decides which moves are available by evaluating each edge's guard against the "
-            "artifacts on disk; the backend only chooses among those. Preserved when resuming."
+            f"Who chooses the move out of a completed stage. Defaults to '{DEFAULT_ROUTING_MODE}', "
+            "which asks the backend only where more than one move is available - never on a "
+            "linear graph, and at a handful of nodes on an adaptive one. 'agent' asks at every "
+            "node; 'off' always takes the graph's default edge. AutoR decides which moves are "
+            "available by evaluating each edge's guard against the artifacts on disk; the backend "
+            "only chooses among those. Preserved when resuming."
         ),
     )
     parser.add_argument(
@@ -352,23 +361,27 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--evolve",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=None,
         help=(
-            "Turn on self-improvement rounds. After a stage produces a valid draft, AutoR scores "
-            "it against a rigour rubric read off disk, then spends up to --evolve-rounds further "
-            "rounds targeting the criteria that lost points. The best-scoring draft is what gets "
-            "promoted, and a round that scores worse is reverted, so a stage can only improve. "
-            "The score is blind to what the run concluded, and a round that changes a hypothesis "
-            "verdict is rejected outright."
+            "Score every valid stage draft against a rigour rubric read off disk and run the "
+            "champion ratchet: the best-scoring draft is what gets promoted, not the last one, "
+            "and a self-initiated round that scores worse is reverted. On by default because it "
+            "costs nothing - the rubric reads the run off disk and never calls a backend. The "
+            "score is blind to what the run concluded, and a round that changes a hypothesis "
+            "verdict is rejected outright. --no-evolve restores the old behaviour, where "
+            "whichever draft came last was the one promoted."
         ),
     )
     parser.add_argument(
         "--evolve-rounds",
         type=int,
         help=(
-            f"Self-improvement rounds per stage. Implies --evolve when above zero. Defaults to "
-            f"{DEFAULT_ROUNDS} with --evolve. These rounds are budgeted separately from "
-            "--max-attempts, which bounds a stage that is failing rather than one being improved."
+            "Improvement rounds per stage, beyond the first draft. This is the half that costs "
+            f"backend calls, so it is the number to turn down; defaults to {DEFAULT_ROUNDS}. A "
+            "stage whose rubric has no shortfall worth acting on spends none of them. Budgeted "
+            "separately from --max-attempts, which bounds a stage that is failing rather than "
+            "one being improved. Zero measures without polishing. Preserved when resuming."
         ),
     )
     parser.add_argument(
@@ -376,20 +389,37 @@ def parse_args() -> argparse.Namespace:
         nargs="+",
         metavar="STAGE",
         help=(
-            "Restrict self-improvement to these stage slugs or numbers (for example '06_analysis' "
-            "or '5 6 7'). Defaults to every stage."
+            "Restrict improvement rounds to these stage slugs or numbers (for example "
+            "'06_analysis' or '5 6 7'). Defaults to every stage."
         ),
     )
     parser.add_argument(
         "--archive",
         metavar="PATH",
         help=(
-            "Directory holding the cross-run topology archive. When set, AutoR records this "
-            "run's route and measured fitness there, compares each graph edge against runs that "
-            "reached the same node and did not take it, and samples the topology it runs from "
-            "what the archive has learned. Requires --evolve, which is what produces the "
-            "fitness. A learned prior only reorders which move is preferred; it can never open "
-            "a guarded edge."
+            "Directory holding the cross-run topology archive. Defaults to "
+            f"'{DEFAULT_ARCHIVE_DIR}'. Each finished run records its route and measured fitness "
+            "there, and each graph edge is compared against runs that reached the same node and "
+            "did not take it. Recording only: the archive does not change the topology a run "
+            "uses unless --archive-steer says so."
+        ),
+    )
+    parser.add_argument(
+        "--no-archive",
+        action="store_true",
+        help="Do not record this run in the cross-run archive.",
+    )
+    parser.add_argument(
+        "--archive-steer",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Let the archive choose the topology this run uses, instead of only recording what "
+            "the run did. Off by default: a run silently using a different topology from the one "
+            "asked for is not a surprise a research tool gets to spring on anyone. Turn it on "
+            "once --archive-report shows the archive has something to say. A learned prior only "
+            "reorders which move is preferred; it can never open a guarded edge. Preserved when "
+            "resuming."
         ),
     )
     parser.add_argument(
@@ -409,37 +439,46 @@ def parse_args() -> argparse.Namespace:
 def resolve_walk_settings(args: argparse.Namespace, existing: dict | None = None) -> dict:
     """CLI flags over the resumed run's settings over the defaults.
 
-    A flag that was not passed must not overwrite what the run was started with,
-    which is why every one of these is checked for presence rather than read for
-    its value: `--stage-graph` defaults to None here, not to "linear", so resuming
-    an adaptive run without repeating the flag keeps it adaptive.
+    Every one of these is checked for *presence* rather than read for its value,
+    because a flag that was not passed must not overwrite what the run was started
+    with: `--stage-graph` defaults to None here, not to the global default, so
+    resuming a linear run without repeating the flag keeps it linear even though a
+    fresh run would be adaptive.
     """
     current = dict(existing or {})
     if args.stage_graph:
         current["stage_graph"] = args.stage_graph
     if args.routing:
         current["routing_mode"] = args.routing
+    if args.evolve is not None:
+        current["evolve_measure"] = bool(args.evolve)
+        if not args.evolve:
+            # Polishing without measuring is not a state that means anything: the
+            # rounds are steered by the score, and there would be nothing to steer
+            # them with.
+            current["evolve_rounds"] = 0
     if args.evolve_rounds is not None:
         current["evolve_rounds"] = max(0, args.evolve_rounds)
-    elif args.evolve and not current.get("evolve_rounds"):
-        current["evolve_rounds"] = DEFAULT_ROUNDS
+        if args.evolve_rounds > 0:
+            current["evolve_measure"] = True
+    if args.archive_steer is not None:
+        current["archive_steer"] = bool(args.archive_steer)
     return normalize_walk_settings(current)
 
 
 def build_evolution_config(walk: dict, args: argparse.Namespace) -> EvolutionConfig:
-    rounds = int(walk["evolve_rounds"])
     stages: tuple[str, ...] = ()
     if args.evolve_stages:
         resolved = [resolve_stage(value) for value in args.evolve_stages]
-        unknown = [
-            value for value, stage in zip(args.evolve_stages, resolved) if stage is None
-        ]
+        unknown = [value for value, stage in zip(args.evolve_stages, resolved) if stage is None]
         if unknown:
-            raise ValueError(
-                "--evolve-stages does not recognise: " + ", ".join(unknown)
-            )
+            raise ValueError("--evolve-stages does not recognise: " + ", ".join(unknown))
         stages = tuple(stage.slug for stage in resolved if stage is not None)
-    return EvolutionConfig(enabled=rounds > 0, rounds=rounds or DEFAULT_ROUNDS, stages=stages)
+    return EvolutionConfig(
+        measure=bool(walk["evolve_measure"]),
+        rounds=int(walk["evolve_rounds"]),
+        stages=stages,
+    )
 
 
 def default_model_for_operator(operator_name: str) -> str:
@@ -603,7 +642,16 @@ def _build_resource_entries(paths: list[str]) -> list[ResourceEntry]:
 
 
 def open_archive(args: argparse.Namespace) -> Archive | None:
-    return Archive(Path(args.archive).expanduser().resolve()) if args.archive else None
+    """The archive this invocation records into, or ``None`` if it was declined.
+
+    Recording is on by default and costs nothing but a line of JSON, because the
+    archive is the only thing that could ever justify a change to the topology and
+    it cannot be built retroactively. Whether it is allowed to *act* on what it
+    records is a separate question, answered by `--archive-steer`.
+    """
+    if args.no_archive:
+        return None
+    return Archive(Path(args.archive or DEFAULT_ARCHIVE_DIR).expanduser().resolve())
 
 
 def record_into_archive(
@@ -625,7 +673,7 @@ def record_into_archive(
         if record is None:
             ui.show_status(
                 "Nothing was recorded in the archive: this run has no measured stages. "
-                "Pass --evolve so stages are scored.",
+                "Drop --no-evolve so stages are scored.",
                 level="warn",
             )
             return
@@ -741,7 +789,9 @@ def main() -> int:
         output_format = resolve_output_format(args.output_format or existing_config.get("output_format"))
         walk = resolve_walk_settings(args, existing_config)
         archive = open_archive(args)
-        graph, variant_id = resolve_graph(archive, walk["stage_graph"])
+        graph, variant_id = resolve_graph(
+            archive if walk["archive_steer"] else None, walk["stage_graph"]
+        )
         web_search_mode = normalize_web_search_mode(args.web_search or existing_config.get("web_search"))
         web_search_context = resolve_search_context(
             ui, mode=web_search_mode, operator=operator_name, codex_sandbox=codex_sandbox
@@ -788,6 +838,7 @@ def main() -> int:
             evolution=build_evolution_config(walk, args),
             graph_max_steps=args.graph_max_steps,
             graph_max_visits=args.graph_max_visits,
+            archive_steer=bool(walk["archive_steer"]),
             web_search_mode=web_search_mode,
         )
         manager.ideation_panel = create_ideation_panel(
@@ -820,7 +871,9 @@ def main() -> int:
     final_stage = resolve_stage(args.final_stage)
     walk = resolve_walk_settings(args)
     archive = open_archive(args)
-    graph, variant_id = resolve_graph(archive, walk["stage_graph"])
+    graph, variant_id = resolve_graph(
+        archive if walk["archive_steer"] else None, walk["stage_graph"]
+    )
     operator = create_operator(
         operator_name,
         model=model,
@@ -863,6 +916,7 @@ def main() -> int:
         evolution=build_evolution_config(walk, args),
         graph_max_steps=args.graph_max_steps,
         graph_max_visits=args.graph_max_visits,
+        archive_steer=bool(walk["archive_steer"]),
         web_search_mode=web_search_mode,
     )
 

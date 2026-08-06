@@ -750,12 +750,20 @@ def _score_reproducibility(paths: RunPaths, stage: StageSpec) -> CriterionScore:
     checks: list[tuple[str, bool, str]] = []
 
     if stage.number >= 1:
-        ledger = paths.literature_dir / "evidence_ledger.json"
+        # Delegated rather than reimplemented. An earlier version of this check
+        # looked for `workspace/literature/evidence_ledger.json`, a file no part of
+        # AutoR writes, so it failed on every run and docked the criterion for work
+        # that had in fact been done. `validate_literature_evidence` is the shipped
+        # definition of what a literature evidence base has to be; there should not
+        # be a second one here to drift from it.
+        from .evidence_ledger import validate_literature_evidence
+
         checks.append(
             (
-                "literature evidence ledger",
-                isinstance(_load_json(ledger), (dict, list)),
-                "Write workspace/literature/evidence_ledger.json so each cited claim points at a source.",
+                "literature evidence base",
+                not validate_literature_evidence(paths),
+                "Write workspace/literature/sources.json and claims.json so each claim names the "
+                "source_ids behind it.",
             )
         )
     if stage.number >= 3:
@@ -779,12 +787,13 @@ def _score_reproducibility(paths: RunPaths, stage: StageSpec) -> CriterionScore:
         )
     if stage.number >= 5:
         manifest = _load_json(paths.experiment_manifest)
+        indexed = manifest.get("result_artifacts") if isinstance(manifest, dict) else None
         checks.append(
             (
                 "experiment manifest",
-                isinstance(manifest, dict) and bool(manifest.get("experiments")),
-                "Record every experiment in workspace/results/experiment_manifest.json with its "
-                "command, config and seeds.",
+                bool(indexed),
+                "Produce result files under workspace/results so experiment_manifest.json indexes "
+                "them; a result nothing indexes cannot be found by the analysis stage.",
             )
         )
     if stage.number >= 6:
