@@ -6,6 +6,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import tempfile
 import subprocess
 import sys
@@ -260,7 +261,7 @@ class CliTest(unittest.TestCase):
 
         def fake_search(query, **kwargs):
             captured["query"] = query
-            return WebSearchResponse(query, "m", "a", [])
+            return WebSearchResponse(query, "m", "a", "api_key", [])
 
         with patch("src.web_search.gemini_web_search", side_effect=fake_search):
             with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
@@ -282,9 +283,33 @@ class PromptSectionTest(unittest.TestCase):
         self.assertIn("--json", section)
         self.assertIn("Never invent a reference", section)
 
+    @staticmethod
+    def _advertised_script(section: str) -> Path:
+        """The path the section actually tells the operator to run."""
+        match = re.search(r"^(\S+) \"([^\"]+)\" \"your search query", section, re.MULTILINE)
+        assert match is not None, f"no runnable command found in section:\n{section}"
+        return Path(match.group(2))
+
     def test_the_script_the_section_advertises_actually_exists(self) -> None:
-        repo_root = Path(__file__).resolve().parent.parent
-        self.assertTrue((repo_root / "tools" / "web_search.py").exists())
+        """Read the value the test is named for, rather than rebuilding it.
+
+        Rebuilding tests/../tools/web_search.py from __file__ cannot see a change to
+        WEB_SEARCH_SCRIPT, so the constant could point anywhere and the suite stayed green
+        while every search died with 'No such file or directory'.
+        """
+        self.assertTrue(self._advertised_script(build_web_search_prompt_section()).exists())
+
+    def test_that_guard_can_actually_fail(self) -> None:
+        """A guard never shown to fire is not a guard."""
+        section = build_web_search_prompt_section(script_path=Path("/nonexistent/web_search.py"))
+        self.assertFalse(self._advertised_script(section).exists())
+
+    def test_the_advertised_path_is_exact_not_merely_a_prefix(self) -> None:
+        """`assertIn("tools/web_search.py", section)` is satisfied by
+        tools/web_search.py.bak, so it cannot catch a rename."""
+        advertised = self._advertised_script(build_web_search_prompt_section())
+        self.assertEqual(advertised.name, "web_search.py")
+        self.assertEqual(advertised, web_search_module.WEB_SEARCH_SCRIPT.resolve())
 
     def test_section_reaches_the_stage_prompt(self) -> None:
         prompt = build_prompt(
@@ -395,12 +420,35 @@ class WebSearchModeTest(unittest.TestCase):
             self.assertIsNotNone(autor_main.resolve_web_search_context("auto"))
 
     def test_the_rcb_adapter_resolves_the_same_way(self) -> None:
+        """One implementation, not two agreeing implementations.
+
+        This used to compare the two entry points' results in a single
+        auto-with-credentials cell -- the one cell where both returned non-None anyway.
+        An RCB-local copy that always injected would have survived it. Identity covers
+        every mode and credential combination at once, and is what actually holds now
+        that the duplication is gone.
+        """
+        import rcb_agent
+        from src import web_search
+
+        for name in ("resolve_web_search_context", "web_search_notice", "assess_search_readiness"):
+            with self.subTest(function=name):
+                canonical = getattr(web_search, name)
+                self.assertIs(getattr(rcb_agent, name), canonical)
+                self.assertIs(getattr(autor_main, name), canonical)
+
+    def test_the_two_entry_points_agree_on_every_mode(self) -> None:
         import rcb_agent
 
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "k"}, clear=True):
-            self.assertEqual(
-                rcb_agent.resolve_web_search_context("auto"),
-                autor_main.resolve_web_search_context("auto"),
+        for mode in ("auto", "gemini", "native"):
+            for env in ({"GEMINI_API_KEY": "k"}, {}):
+                with self.subTest(mode=mode, keyed=bool(env)):
+                    with patch.dict(os.environ, env, clear=True), \
+                         patch("src.web_search.DIAGRAM_CONFIG_PATH", Path("/nonexistent/d.yaml")), \
+                         patch("src.web_search.vertex_credentials_available", return_value=False):
+                        self.assertEqual(
+                            rcb_agent.resolve_web_search_context(mode),
+                            autor_main.resolve_web_search_context(mode),
             )
 
 
@@ -1540,3 +1588,256 @@ class WebSearchModeReachesTheRunTest(unittest.TestCase):
             self.assertEqual(result.returncode, 1, msg=result.stderr)
             config, _ = self._recorded(runs_dir)
         self.assertEqual(config["web_search"], "auto")
+
+
+class _FakeSdk:
+    """A stand-in for `google.genai`, good enough to drive gemini_web_search.
+
+    Nothing in the suite executed the SDK call path, so the mutation that turns a real
+    API failure into an empty *successful* response passed the whole thing green -- the
+    exact silent-lie mode this module exists to prevent. The real SDK is not a dependency
+    and is absent in CI, so the harness is a fake rather than a skip.
+    """
+
+    class GoogleSearch:
+        pass
+
+    class Tool:
+        def __init__(self, google_search=None):
+            self.google_search = google_search
+
+    class GenerateContentConfig:
+        def __init__(self, tools=None):
+            self.tools = tools or []
+
+    class HttpRetryOptions:
+        def __init__(self, attempts, initial_delay, max_delay):
+            self.attempts, self.initial_delay, self.max_delay = attempts, initial_delay, max_delay
+
+    class HttpOptions:
+        def __init__(self, timeout, retry_options):
+            self.timeout, self.retry_options = timeout, retry_options
+
+
+class _RecordingClient:
+    def __init__(self, response=None, error=None, calls=None):
+        self._response, self._error, self.calls = response, error, calls if calls is not None else []
+        self.models = self
+
+    def generate_content(self, **kwargs):
+        self.calls.append(kwargs)
+        if self._error is not None:
+            raise self._error
+        return self._response
+
+
+@contextlib.contextmanager
+def _fake_sdk_installed(client):
+    genai = ModuleType("google.genai")
+    genai.types = _FakeSdk
+    google = ModuleType("google")
+    google.genai = genai
+    types_mod = ModuleType("google.genai.types")
+    for name in dir(_FakeSdk):
+        if not name.startswith("_"):
+            setattr(types_mod, name, getattr(_FakeSdk, name))
+    with patch.dict(sys.modules, {"google": google, "google.genai": genai, "google.genai.types": types_mod}), \
+         patch("src.web_search.build_genai_client", return_value=client):
+        yield
+
+
+class SdkCallPathTest(unittest.TestCase):
+    """The request AutoR sends, and what it does with what comes back."""
+
+    BACKEND = None  # set per test
+
+    def _search(self, *, response=None, error=None, **kwargs):
+        client = _RecordingClient(response=response, error=error)
+        backend = web_search_module.SearchBackend(kind="api_key", model="gemini-test", api_key="k")
+        with _fake_sdk_installed(client), \
+             patch("src.web_search.resolve_backend", return_value=backend):
+            try:
+                return gemini_web_search("a query", **kwargs), client
+            except WebSearchError as exc:
+                return exc, client
+
+    def test_the_request_carries_the_query_and_the_backend_model(self) -> None:
+        _, client = self._search(response=_Response([], text="answer"))
+        self.assertEqual(len(client.calls), 1)
+        self.assertEqual(client.calls[0]["contents"], "a query")
+        self.assertEqual(client.calls[0]["model"], "gemini-test")
+
+    def test_the_request_enables_google_search_grounding(self) -> None:
+        """Without this the model answers from memory and returns no sources at all --
+        and every other assertion in the suite still passes."""
+        _, client = self._search(response=_Response([], text="answer"))
+        tools = client.calls[0]["config"].tools
+        self.assertEqual(len(tools), 1)
+        self.assertIsNotNone(tools[0].google_search)
+
+    def test_the_answer_text_is_carried_through(self) -> None:
+        result, _ = self._search(response=_Response([], text="  the answer  "))
+        self.assertEqual(result.answer, "the answer")
+
+    def test_a_response_with_no_text_yields_an_empty_answer(self) -> None:
+        result, _ = self._search(response=_Response([]))
+        self.assertEqual(result.answer, "")
+
+    def test_the_backend_kind_is_recorded_on_the_response(self) -> None:
+        result, _ = self._search(response=_Response([], text="x"))
+        self.assertEqual(result.backend, "api_key")
+        self.assertEqual(result.model, "gemini-test")
+
+    def test_an_sdk_failure_becomes_a_websearcherror_naming_the_backend(self) -> None:
+        """The mutation that turns this into an empty successful response is the one the
+        whole suite used to miss."""
+        result, _ = self._search(error=RuntimeError("429 quota exceeded"))
+        self.assertIsInstance(result, WebSearchError)
+        self.assertIn("429 quota exceeded", str(result))
+        self.assertIn("Gemini API", str(result))
+
+    def test_an_sdk_failure_is_never_reported_as_a_successful_empty_search(self) -> None:
+        result, _ = self._search(error=RuntimeError("boom"))
+        self.assertNotIsInstance(result, WebSearchResponse)
+
+    def test_grounded_sources_reach_the_response(self) -> None:
+        response = _Response([
+            _Candidate(_Metadata(
+                [_Chunk(_Web("https://arxiv.org/abs/1", "Paper"))],
+                [_Support("A claim.", [0])],
+            ))
+        ], text="answer")
+        result, _ = self._search(response=response, resolve_urls=False)
+        self.assertEqual([r.url for r in result.results], ["https://arxiv.org/abs/1"])
+        self.assertEqual(result.results[0].supported_claims, ["A claim."])
+
+    def test_resolution_is_skipped_when_asked(self) -> None:
+        stub = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AB"
+        response = _Response([_Candidate(_Metadata([_Chunk(_Web(stub, "x"))]))], text="a")
+        with patch("src.web_search.resolve_source", side_effect=AssertionError("must not resolve")):
+            result, _ = self._search(response=response, resolve_urls=False)
+        self.assertEqual(result.results[0].url, stub)
+        self.assertFalse(result.grounded)
+
+    def test_resolution_runs_and_dedupes_by_the_resolved_url(self) -> None:
+        """Two distinct stubs reaching one page must collapse, which can only happen
+        after resolution."""
+        stubs = [f"https://vertexaisearch.cloud.google.com/grounding-api-redirect/{i}" for i in "AB"]
+        response = _Response([
+            _Candidate(_Metadata(
+                [_Chunk(_Web(stubs[0], "arxiv.org")), _Chunk(_Web(stubs[1], "arxiv.org"))],
+                [_Support("First.", [0]), _Support("Second.", [1])],
+            ))
+        ], text="a")
+        with patch("src.web_search.resolve_source", return_value=("https://arxiv.org/abs/1", "Real Title")):
+            result, _ = self._search(response=response, resolve_urls=True)
+        self.assertEqual(len(result.results), 1)
+        self.assertEqual(result.results[0].url, "https://arxiv.org/abs/1")
+        self.assertEqual(result.results[0].title, "Real Title")
+        self.assertEqual(result.results[0].supported_claims, ["First.", "Second."])
+        self.assertTrue(result.grounded)
+
+    def test_the_max_results_cap_reaches_the_extractor(self) -> None:
+        chunks = [_Chunk(_Web(f"https://example.org/{i}")) for i in range(6)]
+        response = _Response([_Candidate(_Metadata(chunks))], text="a")
+        result, _ = self._search(response=response, max_results=2, resolve_urls=False)
+        self.assertEqual(len(result.results), 2)
+
+    def test_an_empty_query_never_reaches_the_sdk(self) -> None:
+        client = _RecordingClient(response=_Response([]))
+        with _fake_sdk_installed(client):
+            with self.assertRaises(WebSearchError):
+                gemini_web_search("   ")
+        self.assertEqual(client.calls, [])
+
+    def test_an_explicit_api_key_bypasses_backend_resolution(self) -> None:
+        client = _RecordingClient(response=_Response([], text="a"))
+        with _fake_sdk_installed(client), \
+             patch("src.web_search.resolve_backend", side_effect=AssertionError("must not resolve")):
+            result = gemini_web_search("q", api_key="explicit", resolve_urls=False)
+        self.assertEqual(result.backend, "api_key")
+
+
+class CliForwardingTest(unittest.TestCase):
+    """What the CLI hands to gemini_web_search, not merely that it called it.
+
+    The previous fake swallowed every keyword argument into **kwargs and never inspected
+    them, so --model, --max-results and --no-resolve-urls could all have been dropped in
+    silence.
+    """
+
+    def _forwarded(self, argv):
+        captured: dict[str, object] = {}
+
+        def fake_search(query, **kwargs):
+            captured["query"] = query
+            captured.update(kwargs)
+            return WebSearchResponse(query, "m", "a", "api_key", [SearchResult("t", "https://u")])
+
+        with patch("src.web_search.gemini_web_search", side_effect=fake_search):
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                code = web_search_main(argv)
+        return captured, code
+
+    def test_the_model_flag_is_forwarded(self) -> None:
+        captured, _ = self._forwarded(["q", "--model", "gemini-9.9-pro"])
+        self.assertEqual(captured["model"], "gemini-9.9-pro")
+
+    def test_the_max_results_flag_is_forwarded(self) -> None:
+        captured, _ = self._forwarded(["q", "--max-results", "3"])
+        self.assertEqual(captured["max_results"], 3)
+
+    def test_the_default_max_results_is_forwarded_too(self) -> None:
+        captured, _ = self._forwarded(["q"])
+        self.assertEqual(captured["max_results"], web_search_module.DEFAULT_MAX_RESULTS)
+
+    def test_no_resolve_urls_inverts_correctly(self) -> None:
+        """An inverted flag is the classic place for a silent polarity bug."""
+        self.assertTrue(self._forwarded(["q"])[0]["resolve_urls"])
+        self.assertFalse(self._forwarded(["q", "--no-resolve-urls"])[0]["resolve_urls"])
+
+    def test_a_failure_prints_the_reason_not_just_a_nonzero_code(self) -> None:
+        """The prompt promises 'it prints the reason on failure'. Asserting only the exit
+        code leaves that promise unheld."""
+        errors = io.StringIO()
+        with patch("src.web_search.gemini_web_search", side_effect=WebSearchError("no backend configured")):
+            with redirect_stdout(io.StringIO()), redirect_stderr(errors):
+                code = web_search_main(["q"])
+        self.assertEqual(code, 1)
+        self.assertIn("no backend configured", errors.getvalue())
+        self.assertIn("web_search error", errors.getvalue())
+
+
+class ContinuationPromptCarriesTheSectionTest(unittest.TestCase):
+    """Refinement attempts go through build_continuation_prompt, not build_prompt.
+
+    Only build_prompt was covered, so the block could be dropped from every refinement
+    turn -- every 1/2/3/4 the reviewer takes -- with the suite green.
+    """
+
+    def _continuation(self, **kwargs):
+        from src.utils import build_continuation_prompt, build_run_paths, ensure_run_layout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = build_run_paths(Path(tmp) / "run")
+            ensure_run_layout(paths)
+            return build_continuation_prompt(
+                STAGES[0], "template", paths, "handoff", "feedback", **kwargs
+            )
+
+    def test_the_section_reaches_a_refinement_turn(self) -> None:
+        prompt = self._continuation(web_search_context=build_web_search_prompt_section())
+        self.assertIn("# Web Search Capability", prompt)
+        self.assertIn("tools/web_search.py", prompt)
+
+    def test_no_section_means_no_heading(self) -> None:
+        self.assertNotIn("# Web Search Capability", self._continuation(web_search_context=None))
+
+    def test_both_prompt_builders_agree(self) -> None:
+        """A block present on the first attempt and absent on every retry is worse than
+        one that is absent throughout: the agent is told the tool exists, then not."""
+        section = build_web_search_prompt_section()
+        first = build_prompt(STAGES[0], "template", "user request", "memory", web_search_context=section)
+        again = self._continuation(web_search_context=section)
+        for prompt in (first, again):
+            self.assertIn("# Web Search Capability", prompt)
