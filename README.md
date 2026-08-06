@@ -15,8 +15,8 @@
   <img src="https://img.shields.io/badge/Human-Approval%20Required-orange" alt="Human approval required" />
   <img src="https://img.shields.io/badge/Execution-Agent%20Harness-purple" alt="Agent harness" />
   <img src="https://img.shields.io/badge/Artifacts-Reproducible%20Research%20Runs-red" alt="Reproducible research runs" />
-  <a href="https://github.com/HavenIntelligence/AutoR">
-    <img src="https://img.shields.io/github/stars/HavenIntelligence/AutoR?style=social" alt="GitHub stars" />
+  <a href="https://github.com/tangxiangru/AutoR">
+    <img src="https://img.shields.io/github/stars/tangxiangru/AutoR?style=social" alt="GitHub stars" />
   </a>
 </p>
 
@@ -35,6 +35,8 @@
   ·
   <a href="#-architecture">Architecture</a>
   ·
+  <a href="#-documentation">Documentation</a>
+  ·
   <a href="#-roadmap">Roadmap</a>
 </p>
 
@@ -43,6 +45,8 @@
   <a href="docs/tutorial_en.md">English Guide</a>
   ·
   <a href="docs/tutorial_zh.md">中文教程</a>
+  ·
+  <a href="docs/">Full Documentation</a>
 </p>
 
 <p align="center">
@@ -287,8 +291,16 @@ AI handles execution load; humans steer the research when direction actually mat
 | Resume the latest run | `python main.py --resume-run latest` |
 | Redo a stage inside the same run | `python main.py --resume-run 20260329_210252 --redo-stage 03` |
 | Roll back to a stage inside the same run | `python main.py --resume-run 20260329_210252 --rollback-stage 03` |
-| Search the web where the agent's own `WebSearch` is disabled | `python main.py --web-search gemini --goal "Your research goal here"` |
+| Re-enter an existing project instead of starting over | `python main.py --project-root ~/code/my-project --goal "..."` |
+| Seed the run from your own prior papers | `python main.py --paper-corpus ~/papers --goal "..."` |
+| Store runs on another disk | `python main.py --runs-dir /mnt/big-disk/runs --goal "..."` |
+| Raise the per-attempt ceiling for long training runs | `python main.py --stage-timeout 43200 --goal "..."` |
+| Skip the intake stage | `python main.py --skip-intake --goal "..."` |
+| Add a generated method diagram to the paper | `python main.py --research-diagram --goal "..."` |
+| Search the web where the agent's own `WebSearch` is disabled | `python main.py --web-search gemini --goal "..."` |
 | Benchmark AutoR on ResearchClawBench | `python rcb_agent.py --workspace <WORKSPACE> --prompt <PROMPT>` |
+
+Every flag, its default, and what is preserved on resume: **[docs/cli-reference.md](docs/cli-reference.md)**.
 
 If `--venue` is omitted, AutoR defaults to `neurips_2025`.
 
@@ -328,7 +340,11 @@ What you can do in the Studio:
 - **Paper preview** — the Paper tab renders the compiled PDF, the LaTeX sources, and the build log
 - **Versions page** — the full checkpoint/attempt timeline for every stage
 
-The Studio requires the **Claude CLI** (`claude` on `PATH`) since every run is a real Claude-driven pipeline. If `claude` isn't installed, the server fails fast at startup with a clear error.
+The Studio requires the **Claude CLI** (`claude` on `PATH`) since every run is a real Claude-driven pipeline. The check happens when you start a run, not at server startup: without `claude` the server still comes up and you can browse existing runs, read stage documents, and view papers, but starting a run fails with a clear error.
+
+> The Studio API has **no authentication**. It binds to `127.0.0.1` by default; anything that can reach it can start runs, approve stages, and read every file under the runs directory. For remote access prefer an SSH tunnel over `--host 0.0.0.0`. See [SECURITY.md](SECURITY.md).
+
+Full page-by-page walkthrough and the complete HTTP API: **[docs/studio.md](docs/studio.md)**.
 
 ## ⚙️ How It Works
 
@@ -454,11 +470,16 @@ AutoR does not consider a run successful just because it generated a plausible m
 
 | Stage | Required non-toy output |
 | --- | --- |
+| Stage 01 | A cross-referenced evidence ledger: `sources.json` and `claims.json`, where every cited `source_id` resolves |
 | Stage 03+ | Machine-readable data under `workspace/data/` |
-| Stage 05+ | Machine-readable results under `workspace/results/` |
+| Stage 05+ | Machine-readable results under `workspace/results/`, plus a valid `experiment_manifest.json` |
 | Stage 06+ | Real figure files under `workspace/figures/` |
-| Stage 07+ | Manuscript sources plus a compiled PDF |
+| Stage 07+ | `main.tex` matching the venue, `sections/*.tex`, a bibliography, a compiled PDF, `build_log.txt`, `citation_verification.json`, `self_review.json`, `layout_review.json` |
 | Stage 08+ | Review and readiness assets under `workspace/reviews/` |
+
+Requirements are cumulative, and the stage that *produces* a class of artifact must produce it **during that stage's execution** — a re-run is not credited with the previous attempt's files.
+
+The complete gate, including every JSON schema that is parsed rather than merely counted, is in **[docs/stage-contract.md](docs/stage-contract.md)**.
 
 Required stage summary shape:
 
@@ -470,6 +491,7 @@ Required stage summary shape:
 ## What I Did
 ## Key Results
 ## Files Produced
+## Decision Ledger
 ## Suggestions for Refinement
 ## Your Options
 ```
@@ -619,7 +641,14 @@ File boundaries:
 - [src/artifact_index.py](src/artifact_index.py): Run-wide artifact indexing over data, results, and figures.
 - [src/experiment_manifest.py](src/experiment_manifest.py): Standardized experiment bundle summary used by later stages.
 - [src/utils.py](src/utils.py): Stage metadata, prompt assembly, run paths, markdown validation, artifact validation, and handoff helpers.
+- [src/evidence_ledger.py](src/evidence_ledger.py): Stage 01 literature evidence and Stage 07 citation verification.
+- [src/hypothesis_manifest.py](src/hypothesis_manifest.py): Stage 02 typed propositions, hypotheses, and paper claims.
+- [src/bootstrap.py](src/bootstrap.py) and [src/project_bootstrap.py](src/project_bootstrap.py): `--paper-corpus` and `--project-root` scanning.
+- [src/approval_agent.py](src/approval_agent.py): The strict reviewer agent used by `--full-auto`.
+- [src/backend/](src/backend) and [src/frontend/](src/frontend): AutoR Studio service, HTTP layer, and the browser UI.
 - [src/prompts/](src/prompts): Per-stage prompt templates.
+
+The full module map, the stage attempt loop, how prompts are assembled, and the extension points are in **[docs/architecture.md](docs/architecture.md)**.
 
 ## 🗂️ Run State
 
@@ -675,6 +704,7 @@ Required stage markdown shape:
 ## What I Did
 ## Key Results
 ## Files Produced
+## Decision Ledger
 ## Suggestions for Refinement
 ## Your Options
 ```
@@ -726,6 +756,43 @@ A run with only markdown notes does not pass validation.
 - heavyweight platform abstractions
 - dashboard-first productization
 
+## 📚 Documentation
+
+The [docs/](docs/) directory is the reference documentation. This README is the overview; everything below is the detail behind it.
+
+**Guides**
+
+| | |
+| --- | --- |
+| [English Guide](docs/tutorial_en.md) · [中文教程](docs/tutorial_zh.md) | Install, run your first project end to end, review each stage, and write feedback that actually improves output. |
+
+**Reference**
+
+| | |
+| --- | --- |
+| [CLI Reference](docs/cli-reference.md) | Every flag on `main.py` and `studio.py`, defaults, what is preserved on resume, exit codes. |
+| [Configuration](docs/configuration.md) | `run_config.json`, the venue registry, diagram setup, environment variables, hard-coded limits. |
+| [Run Artifacts](docs/run-artifacts.md) | The run directory, file by file, and the schema of every machine-readable artifact. |
+| [Stage Contract](docs/stage-contract.md) | Exactly what a stage must produce to be accepted, as the code enforces it. |
+| [Studio Guide & API](docs/studio.md) | The browser workspace and its complete HTTP API. |
+| [ResearchClawBench](docs/researchclawbench.md) | Running with no human in the loop: unattended execution, the benchmark adapter and its output contract, and Gemini-backed web search. |
+
+**Internals**
+
+| | |
+| --- | --- |
+| [Architecture](docs/architecture.md) | Layers, module map, the stage attempt loop, prompt assembly, recovery, extension points. |
+| [Development](docs/development.md) | Dev setup, tests, CI, conventions, and recipes for adding a stage, venue, or backend. |
+| [Troubleshooting](docs/troubleshooting.md) | Symptom-to-fix for the errors AutoR actually raises. |
+
+**Project**
+
+| | |
+| --- | --- |
+| [Contributing](CONTRIBUTING.md) | How to propose and land a change, and what a reviewer looks for. |
+| [Security](SECURITY.md) | The security model, the sandbox trade-offs, and how to report a vulnerability. |
+| [Code of Conduct](CODE_OF_CONDUCT.md) | Community expectations. |
+
 ## 🛣️ Roadmap
 
 The most valuable next steps are the ones that make AutoR more like a real research workflow, not more like a demo framework.
@@ -757,6 +824,18 @@ Implemented milestone:
 - README and open-source assets. Keep refining the README and add `assets/` images such as workflow diagrams, UI screenshots, and artifact examples. This is important for open-source clarity, onboarding, and project presentation.
 
 </details>
+
+## 🤝 Contributing
+
+Bug reports, feature requests, documentation fixes, and shared runs are all welcome. Setup is one clone and one command — AutoR has no third-party Python dependencies and no build step:
+
+```bash
+git clone https://github.com/tangxiangru/AutoR.git
+cd AutoR
+python -m unittest discover -s tests -p "test_*.py"
+```
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request, and [docs/development.md](docs/development.md) before changing code. Security issues go through [SECURITY.md](SECURITY.md), not a public issue.
 
 ## 🌍 Community
 
