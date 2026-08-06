@@ -185,6 +185,12 @@ def _idea_pool(context: ChannelContext) -> str | None:
     manager = context.manager
     if manager is None or getattr(manager, "ideation_panel", None) is None:
         return None
+    # Widening the candidate pool is for a stage that still has to choose. A stage running
+    # routine has already been told its decisions are made, so paying a proposer panel to
+    # re-open them is the expensive configuration landing where its benefit does not.
+    plan = getattr(manager, "effort_plan", None)
+    if plan is not None and plan.is_routine(context.stage):
+        return None
     return manager._build_idea_pool(context.paths, context.stage, context.attempt_no)  # noqa: SLF001
 
 

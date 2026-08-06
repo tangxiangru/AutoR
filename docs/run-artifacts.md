@@ -826,6 +826,14 @@ Required: non-empty string `overall_status`; booleans `pdf_available` and
 Validated by `validate_layout_review` in
 [`src/writing_manifest.py`](../src/writing_manifest.py).
 
+### `workspace/reviews/effort.json`
+
+Written under `--effort-tiers`. Which tier each stage ran in, who chose it, why, and both
+directions of mis-spending: `promoted_after_failing` (ran cheap and should not have) and
+`deliberative_but_uncontested` (paid for ceremony nobody used).
+
+See [Effort Tiers](effort-tiers.md).
+
 ### `workspace/reviews/deliberations.json`
 
 Written when a stage raises a crux under `--deliberation`. Every question escalated, the
