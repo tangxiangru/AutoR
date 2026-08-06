@@ -89,6 +89,11 @@ class RunPaths:
     bootstrap_dir: Path
     profile_dir: Path
     intake_context: Path
+    #: Every candidate draft, its measured score, the champion, the Pareto frontier
+    #: and the improvement ledger. Outside ``workspace/`` on purpose: it is a record
+    #: of how the run reached its answer, not part of the answer, and a benchmark
+    #: export that swept it up would ship the losing drafts alongside the report.
+    evolution_dir: Path
     #: Where the operator's agent CLI looks for project skills. The operator is
     #: invoked with ``cwd=run_root``, so this is the run's own ``.claude/skills``
     #: and not the AutoR checkout's.
@@ -265,6 +270,7 @@ def build_run_paths(run_root: Path) -> RunPaths:
         bootstrap_dir=workspace_root / "bootstrap",
         profile_dir=workspace_root / "profile",
         intake_context=run_root / "intake_context.json",
+        evolution_dir=run_root / "evolution",
     )
 
 
@@ -340,6 +346,44 @@ def normalize_codex_sandbox(value: Any) -> str:
     return DEFAULT_CODEX_SANDBOX
 
 
+#: How the run moves between stages. ``linear`` is the historical sequence, one
+#: edge out of each node. ``adaptive`` adds the backward moves and lets the run
+#: return to an earlier stage when a later one shows it has to.
+DEFAULT_STAGE_GRAPH = "linear"
+STAGE_GRAPH_CHOICES = ("linear", "adaptive")
+
+#: Who picks the edge. ``off`` always takes the graph's default, which on a linear
+#: topology is the only one. ``auto`` asks the backend wherever more than one move
+#: is live; ``agent`` asks at every node.
+DEFAULT_ROUTING_MODE = "off"
+ROUTING_MODE_CHOICES = ("off", "auto", "agent")
+
+#: Self-improvement rounds per stage. Zero is off, which is the default: the loop
+#: costs a backend call per round, and a caller who has not asked for it should not
+#: be paying for it.
+DEFAULT_EVOLVE_ROUNDS = 0
+
+
+def normalize_walk_settings(source: "Mapping[str, Any]") -> dict[str, Any]:
+    """Normalise the three settings that describe how a run walks its stages.
+
+    One definition, called from every run-config reader and writer. The config
+    functions each restate the whole field list, so a fourth setting added by hand
+    in five places is a setting that will eventually be preserved on resume by four
+    of them.
+    """
+    graph = str(source.get("stage_graph") or "").strip().lower()
+    routing = str(source.get("routing_mode") or "").strip().lower()
+    rounds = source.get("evolve_rounds")
+    try:
+        rounds_value = max(0, int(rounds))
+    except (TypeError, ValueError):
+        rounds_value = DEFAULT_EVOLVE_ROUNDS
+    return {
+        "stage_graph": graph if graph in STAGE_GRAPH_CHOICES else DEFAULT_STAGE_GRAPH,
+        "routing_mode": routing if routing in ROUTING_MODE_CHOICES else DEFAULT_ROUTING_MODE,
+        "evolve_rounds": rounds_value,
+    }
 WEB_SEARCH_MODE_CHOICES = ("auto", "gemini", "native")
 DEFAULT_WEB_SEARCH_MODE = "auto"
 
@@ -367,6 +411,7 @@ def default_run_config() -> dict[str, Any]:
         "review_operator": "claude",
         "review_model": "sonnet",
         "codex_sandbox": DEFAULT_CODEX_SANDBOX,
+        **normalize_walk_settings({}),
         "web_search": DEFAULT_WEB_SEARCH_MODE,
     }
 
@@ -381,6 +426,7 @@ def initialize_run_config(
     review_model: str | None = None,
     codex_sandbox: str | None = None,
     output_format: str | None = None,
+    walk: "Mapping[str, Any] | None" = None,
     web_search: str | None = None,
 ) -> dict[str, Any]:
     normalized_operator = operator.strip().lower() if operator.strip() else "claude"
@@ -402,6 +448,7 @@ def initialize_run_config(
             or ("default" if normalized_review_operator == "codex" else "sonnet")
         ),
         "codex_sandbox": normalize_codex_sandbox(codex_sandbox),
+        **normalize_walk_settings(walk or {}),
         "web_search": normalize_web_search_mode(web_search),
         "created_at": datetime.now().isoformat(timespec="seconds"),
     }
@@ -447,6 +494,7 @@ def load_run_config(paths: RunPaths) -> dict[str, Any]:
             else ("default" if normalized_review_operator == "codex" else "sonnet")
         ),
         "codex_sandbox": normalize_codex_sandbox(codex_sandbox),
+        **normalize_walk_settings(payload),
         "web_search": normalize_web_search_mode(payload.get("web_search")),
     }
     created_at = payload.get("created_at")
@@ -472,6 +520,7 @@ def save_run_config(paths: RunPaths, config: dict[str, Any]) -> None:
             or ("default" if normalized_review_operator == "codex" else "sonnet")
         ),
         "codex_sandbox": normalize_codex_sandbox(config.get("codex_sandbox")),
+        **normalize_walk_settings(config),
         "web_search": normalize_web_search_mode(config.get("web_search")),
     }
     created_at = config.get("created_at")
@@ -492,6 +541,7 @@ def ensure_run_config(
     review_model: str | None = None,
     codex_sandbox: str | None = None,
     output_format: str | None = None,
+    walk: "Mapping[str, Any] | None" = None,
     web_search: str | None = None,
 ) -> dict[str, Any]:
     current = load_run_config(paths)
@@ -508,6 +558,10 @@ def ensure_run_config(
             "default" if effective_review_operator == "codex" else "sonnet"
         ),
         "codex_sandbox": normalize_codex_sandbox(codex_sandbox or current.get("codex_sandbox")),
+        # An explicit setting wins; otherwise the run keeps what it was started
+        # with, which is what makes `--resume-run` continue the same walk rather
+        # than silently reverting an adaptive run to the linear default.
+        **normalize_walk_settings({**current, **(walk or {})}),
         "web_search": normalize_web_search_mode(web_search or current.get("web_search")),
         "created_at": current.get("created_at") or datetime.now().isoformat(timespec="seconds"),
     }
