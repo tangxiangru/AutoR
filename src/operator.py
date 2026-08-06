@@ -671,6 +671,25 @@ Original stderr:
         def _write_json(path: Path, payload: object) -> None:
             _write(path, json.dumps(payload, indent=2) + "\n")
 
+        # Stage 03+: the experimental protocol, declared before results exist.
+        _write_json(
+            paths.experimental_protocol,
+            {
+                "declared_at": self._now(),
+                "primary_metric": "placeholder accuracy on a two-row synthetic split",
+                "planned_seeds": 1,
+                "baselines": [
+                    {
+                        "name": "placeholder baseline",
+                        "why_competent": (
+                            "Stand-in declared by fake-operator mode. Not a real comparison."
+                        ),
+                        "tuning_budget": "none; fake mode runs no tuning",
+                    }
+                ],
+            },
+        )
+
         # Stage 03+: machine-readable data under workspace/data.
         _write_json(
             paths.data_dir / "fake_dataset.json",
@@ -741,6 +760,16 @@ Original stderr:
                                     "no real measurement was taken."
                                 ),
                                 "evidence": ["results/fake_results.json"],
+                                "statistics": {
+                                    "n_seeds": 1,
+                                    "dispersion": 0.0,
+                                    "dispersion_type": "none",
+                                    "single_run_justification": (
+                                        "fake-operator mode writes a fixed placeholder rather "
+                                        "than measuring anything, so repeating it would change "
+                                        "nothing. This is not a claim about a real procedure."
+                                    ),
+                                },
                             }
                             for identifier in prereg.adjudicated_ids
                         ],

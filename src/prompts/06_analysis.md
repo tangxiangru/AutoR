@@ -61,7 +61,13 @@ Write `{{WORKSPACE_RESULTS_DIR}}/hypothesis_outcomes.json`:
       "id": "H1",
       "verdict": "supported | refuted | inconclusive | not_tested",
       "rationale": "why the evidence produces this verdict, against H1's own decision rule",
-      "evidence": ["results/main_metrics.json"]
+      "evidence": ["results/main_metrics.json"],
+      "statistics": {
+        "n_seeds": 5,
+        "dispersion": 0.012,
+        "dispersion_type": "std | stderr | ci95 | iqr | range | none",
+        "single_run_justification": "only when n_seeds is 1"
+      }
     }
   ],
   "exploratory_findings": [
@@ -84,6 +90,14 @@ Rules:
   that was arranged.
 - Findings the data suggested but the run did not predict go in `exploratory_findings`,
   never in `outcomes`.
+- A `supported` or `refuted` verdict needs a `statistics` block: how many runs it rests
+  on, and how the spread was measured. `dispersion_type` must name the measure — an
+  interval whose meaning is unstated cannot be read, and every venue asks.
+- A verdict from a single run is refused unless `single_run_justification` says why one
+  run settles it. A deterministic procedure is a legitimate reason; it is a claim worth
+  making out loud rather than by omission.
+- If the measured gap is inside the spread, the verdict is `inconclusive`, however good
+  the mean looks.
 - `Suggestions for Refinement` should focus on claim calibration, extra validation, or improved analysis clarity.
 
 ## Important Constraints

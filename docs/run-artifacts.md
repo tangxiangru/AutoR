@@ -484,6 +484,36 @@ the result.
 Validated by `validate_preregistration` in
 [`src/preregistration.py`](../src/preregistration.py).
 
+### `workspace/notes/experimental_protocol.json`
+
+What would count as having shown the hypothesis. Declared in Stage 03, before
+any experiment runs, and enforced from Stage 05.
+
+```json
+{
+  "declared_at": "2026-03-30T13:20:04",
+  "primary_metric": "held-out accuracy",
+  "planned_seeds": 5,
+  "baselines": [
+    {
+      "name": "long-context prompting",
+      "why_competent": "the standard approach the method has to beat to matter",
+      "tuning_budget": "same prompt-search budget as the method: 20 configurations"
+    }
+  ]
+}
+```
+
+- The **primary metric** is named in advance. Choosing the metric after seeing
+  the results is the same defect as choosing the hypothesis after seeing them.
+- Every baseline needs `why_competent` and a `tuning_budget` matching the
+  method's. Beating a baseline nobody tried to make strong measures the effort
+  split, not the method — and that asymmetry is invisible in the final number.
+- `planned_seeds` is how many independent runs the comparison uses.
+
+Validated by `validate_experimental_protocol` in
+[`src/experimental_protocol.py`](../src/experimental_protocol.py).
+
 ### `workspace/results/hypothesis_outcomes.json`
 
 Stage 06's verdict on every preregistered hypothesis.
@@ -497,7 +527,8 @@ Stage 06's verdict on every preregistered hypothesis.
       "id": "H1",
       "verdict": "refuted",
       "rationale": "the gap was 2 points, below the rule's 8",
-      "evidence": ["results/main_metrics.json"]
+      "evidence": ["results/main_metrics.json"],
+      "statistics": {"n_seeds": 5, "dispersion": 0.012, "dispersion_type": "std"}
     }
   ],
   "exploratory_findings": [{"statement": "...", "evidence": ["results/..."]}]
@@ -514,7 +545,16 @@ Stage 06's verdict on every preregistered hypothesis.
 - Findings the data suggested but the run did not predict belong in
   `exploratory_findings`, never in `outcomes`.
 
-Validated by `validate_hypothesis_outcomes`.
+- A `supported` or `refuted` verdict needs a `statistics` block naming how many
+  runs it rests on and how the spread was measured. `dispersion_type` is one of
+  `std`, `stderr`, `ci95`, `iqr`, `range`, `none` — an interval whose meaning is
+  unstated cannot be read. A verdict from a single run is refused unless
+  `single_run_justification` says why one run settles it.
+- `inconclusive` and `not_tested` are exempt: they are the honest verdicts when
+  the evidence is thin, and requiring statistics for them would push a run
+  toward claiming more than it measured.
+
+Validated by `validate_hypothesis_outcomes` and `validate_outcome_statistics`.
 
 ### `workspace/artifacts/claim_provenance.json`
 

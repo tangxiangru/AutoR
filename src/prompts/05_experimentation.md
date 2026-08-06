@@ -32,6 +32,21 @@ Run or define credible experiments that test the approved hypotheses using the i
 - Failures and anomalies are part of the evidence.
 - Make it easy to see which experiments were completed and which remain blocked.
 
+## Protocol Discipline (required)
+
+`workspace/notes/experimental_protocol.json` was declared in Stage 03, before any result
+existed.
+
+- Run the number of seeds it planned. If you run fewer, say so in `Key Results` with the
+  reason; do not quietly report a single run.
+- Give each baseline the tuning budget it declared. If a baseline got less, record the
+  shortfall — an effort asymmetry that is on the record is a limitation, and one that is
+  not is a misleading comparison.
+- Report the primary metric it named, whatever it shows. Additional metrics are welcome;
+  replacing the primary one with a metric that came out better is not.
+- Record per-condition spread, not just means. Stage 06 has to state how the spread was
+  measured and over how many runs, and it can only do that if this stage saved it.
+
 ## Stage Output Requirements
 
 The markdown at `{{STAGE_OUTPUT_PATH}}` must follow the required output structure exactly.
