@@ -45,6 +45,11 @@ DECISION_TO_CHOICE = {
 }
 
 
+#: Prefix that marks "the reviewer answered but we could not read it", as distinct from
+#: "the reviewer refused". The two are told apart by `AutomatedReviewer._is_unreadable`.
+UNREADABLE_REASON = "Automated reviewer did not return valid JSON."
+
+
 def _try_load_json(text: str) -> dict[str, Any] | None:
     try:
         payload = json.loads(text)
@@ -117,7 +122,12 @@ class AutomatedReviewer:
         fake_mode: bool = False,
         ui: TerminalUI | None = None,
         stage_timeout: int = 14400,
+        unattended: bool = False,
     ) -> None:
+        # Unattended runs cannot ask a human what the reviewer meant, and aborting a
+        # multi-hour run because a verdict was unreadable throws away work the reviewer
+        # may well have been about to approve. See _unreadable_verdict.
+        self.unattended = unattended
         normalized_backend = backend_name.strip().lower() if backend_name.strip() else "claude"
         if normalized_backend == "codex":
             self._operator = CodexOperator(model=model, fake_mode=fake_mode, ui=ui, stage_timeout=stage_timeout)
@@ -172,7 +182,78 @@ class AutomatedReviewer:
                 raw_response=stdout_text or stderr_text,
             )
 
-        return self._parse_decision(stdout_text, markdown=stage_markdown)
+        decision = self._parse_decision(stdout_text, markdown=stage_markdown)
+        if not self._is_unreadable(decision):
+            return decision
+
+        # The reviewer answered, we just could not read it. Ask once more for the verdict
+        # alone: a reviewer that has already inspected the artifacts and then narrated its
+        # findings in prose is one re-ask away from a usable answer, and that is far
+        # cheaper than discarding the stage.
+        retry = self.run_prompt(
+            paths=paths,
+            stage=stage,
+            attempt_no=attempt_no,
+            prompt=self._build_verdict_only_prompt(stage=stage, previous=stdout_text),
+            label="review_verdict",
+        )
+        if retry[0] == 0:
+            retried = self._parse_decision(retry[1], markdown=stage_markdown)
+            if not self._is_unreadable(retried):
+                return retried
+
+        return self._unreadable_verdict(stdout_text)
+
+    @staticmethod
+    def _is_unreadable(decision: ReviewDecision) -> bool:
+        return decision.decision_token == "abort" and decision.reason.startswith(UNREADABLE_REASON)
+
+    def _unreadable_verdict(self, raw_response: str) -> ReviewDecision:
+        """What to do when the reviewer's answer cannot be read, twice.
+
+        Attended: abort, unchanged -- a human is there, and guessing at a verdict is the
+        one thing the approval gate exists to prevent.
+
+        Unattended: send the stage back for another pass instead. An unreadable verdict is
+        not a refusal to approve, it is a failure to read the answer, and the two deserve
+        different outcomes. Revising is bounded by the stage's own attempt budget, so this
+        cannot loop; aborting, by contrast, discards the entire run at whatever stage the
+        parse happened to fail -- in practice Stage 01, hours of real work gone over a
+        formatting slip.
+        """
+        if not self.unattended:
+            return ReviewDecision(
+                choice="6",
+                decision_token="abort",
+                reason=UNREADABLE_REASON + " AutoR stopped instead of approving blindly.",
+                raw_response=raw_response,
+            )
+        return ReviewDecision(
+            choice="4",
+            decision_token="revise",
+            reason=(
+                UNREADABLE_REASON
+                + " Unattended, so the stage was sent back for another pass rather than "
+                "approved or aborted."
+            ),
+            feedback=(
+                "The automated reviewer's verdict could not be parsed, so this stage was "
+                "not approved. Re-examine the draft against the stage contract and the "
+                "artifacts it claims, fix whatever is weakest, and restate the summary."
+            ),
+            raw_response=raw_response,
+        )
+
+    def _build_verdict_only_prompt(self, *, stage: StageSpec, previous: str) -> str:
+        return (
+            f"You were asked to review {stage.stage_title} and your reply could not be "
+            "parsed as a decision.\n\n"
+            "Do not inspect anything further. Do not call any tool. Reply with a single "
+            "JSON object and nothing else, on one line:\n\n"
+            '{"decision": "approve" | "revise" | "abort", "reason": "<one sentence>"}\n\n'
+            "Use the same judgement you already reached. Your previous reply ended:\n\n"
+            + previous.strip()[-2000:]
+        )
 
     def run_prompt(
         self,
@@ -363,7 +444,7 @@ class AutomatedReviewer:
             return ReviewDecision(
                 choice="6",
                 decision_token="abort",
-                reason="Automated reviewer did not return valid JSON. AutoR stopped instead of approving blindly.",
+                reason=UNREADABLE_REASON + " AutoR stopped instead of approving blindly.",
                 raw_response=raw_response,
             )
 
