@@ -344,3 +344,114 @@ class ManagerIntegrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ConcentrationTests(unittest.TestCase):
+    """Tiering labels the steps that matter; this is the part that acts on the label."""
+
+    def test_all_polish_on_deliberative_reads_as_concentrated(self) -> None:
+        from src.effort import Concentration
+
+        concentration = Concentration()
+        for _ in range(4):
+            concentration.note_round(DELIBERATIVE)
+        payload = concentration.to_dict()
+        self.assertEqual(payload["share_on_deliberative"], 1.0)
+        self.assertIn("routine stages spent none", payload["verdict"])
+
+    def test_polish_leaking_to_routine_is_called_out(self) -> None:
+        from src.effort import Concentration
+
+        concentration = Concentration()
+        concentration.note_round(DELIBERATIVE)
+        concentration.note_round(ROUTINE)
+        payload = concentration.to_dict()
+        self.assertEqual(payload["share_on_deliberative"], 0.5)
+        self.assertIn("landing where the benefit does not", payload["verdict"])
+
+    def test_no_rounds_at_all_is_not_reported_as_success(self) -> None:
+        from src.effort import Concentration
+
+        # Concentrating nothing is not the same as concentrating well.
+        self.assertIn("nothing was concentrated", Concentration().to_dict()["verdict"])
+
+    def test_cheap_model_stages_are_recorded_once_each(self) -> None:
+        from src.effort import Concentration
+
+        concentration = Concentration(routine_model="haiku")
+        concentration.note_cheap_model("04_implementation")
+        concentration.note_cheap_model("04_implementation")
+        payload = concentration.to_dict()
+        self.assertEqual(payload["stages_on_the_cheaper_model"], ["04_implementation"])
+        self.assertEqual(payload["routine_model"], "haiku")
+
+
+class ConcentrationIntegrationTests(unittest.TestCase):
+    def _manager_and_paths(self, *, enabled: bool = True):
+        from unittest.mock import MagicMock
+        from src.evolution import EvolutionConfig
+        from src.manager import ResearchManager
+
+        tmp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp_dir.cleanup)
+        runs_dir = Path(tmp_dir.name) / "runs"
+        runs_dir.mkdir()
+        paths = build_run_paths(runs_dir / "20260101_000000")
+        ensure_run_layout(paths)
+        write_text(paths.user_input, "Goal")
+        write_text(paths.memory, "# Approved Run Memory\n")
+        ensure_run_config(paths, model="sonnet", venue="neurips_2025")
+
+        operator = MagicMock()
+        operator.model = "sonnet"
+        operator.backend_name = "claude"
+        manager = ResearchManager(
+            project_root=Path(__file__).resolve().parent.parent,
+            runs_dir=runs_dir,
+            operator=operator,
+            ui=TerminalUI(output_stream=io.StringIO(), interactive=False),
+            evolution=EvolutionConfig(measure=True, rounds=2),
+        )
+        manager.effort_plan = EffortPlan(enabled=enabled)
+        return manager, paths
+
+    def test_a_routine_stage_is_denied_the_polish_rounds(self) -> None:
+        manager, _paths = self._manager_and_paths()
+        # A polish round is a full stage execution — the most expensive thing the loop does.
+        self.assertFalse(manager._evolution_applies(STAGE_04))
+        self.assertTrue(manager._evolution_applies(STAGE_03))
+
+    def test_tiering_off_leaves_polish_on_every_stage(self) -> None:
+        manager, _paths = self._manager_and_paths(enabled=False)
+        self.assertTrue(manager._evolution_applies(STAGE_04))
+        self.assertTrue(manager._evolution_applies(STAGE_03))
+
+    def test_a_promoted_stage_regains_its_polish_rounds(self) -> None:
+        manager, _paths = self._manager_and_paths()
+        self.assertFalse(manager._evolution_applies(STAGE_04))
+        for _ in range(PROMOTE_AFTER_FAILURES):
+            manager.effort_plan.note_failure(STAGE_04)
+        # Promotion is not just a label: the resources follow it.
+        self.assertTrue(manager._evolution_applies(STAGE_04))
+
+    def test_a_routine_stage_runs_on_the_cheaper_operator(self) -> None:
+        manager, _paths = self._manager_and_paths()
+        cheap = object()
+        manager.routine_operator = cheap
+
+        self.assertIs(manager._operator_for(STAGE_04), cheap)
+        self.assertIs(manager._operator_for(STAGE_03), manager.operator)
+        self.assertEqual(manager.concentration.cheap_model_stages, [STAGE_04.slug])
+
+    def test_without_a_routine_operator_everything_uses_the_configured_one(self) -> None:
+        manager, _paths = self._manager_and_paths()
+        self.assertIs(manager._operator_for(STAGE_04), manager.operator)
+        self.assertEqual(manager.concentration.cheap_model_stages, [])
+
+    def test_the_reallocation_reaches_the_ledger(self) -> None:
+        manager, paths = self._manager_and_paths()
+        manager.concentration.note_round(DELIBERATIVE)
+        manager._settle_effort(paths, STAGE_03, 1, "# Stage 03\n")
+        payload = json.loads(read_text(paths.reviews_dir / LEDGER_FILENAME))
+        self.assertIn("concentration", payload)
+        self.assertEqual(payload["concentration"]["polish_rounds_spent"][DELIBERATIVE], 1)
