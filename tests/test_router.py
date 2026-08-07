@@ -401,6 +401,39 @@ class RouterTests(unittest.TestCase):
 
     # -- reporting -----------------------------------------------------------
 
+    def test_a_bypassed_move_is_not_an_edge_observation(self) -> None:
+        """An operator's intervention is not evidence about an edge.
+
+        `/back`, a rollback after retry exhaustion and a research round's own jump
+        all arrive with the move already made: no guard was evaluated, nothing was on
+        offer, and nothing chose. Counted, they enter `RunRecord.edges`
+        indistinguishable from a routed traversal — and without a choice set, which
+        is exactly what `Visit.offered` exists to keep out of the estimator. Round
+        decisions are the largest source of them, so the edges the archive most wants
+        to learn about were the ones it was being lied to about.
+        """
+        state = GraphState()
+        enter(self.paths, state, STAGE_06)
+        leave(
+            self.paths, state, chose="03_study_design", kind="revisit",
+            reason="Operator redirected the run.", default_choice="", agent_directed=False,
+            score_total=None, bypassed=True,
+        )
+        enter(self.paths, state, STAGE_06)
+        leave(
+            self.paths, state, chose="05_experimentation", kind="revisit", reason="thin",
+            default_choice="07_writing", agent_directed=True, score_total=0.6,
+            offered=("05_experimentation", "07_writing"),
+        )
+
+        summary = routing_summary(self.paths)
+        self.assertEqual(summary["edges"], {"06_analysis->05_experimentation": 1})
+        self.assertEqual(summary["bypassed"], 1)
+        # Counted, not silently dropped: a summary that discards moves reports a
+        # route shorter than the one the run walked.
+        self.assertEqual(summary["steps"], 2)
+        self.assertEqual(summary["revisits"], 2)
+
     def test_the_summary_counts_edges_rather_than_stages(self) -> None:
         """The same target reached from two sources is two different decisions."""
         state = GraphState()

@@ -136,6 +136,10 @@ class RunRecord:
     steps: int
     revisits: int
     agent_directed: int
+    #: Moves that never went through the router. Not in :attr:`edges` — they are not
+    #: edge observations — but carried so a reader can see the route was longer than
+    #: the traversals the estimator counted.
+    bypassed: int
     recorded_at: str
 
     @property
@@ -178,6 +182,7 @@ class RunRecord:
             "steps": self.steps,
             "revisits": self.revisits,
             "agent_directed": self.agent_directed,
+            "bypassed": self.bypassed,
             "recorded_at": self.recorded_at,
         }
 
@@ -202,6 +207,7 @@ class RunRecord:
             steps=int(payload.get("steps") or 0),
             revisits=int(payload.get("revisits") or 0),
             agent_directed=int(payload.get("agent_directed") or 0),
+            bypassed=int(payload.get("bypassed") or 0),
             recorded_at=str(payload.get("recorded_at") or ""),
         )
 
@@ -492,6 +498,7 @@ class Archive:
             steps=int(summary.get("steps") or 0),
             revisits=int(summary.get("revisits") or 0),
             agent_directed=int(summary.get("agent_directed") or 0),
+            bypassed=int(summary.get("bypassed") or 0),
             recorded_at=_now(),
         )
         append_jsonl(self.runs_file, record.to_dict())

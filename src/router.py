@@ -379,6 +379,19 @@ def routing_summary(paths: RunPaths) -> dict[str, Any]:
     Reported per edge rather than per stage because the thing worth learning across
     runs is whether *a move* pays, and the same target reached from two different
     sources is two different decisions.
+
+    **A bypassed move is not an edge observation.** `/back`, a rollback after retry
+    exhaustion and a research round's own jump all reach the walk with the move
+    already made: no guard was evaluated, no alternative was on offer, and nothing
+    chose between anything. Counted here, an operator's intervention would enter
+    `RunRecord.edges` indistinguishable from a routed traversal — and, worse, would
+    enter it *without a choice set*, which is the precise observation
+    :attr:`src.stage_graph.Visit.offered` was added to keep out of the estimator.
+    The round decisions are the largest source of these, so the edges the archive
+    most wants to learn about were the ones it was being lied to about.
+
+    They are counted, not silently dropped. A summary that quietly discards moves
+    reports a route shorter than the one the run walked.
     """
     payload = _load_json(paths.evolution_dir / "stage_graph.json")
     if not isinstance(payload, dict):
@@ -386,22 +399,27 @@ def routing_summary(paths: RunPaths) -> dict[str, Any]:
     edges: dict[str, int] = {}
     agent_directed = 0
     revisits = 0
+    bypassed = 0
     for visit in payload.get("path", []):
         if not isinstance(visit, dict):
             continue
         source, target = str(visit.get("stage") or ""), str(visit.get("chose") or "")
         if not source or not target:
             continue
+        if visit.get("kind") == "revisit":
+            revisits += 1
+        if visit.get("bypassed"):
+            bypassed += 1
+            continue
         edges[f"{source}->{target}"] = edges.get(f"{source}->{target}", 0) + 1
         if visit.get("agent_directed"):
             agent_directed += 1
-        if visit.get("kind") == "revisit":
-            revisits += 1
     return {
         "edges": edges,
         "steps": len(payload.get("path", [])),
         "agent_directed": agent_directed,
         "revisits": revisits,
+        "bypassed": bypassed,
         "route": payload.get("route", ""),
     }
 

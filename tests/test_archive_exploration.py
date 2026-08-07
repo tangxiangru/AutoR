@@ -27,6 +27,7 @@ def _record(run_id: str, edges: list[str], fitness: float = 0.5) -> RunRecord:
         steps=len(edges),
         revisits=0,
         agent_directed=0,
+        bypassed=0,
         recorded_at="2026-08-06T00:00:00",
     )
 
