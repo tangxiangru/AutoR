@@ -504,6 +504,9 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
             fake_mode=args.fake_operator,
             ui=ui,
             stage_timeout=args.stage_timeout,
+            # The benchmark run has no human to interpret an unreadable verdict, and
+            # aborting at Stage 01 forfeits the task outright.
+            unattended=True,
         )
     manager = ResearchManager(
         project_root=REPO_ROOT,

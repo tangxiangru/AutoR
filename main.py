@@ -558,6 +558,7 @@ def create_reviewer(
     fake_mode: bool,
     ui: TerminalUI,
     stage_timeout: int,
+    unattended: bool = False,
     panel_roles: list[str] | None = None,
     panel_models: list[str] | None = None,
     use_panel: bool = False,
@@ -585,6 +586,7 @@ def create_reviewer(
         fake_mode=fake_mode,
         ui=ui,
         stage_timeout=stage_timeout,
+        unattended=unattended,
     )
 
 
@@ -890,6 +892,7 @@ def main() -> int:
                 fake_mode=args.fake_operator,
                 ui=ui,
                 stage_timeout=args.stage_timeout,
+                unattended=unattended,
                 use_panel=args.review_panel,
                 panel_roles=args.panel_roles,
                 panel_models=args.panel_models,
@@ -975,6 +978,7 @@ def main() -> int:
             fake_mode=args.fake_operator,
             ui=ui,
             stage_timeout=args.stage_timeout,
+            unattended=unattended,
             use_panel=args.review_panel,
             panel_roles=args.panel_roles,
             panel_models=args.panel_models,
