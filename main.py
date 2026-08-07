@@ -174,6 +174,13 @@ def parse_args() -> argparse.Namespace:
              "needs, and a routine stage that keeps failing is promoted automatically.",
     )
     parser.add_argument(
+        "--routine-model",
+        metavar="MODEL",
+        help="Model for stages running in the routine tier, so the strong model is kept for "
+             "the few steps whose output the rest of the run inherits. Requires "
+             "--effort-tiers; without it every stage is deliberative and this does nothing.",
+    )
+    parser.add_argument(
         "--deliberation",
         action="store_true",
         help="Let a stage stop and pull in a panel when it hits a genuine crux. The agent "
@@ -761,6 +768,17 @@ def configure_effort(manager, args, *, backend_name: str, model: str, ui: Termin
     if not getattr(args, "effort_tiers", False):
         return
     manager.effort_plan = EffortPlan(enabled=True)
+    if getattr(args, "routine_model", None):
+        manager.routine_operator = create_operator(
+            # The execution backend, not the reviewer's: this operator runs stages.
+            getattr(manager.operator, "backend_name", "claude"),
+            model=args.routine_model,
+            fake_mode=fake_mode,
+            ui=ui,
+            codex_sandbox=getattr(args, "codex_sandbox", None) or DEFAULT_CODEX_SANDBOX,
+            stage_timeout=stage_timeout,
+        )
+        manager.concentration.routine_model = args.routine_model
     if isinstance(manager.reviewer, AutomatedReviewer):
         manager.solo_reviewer = manager.reviewer
     elif manager.reviewer is not None:

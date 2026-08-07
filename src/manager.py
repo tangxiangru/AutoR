@@ -122,6 +122,7 @@ from .deliberation import (
     record_resolution,
 )
 from .effort import (
+    Concentration,
     DELIBERATIVE,
     EffortPlan,
     parse_declaration,
@@ -244,6 +245,10 @@ class ResearchManager:
         self.ideation_panel: IdeationPanel | None = None
         self.crux_panel: CruxPanel | None = None
         self.effort_plan = EffortPlan(enabled=False)
+        self.concentration = Concentration()
+        #: A cheaper operator for routine stages. The strong model stays for the few steps
+        #: whose output the rest of the run inherits.
+        self.routine_operator: OperatorProtocol | None = None
         #: A plain reviewer kept alongside a panel, so a routine stage can be gated cheaply.
         self.solo_reviewer: AutomatedReviewer | None = None
         self._crux_resolutions: list[Any] = []
@@ -808,6 +813,27 @@ class ResearchManager:
         except Exception as exc:  # noqa: BLE001 - measurement must not derail the stage
             append_log_entry(paths.logs, f"{stage.slug} anchored_revision_failed", str(exc))
 
+    def _evolution_applies(self, stage: StageSpec) -> bool:
+        """Whether this stage may spend polish rounds.
+
+        A polish round is a full stage execution — the most expensive thing the loop does. A
+        stage whose decisions are already made has nothing to polish toward, so withholding
+        the rounds there is what turns tiering from a label into a reallocation.
+        """
+        assert self.evolution is not None
+        if not self.evolution.config.applies_to(stage):
+            return False
+        if self.effort_plan.enabled and not self.concentration.polish_routine:
+            return not self.effort_plan.is_routine(stage)
+        return True
+
+    def _operator_for(self, stage: StageSpec) -> OperatorProtocol:
+        """The cheaper backend for routine work, the configured one for everything else."""
+        if self.routine_operator is not None and self.effort_plan.is_routine(stage):
+            self.concentration.note_cheap_model(stage.slug)
+            return self.routine_operator
+        return self.operator
+
     def _stage_after(self, stage: StageSpec) -> StageSpec | None:
         """The next stage in the fixed order, for the tier declaration to name."""
         return next((later for later in STAGES if later.number == stage.number + 1), None)
@@ -889,7 +915,7 @@ class ResearchManager:
                     f"{stage.slug} effort_declaration",
                     f"{following.slug}: {tier}" + (f" — {reason}" if reason else ""),
                 )
-            record_plan(paths, self.effort_plan)
+            record_plan(paths, self.effort_plan, self.concentration)
         except Exception as exc:  # noqa: BLE001 - tiering must never disturb an approval
             append_log_entry(paths.logs, f"{stage.slug} effort_failed", str(exc))
 
@@ -909,7 +935,7 @@ class ResearchManager:
                     f"{stage.slug} effort_promoted",
                     self.effort_plan.decision_for(stage).reason,
                 )
-            record_plan(paths, self.effort_plan)
+            record_plan(paths, self.effort_plan, self.concentration)
         except Exception as exc:  # noqa: BLE001
             append_log_entry(paths.logs, f"{stage.slug} effort_failed", str(exc))
 
@@ -1045,7 +1071,7 @@ class ResearchManager:
             prompt = self._build_stage_prompt(paths, stage, revision_feedback, continue_session)
             append_log_entry(paths.logs, f"{stage.slug} attempt {attempt_no} prompt", prompt)
 
-            result = self.operator.run_stage(stage, prompt, paths, attempt_no, continue_session=continue_session)
+            result = self._operator_for(stage).run_stage(stage, prompt, paths, attempt_no, continue_session=continue_session)
             append_log_entry(
                 paths.logs,
                 f"{stage.slug} attempt {attempt_no} result",
@@ -1329,7 +1355,7 @@ class ResearchManager:
             )
             append_log_entry(paths.logs, f"project_bootstrap attempt {attempt_no} prompt", prompt)
 
-            result = self.operator.run_stage(stage, prompt, paths, attempt_no, continue_session=continue_session)
+            result = self._operator_for(stage).run_stage(stage, prompt, paths, attempt_no, continue_session=continue_session)
             append_log_entry(
                 paths.logs,
                 f"project_bootstrap attempt {attempt_no} result",
@@ -1488,7 +1514,7 @@ class ResearchManager:
             prompt = self._build_bootstrap_prompt(paths, stage, corpus_prompt_section, revision_feedback, continue_session)
             append_log_entry(paths.logs, f"bootstrap attempt {attempt_no} prompt", prompt)
 
-            result = self.operator.run_stage(stage, prompt, paths, attempt_no, continue_session=continue_session)
+            result = self._operator_for(stage).run_stage(stage, prompt, paths, attempt_no, continue_session=continue_session)
             append_log_entry(
                 paths.logs,
                 f"bootstrap attempt {attempt_no} result",
@@ -1858,7 +1884,7 @@ class ResearchManager:
                 prompt,
             )
 
-            result = self.operator.run_stage(
+            result = self._operator_for(stage).run_stage(
                 stage,
                 prompt,
                 paths,
@@ -2071,7 +2097,8 @@ class ResearchManager:
                 continue
 
             # The draft is valid. Measure it, and decide whether it may stand.
-            if self.evolution is not None and self.evolution.config.applies_to(stage):
+            if self.evolution is not None and self._evolution_applies(stage):
+                self.concentration.note_round(self.effort_plan.tier_for(stage))
                 outcome = self.evolution.consider(
                     paths=paths,
                     stage=stage,

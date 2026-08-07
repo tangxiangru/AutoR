@@ -80,7 +80,7 @@ AutoR takes a different position: research is too important to hand over as a bl
 | Useful feature | **Divergent ideation panel** | `--ideation-panel` widens Stage 02 with proposers working from distinct lenses - mechanism, contrarian, adjacent field, null/artifact, regime - deduplicated and scored into a candidate pool the stage chooses from. It decides nothing, and reports when the extra proposers added nothing. |
 | Useful feature | **Anchored review comments** | A reviewer can quote the passage it objects to instead of refusing the whole stage. The revision is told to change only those spans, and is then diffed against them — so "preserve the correct parts" is measured rather than hoped for. |
 | Useful feature | **Selective deep thinking** | Most steps are execution. With `--deliberation` a stage that hits a genuine crux can stop, name the question, and pull in a panel of theorist / empiricist / critic / pragmatist plus an expert brief — then carry on with an answer that names its own falsifier. Budgeted, and measured against what the agent already believed. |
-| Useful feature | **Effort tiers** | `--effort-tiers` runs each stage as routine or deliberative rather than treating them alike — a lean prompt and a single reviewer where the decisions are already made, the full apparatus where something is genuinely undecided. Each stage sets the next one's tier, and a routine stage that keeps failing is promoted automatically. |
+| Useful feature | **Effort tiers** | `--effort-tiers` runs each stage as routine or deliberative rather than treating them alike — a lean prompt and a single reviewer where the decisions are already made, the full apparatus where something is genuinely undecided. Each stage sets the next one's tier, and a routine stage that keeps failing is promoted automatically. Polish rounds and the strong model are then concentrated on the deliberative steps rather than spread evenly. |
 | Useful feature | **Two output formats** | Stage 07 writes a benchmark-ready markdown report (`report/report.md` + PNG figures) by default, or a venue-aware LaTeX paper package with a compiled PDF via `--output-format latex`. |
 
 In practice, that means AutoR is useful not only because of the high-level framing, but also because it handles real research chores: literature organization, experiment manifests, citation verification, artifact indexing, manuscript packaging, and recoverable long-running workflows.
@@ -344,6 +344,7 @@ scope. "Make each one refutable" is advice about a gate that now exists.
 | Choose the execution backend and model | `python main.py --operator claude --model opus` or `python main.py --operator codex --model default` |
 =======
 | Spend effort unevenly across the loop | `python main.py --effort-tiers --goal "..."` |
+| Keep the strong model for the steps that matter | `python main.py --effort-tiers --model opus --routine-model sonnet --goal "..."` |
 | Choose the execution backend | `python main.py --operator claude` or `python main.py --operator codex` |
 >>>>>>> dd3d62c (Spend effort where the research needs it, not evenly)
 | Choose the reviewer backend separately | `python main.py --full-auto --review-operator claude --review-model opus` |

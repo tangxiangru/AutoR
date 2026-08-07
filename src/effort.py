@@ -52,6 +52,65 @@ PROMOTE_AFTER_FAILURES = 2
 
 LEDGER_FILENAME = "effort.json"
 
+
+@dataclass
+class Concentration:
+    """What each tier is actually given, once the tiers are known.
+
+    Tiering by itself only *labels* the steps that matter. This is the part that acts on the
+    label. The polish loop is the run's most expensive knob — :mod:`src.evolution` says so
+    itself, "each one is a full stage execution, so this is where the money goes" — and it was
+    being spread across all eight stages regardless. Cost on every step, benefit on a few.
+
+    Concentration is a reallocation rather than an increase: the same rounds, aimed only at the
+    stages that still have something to decide, and the cheaper model handed to the ones that
+    do not.
+    """
+
+    #: Polish rounds are withheld from routine stages entirely.
+    polish_routine: bool = False
+    #: Rounds actually spent, per tier, so the reallocation can be checked rather than assumed.
+    rounds_spent: dict[str, int] = field(default_factory=lambda: {ROUTINE: 0, DELIBERATIVE: 0})
+    #: Stages that ran on the cheaper model.
+    cheap_model_stages: list[str] = field(default_factory=list)
+    routine_model: str = ""
+
+    def note_round(self, tier: str) -> None:
+        self.rounds_spent[tier] = self.rounds_spent.get(tier, 0) + 1
+
+    def note_cheap_model(self, stage_slug: str) -> None:
+        if stage_slug not in self.cheap_model_stages:
+            self.cheap_model_stages.append(stage_slug)
+
+    def to_dict(self) -> dict[str, Any]:
+        spent = dict(self.rounds_spent)
+        total = sum(spent.values())
+        return {
+            "polish_withheld_from_routine": not self.polish_routine,
+            "polish_rounds_spent": spent,
+            "share_on_deliberative": (
+                round(spent.get(DELIBERATIVE, 0) / total, 2) if total else None
+            ),
+            "routine_model": self.routine_model,
+            "stages_on_the_cheaper_model": list(self.cheap_model_stages),
+            "verdict": self._verdict(spent, total),
+        }
+
+    @staticmethod
+    def _verdict(spent: dict[str, int], total: int) -> str:
+        if total == 0:
+            return "No polish rounds were spent, so nothing was concentrated."
+        leaked = spent.get(ROUTINE, 0)
+        if leaked:
+            return (
+                f"{total} polish round(s) spent, but {leaked} of them went to routine stages. "
+                "The expensive knob is still landing where the benefit does not."
+            )
+        return (
+            f"All {total} polish round(s) went to deliberative stages; routine stages spent "
+            "none."
+        )
+
 #: Where each stage starts when nothing has said otherwise.
 #:
 #: These are starting guesses about the *shape* of the work, not claims about any particular
@@ -226,9 +285,17 @@ def tier_notice(stage: StageSpec, tier: str, next_stage: StageSpec | None) -> st
 # ---------------------------------------------------------------------------
 
 
-def record_plan(paths: RunPaths, plan: EffortPlan) -> dict[str, Any]:
+def record_plan(
+    paths: RunPaths, plan: EffortPlan, concentration: "Concentration | None" = None
+) -> dict[str, Any]:
     decisions = [decision.to_dict() for decision in plan.decisions.values()]
-    payload = {"enabled": plan.enabled, "stages": decisions, "summary": summarize(plan)}
+    payload: dict[str, Any] = {
+        "enabled": plan.enabled,
+        "stages": decisions,
+        "summary": summarize(plan),
+    }
+    if concentration is not None:
+        payload["concentration"] = concentration.to_dict()
     paths.reviews_dir.mkdir(parents=True, exist_ok=True)
     write_text(paths.reviews_dir / LEDGER_FILENAME, json.dumps(payload, indent=2, ensure_ascii=False))
     return payload

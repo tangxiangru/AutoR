@@ -61,6 +61,50 @@ And a routine stage is told explicitly that if it discovers something is *not* s
 should say so under Open Questions rather than quietly deciding it alone. Running cheap is a
 claim about the work, and the stage doing the work is allowed to contradict it.
 
+## Concentrating the expensive knob
+
+Tiering by itself only *labels* the steps that matter. This is the part that acts on the label.
+
+The polish loop is the run's most expensive setting — [`src/evolution.py`](../src/evolution.py)
+says so itself: *"each one is a full stage execution, so this is where the money goes"* — and
+it was being spread across all eight stages regardless of whether a stage had anything left to
+decide. Cost on every step, benefit on a few.
+
+Under `--effort-tiers`:
+
+| Resource | routine | deliberative |
+| --- | --- | --- |
+| Polish rounds | **none** | all the configured rounds |
+| Model | `--routine-model` if given | the run's model |
+
+This is a **reallocation, not an increase**. The same rounds, aimed only at the stages that
+still have something to decide; the cheaper model handed to the ones that do not.
+
+```bash
+python main.py --effort-tiers --model opus --routine-model sonnet --goal "..."
+```
+
+A promotion moves the resources with it: a routine stage promoted after failing twice regains
+its polish rounds, because promotion is a statement that the work is harder than expected and
+a label that does not change what the stage gets is not worth making.
+
+### Did the concentration actually happen?
+
+`workspace/reviews/effort.json` gains a `concentration` block:
+
+```json
+{
+  "polish_withheld_from_routine": true,
+  "polish_rounds_spent": {"routine": 0, "deliberative": 5},
+  "share_on_deliberative": 1.0,
+  "stages_on_the_cheaper_model": ["04_implementation", "05_experimentation"],
+  "verdict": "All 5 polish round(s) went to deliberative stages; routine stages spent none."
+}
+```
+
+Spending nothing is not success either — a run with no polish rounds at all reports that
+nothing was concentrated, rather than claiming a perfect share of zero.
+
 ## Both directions of waste are recorded
 
 `workspace/reviews/effort.json`:
