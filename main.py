@@ -621,6 +621,7 @@ def create_reviewer(
             stage_timeout=stage_timeout,
             persona_text=persona_text,
             deliberation_rounds=deliberation_rounds,
+            unattended=unattended,
         )
     return AutomatedReviewer(
         backend_name,

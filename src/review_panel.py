@@ -511,6 +511,7 @@ class ReviewPanel:
         stage_timeout: int = 14400,
         persona_text: str = "",
         deliberation_rounds: int = 2,
+        unattended: bool = False,
     ) -> None:
         if not roles:
             raise ValueError("A review panel needs at least one role.")
@@ -521,6 +522,12 @@ class ReviewPanel:
         self.ui = ui or TerminalUI()
         self.persona_text = persona_text.strip()
         self.deliberation_rounds = max(1, deliberation_rounds)
+        # Passed down, and it was not. `create_reviewer` takes `unattended` and the
+        # panel branch discarded it, so every seat was built attended — while
+        # `--review-panel` alone makes `resolve_unattended` true and puts the manager
+        # in unattended mode. The gate was holding reviewers configured for a human
+        # who was not there.
+        self.unattended = unattended
         self._members: dict[str, AutomatedReviewer] = {
             role.key: AutomatedReviewer(
                 role.backend or backend_name,
@@ -528,6 +535,7 @@ class ReviewPanel:
                 fake_mode=fake_mode,
                 ui=self.ui,
                 stage_timeout=stage_timeout,
+                unattended=unattended,
             )
             for role in roles
         }
@@ -641,6 +649,9 @@ class ReviewPanel:
             self._calls += 1
             verdicts.append(
                 self._verdict_from_output(
+                    paths=paths,
+                    stage=stage,
+                    attempt_no=attempt_no,
                     role=role,
                     stage_markdown=stage_markdown,
                     member=member,
@@ -654,6 +665,9 @@ class ReviewPanel:
     def _verdict_from_output(
         self,
         *,
+        paths: RunPaths,
+        stage: StageSpec,
+        attempt_no: int,
         role: PanelRole,
         stage_markdown: str = "",
         member: AutomatedReviewer,
@@ -691,7 +705,14 @@ class ReviewPanel:
                 abstained=True,
             )
 
-        decision = member.parse_decision(stdout_text, markdown=stage_markdown)
+        decision = member.parse_with_retry(
+            paths=paths,
+            stage=stage,
+            attempt_no=attempt_no,
+            raw_response=stdout_text,
+            markdown=stage_markdown,
+            label=f"panel_{role.key}_verdict",
+        )
         blocking = bool(payload.get("blocking")) if isinstance(payload, dict) else False
         concerns: tuple[str, ...] = ()
         if isinstance(payload, dict) and isinstance(payload.get("concerns"), list):
@@ -780,7 +801,25 @@ class ReviewPanel:
                 reason=f"Panel chair could not be reached (exit code {exit_code}); "
                 "falling back to the panel's own objections.",
             )
-        return chair.parse_decision(stdout_text, markdown=stage_markdown)
+        # Through the same read-retry-fall-back path a solo reviewer uses. A bare
+        # parse here meant one unparseable synthesis cancelled the run, while an
+        # *unreachable* chair fell back to the panel's own objections — the softer
+        # failure got the harsher outcome, and the panel already encodes the rule it
+        # was breaking: `_round` marks an unreadable seat non-blocking precisely so
+        # one bad answer cannot veto.
+        return chair.parse_with_retry(
+            paths=paths,
+            stage=stage,
+            attempt_no=attempt_no,
+            raw_response=stdout_text,
+            markdown=stage_markdown,
+            label="panel_chair_verdict",
+            on_unreadable=lambda _raw: self._decision_from_dissent(
+                verdicts,
+                reason="The panel chair's verdict could not be read; falling back to the "
+                "panel's own objections.",
+            ),
+        )
 
     def _enforce_blocking_objections(self, deliberation: PanelDeliberation) -> ReviewDecision:
         """Refuse approval while a blocking objection stands.

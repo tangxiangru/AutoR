@@ -5,7 +5,7 @@ import re
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .operator import ClaudeOperator
 from .obligations import format_for_review_prompt, load_ledger
@@ -182,7 +182,38 @@ class AutomatedReviewer:
                 raw_response=stdout_text or stderr_text,
             )
 
-        decision = self._parse_decision(stdout_text, markdown=stage_markdown)
+        return self.parse_with_retry(
+            paths=paths,
+            stage=stage,
+            attempt_no=attempt_no,
+            raw_response=stdout_text,
+            markdown=stage_markdown,
+        )
+
+    def parse_with_retry(
+        self,
+        *,
+        paths: RunPaths,
+        stage: StageSpec,
+        attempt_no: int,
+        raw_response: str,
+        markdown: str = "",
+        label: str = "review_verdict",
+        on_unreadable: "Callable[[str], ReviewDecision] | None" = None,
+    ) -> ReviewDecision:
+        """Read a verdict, re-ask once if it cannot be read, then fall back.
+
+        Split out of :meth:`review_stage` so a deliberating panel's chair goes through
+        the same path. It did not: the chair's reply was parsed with a bare
+        `parse_decision`, so one unparseable synthesis cancelled the whole run —
+        `run_status: cancelled`, Stage 01 stuck in review — where the solo reviewer on
+        the identical reply retries and continues.
+
+        ``on_unreadable`` lets a caller supply a better fallback than this one. The
+        panel has an obvious one: the seats already stated their objections, so their
+        dissent is a more informative answer than a generic re-run request.
+        """
+        decision = self._parse_decision(raw_response, markdown=markdown)
         if not self._is_unreadable(decision):
             return decision
 
@@ -194,15 +225,17 @@ class AutomatedReviewer:
             paths=paths,
             stage=stage,
             attempt_no=attempt_no,
-            prompt=self._build_verdict_only_prompt(stage=stage, previous=stdout_text),
-            label="review_verdict",
+            prompt=self._build_verdict_only_prompt(stage=stage, previous=raw_response),
+            label=label,
         )
         if retry[0] == 0:
-            retried = self._parse_decision(retry[1], markdown=stage_markdown)
+            retried = self._parse_decision(retry[1], markdown=markdown)
             if not self._is_unreadable(retried):
                 return retried
 
-        return self._unreadable_verdict(stdout_text)
+        if on_unreadable is not None and self.unattended:
+            return on_unreadable(raw_response)
+        return self._unreadable_verdict(raw_response)
 
     @staticmethod
     def _is_unreadable(decision: ReviewDecision) -> bool:

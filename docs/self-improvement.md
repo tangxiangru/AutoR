@@ -330,6 +330,13 @@ thing.
 
 Three further refusals hold this together:
 
+- **A run that did not finish is not recorded at all.** A halted or aborted run
+  measured some stages and stopped, so its mean sits on an easier composition than a
+  run that finished.
+- **A move the run did not make is not recorded either.** A resume that starts
+  somewhere other than where the last closed visit was heading is an operator
+  overruling that move; it went off the router with no choice set, so it is marked
+  bypassed rather than counted as a traversal.
 - **Below `min_observations` on each side, nothing is acted on.** A variant that
   beat the incumbent once beat it once. Be aware this bound is a guard rather than
   a derivation: a two-sided permutation test over *n* per side attains at best

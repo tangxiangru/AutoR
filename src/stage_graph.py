@@ -207,7 +207,7 @@ def _guard_round_abandoned(paths: RunPaths, state: "GraphState") -> GuardResult:
     indistinguishable from a crash. The most scientifically honest outcome a run can
     reach was its most expensive and its worst-labelled.
     """
-    from .research_rounds import latest_round
+    from .research_rounds import unreopened_abandonment
 
     # Scoped to *this visit*, not to the run.
     #
@@ -229,13 +229,25 @@ def _guard_round_abandoned(paths: RunPaths, state: "GraphState") -> GuardResult:
     if not closed:
         return GuardResult(False, "this visit closed no research round")
 
-    final = latest_round(paths)
-    if final is not None and final.number == closed and final.decision == "abandon":
+    # The *ledger* question is "does an abandonment still stand", not "was the last
+    # round an abandonment". Asking the narrower one let the rollback the tool itself
+    # recommends launder it: abandon at round 1, `--resume-run --rollback-stage 03`,
+    # round 2 closes `converged`, and the terminal shuts because round 2 is not an
+    # abandonment. Measured: Stage 07 then burned 10 operator calls against a gate
+    # refusing it 20 times, and the run produced nothing.
+    #
+    # The *visit* gate stays. It exists so a visit that closed no round cannot be
+    # governed by the ledger at all; it was never meant to let a closing visit
+    # overrule a standing abandonment silently. Overruling one is legitimate and has
+    # its own spelling — `reopens_round` — which this reader honours.
+    standing = unreopened_abandonment(paths)
+    if standing is not None:
         return GuardResult(
             True,
-            f"round {final.number} concluded the question cannot be answered: {final.rationale}",
+            f"round {standing.number} concluded the question cannot be answered: "
+            f"{standing.rationale}",
         )
-    return GuardResult(False, f"round {closed} did not conclude `abandon`")
+    return GuardResult(False, "no abandonment stands")
 
 
 def _guard_has_hypotheses(paths: RunPaths, state: "GraphState") -> GuardResult:
