@@ -63,6 +63,7 @@ from src.rigor import DEFAULT_LEVEL, LEVELS, feature_flags  # noqa: E402
 from src.rigor import help_text as rigor_help_text  # noqa: E402
 from src.rigor import resolve as resolve_rigor  # noqa: E402
 from src.utils import (  # noqa: E402
+    BENCHMARK_MIN_REPORT_FIGURES,
     DEFAULT_OUTPUT_FORMAT,
     DEFAULT_VENUE,
     OUTPUT_FORMAT_CLI_CHOICES,
@@ -559,6 +560,11 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
         # convenience — it would turn a compliant benchmark run, whose results and figures
         # live outside the run tree by contract, into three false refusals.
         artifact_roots=[workspace],
+        # The benchmark's own instructions ask every agent for "data overview, main results,
+        # and validation/comparison plots" -- three distinct questions -- and 27 of its 40
+        # tasks carry two or more image criteria. A one-figure report clears AutoR's ordinary
+        # gate while forfeiting criteria it never addressed.
+        min_report_figures=BENCHMARK_MIN_REPORT_FIGURES,
         cross_reviewer=resolve_cross_reviewer(args.cross_review, args.cross_review_model),
     )
 
