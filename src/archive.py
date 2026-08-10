@@ -57,7 +57,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
-from .evolution import load_run_fitness
+from .evolution import load_run_criteria, load_run_fitness
 from .router import routing_summary
 from .rubric import RUBRIC_VERSION
 from .stage_graph import Edge, StageGraph
@@ -112,6 +112,32 @@ def comparability_basis(
 
 
 @dataclass(frozen=True)
+class TrialTag:
+    """Identifies one arm of a paired trial.
+
+    All three are required together. A ``trial_id`` with no ``capability`` cannot be
+    grouped with anything, and an ``arm`` with no ``trial_id`` is a label on a run
+    nobody can pair — both would look like data and be none.
+    """
+
+    trial_id: str
+    capability: str
+    arm: str
+
+    @classmethod
+    def build(cls, trial_id: str, capability: str, arm: str) -> "TrialTag":
+        values = {"--trial": trial_id, "--capability": capability, "--arm": arm}
+        missing = [flag for flag, value in values.items() if not str(value or "").strip()]
+        if missing:
+            raise ValueError(
+                "A paired trial needs all of --trial, --capability and --arm; missing "
+                + ", ".join(missing)
+                + ". A run tagged with only some of them cannot be paired with anything."
+            )
+        return cls(trial_id.strip(), capability.strip(), arm.strip())
+
+
+@dataclass(frozen=True)
 class RunRecord:
     run_id: str
     variant_id: str
@@ -141,6 +167,22 @@ class RunRecord:
     #: the traversals the estimator counted.
     bypassed: int
     recorded_at: str
+    #: Mean score per rubric criterion. Not used for ranking — the total is — but a
+    #: difference between two configurations is uninterpretable without it: writing
+    #: more files and grounding more claims move the same total and are not the same
+    #: result. See :mod:`src.trials`.
+    #:
+    #: Defaulted, unlike `provenance`. An empty decomposition is the honest reading
+    #: of a record written before it existed; an empty provenance is not "live".
+    criterion_fitness: dict[str, float] = field(default_factory=dict)
+    #: Set when this run is one arm of a paired trial. Empty otherwise. The pairing
+    #: is what removes goal difficulty — the confound that makes the observational
+    #: estimator need more runs than anyone will do.
+    trial_id: str = ""
+    #: What the trial is testing, e.g. `effort_tiers`. Runs pair only within one.
+    capability: str = ""
+    #: Which side of the pair, e.g. `off` / `on`.
+    arm: str = ""
 
     @property
     def mean_fitness(self) -> float:
@@ -175,6 +217,10 @@ class RunRecord:
             "rubric_version": self.rubric_version,
             "edges": dict(self.edges),
             "stage_fitness": dict(self.stage_fitness),
+            "criterion_fitness": dict(self.criterion_fitness),
+            "trial_id": self.trial_id,
+            "capability": self.capability,
+            "arm": self.arm,
             "topology": self.topology,
             "provenance": self.provenance,
             "mean_fitness": round(self.mean_fitness, 4),
@@ -201,6 +247,14 @@ class RunRecord:
             # A row written before these existed knows neither, and must not be
             # assumed into either: an unknown topology forms its own basis, and an
             # unknown provenance is not `live`.
+            criterion_fitness={
+                str(k): float(v)
+                for k, v in (payload.get("criterion_fitness") or {}).items()
+                if isinstance(v, (int, float))
+            },
+            trial_id=str(payload.get("trial_id") or ""),
+            capability=str(payload.get("capability") or ""),
+            arm=str(payload.get("arm") or ""),
             topology=str(payload.get("topology") or ""),
             provenance=str(payload.get("provenance") or "unknown"),
             route=str(payload.get("route") or ""),
@@ -474,6 +528,7 @@ class Archive:
         *,
         variant_id: str = "baseline",
         provenance: str = "live",
+        trial: "TrialTag | None" = None,
     ) -> RunRecord | None:
         """Append a finished run's route and fitness. Returns ``None`` if unmeasured.
 
@@ -492,6 +547,10 @@ class Archive:
             rubric_version=RUBRIC_VERSION,
             edges={str(k): int(v) for k, v in (summary.get("edges") or {}).items()},
             stage_fitness=fitness,
+            criterion_fitness=load_run_criteria(paths),
+            trial_id=trial.trial_id if trial else "",
+            capability=trial.capability if trial else "",
+            arm=trial.arm if trial else "",
             topology=str(load_run_config(paths).get("stage_graph") or ""),
             provenance=provenance,
             route=str(summary.get("route") or ""),

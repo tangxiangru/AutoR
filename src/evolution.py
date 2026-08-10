@@ -671,6 +671,41 @@ def _read_json(path: Path) -> Any:
         return None
 
 
+def load_run_criteria(paths: RunPaths) -> dict[str, float]:
+    """Mean score per rubric criterion across the stages that measured it.
+
+    The per-stage total is what the archive ranks on; this is what makes a
+    difference *interpretable*. A capability that raises the total by writing more
+    files and a capability that raises it by grounding more claims are the same
+    number and completely different results, and only the decomposition tells them
+    apart. See :mod:`src.trials`.
+
+    Averaged over the stages where a criterion applied, not over all eight:
+    ``numeric_fidelity`` starts at Stage 05, and counting the earlier stages as
+    zeroes would make it look like every run fails it.
+    """
+    payload = _read_json(paths.evolution_dir / "summary.json")
+    if not isinstance(payload, Mapping):
+        return {}
+    if str(payload.get("rubric_version") or "") != RUBRIC_VERSION:
+        return {}
+    stages = payload.get("stages")
+    if not isinstance(stages, Mapping):
+        return {}
+    collected: dict[str, list[float]] = {}
+    for entry in stages.values():
+        if not isinstance(entry, Mapping):
+            continue
+        for item in entry.get("criteria", []):
+            if not isinstance(item, Mapping):
+                continue
+            key = str(item.get("key") or "").strip()
+            score = item.get("score")
+            if key and isinstance(score, (int, float)):
+                collected.setdefault(key, []).append(float(score))
+    return {key: sum(values) / len(values) for key, values in collected.items()}
+
+
 def load_run_fitness(paths: RunPaths) -> dict[str, float]:
     """Per-stage champion totals for a finished run, for the cross-run archive.
 

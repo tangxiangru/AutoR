@@ -466,6 +466,10 @@ class ResearchManager:
         state = load_graph_state(
             paths, max_steps=self.graph_max_steps, max_visits=self.graph_max_visits
         )
+        # A new walk has not halted. Without this the reason a *previous* invocation
+        # stopped survives into this one, and the run that recovers from a halt is
+        # reported as the run that halted.
+        state.halted_because, state.halted_kind = "", ""
         stage: StageSpec | None = entry
 
         while stage is not None:
@@ -473,6 +477,7 @@ class ResearchManager:
                 state.halted_because = (
                     f"the run reached the {state.max_steps}-step limit for this graph"
                 )
+                state.halted_kind = "steps"
                 save_graph_state(paths, state)
                 self.ui.show_status(state.halted_because, level="warn")
                 break
@@ -538,7 +543,17 @@ class ResearchManager:
         history and is not an abandoned run, and the status it ends with decides how
         every downstream reader treats it.
         """
-        if state is None or not state.path:
+        if state is None:
+            # No walk happened at all, which is what a refused resume looks like.
+            # Falling through to `completed` here relabelled an abandoned run as a
+            # finished one — `run_status` went `abandoned` -> `completed` while
+            # Stages 07 and 08 stayed pending and no report existed.
+            #
+            # The ledger is the right fallback precisely here: a laundered
+            # abandonment is already excluded by `unreopened_abandonment`, so what is
+            # left is a standing one.
+            return unreopened_abandonment(paths)
+        if not state.path:
             return None
         last = state.path[-1]
         if last.chose != GRAPH_FINISH or not last.closed_round:
@@ -556,6 +571,38 @@ class ResearchManager:
         # `completed` and `cancelled` are both wrong, and `cancelled` is the worse
         # of the two: it is what an abort writes, so the honest outcome would be
         # indistinguishable from a crash in every downstream reader.
+        # A run that stopped because a budget ran out did not finish, and saying it
+        # did is the worst available outcome: `run_status` reads `completed`, the exit
+        # code is 0, the log says "All stages approved", and four stages never ran.
+        # Anything checking either would score an empty run as a success.
+        #
+        # `pruned` is excluded on purpose. That is `--final-stage`, where stopping is
+        # exactly what the caller asked for.
+        halted = state.halted_kind if state is not None else ""
+        if halted in {"steps", "visits", "guard", "none"}:
+            unsettled = [
+                entry.slug for entry in ensure_run_manifest(paths).stages if not entry.settled
+            ]
+            append_log_entry(
+                paths.logs,
+                "run_halted",
+                f"{state.halted_because}\nRoute: {route}\nNot produced: "
+                + (", ".join(unsettled) or "nothing"),
+            )
+            update_manifest_run_status(
+                paths,
+                run_status="halted",
+                last_event="run.halted",
+                current_stage_slug=None,
+            )
+            self.ui.show_status(f"Run stopped early: {state.halted_because}", level="error")
+            self._print(
+                "Run stopped early and did not produce: "
+                + (", ".join(unsettled) or "nothing")
+                + ". Raise the budget and resume: --resume-run latest --graph-max-steps N."
+            )
+            return False
+
         abandoned = self._run_was_abandoned(paths, state)
         if abandoned is not None:
             append_log_entry(

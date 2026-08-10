@@ -529,6 +529,15 @@ class GraphState:
     max_visits: int = DEFAULT_MAX_VISITS
     #: Set when the walk stopped for a reason other than reaching ``finish``.
     halted_because: str = ""
+    #: Which kind of stop it was, from :data:`BLOCK_KINDS`, or ``"none"`` when the
+    #: node simply had no edge.
+    #:
+    #: The reason alone was not enough, and being a string nobody could branch on is
+    #: why it went unread: `--final-stage` stopping a run is the caller getting what
+    #: they asked for, and a step budget stopping one is a run that did not finish.
+    #: Both wrote a sentence into ``halted_because`` and both came out of
+    #: ``_complete_run`` as "All stages approved."
+    halted_kind: str = ""
 
     @property
     def steps(self) -> int:
@@ -551,6 +560,7 @@ class GraphState:
             "max_steps": self.max_steps,
             "max_visits": self.max_visits,
             "halted_because": self.halted_because,
+            "halted_kind": self.halted_kind,
             "route": " -> ".join(visit.stage for visit in self.path),
         }
 
@@ -561,6 +571,7 @@ class GraphState:
             max_steps=int(payload.get("max_steps") or DEFAULT_MAX_STEPS),
             max_visits=int(payload.get("max_visits") or DEFAULT_MAX_VISITS),
             halted_because=str(payload.get("halted_because") or ""),
+            halted_kind=str(payload.get("halted_kind") or ""),
         )
 
 

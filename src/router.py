@@ -119,13 +119,32 @@ class StageRouter:
 
         if default is None:
             # Nothing is open. That is a real answer at Stage 08 and a halt anywhere
-            # else; either way the walk stops, and the state records which it was.
-            state.halted_because = (
-                ""
-                if stage.slug == "08_dissemination"
-                else f"no move out of {stage.slug} is available: "
-                + "; ".join(move.blocked_because for move in moves) or "the graph has no edge here"
-            )
+            # else; either way the walk stops, and the state records which it was —
+            # and *which kind* it was, because the caller's own `--final-stage` and a
+            # spent step budget are not the same event and only one of them means the
+            # run finished.
+            # Read off the *advance* edge, not every forward one. A conditional
+            # terminal is shut on every run that did not meet its condition — the
+            # abandonment edge is `guard`-blocked on essentially all of them — so
+            # including terminals made "guard" the answer at Stage 06 always, and
+            # `--final-stage 06` came out as a halt when it is the caller getting
+            # exactly what they asked for.
+            #
+            # A merely guard-blocked advance cannot reach here anyway:
+            # `default_move` takes it as a last resort rather than returning None.
+            advances = [move for move in moves if move.edge.kind == "advance"]
+            kinds = {move.blocked_kind for move in advances if move.blocked_kind}
+            if stage.slug == "08_dissemination":
+                state.halted_because, state.halted_kind = "", ""
+            else:
+                state.halted_because = (
+                    f"no move out of {stage.slug} is available: "
+                    + "; ".join(move.blocked_because for move in moves)
+                ) or "the graph has no edge here"
+                state.halted_kind = next(
+                    (kind for kind in ("steps", "visits", "pruned", "guard") if kind in kinds),
+                    "none",
+                )
             return RoutingDecision(
                 FINISH, "finish", "No further move is available.", FINISH, False,
                 offered=offered, blocked=blocked,

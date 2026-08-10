@@ -32,6 +32,18 @@ STAGE_06 = next(stage for stage in STAGES if stage.slug == "06_analysis")
 STAGE_07 = next(stage for stage in STAGES if stage.slug == "07_writing")
 
 
+class NeverRunsOperator(ScriptedSmokeOperator):
+    """Fails loudly if the walk starts a stage.
+
+    Used where the assertion *is* that no stage runs. A resume that refuses has
+    nothing to execute, and a passing test that merely checked the status afterwards
+    would still pass if the walk quietly re-ran everything.
+    """
+
+    def run_stage(self, *args, **kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("the walk started a stage on a run that had nothing to resume")
+
+
 def _advance(stage) -> RoutingDecision:
     """The forward move, scripted. Keeps a walk test deterministic.
 
@@ -61,14 +73,19 @@ class GraphWalkTests(unittest.TestCase):
         )
         return operator, manager
 
-    def drive(self, manager: ResearchManager, goal: str = "Walk the stage graph.") -> bool:
+    def drive(
+        self,
+        manager: ResearchManager,
+        goal: str = "Walk the stage graph.",
+        **kwargs,
+    ) -> bool:
         stack = ExitStack()
         stack.enter_context(patch.object(manager.ui, "choose_intake_clarification_answer", return_value=None))
         stack.enter_context(patch.object(manager.ui, "read_optional_multiline_feedback", return_value=None))
         stack.enter_context(patch.object(manager.ui, "choose_intake_final_action", return_value="5"))
         stack.enter_context(patch.object(manager, "_ask_choice", return_value="5"))
         with stack:
-            return manager.run(goal, venue="neurips_2025")
+            return manager.run(goal, venue="neurips_2025", **kwargs)
 
     def only_run(self):
         roots = sorted(path for path in self.runs_dir.iterdir() if path.is_dir())
@@ -258,6 +275,90 @@ class GraphWalkTests(unittest.TestCase):
         self.assertEqual(bypassed[0].chose, STAGE_05.slug)
         self.assertEqual(bypassed[0].offered, ())
         self.assertTrue(all(not v.bypassed for v in path if v is not bypassed[0]))
+
+    # -- a run that did not finish must not report that it did ---------------
+
+    def test_a_budget_halt_is_not_a_completed_run(self) -> None:
+        """The worst available outcome, and what it looked like.
+
+        `--graph-max-steps 4` produced: exit code 0, `run_status: completed`,
+        `last_event: run.completed`, the log line "All stages approved. Run
+        complete." — and Stages 05 through 08 never ran. Anything checking the exit
+        code or the status would score an empty run as a success, and
+        `state.halted_because` was set the whole time and read by nothing.
+        """
+        _operator, manager = self.build(graph_max_steps=4)
+        completed = self.drive(manager)
+
+        paths = self.only_run()
+        manifest = load_run_manifest(paths.run_manifest)
+        self.assertFalse(completed)
+        self.assertEqual(manifest.run_status, "halted")
+        self.assertEqual(manifest.last_event, "run.halted")
+        self.assertTrue(
+            [entry.slug for entry in manifest.stages if not entry.settled],
+            msg="a halt that settled every stage is not the case this is about",
+        )
+        state = load_graph_state(paths)
+        self.assertEqual(state.halted_kind, "steps")
+
+    def test_final_stage_is_a_completed_run_not_a_halt(self) -> None:
+        """The control. `--final-stage` also ends the walk with moves unavailable,
+        and it is the caller getting exactly what they asked for.
+
+        The distinction is easy to lose: the abandonment terminal is guard-blocked on
+        every run that did not abandon, so reading the halt kind off *every* forward
+        edge made `guard` the answer at Stage 06 always, and `--final-stage 06` came
+        out as a failure. It is read off the advance edge alone.
+        """
+        stage_06 = next(stage for stage in STAGES if stage.number == 6)
+        _operator, manager = self.build()
+        self.assertTrue(self.drive(manager, final_stage=stage_06))
+
+        paths = self.only_run()
+        self.assertEqual(load_run_manifest(paths.run_manifest).run_status, "completed")
+        self.assertEqual(load_graph_state(paths).halted_kind, "pruned")
+
+    def test_resuming_an_abandoned_run_does_not_relabel_it_completed(self) -> None:
+        """A refused resume ran no walk, and `_complete_run` read the walk.
+
+        So the resume printed "Nothing to resume", fell through, and wrote
+        `run_status: completed` over `abandoned` — with Stages 07 and 08 still
+        pending and no report on disk. `operator=None` is the assertion that no walk
+        starts: if one did, this raises rather than quietly passing.
+        """
+        _operator, manager = self.build()
+        self._abandon_at_analysis(manager)
+        self.drive(manager)
+        paths = self.only_run()
+        self.assertEqual(load_run_manifest(paths.run_manifest).run_status, "abandoned")
+
+        resumed = ResearchManager(
+            project_root=REPO_ROOT,
+            runs_dir=self.runs_dir,
+            operator=NeverRunsOperator(),
+            output_stream=io.StringIO(),
+        )
+        self.assertTrue(resumed.resume_run(paths.run_root))
+
+        manifest = load_run_manifest(paths.run_manifest)
+        self.assertEqual(manifest.run_status, "abandoned")
+        self.assertEqual(manifest.last_event, "run.abandoned")
+
+    def test_resuming_an_ordinary_finished_run_still_reports_completed(self) -> None:
+        """The control for the one above, so the fallback cannot over-broaden."""
+        _operator, manager = self.build()
+        self.assertTrue(self.drive(manager))
+        paths = self.only_run()
+
+        resumed = ResearchManager(
+            project_root=REPO_ROOT,
+            runs_dir=self.runs_dir,
+            operator=NeverRunsOperator(),
+            output_stream=io.StringIO(),
+        )
+        self.assertTrue(resumed.resume_run(paths.run_root))
+        self.assertEqual(load_run_manifest(paths.run_manifest).run_status, "completed")
 
     # -- the checks have to be satisfiable -----------------------------------
 
