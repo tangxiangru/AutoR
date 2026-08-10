@@ -60,17 +60,25 @@ from typing import Any, Iterable, Mapping, Sequence
 from .evolution import load_run_criteria, load_run_fitness
 from .router import routing_summary
 from .rubric import RUBRIC_VERSION
-from .stage_graph import Edge, StageGraph
-from .utils import RunPaths, append_jsonl, load_run_config, read_text, write_text
+from .inference import ALPHA, minimum_arms_for
+from .stage_graph import REVISIT_EDGES, Edge, StageGraph
+from .utils import STAGES, RunPaths, append_jsonl, load_run_config, read_text, write_text
 
 
 ARCHIVE_VERSION = "1"
 
-#: Runs on each side of a comparison before an edge payoff is believed. Research
-#: runs vary for reasons that have nothing to do with the route — the goal, the
-#: data, the day. Three is not enough to be sure and is enough to stop acting on
-#: a single lucky run, which is the failure that matters here.
-DEFAULT_MIN_OBSERVATIONS = 3
+#: Observations each side of a comparison needs before it is believed.
+#:
+#: Derived, not chosen. An exact two-sided permutation test over arms of size *a*
+#: and *b* has ``C(a+b, a)`` labellings, so no result can go below ``2/C(a+b,a)``:
+#: three a side bottoms out at 0.10, and against the eighteen edges of the adaptive
+#: graph the corrected threshold is ``0.05/18 = 0.0028``, which needs six.
+#:
+#: The previous value was three, with a docstring saying "three is not enough to be
+#: sure and is enough to stop acting on a single lucky run" — a sentence about
+#: intent. The archive was licensing topology changes at a sample size where the
+#: arithmetic forbids the claim.
+DEFAULT_MIN_OBSERVATIONS = minimum_arms_for(ALPHA, family=len(REVISIT_EDGES) + len(STAGES))
 
 #: Mean fitness a challenger must beat the incumbent by. Roughly the size of one
 #: criterion moving a quarter of its range on a seven-criterion rubric; below that
@@ -167,6 +175,11 @@ class RunRecord:
     #: the traversals the estimator counted.
     bypassed: int
     recorded_at: str
+    #: Every routing decision, with the set it was chosen from. The unit the
+    #: `offered and declined` estimator works on — `edges` alone cannot say whether
+    #: a move was declined or was never on offer, and those are different
+    #: observations. See :mod:`src.decisions`.
+    decisions: "list[dict[str, object]]" = field(default_factory=list)
     #: Mean score per rubric criterion. Not used for ranking — the total is — but a
     #: difference between two configurations is uninterpretable without it: writing
     #: more files and grounding more claims move the same total and are not the same
@@ -229,6 +242,7 @@ class RunRecord:
             "revisits": self.revisits,
             "agent_directed": self.agent_directed,
             "bypassed": self.bypassed,
+            "decisions": [dict(item) for item in self.decisions],
             "recorded_at": self.recorded_at,
         }
 
@@ -262,6 +276,7 @@ class RunRecord:
             revisits=int(payload.get("revisits") or 0),
             agent_directed=int(payload.get("agent_directed") or 0),
             bypassed=int(payload.get("bypassed") or 0),
+            decisions=[dict(item) for item in payload.get("decisions", []) if isinstance(item, dict)],
             recorded_at=str(payload.get("recorded_at") or ""),
         )
 
@@ -558,6 +573,7 @@ class Archive:
             revisits=int(summary.get("revisits") or 0),
             agent_directed=int(summary.get("agent_directed") or 0),
             bypassed=int(summary.get("bypassed") or 0),
+            decisions=list(summary.get("decisions") or []),
             recorded_at=_now(),
         )
         append_jsonl(self.runs_file, record.to_dict())
@@ -643,10 +659,21 @@ class Archive:
         common answer and the right one. A proposer that always proposes converts an
         archive into a random walk.
         """
+        # The `offered and declined` contrast, not the run-level one. The old
+        # control arm pooled "the guard was shut", "--final-stage pruned it", "the
+        # visit budget was spent" and "this topology has no such edge" into one
+        # group, and only the absence of a *choice* is evidence about a choice.
+        # `edge_payoffs` is still computed and still printed by `report`, under a
+        # heading saying it is unadjusted — an operator should be able to see the
+        # two estimators disagree rather than have the conclusion change silently.
+        from .decisions import decisions_from, offered_payoffs
+
+        contrasts = offered_payoffs(decisions_from(self.runs()))
+        family = max(len(contrasts), 1)
         payoffs = [
             payoff
-            for payoff in edge_payoffs(self.runs()).values()
-            if payoff.believable(self.min_observations) and abs(payoff.delta) >= self.min_gain
+            for payoff in contrasts.values()
+            if payoff.test.believable(family=family) and abs(payoff.delta) >= self.min_gain
         ]
         if not payoffs:
             return None
@@ -686,10 +713,10 @@ class Archive:
             parent_id=parent.variant_id,
             generation=parent.generation + 1,
             note=(
-                f"`{best.edge}` {direction}: runs that took it averaged "
-                f"{best.taken_mean:.3f} over {best.taken_runs} run(s) against "
-                f"{best.skipped_mean:.3f} over {best.skipped_runs} that reached the same node "
-                f"and did not ({best.delta:+.3f})."
+                f"`{best.edge}` {direction}: decisions that took it averaged "
+                f"{best.taken_mean:.3f} over {best.taken_n} against "
+                f"{best.declined_mean:.3f} over {best.declined_n} that were offered it and "
+                f"declined ({best.delta:+.3f}; {best.test.describe(family=family)})."
             ),
             promoted=False,
             created_at=_now(),
@@ -878,12 +905,28 @@ class Archive:
                 )
             lines.append("")
 
+        from .decisions import decisions_from, format_offered_payoffs, offered_payoffs
+
+        contrasts = offered_payoffs(decisions_from(usable))
+        lines += [
+            "## Edge payoff — offered and declined",
+            "",
+            "The estimator the proposer acts on. Treatment is decisions that took the move; "
+            "control is decisions that were *offered* it and did not.",
+            "",
+            format_offered_payoffs(contrasts),
+            "",
+        ]
+
         payoffs = edge_payoffs(usable)
         if payoffs:
             lines += [
-                "## Edge payoff",
+                "## Edge payoff — unadjusted (not acted on)",
                 "",
-                "Runs that took the edge against runs that reached the same node and did not.",
+                "The older run-level contrast, kept and printed so the two can be seen to "
+                "disagree. Its control arm pools four states — the guard was shut, "
+                "`--final-stage` pruned the edge, the visit budget was spent, or the topology "
+                "never had it — and only one of those was a choice.",
                 "",
                 "| Edge | Took | Mean | Skipped | Mean | Delta | Believable |",
                 "| --- | --- | --- | --- | --- | --- | --- |",

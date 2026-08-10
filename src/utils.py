@@ -793,6 +793,14 @@ def build_prompt(
         "# Original User Request",
         user_request.strip(),
     ]
+    # Placed straight after the request it is derived from: what the task demands, and
+    # the artifact that will be checked against those demands. A run can be rigorous
+    # about the wrong question, and nothing else in the prompt notices.
+    from .deliverables import format_deliverables_for_prompt
+
+    deliverables_block = format_deliverables_for_prompt(user_request)
+    if deliverables_block:
+        sections.extend(["# What the Task Asks For", deliverables_block])
     if obligations_context:
         sections.extend(["# Obligations Carried Forward", obligations_context.strip()])
     if web_search_context:
@@ -877,6 +885,12 @@ def build_continuation_prompt(
     ]
     if web_search_context:
         sections.extend(["# Web Search Capability", web_search_context.strip()])
+    # A contract that only appears on the first attempt is one every retry can forget.
+    from .deliverables import format_deliverables_for_prompt
+
+    _deliverables = format_deliverables_for_prompt(read_text(paths.user_input))
+    if _deliverables:
+        sections.extend(["# What the Task Asks For", _deliverables])
     if intake_context_text:
         sections.extend([
             "# Intake Context (User-Provided Resources and Clarifications)",
@@ -1384,6 +1398,16 @@ def validate_stage_artifacts(
             for problem in validate_report_plan_coverage(
                 paths, [*(artifact_dirs or {}).get("figures", ())]
             )
+        )
+
+        # Rigour about the wrong question still fails the task. Everything above this
+        # measures how well the report was made; this measures whether it answered what
+        # was asked.
+        from .deliverables import validate_deliverables_coverage
+
+        problems.extend(
+            f"{stage.stage_title}: {problem}"
+            for problem in validate_deliverables_coverage(paths, read_text(paths.user_input))
         )
 
         if not (paths.artifacts_dir / "citation_verification.json").exists():

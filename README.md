@@ -81,6 +81,7 @@ AutoR takes a different position: research is too important to hand over as a bl
 | Useful feature | **Anchored review comments** | A reviewer can quote the passage it objects to instead of refusing the whole stage. The revision is told to change only those spans, and is then diffed against them — so "preserve the correct parts" is measured rather than hoped for. |
 | Useful feature | **Selective deep thinking** | Most steps are execution. With `--deliberation` a stage that hits a genuine crux can stop, name the question, and pull in a panel of theorist / empiricist / critic / pragmatist plus an expert brief — then carry on with an answer that names its own falsifier. Budgeted, and measured against what the agent already believed. |
 | Useful feature | **Effort tiers** | `--effort-tiers` runs each stage as routine or deliberative rather than treating them alike — a lean prompt and a single reviewer where the decisions are already made, the full apparatus where something is genuinely undecided. Each stage sets the next one's tier, and a routine stage that keeps failing is promoted automatically. Polish rounds and the strong model are then concentrated on the deliberative steps rather than spread evenly. |
+| Useful feature | **One dial** | `--rigor {fast,standard,thorough,max}` decides how much optional machinery a run uses, ordered by what each costs and what evidence there is for it. Individual switches remain as overrides in both directions. |
 | Useful feature | **Run scorecard** | Every optional feature measures itself; at the end of a run `workspace/reviews/scorecard.md` reads all of those ledgers together and says which ones earned their cost and which flags to turn off — keeping "could not be measured" separate from "changed nothing". |
 | Useful feature | **Two output formats** | Stage 07 writes a benchmark-ready markdown report (`report/report.md` + PNG figures) by default, or a venue-aware LaTeX paper package with a compiled PDF via `--output-format latex`. |
 
@@ -336,15 +337,12 @@ scope. "Make each one refutable" is advice about a gate that now exists.
 | Start with preloaded resources | `python main.py --goal "Your research goal here" --resources paper.pdf refs.bib data.csv` |
 | Run a local smoke test without a real agent backend | `python main.py --fake-operator --goal "Smoke test"` |
 | Run with the automated reviewer gate | `python main.py --full-auto --goal "Your research goal here"` |
-| Replace the single reviewer with a deliberating panel | `python main.py --review-panel --goal "..."` |
+| Choose how much optional machinery to run | `python main.py --rigor thorough --goal "..."` |
 | Give the panel a researcher persona to stand in for | `python main.py --review-panel --persona docs/persona-example.md --goal "..."` |
 | Seat the panel across different models | `python main.py --review-panel --panel-models pi=opus skeptic=codex:default --goal "..."` |
-| Widen Stage 02's hypotheses with a proposer panel | `python main.py --ideation-panel --goal "..."` |
-| Let a stage stop and think hard at a crux | `python main.py --deliberation --goal "..."` |
 <<<<<<< HEAD
 | Choose the execution backend and model | `python main.py --operator claude --model opus` or `python main.py --operator codex --model default` |
 =======
-| Spend effort unevenly across the loop | `python main.py --effort-tiers --goal "..."` |
 | Keep the strong model for the steps that matter | `python main.py --effort-tiers --model opus --routine-model sonnet --goal "..."` |
 | Choose the execution backend | `python main.py --operator claude` or `python main.py --operator codex` |
 >>>>>>> dd3d62c (Spend effort where the research needs it, not evenly)

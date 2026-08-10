@@ -137,6 +137,25 @@ The division of labour is the point:
   refused, recorded, and replaced by the default edge — which at every node is the
   forward one, so a refusal degrades to the old pipeline rather than to a stall.
 
+### A research round's decision goes through the router too
+
+`src/research_rounds.py` closes a round at Stage 06 with `converged`,
+`refine_design` (back to 03), `new_hypothesis` (back to 02) or `abandon`. The two
+backward decisions are edges the graph already has, and they used to reach them by
+setting `_jump_target_stage` — around the router entirely.
+
+That had two costs. The run's most consequential routing decisions arrived at the
+archive marked `bypassed` with no choice set, so the estimator excluded exactly the
+moves it most wanted to learn about. And the jump happened whatever the guards said.
+
+A closed round now *declares* an intent, and the router treats it as a proposal that
+outranks the backend — the round has already reasoned about the results and written
+its conclusion to disk, so asking again would be buying an opinion on a settled
+question. What it does not outrank is the guards. A refused intent falls to the
+forward edge and the round ledger records that it was not acted on, which it could
+not do before: `record_round` runs at approval, before the router has ruled, so the
+ledger could claim a round was acted on when its move was refused.
+
 Blocked moves are shown to the agent *with the reason they are blocked*. Hiding
 them is the more obvious design and it is the wrong one: an agent that can see
 "`07_writing` is closed because H2 has no verdict" routes to the analysis stage
@@ -265,10 +284,26 @@ A run that navigates its own topology produces something a linear pipeline never
 could: evidence about the topology. One run means nothing. Forty mean the backward
 edge out of Stage 06 is worth taking, and that is a fact about the harness.
 
-For each edge, the archive compares runs that took it against runs that **reached
-the same node and did not**. Comparing against the whole archive would credit the
-edge with the difference between runs that got as far as Stage 06 and runs that
-never did.
+For each edge, the archive compares decisions that took it against decisions that
+were **offered it and declined**.
+
+That distinction is the estimator. The obvious control arm — runs that reached the
+node and did not take the edge — pools four unrelated states: the guard was shut,
+`--final-stage` pruned the move, the visit budget was spent, or the topology never
+had the edge at all. Only the first kind of "did not" is a *choice*, and only a
+choice is evidence about a choice.
+
+It is not a fine distinction. Five of the seven guards read the same disk predicates
+the rubric scores, so a shut guard is correlated with a weak run. Pooling those into
+the control arm makes the guard a selection mechanism on the outcome, and the
+contrast then measures how much worse a run is when its artifacts are missing while
+reporting it as the payoff of an edge nobody could have taken. On a fixture where
+routing has no effect at all, the two arms give opposite signs.
+
+The choice set is recorded on every visit (`offered`), so "was declined" is a fact
+on disk rather than an inference. The older run-level contrast is still computed and
+still printed, under a heading saying it is not acted on, so the two can be seen to
+disagree.
 
 ```
 | Edge                            | Took | Mean  | Skipped | Mean  | Delta  | Believable |
@@ -337,12 +372,16 @@ Three further refusals hold this together:
   somewhere other than where the last closed visit was heading is an operator
   overruling that move; it went off the router with no choice set, so it is marked
   bypassed rather than counted as a traversal.
-- **Below `min_observations` on each side, nothing is acted on.** A variant that
-  beat the incumbent once beat it once. Be aware this bound is a guard rather than
-  a derivation: a two-sided permutation test over *n* per side attains at best
-  `2/C(2n,n)`, so `n=3` can reach `p=0.10` at best, and a family correction over 18
-  edges would demand far less. Three stops a single lucky run from moving the
-  topology; it does not license the claim.
+- **Below `min_observations` on each side, nothing is acted on — and that bound is
+  now derived.** An exact two-sided permutation test over arms of *a* and *b* has
+  `C(a+b,a)` labellings, so no result can go below `2/C(a+b,a)`. Three a side bottoms
+  out at `p = 0.10`; against the adaptive graph's edge family the corrected threshold
+  needs six. `minimum_arms_for` computes it. The previous value was three, with a
+  docstring about intent, which meant the archive was licensing topology changes at a
+  sample size where the arithmetic forbids the claim.
+- **A p-value is never reported without the floor its sample size could attain.**
+  *Did not show an effect* and *could not have shown one* print identically as "not
+  significant" and mean opposite things.
 - **A run is only compared against runs that walked the same topology, measured the
   same stages, and were driven by a real backend.** A fake operator's scores measure
   the script. A linear run never had the revisit edges, so counting it as one that
@@ -363,6 +402,37 @@ Three further refusals hold this together:
 Parents are sampled by fitness with a novelty bonus for under-observed variants.
 Pure fitness-proportional sampling locks onto whatever won first and stops
 generating the observations that would overturn it.
+
+### What the archive is allowed to do with what it learned
+
+Nothing, until `--archive-steer`. And then only this: **show the agent the numbers.**
+
+The learned value reached nothing before. Measured over 50 random priority
+assignments across all 8 nodes: 0/400 `default_move` answers change, 207/400 menu
+orderings do — `default_move` filters to forward edges and every node has exactly
+one, so a learned priority could only ever reorder rows in a table.
+
+Wiring the statistic into `default_move` was the obvious fix and three independent
+reviews refused it, for the same reason: it would put an unrandomised,
+guard-selected statistic in charge of what the run does at the moment a guard has
+just failed. The route taken instead is that the archive prints what earlier runs
+measured — the two means, the sample sizes, the p-value and the floor — into the
+routing prompt, and the agent decides. The agent can see this research question; the
+archive has only seen other ones.
+
+Three properties hold it:
+
+- **Only believable contrasts appear.** A row must clear the family-corrected
+  threshold *and* have been able to. Anything else is omitted rather than shown with
+  a caveat, because the caveat would not be read.
+- **Numbers, not a recommendation.** No sentence authored by the archive enters the
+  prompt, because there would be no gate that could fire on a wrong sentence.
+- **Nothing about admissibility depends on it.** Guards and `default_move` are
+  untouched, and a test asserts the live move set and the default are identical with
+  and without an archive that strongly prefers something else.
+
+A broken archive is a research aid that is unavailable, not a reason to fail a
+routing decision.
 
 ### Recording is on; steering is not
 

@@ -13,6 +13,7 @@ detail behind it.
 | Run AutoR unattended, or benchmark it on ResearchClawBench | [ResearchClawBench](researchclawbench.md) |
 | Understand what a run leaves on disk | [Run Artifacts](run-artifacts.md) |
 | Know exactly what a stage must produce to be accepted | [Stage Contract](stage-contract.md) |
+| Choose how much optional machinery a run uses | [Rigor](rigor.md) |
 | Replace the reviewer agent with a panel that argues before it decides | [Review Panel](review-panel.md) |
 | Send back one passage instead of the whole stage | [Anchored Review Comments](stage-comments.md) |
 | Widen Stage 02's hypotheses with a panel that proposes instead of deciding | [Ideation Panel](ideation-panel.md) |

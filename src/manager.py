@@ -57,6 +57,9 @@ from .prompt_fragments import compose_stage_template
 from .validity_review import ValidityReviewer, format_findings_for_prompt
 from .research_rounds import (
     ROUND_CLOSING_STAGE_NUMBER,
+    RoundIntent,
+    amend_last_round,
+    discard_pending_decision,
     Round,
     latest_round,
     unreopened_abandonment,
@@ -223,6 +226,7 @@ class ResearchManager:
         graph_max_steps: int | None = None,
         graph_max_visits: int | None = None,
         archive_steer: bool = False,
+        archive: "Any | None" = None,
         cross_reviewer: GeminiCrossReviewer | None = None,
     ) -> None:
         self.project_root = project_root
@@ -245,12 +249,17 @@ class ResearchManager:
         #: reads the visit rather than the run-global ledger, so this is what scopes
         #: it to the traversal that actually made the decision.
         self._closed_round: int = 0
+        #: What the round that just closed asked for, if it asked for anything. Read
+        #: by `_advance_from` and cleared on every stage entry.
+        self._round_intent: "RoundIntent | None" = None
         self._redo_start_stage: StageSpec | None = None
         self._research_diagram: bool = False
         self._final_stage: StageSpec | None = None
         self.ideation_panel: IdeationPanel | None = None
         self.crux_panel: CruxPanel | None = None
         self.effort_plan = EffortPlan(enabled=False)
+        #: The `--rigor` level this run was started with, recorded on the scorecard.
+        self.rigor_level: str = ""
         self.concentration = Concentration()
         #: A cheaper operator for routine stages. The strong model stays for the few steps
         #: whose output the rest of the run inherits.
@@ -304,6 +313,7 @@ class ResearchManager:
             operator=operator,
             mode=routing_mode,
             fake_mode=bool(getattr(operator, "fake_mode", False)),
+            archive=archive,
         )
         # Measuring is on unless a caller turns it off: scoring a draft and running
         # the ratchet spends no backend call, and the property it buys — the draft
@@ -511,6 +521,7 @@ class ResearchManager:
             self._jump_target_stage = None
             self._jump_reason = ""
             self._closed_round = 0
+            self._round_intent = None
             approved = self._run_stage(paths, stage)
 
             # Three things reach this seam: `/back <stage>`, a rollback after retry
@@ -708,6 +719,7 @@ class ResearchManager:
         if state.path:
             state.path[-1].closed_round = self._closed_round
 
+        intent = self._round_intent
         decision = self.router.choose(
             paths=paths,
             stage=stage,
@@ -715,7 +727,21 @@ class ResearchManager:
             state=state,
             score=score,
             final_stage=self._final_stage,
+            declared=(intent.target, intent.reason) if intent is not None else None,
         )
+        if intent is not None:
+            honoured = decision.target == intent.target
+            amend_last_round(
+                paths,
+                acted_on=honoured,
+                budget_note="" if honoured else (decision.refusal or "the move was not available"),
+            )
+            if not honoured:
+                self.ui.show_status(
+                    f"Round {intent.number} asked to go back to `{intent.target}` and could "
+                    f"not: {decision.refusal or 'the move was not available'}.",
+                    level="warn",
+                )
         graph_leave(
             paths,
             state,
@@ -744,10 +770,24 @@ class ResearchManager:
             # later stage's approved summary in memory describing work that the
             # revisit is about to replace.
             self._print(self._format_rollback_preview(paths, target))
-            rollback_to_stage(
+            reason = f"Graph revisit from {stage.slug}: {decision.reason}"
+            rollback_to_stage(paths, target, reason=reason)
+            # `_rollback_and_jump` did this and the router path did not, so moving
+            # the round decision onto the router would have silently dropped it. A
+            # rollback is the strongest evidence a review can produce — an approval
+            # already given turned out to be wrong — and standing rules from one are
+            # the highest-weight group in the approval prompt. Losing them would make
+            # the review gate get *easier* with each round, which is the inversion
+            # the round machinery exists to prevent.
+            record_correction(
                 paths,
-                target,
-                reason=f"Graph revisit from {stage.slug}: {decision.reason}",
+                stage=stage,
+                attempt_no=0,
+                text=(
+                    f"{stage.stage_title} was rolled back to {target.stage_title}. "
+                    f"Reason: {reason}"
+                ),
+                source="rollback",
             )
             return target
 
@@ -910,7 +950,7 @@ class ResearchManager:
         the reason one looks unfinished.
         """
         try:
-            scorecard = write_scorecard(paths)
+            scorecard = write_scorecard(paths, self.rigor_level)
         except Exception as exc:  # noqa: BLE001
             append_log_entry(paths.logs, "scorecard_failed", str(exc))
             return
@@ -3143,6 +3183,18 @@ class ResearchManager:
         reason: str,
         kind: str,
     ) -> bool:
+        # A skipped Stage 06 never reaches `record_round`, so its declaration is
+        # never consumed and never unlinked. Left on disk, the *next* Stage 06 closes
+        # its round from the previous visit's file — inheriting a conclusion drawn
+        # from results it did not produce.
+        if stage.number == ROUND_CLOSING_STAGE_NUMBER and discard_pending_decision(paths):
+            append_log_entry(
+                paths.logs,
+                f"{stage.slug} round_decision_discarded",
+                "The stage was skipped, so the round it declared never closed. The "
+                "declaration was dropped rather than left for the next visit to inherit.",
+            )
+
         final_stage_path = paths.stage_file(stage)
         rescued = self._validated_draft_for_skip(paths, stage) if kind == "auto" else None
         if rescued is not None:
@@ -3347,17 +3399,22 @@ class ResearchManager:
 
         target = next(item for item in STAGES if item.slug == resume_slug)
         self.ui.show_status(
-            f"Round {entry.number} chose {entry.decision}. Starting round {entry.number + 1} "
+            f"Round {entry.number} chose {entry.decision}. Asking for round {entry.number + 1} "
             f"from {target.stage_title}.",
             level="warn",
         )
-        self._rollback_and_jump(
-            paths=paths,
-            current_stage=stage,
-            target_stage=target,
-            reason=(
-                f"Round {entry.number} concluded {entry.decision}: {entry.rationale}"
-            ),
+        # Declared, not taken. `06->03` and `06->02` are edges the graph already has,
+        # and going around the router meant the run's most consequential routing
+        # decisions arrived at the archive as `bypassed` with no choice set — the
+        # exact observations `Visit.offered` exists to keep out of the estimator.
+        #
+        # It also means the move is now checked. `_rollback_and_jump` jumped whatever
+        # the guards said; a declared intent has to be admissible, and a refusal is
+        # recorded with its reason.
+        self._round_intent = RoundIntent(
+            target=target.slug,
+            reason=f"Round {entry.number} concluded {entry.decision}: {entry.rationale}",
+            number=entry.number,
         )
 
     def _run_validity_review(self, paths: RunPaths, stage: StageSpec, stage_markdown: str) -> None:

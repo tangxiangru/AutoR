@@ -17,6 +17,7 @@ from src.experiment_manifest import write_experiment_manifest
 from src.rcb import export_run
 from src.diagram_gen import inject_diagram_into_markdown
 from src.utils import (
+    read_text,
     DEFAULT_OUTPUT_FORMAT,
     DEFAULT_VENUE,
     OUTPUT_FORMAT_CHOICES,
@@ -211,6 +212,18 @@ class MarkdownStage07GateTests(unittest.TestCase):
         write_text(
             paths.artifacts_dir / "self_review.json",
             json.dumps({"overall_score": 8.5, "final_verdict": "ready", "rounds": 1}),
+        )
+
+        from src.deliverables import COVERAGE_FILENAME, demanding_sentences
+
+        _statement = read_text(paths.user_input)
+        write_text(
+            paths.artifacts_dir / COVERAGE_FILENAME,
+            json.dumps({"deliverables": [
+                {"task_quote": s, "addressed": False, "reason": "fixture does no research."}
+                for s in demanding_sentences(_statement)
+            ] or [{"task_quote": " ".join(_statement.split())[:120] or "goal",
+                   "addressed": False, "reason": "fixture does no research."}]}),
         )
         generate_report_review(paths)
 

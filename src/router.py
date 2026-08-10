@@ -90,12 +90,18 @@ class StageRouter:
         *,
         mode: str = "auto",
         fake_mode: bool = False,
+        archive: Any | None = None,
     ) -> None:
         if mode not in ROUTING_MODES:
             raise ValueError(f"Unknown routing mode: {mode!r}. Expected one of {', '.join(ROUTING_MODES)}.")
         self.mode = mode
         self.operator = operator
         self.fake_mode = fake_mode
+        # What the cross-run archive has learned, if the caller is willing to let it
+        # be *seen*. It reaches the agent as numbers in the prompt and nothing else:
+        # not `default_move`, not a guard, not a recommendation. The archive knows
+        # about other research questions; the agent can see this one.
+        self.archive = archive
 
     def choose(
         self,
@@ -106,6 +112,7 @@ class StageRouter:
         state: GraphState,
         score: StageScore | None = None,
         final_stage: StageSpec | None = None,
+        declared: tuple[str, str] | None = None,
     ) -> RoutingDecision:
         moves = graph.moves(paths, stage.slug, state, final_stage=final_stage)
         live = [move for move in moves if move.admissible]
@@ -113,7 +120,7 @@ class StageRouter:
         default_target = default.target if default is not None else FINISH
         # Computed here anyway; recorded rather than dropped. See `Visit.offered`.
         offered = tuple(sorted(move.target for move in live))
-        blocked = {
+        blocked_kinds = {
             move.target: move.blocked_kind for move in moves if move.blocked_kind
         }
 
@@ -147,7 +154,36 @@ class StageRouter:
                 )
             return RoutingDecision(
                 FINISH, "finish", "No further move is available.", FINISH, False,
-                offered=offered, blocked=blocked,
+                offered=offered, blocked=blocked_kinds,
+            )
+
+        # A closed research round's decision is a proposal like any other, and it
+        # outranks the backend: the round has already reasoned about the results and
+        # written its conclusion to disk, so asking a second time would be paying for
+        # an opinion on a settled question. What it does not outrank is the guards —
+        # `_rollback_and_jump` jumped regardless of them, and this does not.
+        if declared is not None:
+            target, reason = declared
+            chosen = next((move for move in live if move.edge.target == target), None)
+            if chosen is None:
+                unavailable = next((move for move in moves if move.edge.target == target), None)
+                detail = (
+                    f"the round asked for `{target}`: {unavailable.blocked_because}"
+                    if unavailable is not None
+                    else f"the round asked for `{target}`, which is not a move out of {stage.slug}"
+                )
+                return self._refuse(
+                    paths, stage, default, default_target, detail,
+                    offered=offered, blocked=blocked_kinds,
+                )
+            append_log_entry(
+                paths.logs,
+                f"{stage.slug} route_from_round",
+                f"target: {target}\nreason: {reason}",
+            )
+            return RoutingDecision(
+                target, chosen.edge.kind, reason, default_target, agent_directed=True,
+                offered=offered, blocked=blocked_kinds,
             )
 
         should_ask = self.mode == "agent" or (self.mode == "auto" and len(live) > 1)
@@ -159,7 +195,7 @@ class StageRouter:
                 default_target,
                 agent_directed=False,
                 offered=offered,
-                blocked=blocked,
+                blocked=blocked_kinds,
             )
 
         proposal = self._ask(paths=paths, stage=stage, moves=moves, state=state, score=score)
@@ -167,7 +203,7 @@ class StageRouter:
             return self._refuse(
                 paths, stage, default, default_target,
                 "the router produced no readable decision",
-                offered=offered, blocked=blocked,
+                offered=offered, blocked=blocked_kinds,
             )
 
         target = str(proposal.get("target") or "").strip()
@@ -182,14 +218,15 @@ class StageRouter:
                 else f"`{target}` is not a move out of {stage.slug}"
             )
             return self._refuse(
-                paths, stage, default, default_target, detail, offered=offered, blocked=blocked
+                paths, stage, default, default_target, detail, offered=offered,
+                blocked=blocked_kinds,
             )
 
         if not reason:
             return self._refuse(
                 paths, stage, default, default_target,
                 f"`{target}` was chosen with no stated reason",
-                offered=offered, blocked=blocked,
+                offered=offered, blocked=blocked_kinds,
             )
 
         if chosen.edge.kind == "revisit" and graph.repeats_a_previous_reason(state, target, reason):
@@ -197,7 +234,7 @@ class StageRouter:
                 paths, stage, default, default_target,
                 f"the run has already gone back to `{target}` for this same reason and it was not "
                 "resolved; going again on the same grounds is a loop, not an iteration",
-                offered=offered, blocked=blocked,
+                offered=offered, blocked=blocked_kinds,
             )
 
         append_log_entry(
@@ -207,7 +244,7 @@ class StageRouter:
         )
         return RoutingDecision(
             target, chosen.edge.kind, reason, default_target, agent_directed=True,
-            offered=offered, blocked=blocked,
+            offered=offered, blocked=blocked_kinds,
         )
 
     # -- refusal -------------------------------------------------------------
@@ -285,6 +322,29 @@ class StageRouter:
             return None
         return extract_json_payload(stdout_text)
 
+    def _archive_evidence(self, source: str, targets: list[str]) -> str:
+        """What the archive can show about the moves on this menu, or nothing.
+
+        Best-effort. A archive that cannot be read is a research aid that is
+        unavailable, not a reason to fail a routing decision.
+        """
+        if self.archive is None or not targets:
+            return ""
+        try:
+            from .decisions import (
+                believable_evidence,
+                decisions_from,
+                format_evidence_for_prompt,
+                offered_payoffs,
+            )
+
+            payoffs = offered_payoffs(decisions_from(self.archive.runs()))
+            live = believable_evidence(payoffs, targets, source)
+            return format_evidence_for_prompt(live, max(len(payoffs), 1))
+        except Exception:  # noqa: BLE001 - never fail a route over a report
+            return ""
+
+
     def build_prompt(
         self,
         *,
@@ -339,6 +399,10 @@ class StageRouter:
         if score is not None:
             sections += ["", "## Measured standing of the stage you just finished", "",
                          format_score_for_prompt(score)]
+
+        evidence = self._archive_evidence(stage.slug, [move.target for move in moves if move.admissible])
+        if evidence:
+            sections += ["", evidence]
 
         sections += [
             "",
@@ -422,6 +486,10 @@ def routing_summary(paths: RunPaths) -> dict[str, Any]:
     if not isinstance(payload, dict):
         return {}
     edges: dict[str, int] = {}
+    # The same walk, kept per decision rather than summed per edge. `edges` cannot
+    # distinguish "declined" from "never offered", and those are different
+    # observations — see :mod:`src.decisions`.
+    decisions: list[dict[str, object]] = []
     agent_directed = 0
     revisits = 0
     bypassed = 0
@@ -436,11 +504,20 @@ def routing_summary(paths: RunPaths) -> dict[str, Any]:
         if visit.get("bypassed"):
             bypassed += 1
             continue
+        decisions.append(
+            {
+                "source": source,
+                "chose": target,
+                "offered": [str(item) for item in visit.get("offered", []) if str(item)],
+                "agent_directed": bool(visit.get("agent_directed")),
+            }
+        )
         edges[f"{source}->{target}"] = edges.get(f"{source}->{target}", 0) + 1
         if visit.get("agent_directed"):
             agent_directed += 1
     return {
         "edges": edges,
+        "decisions": decisions,
         "steps": len(payload.get("path", [])),
         "agent_directed": agent_directed,
         "revisits": revisits,
