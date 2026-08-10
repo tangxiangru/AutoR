@@ -61,6 +61,7 @@ from .utils import (
     extract_markdown_image_targets,
     read_text,
     resolve_output_format,
+    resolve_report_image,
     truncate_text,
     write_text,
 )
@@ -240,6 +241,42 @@ def build_benchmark_goal(
         else "Write this file during Stage 07 (Writing) at the latest, in addition to the "
         "normal LaTeX paper package. Do not defer it to the end of the run."
     )
+    # Every benchmark-specific number AutoR ships lives in this block and nowhere else. The
+    # figure count is derived from MAX_REPORT_FIGURES rather than typed, and the other three
+    # are properties of ResearchClawBench's scorer that no AutoR constant should encode: they
+    # would be wrong for any run that is not this benchmark. Re-measured 2026-08-10 over the
+    # 40 shipped `tasks/*/target_study/checklist.json` and `evaluation/score.py`; the rule for
+    # reproducing them is in docs/researchclawbench.md.
+    #
+    # None of this is a checklist item. The run is being told the shape of the exam — a
+    # report, figures carrying most of it, a fixed handful of image slots, a truncated
+    # excerpt — which is not the answers, and the checklist is not in the workspace at all.
+    scoring_block = (
+        "The judge scores this report against a checklist built from the original paper, and "
+        "most of that checklist is images: across the benchmark's 40 shipped tasks, image "
+        "criteria carry about 61% of the total weight. The figures are the larger half of the "
+        "score, which makes them something to plan rather than something to produce.\n\n"
+        f"- **One fixed set of at most {MAX_REPORT_FIGURES} images is shown against every image "
+        "criterion.** It is collected once from the whole workspace, not chosen per criterion, "
+        f"so figure number {MAX_REPORT_FIGURES + 1} buys no extra coverage: it is never seen, "
+        f"and it randomises which {MAX_REPORT_FIGURES} are.\n"
+        f"- No shipped task has more than {MAX_REPORT_FIGURES} image criteria, and most have "
+        "three or fewer. That is a ceiling, not a target. What earns the weight is each "
+        "figure settling a different question the task statement asks; several views of one "
+        "result spend the whole budget on one criterion.\n"
+        "- Image criteria are shown only the **first ~10,000 characters** of the report. The "
+        "headline numbers, the results and the figure captions have to come before anything "
+        "long, or the criteria carrying most of the weight never reach them. This is an "
+        "*ordering* constraint, not a length limit: the text criteria that carry the rest of "
+        "the score read the whole report, so do not truncate the methodology or the "
+        "discussion to fit — put them after the results instead.\n"
+        f"- **No image belongs anywhere under `{resolved}` except `report/images/`.** The "
+        "scorer sweeps `outputs/` before `report/`, and `report/` in full — not just "
+        "`report/images/` — so one diagnostic plot in either place takes a slot from a "
+        "figure the report argues with. AutoR deletes images under `outputs/` and every "
+        "unreferenced image under `report/` when it exports, so a plot saved outside "
+        "`report/images/` is lost rather than merely unhelpful."
+    )
     return "\n\n".join(
         [
             "# Benchmark Run: ResearchClawBench",
@@ -269,9 +306,13 @@ def build_benchmark_goal(
                 "to the report itself, for example `![Result](images/main_result.png)` — never "
                 "with absolute paths. Report concrete numbers, not adjectives; the judge compares "
                 "your results against the original paper's and is explicitly sceptical of "
-                "plausible-sounding claims with no evidence behind them. Length is not rewarded.\n\n"
+                "plausible-sounding claims with no evidence behind them. Length is not rewarded, "
+                "and the criteria that carry most of the score stop reading at roughly 10,000 "
+                "characters — order the report accordingly, see below.\n\n"
                 f"{report_instruction}"
             ),
+            "## How This Report Is Scored",
+            scoring_block,
             reference_block,
             "## Research Task",
             instructions.strip(),
@@ -346,7 +387,9 @@ def mirror_tree(source: Path, destination: Path, *, skip_suffixes: frozenset[str
     return copied
 
 
-def _figure_candidates(paths: RunPaths, images_dir: Path) -> list[tuple[str, Path]]:
+def _figure_candidates(
+    paths: RunPaths, images_dir: Path, outputs_dir: Path | None = None
+) -> list[tuple[str, Path]]:
     """Every figure that could be published, as (name, source), best source first."""
     candidates: list[tuple[str, Path]] = []
     claimed: dict[str, Path] = {}
@@ -359,12 +402,21 @@ def _figure_candidates(paths: RunPaths, images_dir: Path) -> list[tuple[str, Pat
     # The run tree's own report/images/ comes first: in markdown mode those are the figures the
     # report actually references by name, so they must keep their filenames. A same-named figure
     # swept up later from figures/ or results/ is the one that gets qualified.
+    #
+    # The benchmark's own ``outputs/`` comes *last*, and only because
+    # :func:`collect_figures` deletes every image left there. A plot a stage wrote straight to
+    # ``outputs/`` is a slot stolen from a chosen figure, so it must never outrank one — but
+    # deleting it without first offering it a leftover slot would throw away the only images a
+    # run produced when it wrote them nowhere else, and an image the judge cannot see scores
+    # the same as no research at all. Ranked last, it fills a slot only when nothing better
+    # wants it.
     for source_root in (
         paths.report_images_dir,
         paths.figures_dir,
         paths.writing_dir,
         paths.results_dir,
         paths.artifacts_dir,
+        *([outputs_dir] if outputs_dir is not None else []),
     ):
         for path in _iter_files(source_root):
             if path.suffix.lower() not in FIGURE_SUFFIXES:
@@ -388,10 +440,28 @@ def _figure_candidates(paths: RunPaths, images_dir: Path) -> list[tuple[str, Pat
 def collect_figures(paths: RunPaths, workspace: Path, report_text: str = "") -> list[str]:
     """Publish at most :data:`MAX_REPORT_FIGURES` figures into ``report/images/``.
 
-    The scorer shows the judge five agent images per checklist item, picked by an unsorted
-    ``rglob``. Publishing a sixth does not add a sixth chance to match — it randomises which
-    five are seen, on the ~61% of the benchmark's weight that is image-graded. So the budget
-    is enforced here, and figures the report actually references win the slots.
+    The scorer collects one fixed set of images per *workspace*, by an unsorted ``rglob`` over
+    ``outputs/`` and then ``report/``, and shows the first five of that one set against every
+    image criterion. Publishing a sixth does not add a sixth chance to match — it randomises
+    which five are seen, on the ~61% of the benchmark's weight that is image-graded. So the
+    budget is enforced here, and figures the report actually references win the slots.
+
+    That sweep is an ``rglob`` over two whole trees, not over ``report/images/``. It starts at
+    ``outputs/``, which is where the goal contract sends derived data, so an image a stage
+    wrote straight to the benchmark's ``outputs/`` outranks every figure the report argues
+    with — six diagnostic PNGs there take all five slots and the report's own figures reach
+    the judge as nothing. A loose ``report/panel.png`` or a nested
+    ``report/images/panels/*.png`` is the same theft one directory over. :func:`mirror_tree`
+    keeps AutoR's exports out of ``outputs/``; the prune below removes the ones a stage put
+    in either tree by hand, walking exactly as far as the scorer does. Together they are the
+    only reason a planned figure survives to be seen.
+
+    The prune is a delete, so what it deletes has to have been *offered a slot first*.
+    ``outputs/`` is therefore the last-ranked candidate source: an image there can never
+    outrank a figure the report argues with, but a run that wrote its only plots there — no
+    report references, nothing in the run tree — is published from them rather than left with
+    an empty ``report/images/``. Deleting the last image in a workspace scores the same as
+    having done no research.
 
     A figure the report references is never dropped, even when that pushes past the budget:
     breaking a live link is worse than overshooting, and Stage 07's own gate is what keeps a
@@ -400,7 +470,7 @@ def collect_figures(paths: RunPaths, workspace: Path, report_text: str = "") -> 
     images_dir = workspace / "report" / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
 
-    candidates = _figure_candidates(paths, images_dir)
+    candidates = _figure_candidates(paths, images_dir, workspace / "outputs")
     by_name = dict(candidates)
 
     referenced: list[str] = []
@@ -429,8 +499,35 @@ def collect_figures(paths: RunPaths, workspace: Path, report_text: str = "") -> 
     # Anything already sitting at the benchmark path that did not make the cut would still be
     # swept up by the scorer, so the budget has to be enforced on disk, not just on the list.
     keep = set(selected)
-    for path in sorted(images_dir.iterdir()):
-        if path.is_file() and path.suffix.lower() in JUDGE_IMAGE_SUFFIXES and path.name not in keep:
+
+    # What survives is exactly what the report argues with: the published slots, plus any
+    # image the winning report links that already lives somewhere else under `report/`. The
+    # second set is why this is not a blanket delete — an agent that wrote
+    # `report/figure1.png` and linked it as `![](figure1.png)` has a live link, and breaking
+    # one is worse than overshooting the budget.
+    protected = {(images_dir / name).resolve() for name in keep}
+    for target in extract_markdown_image_targets(report_text):
+        linked = resolve_report_image(workspace / "report", target)
+        if linked is not None and linked.is_file():
+            protected.add(linked.resolve())
+
+    # The scorer's sweep is `rglob` over `outputs/` and then `report/`, so the prune has to
+    # be the same walk over the same two trees — hidden files and nested directories
+    # included, because a prune that searches less than the sweep does leaves exactly the
+    # files that win the slots. `outputs/` is drained entirely: it is swept *first*, so an
+    # image there is not an extra figure but a slot taken from a chosen one, and the goal
+    # contract's own instruction to keep `outputs/` up to date makes leaving one there easy.
+    # Under `report/`, a nested or loose image is the same theft one directory over —
+    # `report/images/` is not the only place the scorer looks. Suffixes are matched
+    # case-insensitively, which is a superset of the scorer's `*{ext}` glob here and the same
+    # set on a case-insensitive filesystem: erring the other way would mean a `PLOT.PNG` that
+    # scores on a mac and not on this box.
+    for root in (workspace / "outputs", workspace / "report"):
+        for path in sorted(root.rglob("*")):
+            if not path.is_file() or path.suffix.lower() not in JUDGE_IMAGE_SUFFIXES:
+                continue
+            if path.resolve() in protected:
+                continue
             path.unlink()
 
     return sorted(keep)

@@ -77,6 +77,11 @@ from .preregistration import (
     freeze_preregistration,
     load_preregistration,
 )
+from .report_plan import (
+    load_report_plan,
+    recorded_report_plan_stamp,
+    stamp_report_plan,
+)
 from .run_skills import install_run_skills
 from .manifest import (
     ensure_run_manifest,
@@ -2389,6 +2394,8 @@ class ResearchManager:
                     )
                 if stage.slug == "02_hypothesis_generation":
                     self._measure_pool_adoption(paths, stage, stage_markdown)
+                if stage.slug == "03_study_design":
+                    self._stamp_report_plan(paths)
                 if stage.slug == "04_implementation":
                     self._freeze_preregistration(paths)
                 self._run_validity_review(paths, stage, stage_markdown)
@@ -2505,6 +2512,19 @@ class ResearchManager:
         # before results exist on every route in.
         if stage.number >= 5:
             self._freeze_preregistration(paths)
+
+        # Same route in, same problem: a run resumed above Stage 03 has a figure
+        # plan that was never dated, and one edited between approvals has a
+        # digest that no longer describes it. Stamping is idempotent, so the
+        # normal path pays nothing here.
+        if stage.number >= 6:
+            self._stamp_report_plan(
+                paths,
+                reason=(
+                    "the plan changed outside a Stage 03 approval; recorded while preparing "
+                    f"{stage.slug}"
+                ),
+            )
 
         # No hypotheses at all is a different problem from unfrozen ones, and
         # the stage that first needs them is the one that has to fix it.
@@ -3493,6 +3513,102 @@ class ResearchManager:
                 f"digest: {amended.digest}"
             ),
         )
+
+    def _report_plan_amendment_reason(self, paths: RunPaths, *, declared: bool = False) -> str:
+        """Why the plan moved, taken from the round that asked it to move.
+
+        ``validate_round_decision`` already requires ``what_changes_next`` to be
+        at least 40 characters before a round may re-enter Stage 03, so the
+        reason a second-round plan differs is already written down and already
+        argued for. Asking the run to state it again would be the same sentence
+        twice, and the second copy would be the one nobody checked.
+
+        Read from ``research_rounds.json`` rather than ``round_decision.json``,
+        because ``record_round`` unlinks the latter once the round is closed.
+
+        ``declared`` is whether the plan already carries a date. The fallback
+        differs on it because the two situations are different facts: a first
+        write is a declaration, while a rewrite with no round behind it — a
+        ``--redo-stage``, a manual edit — is a revision nothing on record asked
+        for, and calling that "initial declaration" would put a false sentence
+        in the amendment ledger.
+        """
+        round_entry = latest_round(paths)
+        if round_entry is not None and round_entry.what_changes_next.strip():
+            return f"round {round_entry.number}: {round_entry.what_changes_next.strip()}"
+        if declared:
+            return "revised at Stage 03 with no round on record explaining the change"
+        return "initial declaration"
+
+    def _stamp_report_plan(self, paths: RunPaths, reason: str | None = None) -> None:
+        """Date the figure plan, and record it whenever it moves.
+
+        The agent writes *which* figures it will produce and what each one
+        settles. ``declared_at``, ``digest`` and ``amendments`` are AutoR's,
+        because asking a language model for a sha256 is a wish rather than a
+        gate — the same split the preregistration already uses.
+
+        Stamping is idempotent by content: a round that legitimately left the
+        plan alone produces no amendment, so the ledger stays a record of real
+        movement instead of a count of how many times a stage was approved.
+
+        A missing plan is not logged here. It is not this hook's finding: the
+        Stage 03 artifact gate refuses a run with no plan, and that refusal is
+        already written to the log by the validation path. Logging it again from
+        a hook that fires on every stage from 06 onward would turn one refusal
+        into a repeated line.
+        """
+        before = load_report_plan(paths)
+        if before is None:
+            return
+        # What AutoR last stamped, not what the file says it was stamped with.
+        # The two disagree exactly when a stage rewrote the plan wholesale, and
+        # that is the case the log most needs to name: reading the file would
+        # report the second write of a moved plan as a first declaration.
+        recorded = recorded_report_plan_stamp(paths)
+        already_declared = recorded is not None
+        amendments_before = len(recorded[2]) if recorded is not None else len(before.amendments)
+        stamped = stamp_report_plan(
+            paths,
+            reason
+            or self._report_plan_amendment_reason(
+                paths, declared=already_declared or bool(before.declared_at)
+            ),
+        )
+        if stamped is None:
+            return
+        if len(stamped.amendments) > amendments_before:
+            append_log_entry(
+                paths.logs,
+                "report_plan amended",
+                (
+                    "The figure plan changed after it was declared.\n"
+                    f"reason: {stamped.amendments[-1].get('reason', '')}\n"
+                    f"amendments on record: {len(stamped.amendments)}\n"
+                    f"previous digest: {stamped.amendments[-1].get('previous_digest', '')}\n"
+                    f"digest: {stamped.digest}"
+                ),
+            )
+            return
+        if not already_declared:
+            append_log_entry(
+                paths.logs,
+                "report_plan declared",
+                (
+                    f"Declared {len(stamped.figures)} figures and "
+                    f"{len(stamped.headline_numbers)} headline numbers before any result "
+                    "existed.\n"
+                    f"declared_at: {stamped.declared_at}\n"
+                    f"digest: {stamped.digest}\n"
+                    "slots: "
+                    + (
+                        ", ".join(
+                            f"{figure.slot}:{figure.filename}" for figure in stamped.figures
+                        )
+                        or "none"
+                    )
+                ),
+            )
 
     def _record_inbound_channels(
         self, paths: RunPaths, stage: StageSpec, delivered: list[str]

@@ -135,6 +135,8 @@ everything Stage 03, 05, and 06 required.
 | --- | --- |
 | **01** | `workspace/literature/sources.json` and `workspace/literature/claims.json` exist and cross-reference correctly (see [the evidence ledger](#the-evidence-ledger)). |
 | **03+** | At least one machine-readable file under `workspace/data/` with a suffix in `.json .jsonl .csv .tsv .parquet .yaml .yml`. |
+| **03+** | `workspace/notes/report_plan.json` exists and is a commitment (see [the report plan](#the-report-plan)). |
+| **06+** | Every live slot's and headline number's `source_artifact` resolves to a file that is not empty. |
 | **05+** | At least one result file under `workspace/results/` with a suffix in `.json .jsonl .csv .tsv .parquet .npz .npy`. |
 | **05+** | `workspace/results/experiment_manifest.json` exists and is structurally valid. |
 | **06+** | At least one figure under `workspace/figures/` with a suffix in `.png .pdf .svg .jpg .jpeg`. |
@@ -156,6 +158,7 @@ Stage 07's requirements depend on the run's `output_format`.
 | **07+** | `workspace/artifacts/citation_verification.json`, structurally valid. |
 | **07+** | `workspace/artifacts/self_review.json`. |
 | **07+** | `workspace/artifacts/report_review.json`, structurally valid. |
+| **07+** | Every slot in `report_plan.json` was published under `report/images/` and referenced from `report.md`, or carries a `dropped_because` of at least 20 characters — and not every slot may be dropped. |
 
 The upper bound is not a style preference. A benchmark judge is shown only the first five
 images it finds, in filesystem order, so a sixth figure does not add a sixth chance to be
@@ -195,6 +198,40 @@ owns to be at least that new.
 This is what stops a re-run from being credited with the previous attempt's
 files. Stages that only *consume* an artifact class (for example Stage 05
 reading `workspace/data/`) check existence but not freshness.
+
+### The report plan
+
+`workspace/notes/report_plan.json` is where the run commits to its figures —
+at Stage 03, before a result exists that could choose them for it. The
+validator is `src/report_plan.py`.
+
+Each entry in `figures` needs a `slot` (unique, contiguous from 1), a bare
+`filename` with a publishable image suffix, a `supports` list naming the claim
+the figure settles (a `hypothesis_manifest.json` id, or `exploratory:<slug>`),
+a `shows` sentence, an `if_supported` and an `if_refuted` that are not the same
+sentence, and a `source_artifact` under `results/`, `data/` or `outputs/`.
+`headline_numbers` names the quantities the report must state, each with a unit
+and a `source_artifact`. In markdown mode there may be at most
+`MAX_REPORT_FIGURES` slots.
+
+Two rules exist to stop the file being satisfied without committing to
+anything:
+
+- **Every slot must carry at least one claim no other slot carries.** This is
+  the only rule here that pushes the figure count *down*; nothing in the module
+  ever asks for more figures, because `MAX_REPORT_FIGURES` is a ceiling and a
+  gate that restated it as a goal would have made it a quota.
+- **A slot cannot be born dropped.** `dropped_because` is skipped by the Stage
+  06 source check and the Stage 07 coverage check, so a slot abandoned in the
+  same plan that declares it would owe nothing at all. Dropping is only allowed
+  once AutoR has stamped the plan — that is, from the Stage 03 approval onward,
+  which is what makes it a record of the results changing the plan rather than
+  padding.
+
+`declared_at`, `digest` and `amendments` are AutoR's, written by
+`stamp_report_plan` on Stage 03 approval and kept in `report_plan_stamp.json`
+outside `workspace/`. The agent does not write them, and the validators ignore
+them in the file.
 
 ### The evidence ledger
 

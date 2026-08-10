@@ -42,6 +42,11 @@ existed.
   replacing the primary one with a metric that came out better is not.
 - Record per-condition spread, not just means. Stage 06 has to state how the spread was
   measured and over how many runs, and it can only do that if this stage saved it.
+- The figures the report will carry were declared in `{{WORKSPACE_NOTES_DIR}}/report_plan.json`,
+  each against the result file it will be computed from, and so was every `headline_numbers`
+  entry. Those files are outputs of this stage: write them at the paths the plan names, for the
+  headline numbers as much as for the figures. If one cannot be produced, say so in `Key Results`
+  rather than leaving Stage 06 to discover the gap.
 - Log the search: how many configurations you tried for the method, how many for each
   baseline, and the point in the process at which the evaluation split was first read. Put
   the counts in `Key Results` and the detail under `{{WORKSPACE_NOTES_DIR}}`. Report them

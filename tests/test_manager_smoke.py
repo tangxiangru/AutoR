@@ -268,6 +268,42 @@ class ScriptedSmokeOperator:
             )
             produced.append(relative_to_run(paths.experimental_protocol, paths.run_root))
 
+        if stage.number >= 3 and not paths.report_plan.exists():
+            # One slot, naming the figure this operator actually publishes and
+            # references at Stage 07. Written once rather than every stage: the
+            # plan has no freshness requirement, and rewriting it would erase
+            # the `declared_at` and `digest` the manager stamps on approval.
+            write_text(
+                paths.report_plan,
+                json.dumps(
+                    {
+                        "figures": [
+                            {
+                                "slot": 1,
+                                "filename": "accuracy.png",
+                                "supports": ["H1"],
+                                "shows": (
+                                    "Held-out accuracy (%) for retrieval-on and retrieval-off "
+                                    "across five folds, band = stderr."
+                                ),
+                                "if_supported": "the retrieval-on bar clears the retrieval-off band",
+                                "if_refuted": "the two bars overlap within their bands",
+                                "source_artifact": "results/metrics.json",
+                                "dropped_because": "",
+                            }
+                        ],
+                        "headline_numbers": [
+                            {
+                                "quantity": "held-out accuracy, retrieval-on minus retrieval-off",
+                                "unit": "percentage points",
+                                "source_artifact": "results/metrics.json",
+                            }
+                        ],
+                    }
+                ),
+            )
+            produced.append(relative_to_run(paths.report_plan, paths.run_root))
+
         if stage.number >= 3:
             data_path = paths.data_dir / "study_design.json"
             write_text(

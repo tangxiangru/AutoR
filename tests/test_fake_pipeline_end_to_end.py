@@ -99,6 +99,39 @@ class FakePipelineEndToEndTest(unittest.TestCase):
             with self.subTest(stage=stage.slug):
                 self.assertEqual(validate_stage_artifacts(stage, self.paths), [])
 
+    def test_the_figure_plan_is_dated_before_the_experiments_run(self) -> None:
+        """The claim ``report_plan.json`` makes is *when* it was written.
+
+        AutoR stamps the plan on Stage 03's approval; a safety net at Stage 06
+        catches runs that reach there another way. Both together mean a run
+        always ends up with a dated plan, so "it has a date" holds even if the
+        Stage 03 hook is gone — and a plan first dated at Stage 06 was chosen
+        after the results existed, which is the failure the plan exists to
+        prevent. The order in the log is therefore the assertion, not the
+        presence of the date.
+        """
+        log = self.paths.logs.read_text(encoding="utf-8")
+        declared = log.find("report_plan declared")
+        experiments = log.find("05_experimentation inbound_channels")
+        self.assertNotEqual(declared, -1, "the figure plan was never dated")
+        self.assertNotEqual(experiments, -1, "this run never reached Stage 05")
+        self.assertLess(
+            declared,
+            experiments,
+            "the figure plan was dated after the experiments started, so it is a "
+            "description of what happened rather than a plan",
+        )
+
+    def test_a_single_round_run_does_not_manufacture_a_plan_amendment(self) -> None:
+        """The plan is stamped once per approval and again from Stage 06 on. If
+        stamping were not idempotent by content, a run that never changed its
+        plan would still arrive with an amendment ledger describing changes that
+        did not happen."""
+        plan = json.loads(self.paths.report_plan.read_text(encoding="utf-8"))
+        self.assertTrue(plan.get("declared_at"))
+        self.assertTrue(plan.get("digest"))
+        self.assertEqual(plan.get("amendments"), [])
+
     def test_node_output_does_not_grow_with_the_run(self) -> None:
         """The relay is what made stage summaries grow 235 -> 1,211 words.
 

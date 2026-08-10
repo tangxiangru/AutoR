@@ -105,27 +105,32 @@ Complete the stage in this order within a single stage conversation.
 
 1. Read the injected `## Writing Manifest` and the prior approved stage context. It lists the figures, result files, data files, and approved stage summaries available to you — use them directly rather than inventing equivalents.
 2. Identify the single central technical story of the report.
-3. Decide which figures carry that story, and confirm each one exists or can be produced from real run artifacts.
+3. Read the injected `# Report Plan`; the figure set was chosen at Stage 03 against the claims it carries. Your job is to publish it, not to re-choose it.
 4. Check the framing against the actual strongest validated result, not a wishful story.
 
 ### Phase 2: Figures
 
 Figures are the highest-value part of this deliverable. The reviewer grades them by putting your
 image side by side with the corresponding figure from the published study and asking whether yours
-shows the same thing. Plan them deliberately.
+shows the same thing. They were chosen at Stage 03; this phase produces them.
 
-5. Decide on **three to {{MAX_REPORT_FIGURES}} figures**, no more. Budget them against the claims
-   that matter: the data, the main result, and the evidence that the main result holds.
+5. **Publish the planned figures in slot order, at most {{MAX_REPORT_FIGURES}}.** Every slot you
+   do not publish needs `dropped_because` in `report_plan.json` and a sentence in `Key Results`;
+   a slot you publish that the plan does not name will be flagged in `report_review.json`.
+   Dropping is for a figure the results made impossible, not for one you ran out of time for:
+   the plan's claims still have to be carried, and a report that ends up below three figures is
+   one where the data, the main result and the evidence it holds are not all shown.
 6. **Make the first figure a composite summary panel.** This is the single highest-return figure
-   in the report. Build one multi-panel figure that carries the whole result at a glance:
+   in the report, and it is slot 1's default role. Build one multi-panel figure that carries the
+   whole result at a glance:
    - a 2x2 or 1x3 grid built with `plt.subplots`, each panel labelled `a)`, `b)`, `c)`, `d)` in
      the panel title
    - the primary measurement or map, plotted from the real data
    - the key relationship, with the **experimental points overlaid on the fitted or predicted
      curve**, and a legend naming both
-   - a final panel that is plain text: the headline numbers with their units and uncertainties
-     (`Dirac point: -0.043 eV`, `n = 2,000`, `R^2 = 0.94`), rendered with `ax.text` on
-     `ax.axis("off")`
+   - a final panel that is plain text: the plan's `headline_numbers` with their units and
+     uncertainties (`Dirac point: -0.043 eV`, `n = 2,000`, `R^2 = 0.94`), rendered with
+     `ax.text` on `ax.axis("off")`
    Published summary figures look exactly like this, and a reviewer comparing against one will
    find your equivalent panel inside it.
 7. Generate every figure from the real data and results in the workspace, using a script under
@@ -141,30 +146,32 @@ shows the same thing. Plan them deliberately.
 ### Phase 3: Drafting
 
 10. Write `{{WORKSPACE_REPORT_FILE}}` end to end in academic prose.
-11. Report concrete numbers, not adjectives. "Accuracy improved to 0.87 from a 0.81 baseline
+11. **State the headline numbers, with their units, in the report's first section.** What
+    argues for the figures has to come before anything long.
+12. Report concrete numbers, not adjectives. "Accuracy improved to 0.87 from a 0.81 baseline
     (n=2,000, 5-fold CV, ±0.02)" is scoreable; "performance improved substantially" is not.
-12. Every quantitative claim must trace to a file under `{{WORKSPACE_RESULTS_DIR}}` or a figure in
+13. Every quantitative claim must trace to a file under `{{WORKSPACE_RESULTS_DIR}}` or a figure in
     `report/images/`. Say where a number came from when it is not obvious.
-13. Embed each figure at the point in the narrative where it is discussed, with a caption that
+14. Embed each figure at the point in the narrative where it is discussed, with a caption that
     states what the reader should conclude from it:
     `![Held-out AUROC by model class; the proposed method leads across all five folds.](images/main_result.png)`
-14. Keep tables in markdown table syntax so they survive as text.
-15. Keep every reference in the `## References` section in a consistent, readable style.
-16. Cut anything that does not carry evidence. Padding, generic background, and well-written but
+15. Keep tables in markdown table syntax so they survive as text.
+16. Keep every reference in the `## References` section in a consistent, readable style.
+17. Cut anything that does not carry evidence. Padding, generic background, and well-written but
     shallow content are explicitly penalized.
 
 ### Phase 4: Quality Polish
 
-17. Remove AI-writing patterns where they actually weaken the prose.
-18. Run a reverse-outline check: the first sentences of paragraphs should form a coherent narrative.
-19. Check logic consistency — no contradiction between introduction and results, no terminology
+18. Remove AI-writing patterns where they actually weaken the prose.
+19. Run a reverse-outline check: the first sentences of paragraphs should form a coherent narrative.
+20. Check logic consistency — no contradiction between introduction and results, no terminology
     drift, no claim in the abstract or introduction that lacks support later.
-20. Verify every figure reference resolves. Walk the list of `![...](images/...)` links and confirm
+21. Verify every figure reference resolves. Walk the list of `![...](images/...)` links and confirm
     each target file exists in `{{WORKSPACE_REPORT_IMAGES_DIR}}`.
 
 ### Phase 5: Evidence Audit
 
-21. Write `{{WORKSPACE_ARTIFACTS_DIR}}/citation_verification.json`. The gate reads this file, so it
+22. Write `{{WORKSPACE_ARTIFACTS_DIR}}/citation_verification.json`. The gate reads this file, so it
     needs a non-empty `overall_status`, an integer `total_citations`, and a non-empty
     `claim_coverage` list in which **every** entry has a non-empty `claim` and at least one
     `citation_keys` or `source_ids` value. Record verified and unresolved citations, missing
@@ -194,11 +201,11 @@ shows the same thing. Plan them deliberately.
 
 ### Phase 6: Self-Review
 
-22. Score the draft on narrative clarity, claims-evidence alignment, technical rigor, experiment
+23. Score the draft on narrative clarity, claims-evidence alignment, technical rigor, experiment
     design, writing quality, structure and flow, references and figures, and completeness.
-23. Classify each issue as CRITICAL, MAJOR, or MINOR. Fix the CRITICAL ones first, then the most
+24. Classify each issue as CRITICAL, MAJOR, or MINOR. Fix the CRITICAL ones first, then the most
     important MAJOR ones.
-24. Write `{{WORKSPACE_ARTIFACTS_DIR}}/self_review.json` with per-dimension scores, an overall
+25. Write `{{WORKSPACE_ARTIFACTS_DIR}}/self_review.json` with per-dimension scores, an overall
     score, issues found, issues fixed, and a final verdict.
 
 Minimum bar:
@@ -211,7 +218,7 @@ Minimum bar:
 
 ### Phase 7: Stage Summary
 
-25. Write the stage summary draft to `{{STAGE_OUTPUT_PATH}}`.
+26. Write the stage summary draft to `{{STAGE_OUTPUT_PATH}}`.
 
 ## Claim Provenance (required)
 

@@ -13,7 +13,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tests.prereg_support import write_validity_chain
+from tests.prereg_support import HYPOTHESIS_ID, write_report_plan, write_validity_chain
 from src.rcb import (
     JUDGE_IMAGE_SUFFIXES,
     build_benchmark_goal,
@@ -97,12 +97,92 @@ class FigureBudgetTests(unittest.TestCase):
                 "hypothesis_outcomes.json",
                 "metrics.json",
                 "preregistration.json",
+                "report_plan.json",
                 "research_rounds.json",
             ],
         )
         # outputs/ is swept before report/, so an image there would take a judge slot.
         self.assertEqual(
             [p for p in _judge_visible_images(workspace) if p.parent.name == "outputs"], []
+        )
+
+    def test_a_png_a_stage_wrote_to_the_benchmark_outputs_takes_no_judge_slot(self) -> None:
+        paths, workspace = self._run_and_workspace()
+        # Withholding images from the outputs/ *mirror* is only half the defence: the goal
+        # contract points every stage at <workspace>/outputs/ for derived data, so a stage
+        # can write a plot there directly. The scorer drains outputs/ before report/, so
+        # six of them take all five slots and the one figure the report argues with is
+        # never seen — the planned figure set buys nothing without this prune.
+        outputs = workspace / "outputs"
+        (outputs / "diagnostics").mkdir(parents=True)
+        for index in range(MAX_REPORT_FIGURES + 1):
+            (outputs / f"diag_{index}.png").write_bytes(b"\x89PNG diag" + str(index).encode())
+        (outputs / "diagnostics" / "nested.svg").write_bytes(b"<svg/>")
+        (outputs / "table.json").write_text('{"rows": 3}')
+        (paths.report_images_dir / "main.png").write_bytes(b"\x89PNG main")
+        write_text(paths.report_file, self._report("main.png"))
+
+        export_run(paths=paths, workspace=workspace, pipeline_completed=True)
+
+        # The scorer's own sweep order, and the five it would actually attach.
+        visible = [p.name for p in _judge_visible_images(workspace)]
+        self.assertIn("main.png", visible[:MAX_REPORT_FIGURES])
+        self.assertEqual(visible, ["main.png"])
+        # Derived data is what outputs/ is for. Only the images are pruned, including the
+        # nested one: the prune has to reach everywhere the scorer's rglob does.
+        self.assertTrue((outputs / "table.json").exists())
+
+    def test_an_image_loose_or_nested_under_report_takes_no_judge_slot(self) -> None:
+        """``report/images/`` is not the only place the scorer looks under ``report/``.
+
+        The sweep is ``rglob`` over the whole ``report/`` tree, so a plot saved beside
+        ``report.md`` or one directory deeper inside ``images/`` competes for the same five
+        slots as a published figure — and both sort ahead of ``report/images/main.png`` in
+        the walk. A prune that only reads ``images_dir.iterdir()`` leaves exactly those
+        files, which is the same defect as leaving them in ``outputs/`` one directory over.
+        """
+        paths, workspace = self._run_and_workspace()
+        for index in range(MAX_REPORT_FIGURES + 1):
+            (workspace / "report" / f"loose_{index}.png").parent.mkdir(
+                parents=True, exist_ok=True
+            )
+            (workspace / "report" / f"loose_{index}.png").write_bytes(
+                b"\x89PNG loose" + str(index).encode()
+            )
+        nested = workspace / "report" / "images" / "panels"
+        nested.mkdir(parents=True, exist_ok=True)
+        (nested / "panel.png").write_bytes(b"\x89PNG panel")
+        (paths.report_images_dir / "main.png").write_bytes(b"\x89PNG main")
+        write_text(paths.report_file, self._report("main.png"))
+
+        export_run(paths=paths, workspace=workspace, pipeline_completed=True)
+
+        self.assertEqual([p.name for p in _judge_visible_images(workspace)], ["main.png"])
+        # report.md is not an image and is never touched by the prune.
+        self.assertTrue((workspace / "report" / "report.md").is_file())
+
+    def test_a_live_link_to_a_loose_report_image_is_not_pruned(self) -> None:
+        """Breaking a live link is worse than overshooting, here as everywhere else.
+
+        An agent that wrote its report at the benchmark path and linked
+        ``![](figure1.png)`` beside it has a figure the judge can both read about and see.
+        Deleting it would leave the prose promising a figure and the judge shown nothing —
+        the most expensive defect in this deliverable.
+        """
+        paths, workspace = self._run_and_workspace()
+        (workspace / "report").mkdir(parents=True, exist_ok=True)
+        (workspace / "report" / "figure1.png").write_bytes(b"\x89PNG f1")
+        (workspace / "report" / "orphan.png").write_bytes(b"\x89PNG orphan")
+        (workspace / "report" / "report.md").write_text(
+            "# Agent Report\n\n" + (_PARAGRAPH * 40) + "\n\n![Result](figure1.png)\n",
+            encoding="utf-8",
+        )
+
+        result = export_run(paths=paths, workspace=workspace, pipeline_completed=True)
+
+        self.assertEqual(result.report_source, "agent")
+        self.assertEqual(
+            sorted(p.name for p in _judge_visible_images(workspace)), ["figure1.png"]
         )
 
     def test_the_reports_own_figures_are_the_ones_the_judge_sees(self) -> None:
@@ -233,6 +313,28 @@ class FigureBudgetGateTests(unittest.TestCase):
                    "addressed": False, "reason": "fixture does no research."}]}),
         )
         write_validity_chain(paths, evidence="results/metrics.json")
+        # One planned slot, pointing at the first figure this fixture publishes, so the
+        # Stage 07 coverage check sees a plan that was kept. Deliberately not one entry per
+        # published figure: the budget tests here are about the ceiling, and an unplanned
+        # published figure is a report_review issue rather than a refusal.
+        write_report_plan(
+            paths,
+            figures=[
+                {
+                    "slot": 1,
+                    "filename": names[0],
+                    "supports": [HYPOTHESIS_ID],
+                    "shows": (
+                        "Held-out accuracy (%) against training steps for the treatment "
+                        "and the baseline, five seeds, band = stderr."
+                    ),
+                    "if_supported": "the treatment's curve stays above the baseline's band",
+                    "if_refuted": "the two curves overlap within their bands throughout",
+                    "source_artifact": "results/r.json",
+                    "dropped_because": "",
+                }
+            ],
+        )
         generate_report_review(paths)
 
     def test_a_run_within_budget_passes(self) -> None:
@@ -411,6 +513,66 @@ class CollectFiguresUnitTests(unittest.TestCase):
         )
 
         self.assertEqual(published, ["b.png", "g.png"])
+
+
+class OutputsPruneIsNotADataLossTest(unittest.TestCase):
+    """The prune deletes; so it has to offer a slot before it deletes.
+
+    Draining ``outputs/`` is right when there is a chosen figure to protect — a
+    stray plot there is a slot stolen, not a slot added. It is wrong when there
+    is nothing else: a run that wrote its only plots to the benchmark's
+    ``outputs/``, following the goal contract's own instruction to keep that
+    directory up to date, would reach the judge with an empty workspace, and an
+    image the judge cannot see scores exactly what no research scores. So
+    ``outputs/`` ranks last among the candidate sources rather than being
+    excluded from them.
+    """
+
+    def _workspace(self):
+        tmp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp_dir.cleanup)
+        root = Path(tmp_dir.name)
+        workspace = root / "workspace"
+        workspace.mkdir()
+        paths = build_run_paths(root / ".autor" / "run")
+        ensure_run_layout(paths)
+        write_text(paths.user_input, "Benchmark task")
+        write_text(paths.memory, "# Approved Run Memory\n")
+        ensure_run_config(paths, model="sonnet", venue="neurips_2025", output_format="markdown")
+        (workspace / "outputs").mkdir()
+        return paths, workspace
+
+    def test_a_run_whose_only_images_are_in_outputs_still_reaches_the_judge(self) -> None:
+        paths, workspace = self._workspace()
+        for name in ("main_result.png", "ablation.png"):
+            (workspace / "outputs" / name).write_bytes(b"\x89PNG " + name.encode())
+
+        export_run(paths=paths, workspace=workspace, pipeline_completed=False)
+
+        visible = sorted(p.name for p in _judge_visible_images(workspace))
+        self.assertEqual(visible, ["ablation.png", "main_result.png"])
+
+    def test_the_promotion_never_exceeds_the_budget(self) -> None:
+        paths, workspace = self._workspace()
+        for index in range(MAX_REPORT_FIGURES + 3):
+            (workspace / "outputs" / f"p{index}.png").write_bytes(b"\x89PNG " + str(index).encode())
+
+        export_run(paths=paths, workspace=workspace, pipeline_completed=False)
+
+        self.assertEqual(len(_judge_visible_images(workspace)), MAX_REPORT_FIGURES)
+
+    def test_an_outputs_plot_never_outranks_a_figure_the_report_argues_with(self) -> None:
+        """The property the prune exists for, unchanged by ranking outputs last."""
+        paths, workspace = self._workspace()
+        for index in range(MAX_REPORT_FIGURES + 1):
+            (workspace / "outputs" / f"diag_{index}.png").write_bytes(b"\x89PNG d" + str(index).encode())
+        (paths.report_images_dir / "main.png").write_bytes(b"\x89PNG main")
+        body = "# Report\n\n## Results\n\n" + (_PARAGRAPH * 40) + "\n\n![main](images/main.png)\n"
+        write_text(paths.report_file, body)
+
+        export_run(paths=paths, workspace=workspace, pipeline_completed=True)
+
+        self.assertEqual([p.name for p in _judge_visible_images(workspace)], ["main.png"])
 
 
 if __name__ == "__main__":

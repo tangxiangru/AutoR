@@ -24,7 +24,17 @@ consumer pairs, so the information topology can be printed, tested, and diffed
 rather than reconstructed by reading thirteen ``if`` statements.
 
 A channel is deliberately allowed to have no producer (``produced_by=None``):
-run configuration and the researcher profile come from outside the stage graph.
+run configuration, the researcher profile and the deliverable contract come
+from outside the stage graph.
+
+**A constraint has to arrive while it can still be obeyed.** The figure ceiling
+was the worst case of the opposite: ``MAX_REPORT_FIGURES`` reached Stage 07 and
+nowhere earlier, so the run learned how many figures a reader would see four
+stages after it decided which figures to make, when the only remaining move was
+to delete the weakest. ``report_contract`` delivers the shape of the deliverable
+to the stage that plans the work (03) as well as the stages that draw (06) and
+publish (07) it, and ``report_plan`` carries the resulting choice forward. An
+edge here is cheaper than a repair there.
 """
 
 from __future__ import annotations
@@ -149,6 +159,65 @@ def _venue(context: ChannelContext) -> str:
     return format_venue_for_prompt(context.paths)
 
 
+def _report_contract(context: ChannelContext) -> str:
+    """The shape of the scored deliverable, sent to the stages that can still act on it.
+
+    Everything here is true of *any* AutoR run in the given output format, and
+    the figure ceiling is read from ``MAX_REPORT_FIGURES`` rather than written
+    out, so the prompt cannot drift away from the gate that enforces it
+    (``validate_markdown_report``). Nothing benchmark-specific belongs in this
+    block: no grader, no weighting, no scoring model. A benchmark that scores a
+    report its own way says so in its own goal text, which reaches every stage
+    verbatim through ``user_input``.
+
+    Conditioned on the output format because the ceiling is not universal: a
+    latex run targets a venue that routinely carries eight or ten figures, and
+    shipping "at most five" there would damage the paper rather than focus it.
+
+    The deliverable's *path* is not repeated here — ``## Run Configuration``
+    already names it in the same prompt, and this block is about the shape of
+    the thing, not its location.
+    """
+    from .utils import MAX_REPORT_FIGURES, selected_output_format
+
+    if selected_output_format(context.paths) != "markdown":
+        return "\n".join(
+            [
+                "- The scored deliverable is one compiled paper, and the venue named in "
+                "`## Run Configuration` sets how many figures it may carry. Plan one "
+                "figure per claim.",
+                "- Choose the figures now, against the claims they carry. A figure chosen "
+                "at the end is chosen by whatever happened to exist by then.",
+            ]
+        )
+    return "\n".join(
+        [
+            "- The scored deliverable is one markdown report, named in "
+            "`## Run Configuration`. Everything else the run produces is evidence for it, "
+            "not a substitute for it.",
+            f"- At most {MAX_REPORT_FIGURES} figures reach the reader, and Stage 07's gate "
+            "refuses a report that publishes more. A sixth figure is not extra coverage; "
+            "it is work nobody sees.",
+            "- Choose the figures now, against the claims they carry. A figure chosen at "
+            "the end is chosen by whatever happened to exist by then.",
+            "- A slot that answers no question the other slots leave open is a slot spent "
+            "twice. Fewer figures, each settling a different claim, beats a full set of "
+            "views of one result.",
+            "- The ceiling is not a target and there is no floor. Count the questions a "
+            "figure has to settle and plan that many: some reports rest on one, and a "
+            "report whose result is a single number may honestly carry none. Padding "
+            "toward the ceiling costs the figures that were carrying a claim.",
+        ]
+    )
+
+
+def _report_plan(context: ChannelContext) -> str | None:
+    from .report_plan import format_report_plan_for_prompt, load_report_plan
+
+    plan = load_report_plan(context.paths)
+    return format_report_plan_for_prompt(plan) if plan is not None else None
+
+
 def _artifact_index(context: ChannelContext) -> str:
     from .artifact_index import format_artifact_index_for_prompt, write_artifact_index
 
@@ -251,6 +320,21 @@ CHANNELS: tuple[Channel, ...] = (
         consumed_by=_from("00_intake"),
         build=_venue,
         rationale="Venue and output format bind every stage's deliverable shape.",
+    ),
+    Channel(
+        key="report_contract",
+        heading="## Deliverable Contract",
+        produced_by=None,
+        consumed_by=frozenset({"03_study_design", "06_analysis", "07_writing"}),
+        build=_report_contract,
+        rationale=(
+            "The shape of the scored deliverable binds the stage that plans the figures "
+            "(03), the stage that draws them (06) and the stage that publishes them (07). "
+            "Stages 04 and 05 write and run code: a ceiling on how many figures reach the "
+            "reader changes nothing about what to implement or execute, and sending it "
+            "there would invite plotting instead of running. Stages 00-02 have no "
+            "deliverable to shape yet, and Stage 08 packages a report it cannot change."
+        ),
     ),
     Channel(
         key="artifact_index",
@@ -361,6 +445,43 @@ CHANNELS: tuple[Channel, ...] = (
         consumed_by=_from("05_experimentation"),
         build=_preregistration,
         rationale="From the freeze onward this is the authoritative statement of what the run predicted.",
+    ),
+    Channel(
+        key="report_plan",
+        heading="# Report Plan (declared at Stage 03)",
+        produced_by="03_study_design",
+        consumed_by=frozenset(
+            {
+                "03_study_design",
+                "04_implementation",
+                "05_experimentation",
+                "06_analysis",
+                "07_writing",
+            }
+        ),
+        build=_report_plan,
+        preface=(
+            "The figures below were chosen before any result existed, and they are a "
+            "commitment rather than a suggestion. Each slot names the file its numbers "
+            "come from: the stages that write and run code owe those files at those "
+            "paths. Stage 06 draws the figures, under exactly the filenames declared "
+            "here, and Stage 07 publishes them. **Do not draw a figure before Stage 06** "
+            "— a figure drawn before the results exist is a figure fitted to nothing. A "
+            "slot that has to be abandoned carries `dropped_because` saying what happened "
+            "to the claim it was going to settle."
+        ),
+        rationale=(
+            "03 re-reads its own plan so a second round amends it rather than rewriting "
+            "it from scratch, the way 05 re-reads the experiment manifest. 04 and 05 need "
+            "it because each slot names a `source_artifact`: 04 writes the code that emits "
+            "those files and 05 is the stage that actually emits them, and the Stage 06 "
+            "gate that refuses a slot whose source does not exist is unfixable by then if "
+            "neither stage was told the paths. 06 draws the figures and 07 publishes them. "
+            "Stages 00-02 precede the plan; Stage 08 cannot change a published report. The "
+            "preface withholds the drawing instruction from everyone before 06 on purpose "
+            "— the plan reaches 04 and 05 as a list of files to produce, not as an "
+            "invitation to plot instead of run."
+        ),
     ),
     Channel(
         key="research_rounds",

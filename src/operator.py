@@ -739,6 +739,57 @@ Original stderr:
             },
         )
 
+        # Stage 03+: which figures the report will carry, chosen before any
+        # result exists. Written once and then left alone: the plan has no
+        # freshness requirement, and rewriting it every stage would erase the
+        # `declared_at` and `digest` the manager stamps on Stage 03 approval —
+        # the very evidence that the choice predates the results.
+        #
+        # Exactly one entry, naming the figure this stub actually publishes and
+        # references at Stage 07, so the fixture exercises the published path
+        # rather than the dropped one. One entry rather than five on purpose:
+        # MAX_REPORT_FIGURES is a ceiling, and a fixture that filled it would
+        # teach the ceiling as a target to everyone who reads this file.
+        if not paths.report_plan.exists():
+            _write_json(
+                paths.report_plan,
+                {
+                    "figures": [
+                        {
+                            "slot": 1,
+                            "filename": "fake_comparison.png",
+                            "supports": ["H1"],
+                            "shows": (
+                                "Placeholder produced by fake-operator mode. In a real run "
+                                "this slot would show the placeholder score (dimensionless) "
+                                "for the baseline and treatment conditions. Nothing here was "
+                                "measured."
+                            ),
+                            "if_supported": (
+                                "the treatment bar would stand above the baseline bar; fake "
+                                "mode measures nothing, so it does not"
+                            ),
+                            "if_refuted": (
+                                "the two bars would be indistinguishable, which is what a "
+                                "fabricated placeholder actually shows"
+                            ),
+                            "source_artifact": "results/fake_results.json",
+                            "dropped_because": "",
+                        }
+                    ],
+                    "headline_numbers": [
+                        {
+                            "quantity": (
+                                "placeholder score, treatment minus baseline (not a "
+                                "measurement)"
+                            ),
+                            "unit": "dimensionless",
+                            "source_artifact": "results/fake_results.json",
+                        }
+                    ],
+                },
+            )
+
         # Stage 03+: machine-readable data under workspace/data.
         _write_json(
             paths.data_dir / "fake_dataset.json",

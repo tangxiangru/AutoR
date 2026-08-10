@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 
 from .artifact_index import indexed_artifacts_for_category, write_artifact_index
+from .report_plan import load_report_plan
 from .utils import (
     MAX_REPORT_FIGURES,
     MIN_REPORT_CHARS,
@@ -331,12 +332,27 @@ def generate_report_review(paths: RunPaths) -> dict[str, object]:
 
     over_budget = max(0, len(available) - MAX_REPORT_FIGURES)
 
+    # A figure nobody planned is the defect ``report_plan.json`` exists to stop: a slot filled
+    # by whatever the run happened to produce. Advisory rather than a refusal, because the
+    # plan is amendable and a late figure that earns its slot is a legitimate move — but the
+    # Stage 07 prompt tells the run this will be flagged, and a promise no reader keeps is
+    # worth less than no promise. Only checked once a plan exists: a run with none is the
+    # Stage 03 gate's finding, and repeating it here would make one defect look like two.
+    unplanned: list[str] = []
+    plan = load_report_plan(paths)
+    if plan is not None and plan.figures:
+        planned_names = {item.filename.casefold() for item in plan.figures if item.filename}
+        unplanned = [
+            path.name for path in available if path.name.casefold() not in planned_names
+        ]
+
     issue_counts = {
         "broken_image_links": len(broken),
         "non_relative_image_links": len(non_relative),
         "unrenderable_images": len(unrenderable),
         "non_png_images": len(non_preferred),
         "unreferenced_images": len(unreferenced),
+        "unplanned_images": len(unplanned),
         "figures_over_budget": over_budget,
     }
     issue_counts["total"] = sum(issue_counts.values())
@@ -422,6 +438,21 @@ def generate_report_review(paths: RunPaths) -> dict[str, object]:
                     f"importance. {over_budget} figure(s) must go."
                 ),
                 "evidence": [path.name for path in available][:_REPORT_ISSUE_SAMPLE_LIMIT],
+            }
+        )
+    if unplanned:
+        issues.append(
+            {
+                "category": "unplanned_image",
+                "severity": "minor",
+                "summary": (
+                    f"{len(unplanned)} image(s) under report/images/ are not slots in "
+                    "report_plan.json. The figure set was chosen at Stage 03 against the "
+                    "claims it carries; an unplanned figure spends a judge slot on a claim "
+                    "nobody argued for. Publish the planned slot instead, or amend the plan "
+                    "to say which claim this figure settles."
+                ),
+                "evidence": unplanned[:_REPORT_ISSUE_SAMPLE_LIMIT],
             }
         )
     if unreferenced:

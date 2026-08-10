@@ -551,7 +551,13 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
         web_search_context=web_search_context,
         web_search_mode=args.web_search,
         # Stages are told to keep code/, outputs/ and report/images/ up to date in the
-        # benchmark workspace, so 'Files Produced' must resolve against it too.
+        # benchmark workspace, so 'Files Produced' must resolve against it too. Three gates
+        # now read what this becomes (`ResearchManager.artifact_dirs`), not just the
+        # summary check: the Stage 03 machine-data gate, the Stage 06 check that every
+        # planned figure's `source_artifact` exists, and the Stage 07 check that every
+        # planned figure was published. Dropping this argument would not merely lose a
+        # convenience — it would turn a compliant benchmark run, whose results and figures
+        # live outside the run tree by contract, into three false refusals.
         artifact_roots=[workspace],
         cross_reviewer=resolve_cross_reviewer(args.cross_review, args.cross_review_model),
     )
