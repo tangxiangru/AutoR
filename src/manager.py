@@ -111,6 +111,7 @@ from .stage_graph import (
     stage_for_slug,
 )
 from .diagram_gen import post_writing_diagram_hook
+from .scorecard import write_scorecard
 from .terminal_ui import TerminalUI
 from .platform.foundry import generate_paper_package, generate_release_package
 from .deliberation import (
@@ -647,6 +648,7 @@ class ResearchManager:
         )
         if route and self.stage_graph.name != "linear":
             self.ui.show_status(f"Route taken: {route}", level="info")
+        self._report_optional_machinery(paths)
         self._print("All stages approved. Run complete.")
         return True
 
@@ -880,6 +882,30 @@ class ResearchManager:
             self.concentration.note_cheap_model(stage.slug)
             return self.routine_operator
         return self.operator
+
+    def _report_optional_machinery(self, paths: RunPaths) -> None:
+        """Say which of the run's optional features earned their cost.
+
+        Five features each measure themselves and write their own ledger; nobody reads five
+        JSON files. Best-effort — a scorecard is a summary of a finished run and must never be
+        the reason one looks unfinished.
+        """
+        try:
+            scorecard = write_scorecard(paths)
+        except Exception as exc:  # noqa: BLE001
+            append_log_entry(paths.logs, "scorecard_failed", str(exc))
+            return
+        if not scorecard.features or all(
+            report.verdict == "unused" for report in scorecard.features
+        ):
+            return
+        append_log_entry(paths.logs, "scorecard", scorecard.headline())
+        body = [scorecard.headline(), ""]
+        for report in scorecard.features:
+            if report.verdict == "unused":
+                continue
+            body.append(f"{report.name:<26}: {report.verdict}")
+        self.ui.panel("Optional machinery", body, color=self.ui.FG_MAGENTA)
 
     def _stage_after(self, stage: StageSpec) -> StageSpec | None:
         """The next stage in the fixed order, for the tier declaration to name."""
