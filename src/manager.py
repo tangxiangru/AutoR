@@ -120,6 +120,7 @@ from .stage_graph import (
 )
 from .diagram_gen import post_writing_diagram_hook
 from .scorecard import write_scorecard
+from .backend_health import BackendUnavailable, classify as classify_backend
 from .terminal_ui import TerminalUI
 from .platform.foundry import generate_paper_package, generate_release_package
 from .deliberation import (
@@ -471,6 +472,19 @@ class ResearchManager:
         return self._run_from_paths(paths, start_stage=start_stage)
 
     def _run_from_paths(self, paths: RunPaths, start_stage: StageSpec | None = None) -> bool:
+        try:
+            return self._walk_stages(paths, start_stage=start_stage)
+        except BackendUnavailable as exc:
+            update_manifest_run_status(
+                paths,
+                run_status="failed",
+                last_event="run.backend_unavailable",
+            )
+            self.ui.panel("Backend unavailable", str(exc).splitlines(), color=self.ui.FG_RED)
+            append_log_entry(paths.logs, "run_aborted", str(exc))
+            return False
+
+    def _walk_stages(self, paths: RunPaths, start_stage: StageSpec | None = None) -> bool:
         """Walk the stage graph until it reaches ``finish`` or nothing is open.
 
         The default topology has one edge out of every node, so this reproduces the
@@ -2892,6 +2906,18 @@ class ResearchManager:
         source: str,
         fallback_text: str,
     ):
+        # Both the primary attempt and its repair produced nothing. If the reason is that the
+        # backend refused them, a locally written summary would be indistinguishable from
+        # research by the end of the run — so stop instead of manufacturing one.
+        cause = classify_backend(fallback_text)
+        if cause is not None:
+            append_log_entry(
+                paths.logs,
+                f"{stage.slug} backend_unavailable",
+                f"cause: {cause}\n{truncate_text(fallback_text, max_chars=2000)}",
+            )
+            raise BackendUnavailable(cause, fallback_text)
+
         draft_path = paths.stage_tmp_file(stage)
         normalized_markdown = canonicalize_stage_markdown(
             stage=stage,
