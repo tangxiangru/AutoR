@@ -218,6 +218,7 @@ class ResearchManager:
         max_rounds: int = 1,
         max_stage_attempts: int = MAX_STAGE_ATTEMPTS,
         web_search_context: str | None = None,
+        min_report_figures: int | None = None,
         web_search_mode: str | None = None,
         artifact_roots: list[Path] | None = None,
         stage_graph: StageGraph | None = None,
@@ -284,6 +285,7 @@ class ResearchManager:
         self.max_stage_attempts = max_stage_attempts
         self.auto_skipped_stages: list[str] = []
         self.web_search_context = web_search_context
+        self.min_report_figures = min_report_figures
         # The *mode* is recorded in run_config so a resume reconciles it the way it does
         # every other backend selection, instead of silently re-deciding from whatever
         # credentials happen to be in the environment that day.
@@ -435,6 +437,7 @@ class ResearchManager:
             output_format=output_format,
             walk=self._walk_settings,
             web_search=self.web_search_mode,
+            min_report_figures=self.min_report_figures,
         )
         ensure_run_manifest(paths)
         if not paths.user_input.exists():
@@ -1140,6 +1143,7 @@ class ResearchManager:
             output_format=output_format,
             walk=self._walk_settings,
             web_search=self.web_search_mode,
+            min_report_figures=self.min_report_figures,
         )
         initialize_run_manifest(paths)
         write_artifact_index(paths)

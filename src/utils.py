@@ -208,6 +208,19 @@ MIN_REPORT_CHARS = 1200
 #: randomises it.
 MAX_REPORT_FIGURES = 5
 
+#: Distinct figures a markdown report must carry. One is the floor for an ordinary research
+#: run, where how much the question needs illustrating is the researcher's call.
+#:
+#: A benchmark run raises it. ResearchClawBench's own instructions ask every agent for "data
+#: overview, main results, and validation/comparison plots" — three categories — and 27 of its
+#: 40 shipped tasks carry two or more image criteria, which together hold about 61% of the
+#: total weight. A single-figure report clears the old gate while structurally forfeiting most
+#: of that: one image cannot answer two different questions. The floor is a *count of distinct
+#: figures*, never a target to pad toward, and is capped by MAX_REPORT_FIGURES because a sixth
+#: figure is not shown to the judge at all.
+MIN_REPORT_FIGURES = 1
+BENCHMARK_MIN_REPORT_FIGURES = 3
+
 #: ``![alt](target)``, tolerating an optional title and angle-bracketed targets.
 MARKDOWN_IMAGE_PATTERN = re.compile(
     r"!\[[^\]]*\]\(\s*(<[^>]*>|[^)\s]+)(?:\s+[\"'][^\"']*[\"'])?\s*\)"
@@ -435,6 +448,20 @@ def normalize_web_search_mode(value: Any) -> str:
     return DEFAULT_WEB_SEARCH_MODE
 
 
+def resolve_min_report_figures(value: Any) -> int:
+    """Clamp a configured figure floor into the range the judge can actually see.
+
+    A floor above :data:`MAX_REPORT_FIGURES` would demand figures the scorer never looks
+    at, turning the gate into busywork; below one it would allow a report with no figure
+    at all, which no markdown deliverable should be.
+    """
+    try:
+        wanted = int(value)
+    except (TypeError, ValueError):
+        wanted = MIN_REPORT_FIGURES
+    return max(1, min(wanted, MAX_REPORT_FIGURES))
+
+
 def default_run_config() -> dict[str, Any]:
     """The configuration a run falls back to when run_config.json is absent or unreadable."""
     return {
@@ -448,6 +475,7 @@ def default_run_config() -> dict[str, Any]:
         "codex_sandbox": DEFAULT_CODEX_SANDBOX,
         **normalize_walk_settings({}),
         "web_search": DEFAULT_WEB_SEARCH_MODE,
+        "min_report_figures": MIN_REPORT_FIGURES,
     }
 
 
@@ -463,6 +491,7 @@ def initialize_run_config(
     output_format: str | None = None,
     walk: "Mapping[str, Any] | None" = None,
     web_search: str | None = None,
+    min_report_figures: int | None = None,
 ) -> dict[str, Any]:
     normalized_operator = operator.strip().lower() if operator.strip() else "claude"
     normalized_review_operator = (
@@ -485,6 +514,7 @@ def initialize_run_config(
         "codex_sandbox": normalize_codex_sandbox(codex_sandbox),
         **normalize_walk_settings(walk or {}),
         "web_search": normalize_web_search_mode(web_search),
+        "min_report_figures": resolve_min_report_figures(min_report_figures),
         "created_at": datetime.now().isoformat(timespec="seconds"),
     }
     write_text(paths.run_config, json.dumps(config, indent=2, ensure_ascii=False))
@@ -531,6 +561,7 @@ def load_run_config(paths: RunPaths) -> dict[str, Any]:
         "codex_sandbox": normalize_codex_sandbox(codex_sandbox),
         **normalize_walk_settings(payload),
         "web_search": normalize_web_search_mode(payload.get("web_search")),
+        "min_report_figures": resolve_min_report_figures(payload.get("min_report_figures")),
     }
     created_at = payload.get("created_at")
     if isinstance(created_at, str) and created_at.strip():
@@ -557,6 +588,7 @@ def save_run_config(paths: RunPaths, config: dict[str, Any]) -> None:
         "codex_sandbox": normalize_codex_sandbox(config.get("codex_sandbox")),
         **normalize_walk_settings(config),
         "web_search": normalize_web_search_mode(config.get("web_search")),
+        "min_report_figures": resolve_min_report_figures(config.get("min_report_figures")),
     }
     created_at = config.get("created_at")
     if isinstance(created_at, str) and created_at.strip():
@@ -578,6 +610,7 @@ def ensure_run_config(
     output_format: str | None = None,
     walk: "Mapping[str, Any] | None" = None,
     web_search: str | None = None,
+    min_report_figures: int | None = None,
 ) -> dict[str, Any]:
     current = load_run_config(paths)
     effective_operator = operator or current.get("operator") or "claude"
@@ -593,6 +626,9 @@ def ensure_run_config(
             "default" if effective_review_operator == "codex" else "sonnet"
         ),
         "codex_sandbox": normalize_codex_sandbox(codex_sandbox or current.get("codex_sandbox")),
+        "min_report_figures": resolve_min_report_figures(
+            min_report_figures if min_report_figures is not None else current.get("min_report_figures")
+        ),
         # An explicit setting wins; otherwise the run keeps what it was started
         # with, which is what makes `--resume-run` continue the same walk rather
         # than silently reverting an adaptive run to the linear default.
@@ -1234,10 +1270,15 @@ def validate_markdown_report(paths: RunPaths) -> list[str]:
             )
 
     published = _count_files_with_suffixes(paths.report_images_dir, RENDERABLE_IMAGE_SUFFIXES)
-    if published == 0:
+    floor = resolve_min_report_figures(load_run_config(paths).get("min_report_figures"))
+    if published < floor:
         problems.append(
-            "requires at least one rendered figure under report/images/ "
-            f"(save figures as {PREFERRED_REPORT_IMAGE_SUFFIX})."
+            f"report/images/ holds {published} rendered figure(s) but this run requires at "
+            f"least {floor}. One figure cannot answer more than one question, and a report "
+            "that under-illustrates forfeits the criteria it never addresses. Add figures "
+            "that settle *different* questions the task asks — a data overview, the main "
+            "result, and a validation or comparison are the usual three — rather than more "
+            f"views of the same one. Save them as {PREFERRED_REPORT_IMAGE_SUFFIX}."
         )
     elif published > MAX_REPORT_FIGURES:
         problems.append(
