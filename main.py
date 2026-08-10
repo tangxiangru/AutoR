@@ -796,7 +796,27 @@ def record_into_archive(
         if archive.promote(variant_id):
             ui.show_status(f"Variant `{variant_id}` has replayed its improvement and is promoted.", level="success")
         proposal = archive.propose_variant()
-        if proposal is not None:
+        if proposal is None:
+            # `propose_variant` reads only *believable* payoffs, and an edge nobody
+            # has taken has no payoff in either direction. That closes the loop the
+            # archive exists for: the graph's 13 backward edges are never taken, so
+            # they never become believable, so nothing ever proposes taking them.
+            # Measured on the shipped archive: 583 recorded runs, every one of them
+            # the plain forward line, 0 believable edges — and 0 at any N under a
+            # forward-only policy, not merely a large N.
+            #
+            # `propose_exploration` is the written entry into that blind spot and
+            # had no caller. Reaching it only when the evidence-driven proposer
+            # declines keeps exploitation first: the archive spends a run on
+            # curiosity only when it has nothing it can act on.
+            proposal = archive.propose_exploration()
+            if proposal is not None:
+                ui.show_status(
+                    f"Archive has no edge it can judge yet, so it proposed exploring one: "
+                    f"`{proposal.variant_id}`. {proposal.note}",
+                    level="info",
+                )
+        elif proposal is not None:
             ui.show_status(f"Archive proposed `{proposal.variant_id}`: {proposal.note}", level="info")
     except OSError as exc:
         ui.show_status(f"Could not update the archive: {exc}", level="warn")
