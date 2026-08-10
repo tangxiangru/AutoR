@@ -422,6 +422,10 @@ def routing_summary(paths: RunPaths) -> dict[str, Any]:
     if not isinstance(payload, dict):
         return {}
     edges: dict[str, int] = {}
+    # The same walk, kept per decision rather than summed per edge. `edges` cannot
+    # distinguish "declined" from "never offered", and those are different
+    # observations — see :mod:`src.decisions`.
+    decisions: list[dict[str, object]] = []
     agent_directed = 0
     revisits = 0
     bypassed = 0
@@ -436,11 +440,20 @@ def routing_summary(paths: RunPaths) -> dict[str, Any]:
         if visit.get("bypassed"):
             bypassed += 1
             continue
+        decisions.append(
+            {
+                "source": source,
+                "chose": target,
+                "offered": [str(item) for item in visit.get("offered", []) if str(item)],
+                "agent_directed": bool(visit.get("agent_directed")),
+            }
+        )
         edges[f"{source}->{target}"] = edges.get(f"{source}->{target}", 0) + 1
         if visit.get("agent_directed"):
             agent_directed += 1
     return {
         "edges": edges,
+        "decisions": decisions,
         "steps": len(payload.get("path", [])),
         "agent_directed": agent_directed,
         "revisits": revisits,

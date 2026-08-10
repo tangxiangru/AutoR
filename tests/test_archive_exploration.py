@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from src.archive import (
+    DEFAULT_MIN_OBSERVATIONS,
     RUBRIC_VERSION,
     Archive,
     RunRecord,
@@ -45,7 +46,9 @@ class ExplorableOnlyWithARivalTest(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.archive = Archive(Path(self._tmp.name) / "archive")
-        for index in range(5):
+        # `min_observations` is derived now, so "enough runs to be worth deviating
+        # from" is whatever the permutation floor says rather than a round number.
+        for index in range(DEFAULT_MIN_OBSERVATIONS):
             append_jsonl(
                 self.archive.runs_file,
                 _record(f"r{index}", ["01_literature_survey->02_hypothesis_generation"]).to_dict(),
