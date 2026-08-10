@@ -76,6 +76,34 @@ class ArtifactIndex:
         )
 
 
+def is_autor_own_record(paths: RunPaths, path: Path) -> bool:
+    """Whether a workspace file is AutoR's own bookkeeping rather than research output.
+
+    One rule with two readers. `write_experiment_manifest` runs on the way *into*
+    every stage from 05 on — `information_flow` declares the manifest as an inbound
+    channel — so it is rewritten inside the stage's own execution window on every
+    run. Counted as output, a Stage 05 that produced literally nothing scored a third
+    of `artifact_breadth` off a file whose own body reads `result_artifact_count: 0`.
+    At Stages 03 and 04 it was worse than wrong, it was *noisy*: the manifest write
+    and the next stage's start marker land in the same clock tick often enough to
+    make the score flicker on byte-identical inputs.
+
+    `src.rubric` and this module both had to know the rule and only this one did.
+    `RECORD_ARTIFACTS` is the list `experiment_manifest` already keeps of the files
+    it excludes from its own result set, so there is no third spelling.
+    """
+    from .experiment_manifest import RECORD_ARTIFACTS
+
+    if path.name.endswith(".schema.json"):
+        return True
+    try:
+        relative = path.relative_to(paths.workspace_root).as_posix()
+    except ValueError:
+        return False
+    return relative in RECORD_ARTIFACTS
+
+
+
 def write_artifact_index(paths: RunPaths) -> ArtifactIndex:
     artifacts = _scan_artifacts(paths)
     counts_by_category = {
@@ -160,9 +188,7 @@ def _scan_artifacts(paths: RunPaths) -> list[ArtifactRecord]:
         for path in sorted(directory.rglob("*")):
             if not path.is_file() or path.suffix.lower() not in suffixes:
                 continue
-            if path.name.endswith(".schema.json"):
-                continue
-            if category == "results" and path.name == "experiment_manifest.json":
+            if is_autor_own_record(paths, path):
                 continue
             stat = path.stat()
             records.append(

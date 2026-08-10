@@ -503,6 +503,10 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
             stage_timeout=args.stage_timeout,
             persona_text=load_persona(args.persona),
             deliberation_rounds=args.panel_rounds,
+            # The benchmark adapter is unattended by construction. `docs/review-panel.md`
+            # documents `rcb_agent.py --review-panel`, which is the exact context the
+            # unreadable-verdict fallback was found in.
+            unattended=True,
         )
     else:
         reviewer = AutomatedReviewer(

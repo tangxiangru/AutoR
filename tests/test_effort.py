@@ -235,6 +235,40 @@ class ManagerIntegrationTests(unittest.TestCase):
         manager.effort_plan = EffortPlan(enabled=enabled)
         return manager, paths
 
+    def test_a_polish_round_is_not_a_contest(self) -> None:
+        """The ledger contradicted itself inside one artifact.
+
+        `EvolutionConfig.rounds` defaults to 2 and polish rounds increment
+        `attempt_no`, which `_settle_effort` passed straight through — so
+        `effort.json` recorded `failures: 0` beside `contested: true` for the same
+        stage, and `attempts: 3` where the manifest said `1`. Four of eight stages on
+        shipped defaults.
+
+        A polish round is not a contest on this code's own terms: the `continue` that
+        starts one happens before `mark_stage_human_review_manifest` and before
+        `_collect_review_decision`, so it never reaches the gate at all. And because
+        polish is tier-independent it hit routine stages too, which destroyed the
+        measure rather than biasing it — `deliberative_but_uncontested` needs
+        `attempts == 1 and not contested`, so under defaults it could only ever fire
+        for a stage evolution declined to polish.
+        """
+        manager, _paths = self._manager_and_paths()
+        manager._settle_effort(_paths, STAGE_04, attempt_no=3, stage_markdown="", polish_rounds=2)
+
+        decision = manager.effort_plan.decision_for(STAGE_04)
+        self.assertEqual(decision.attempts, 1)
+        self.assertFalse(decision.contested)
+
+    def test_a_stage_that_failed_its_gate_is_still_contested(self) -> None:
+        """The control. `contested` now comes from the failures the gate recorded, so
+        a real refusal has to survive the change."""
+        manager, _paths = self._manager_and_paths()
+        manager.effort_plan.note_failure(STAGE_04)
+        manager._settle_effort(_paths, STAGE_04, attempt_no=3, stage_markdown="", polish_rounds=2)
+
+        decision = manager.effort_plan.decision_for(STAGE_04)
+        self.assertTrue(decision.contested)
+
     def test_a_routine_stage_prompt_is_told_it_is_routine(self) -> None:
         manager, paths = self._manager_and_paths()
         prompt = manager._build_stage_prompt(paths, STAGE_04, None, False)

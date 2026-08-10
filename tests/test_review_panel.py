@@ -96,7 +96,9 @@ class _ScriptedPanel:
         member_run = chair_member.run_prompt
 
         def chair_aware_run(*, paths, stage, attempt_no, prompt, label):
-            if label == "panel_chair":
+            # `panel_chair_verdict` is the chair's verdict-only re-ask, so it draws
+            # from the chair's script rather than a seat's.
+            if label.startswith("panel_chair"):
                 self.calls.append(("__chair__", label))
                 if not chair_queue:
                     raise AssertionError("No scripted chair response left")
@@ -547,6 +549,74 @@ class DropInContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UnreadableChairTests(unittest.TestCase):
+    """One unparseable synthesis must not cancel the run.
+
+    `#147` gave the solo reviewer a verdict-only re-ask and, unattended, a
+    send-back-for-another-pass instead of an abort. The panel bypassed both: the
+    chair's reply went through a bare `parse_decision`, so an unreadable synthesis
+    aborted — `run_status: cancelled`, Stage 01 stuck in review — where the solo
+    reviewer on the identical reply continues.
+
+    Two things rule out intent. `_round` already marks an unreadable *seat*
+    non-blocking, so the panel encodes the rule the chair path was breaking. And an
+    *unreachable* chair falls back to the panel's own objections, so the softer
+    failure got the harsher outcome.
+    """
+
+    def _panel(self, *, unattended: bool):
+        """Readable, split seats; only the chair's synthesis is prose.
+
+        Split so a second round and a chair synthesis both happen, and so the
+        fallback has real objections to fall back *to* — the point is that the seats'
+        actual complaints survive rather than being replaced by a generic re-run
+        request.
+        """
+        script = {
+            "pi": [_verdict_json("approve"), _verdict_json("approve")],
+            "domain": [_verdict_json("approve"), _verdict_json("approve")],
+            "method": [
+                _verdict_json("custom_feedback", feedback="Add a competent baseline."),
+                _verdict_json("custom_feedback", feedback="Add a competent baseline."),
+            ],
+            "repro": [_verdict_json("approve"), _verdict_json("approve")],
+            "skeptic": [_verdict_json("approve"), _verdict_json("approve")],
+            "__chair__": [
+                "I have read the draft and I have some thoughts about it.",
+                "Still prose, I am afraid.",
+            ],
+        }
+        return _ScriptedPanel(self, script, unattended=unattended)
+
+    def test_unattended_an_unreadable_chair_falls_back_to_the_panel_s_objections(self) -> None:
+        harness = self._panel(unattended=True)
+        decision = harness.review()
+
+        self.assertNotEqual(decision.decision_token, "abort")
+        self.assertEqual(decision.choice, "4")
+        self.assertIn("panel", decision.reason.lower())
+        # The verdict-only re-ask happened, and got its own prompt_cache label.
+        self.assertIn(
+            "panel_chair_verdict", [label for _key, label in harness.calls]
+        )
+
+    def test_attended_an_unreadable_chair_still_aborts(self) -> None:
+        """The control against an over-broad fix. With a human there, guessing at a
+        verdict is the one thing the approval gate exists to prevent."""
+        harness = self._panel(unattended=False)
+        self.assertEqual(harness.review().decision_token, "abort")
+
+    def test_the_seats_are_built_with_the_panel_s_own_unattended_setting(self) -> None:
+        """`create_reviewer` takes `unattended` and the panel branch discarded it, so
+        every seat was attended — while `--review-panel` alone puts the manager in
+        unattended mode."""
+        panel = ReviewPanel(DEFAULT_PANEL, backend_name="claude", model="sonnet", unattended=True)
+        self.assertTrue(all(member.unattended for member in panel._members.values()))
+
+        attended = ReviewPanel(DEFAULT_PANEL, backend_name="claude", model="sonnet")
+        self.assertFalse(any(member.unattended for member in attended._members.values()))
 
 
 class PanelEffectTests(unittest.TestCase):

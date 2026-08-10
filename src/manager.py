@@ -476,6 +476,20 @@ class ResearchManager:
         # stopped survives into this one, and the run that recovers from a halt is
         # reported as the run that halted.
         state.halted_because, state.halted_kind = "", ""
+
+        # A resume that starts somewhere other than where the last closed visit said
+        # the run was going is an operator overruling that move. It was made off the
+        # router with no choice set, so it is not an edge observation — the same rule
+        # as `/back` and a round's own jump.
+        #
+        # Without this the archive learns a move the run did not make. Measured after
+        # `--final-stage 06` then a plain resume: the record claims
+        # `06_analysis->finish` *and* a route reading `06 -> 07 -> 08`, while the
+        # advance into Stage 07 is missing entirely. One row, two contradictory
+        # claims, and `EdgePayoff.believable` counts both.
+        if state.path and state.path[-1].chose and state.path[-1].chose != entry.slug:
+            state.path[-1].bypassed = True
+            save_graph_state(paths, state)
         stage: StageSpec | None = entry
 
         while stage is not None:
@@ -564,10 +578,10 @@ class ResearchManager:
         last = state.path[-1]
         if last.chose != GRAPH_FINISH or not last.closed_round:
             return None
-        final = latest_round(paths)
-        if final is not None and final.number == last.closed_round and final.decision == "abandon":
-            return final
-        return None
+        # Same widening as the graph guard: a later `converged` round does not erase
+        # an abandonment, it launders one. `unreopened_abandonment` is the reader
+        # that knows the difference, because overruling has its own spelling.
+        return unreopened_abandonment(paths)
 
     def _complete_run(self, paths: RunPaths, state: "GraphState | None" = None) -> bool:
         route = format_route(state) if state is not None else ""
@@ -964,15 +978,40 @@ class ResearchManager:
         )
 
     def _settle_effort(
-        self, paths: RunPaths, stage: StageSpec, attempt_no: int, stage_markdown: str
+        self,
+        paths: RunPaths,
+        stage: StageSpec,
+        attempt_no: int,
+        stage_markdown: str,
+        polish_rounds: int = 0,
     ) -> None:
-        """Record what this stage cost, and let it set the next stage's tier."""
+        """Record what this stage cost, and let it set the next stage's tier.
+
+        Two corrections to what the raw attempt number says, both because a polish
+        round is not a contest on this code's own terms: it happens before
+        `mark_stage_human_review_manifest` and before `_collect_review_decision`, so
+        it never reaches the gate at all.
+
+        Charged as one, the ledger contradicted itself inside a single artifact —
+        `failures: 0` beside `contested: true` for the same stage, and `attempts: 3`
+        where the manifest said `1`. Measured on shipped defaults, four of eight
+        stages. And because polish is tier-independent, routine stages recorded it
+        too, so it destroyed the measure rather than biasing it:
+        `deliberative_but_uncontested` needs `attempts == 1 and not contested`, which
+        under defaults could only fire for a stage evolution declined to polish.
+        """
         try:
             self.effort_plan.note_outcome(
                 stage,
-                attempts=attempt_no,
-                # Uncontested means it cleared its gate without anyone asking for a change.
-                contested=attempt_no > 1,
+                # The same subtraction the manifest already gets.
+                attempts=max(attempt_no - polish_rounds, 1),
+                # Uncontested means it cleared its gate without anyone asking for a
+                # change. Read off the failures the gate actually recorded rather
+                # than off an attempt counter that also counts work nobody asked for.
+                # `_note_effort_failure` runs before any approval, so this is settled
+                # by the time we get here — and it is right on a second visit too,
+                # where the attempt number is run-wide.
+                contested=self.effort_plan.decision_for(stage).failures > 0,
             )
             following = self._stage_after(stage)
             declaration = parse_declaration(stage_markdown)
@@ -2305,7 +2344,9 @@ class ResearchManager:
                     self._stage_file_paths(stage_markdown),
                 )
                 if self.effort_plan.enabled:
-                    self._settle_effort(paths, stage, attempt_no, stage_markdown)
+                    self._settle_effort(
+                        paths, stage, attempt_no, stage_markdown, polish_rounds=polish_rounds
+                    )
                 if stage.slug == "02_hypothesis_generation":
                     self._measure_pool_adoption(paths, stage, stage_markdown)
                 if stage.slug == "04_implementation":

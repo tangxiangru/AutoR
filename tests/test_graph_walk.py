@@ -20,9 +20,16 @@ from unittest.mock import patch
 from src.evolution import EvolutionConfig
 from src.manager import ResearchManager
 from src.manifest import load_run_manifest
-from src.router import RoutingDecision
+from src.router import RoutingDecision, routing_summary
 from src.rubric import score_stage
-from src.stage_graph import FINISH, GUARDS, GraphState, StageGraph, load_graph_state
+from src.stage_graph import (
+    FINISH,
+    GUARDS,
+    GraphState,
+    StageGraph,
+    load_graph_state,
+    save_graph_state,
+)
 from src.utils import STAGES, build_run_paths, load_run_config, read_text, write_text
 from tests.test_manager_smoke import REPO_ROOT, ScriptedSmokeOperator
 
@@ -360,6 +367,121 @@ class GraphWalkTests(unittest.TestCase):
         self.assertTrue(resumed.resume_run(paths.run_root))
         self.assertEqual(load_run_manifest(paths.run_manifest).run_status, "completed")
 
+    def test_a_standing_abandonment_is_not_laundered_by_a_rollback_resume(self) -> None:
+        """The rollback the tool itself recommends was the way around the terminal.
+
+        A bare resume of an abandoned run prints "To continue anyway, roll back
+        explicitly, or record a round that reopens it." Take the first suggestion:
+        `--rollback-stage 03`, round 2 closes `converged`, and the guard shut because
+        round 2 was not an abandonment. Measured: Stage 07 burned 10 operator calls
+        against a gate refusing it 20 times, and the run produced nothing.
+
+        The ledger question is "does an abandonment still stand", not "was the last
+        round one". The visit gate stays — it stops a visit that closed nothing being
+        governed by the ledger at all — and the companion below is what holds it.
+        """
+        _operator, manager = self.build()
+        self._abandon_at_analysis(manager)
+        self.drive(manager)
+        paths = self.only_run()
+        self.assertEqual(load_run_manifest(paths.run_manifest).run_status, "abandoned")
+
+        operator, resumed = self.build()
+        self._declare_at_analysis(resumed, "converged")
+        stage_03 = next(stage for stage in STAGES if stage.number == 3)
+        self.drive_resume(resumed, paths.run_root, rollback_stage=stage_03)
+
+        self.assertEqual(operator.invocations.get("07_writing", 0), 0)
+        self.assertEqual(operator.invocations.get("08_dissemination", 0), 0)
+        # The Stage-07 refusal specifically. The log legitimately records the round's
+        # own decision; what must be absent is the gate rejecting a write-up 20 times.
+        self.assertNotIn("cannot run: round", read_text(paths.logs))
+        self.assertEqual(load_run_manifest(paths.run_manifest).run_status, "abandoned")
+
+    def test_a_round_that_says_it_reopens_the_abandonment_may_continue(self) -> None:
+        """The companion, so the fix cannot be satisfied by nailing the terminal shut.
+
+        Overruling an abandonment is legitimate. It has a spelling, and a round that
+        uses it gets through to writing.
+        """
+        _operator, manager = self.build()
+        self._abandon_at_analysis(manager)
+        self.drive(manager)
+        paths = self.only_run()
+
+        operator, resumed = self.build()
+        self._declare_at_analysis(resumed, "converged", reopens_round=1)
+        stage_03 = next(stage for stage in STAGES if stage.number == 3)
+        self.drive_resume(resumed, paths.run_root, rollback_stage=stage_03)
+
+        self.assertGreater(operator.invocations.get("07_writing", 0), 0)
+        self.assertEqual(load_run_manifest(paths.run_manifest).run_status, "completed")
+
+    def test_a_resume_that_starts_elsewhere_does_not_archive_the_move_it_overruled(self) -> None:
+        """The halted walk closed Stage 06 with `chose='finish'`. The resume starts at
+        Stage 07 and never re-enters 06, so that visit is never reconciled — and the
+        archived row claimed `06_analysis->finish` while its own route read
+        `06 -> 07 -> 08`. One record, two contradictory claims, and the real advance
+        into Stage 07 missing entirely.
+        """
+        stage_06 = next(stage for stage in STAGES if stage.number == 6)
+        _operator, manager = self.build()
+        self.assertTrue(self.drive(manager, final_stage=stage_06))
+        paths = self.only_run()
+        self.assertIn("06_analysis->finish", routing_summary(paths)["edges"])
+
+        _op2, resumed = self.build()
+        self.drive_resume(resumed, paths.run_root)
+
+        summary = routing_summary(paths)
+        self.assertNotIn("06_analysis->finish", summary["edges"])
+        self.assertIn("07_writing->08_dissemination", summary["edges"])
+        self.assertEqual(summary["bypassed"], 1)
+        self.assertIn("07_writing", summary["route"])
+
+    def test_a_resume_that_continues_where_it_was_heading_keeps_its_edge(self) -> None:
+        """The control for the `!= entry.slug` half.
+
+        Dropping that condition would mark *every* resumed run's last move bypassed,
+        including one that simply picked up where it left off, and quietly delete a
+        traversal the run genuinely made. Staged directly rather than through a real
+        interruption, because the two natural ways to stop a walk — a budget halt and
+        an abort — both leave a last visit that was not heading to the entry stage.
+        """
+        _operator, manager = self.build(graph_max_steps=4)
+        self.drive(manager)
+        paths = self.only_run()
+
+        # Rewrite the halt as "it was on its way to Stage 05 and stopped", which is
+        # what an interruption between stages looks like.
+        state = load_graph_state(paths)
+        state.path[-1].chose = STAGE_05.slug
+        state.path[-1].kind = "advance"
+        save_graph_state(paths, state)
+        before = dict(routing_summary(paths)["edges"])
+        self.assertIn("04_implementation->05_experimentation", before)
+
+        _op2, resumed = self.build(graph_max_steps=40)
+        self.drive_resume(resumed, paths.run_root)
+
+        after = routing_summary(paths)["edges"]
+        self.assertIn("04_implementation->05_experimentation", after)
+        self.assertEqual(routing_summary(paths)["bypassed"], 0)
+
+    def test_an_unfinished_visit_is_left_alone(self) -> None:
+        """A visit with no recorded move was never a traversal, so there is nothing to
+        reconcile and nothing to mark. An abort leaves one."""
+        _operator, manager = self.build()
+        self.drive(manager)
+        paths = self.only_run()
+        state = load_graph_state(paths)
+        state.path[-1].chose = ""
+        save_graph_state(paths, state)
+
+        _op2, resumed = self.build()
+        self.drive_resume(resumed, paths.run_root)
+        self.assertEqual(routing_summary(paths)["bypassed"], 0)
+
     # -- the checks have to be satisfiable -----------------------------------
 
     def test_every_guard_passes_on_a_completed_run(self) -> None:
@@ -423,6 +545,35 @@ class GraphWalkTests(unittest.TestCase):
         self.assertEqual(
             shortfalls, {}, msg=f"validity-chain checks unsatisfiable by a completed run: {shortfalls}"
         )
+
+    def _declare_at_analysis(self, manager, decision: str, **extra) -> None:
+        """Make Stage 06 close its round with `decision`."""
+        original = manager.operator.run_stage
+
+        def run_stage(stage, prompt, run_paths, attempt_no, continue_session=False):
+            result = original(stage, prompt, run_paths, attempt_no, continue_session)
+            if stage.number == 6:
+                payload = {
+                    "decision": decision,
+                    "rationale": "The second design separates the effect cleanly enough.",
+                    "what_we_learned": "Tuning on a development split removes the confound.",
+                    "what_changes_next": "",
+                    "negative_result": True,
+                }
+                payload.update(extra)
+                write_text(run_paths.round_decision, json.dumps(payload))
+            return result
+
+        manager.operator.run_stage = run_stage
+
+    def drive_resume(self, manager: ResearchManager, run_root, **kwargs) -> bool:
+        stack = ExitStack()
+        stack.enter_context(patch.object(manager.ui, "choose_intake_clarification_answer", return_value=None))
+        stack.enter_context(patch.object(manager.ui, "read_optional_multiline_feedback", return_value=None))
+        stack.enter_context(patch.object(manager.ui, "choose_intake_final_action", return_value="5"))
+        stack.enter_context(patch.object(manager, "_ask_choice", return_value="5"))
+        with stack:
+            return manager.resume_run(run_root, **kwargs)
 
     # -- abandonment is an outcome, not a failure ----------------------------
 

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -23,7 +24,14 @@ from src.rubric import (
     score_stage,
     verdict_digest,
 )
-from src.utils import STAGES, build_run_paths, ensure_run_layout, write_text
+from src.utils import (
+    STAGES,
+    build_run_paths,
+    ensure_run_layout,
+    mark_stage_execution_started,
+    read_text,
+    write_text,
+)
 from tests import prereg_support
 
 
@@ -249,6 +257,42 @@ class RubricTestCase(unittest.TestCase):
             ),
         )
         self.assertLess(planned.by_key["commitment"].score, done.by_key["commitment"].score)
+
+    def test_autors_own_bookkeeping_is_not_the_stages_output(self) -> None:
+        """`write_experiment_manifest` runs on the way *into* every stage from 05 on —
+        `information_flow` declares the manifest as an inbound channel — so it is
+        rewritten inside the stage's own execution window on every run. Counted as
+        output, a Stage 05 that produced literally nothing scored a third of
+        `artifact_breadth` off a file whose own body reads `result_artifact_count: 0`.
+
+        `_score_reproducibility` already read the same file's empty `result_artifacts`
+        and penalised the stage for it, so the rubric was crediting and debiting one
+        artifact at once.
+        """
+        from src.experiment_manifest import write_experiment_manifest
+
+        mark_stage_execution_started(self.paths, STAGE_05)
+        time.sleep(0.02)
+        write_experiment_manifest(self.paths)
+
+        manifest = json.loads(read_text(self.paths.experiment_manifest))
+        self.assertEqual(manifest.get("result_artifacts"), [])
+        score = score_stage(paths=self.paths, stage=STAGE_05, markdown=stage_markdown(STAGE_05))
+        self.assertEqual(score.by_key["artifact_breadth"].score, 0.0)
+
+    def test_a_real_result_beside_the_bookkeeping_still_counts(self) -> None:
+        """The control, so the exclusion cannot over-broaden into dropping output."""
+        from src.experiment_manifest import write_experiment_manifest
+
+        mark_stage_execution_started(self.paths, STAGE_05)
+        time.sleep(0.02)
+        write_experiment_manifest(self.paths)
+        write_text(
+            self.paths.results_dir / "metrics.json",
+            json.dumps({"baseline": 0.58, "treatment": 0.74, "seeds": [1, 2, 3, 4, 5]}),
+        )
+        score = score_stage(paths=self.paths, stage=STAGE_05, markdown=stage_markdown(STAGE_05))
+        self.assertGreater(score.by_key["artifact_breadth"].score, 0.0)
 
     # -- structure -----------------------------------------------------------
 

@@ -43,6 +43,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from .artifact_index import is_autor_own_record
 from .utils import (
     FIGURE_SUFFIXES,
     MACHINE_DATA_SUFFIXES,
@@ -62,7 +63,11 @@ from .utils import (
 #: changed. Scores carrying different versions are not comparable, and every
 #: consumer that ranks two scores has to refuse to rank across a version change:
 #: a reweight would otherwise read as a run that got better or worse overnight.
-RUBRIC_VERSION = "1"
+#: ``2`` excludes AutoR's own record files from ``artifact_breadth``. A v1 score and
+#: a v2 score are not two measurements of one thing, and every consumer refuses to
+#: rank across the change rather than quietly treating the correction as a run
+#: having got worse.
+RUBRIC_VERSION = "2"
 
 #: The keys the rubric refuses to read out of an adjudication artifact.
 #:
@@ -448,6 +453,11 @@ def _fresh_artifact_kinds(
         for directory in directories:
             for path in _existing_files(directory):
                 if path.suffix.lower() not in allowed:
+                    continue
+                # AutoR's own bookkeeping is not the stage's output. Per-file rather
+                # than by pruning the directory, because `artifact_dirs` are
+                # operator-declared and may point anywhere.
+                if is_autor_own_record(paths, path):
                     continue
                 try:
                     stat = path.stat()
