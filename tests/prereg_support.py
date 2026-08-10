@@ -75,6 +75,58 @@ def write_experimental_protocol(paths: RunPaths, *, planned_seeds: int = 5) -> N
     )
 
 
+def write_report_plan(
+    paths: RunPaths,
+    *,
+    filename: str = "accuracy.png",
+    source_artifact: str = "results/metrics.json",
+    figures=None,
+    headline_numbers=None,
+) -> None:
+    """One planned figure, one headline number: the smallest plan the gate accepts.
+
+    Deliberately one entry rather than five. The fixture is read by everyone who
+    adds a test, and a five-entry fixture would teach the ceiling as a target
+    exactly the way a five-entry prompt example would.
+
+    ``filename`` defaults to the figure the run fixtures in this suite publish,
+    so the Stage 07 coverage check sees a plan the package actually delivered.
+    """
+    write_text(
+        paths.report_plan,
+        json.dumps(
+            {
+                "figures": figures
+                if figures is not None
+                else [
+                    {
+                        "slot": 1,
+                        "filename": filename,
+                        "supports": [HYPOTHESIS_ID],
+                        "shows": (
+                            "Held-out accuracy (%) for the treatment and the baseline, "
+                            "five seeds, band = stderr."
+                        ),
+                        "if_supported": "the treatment's bar clears the baseline's error band",
+                        "if_refuted": "the two bars overlap within their error bands",
+                        "source_artifact": source_artifact,
+                        "dropped_because": "",
+                    }
+                ],
+                "headline_numbers": headline_numbers
+                if headline_numbers is not None
+                else [
+                    {
+                        "quantity": "held-out accuracy, treatment vs baseline",
+                        "unit": "percentage points",
+                        "source_artifact": source_artifact,
+                    }
+                ],
+            }
+        ),
+    )
+
+
 def write_round_decision(paths: RunPaths, *, decision: str = "converged", **overrides) -> None:
     payload = {
         "decision": decision,
@@ -107,6 +159,10 @@ def write_validity_chain(
     not already written it, because the gates reject a verdict or a claim that
     cites a file that does not exist — a rejection covered by its own test
     rather than by every fixture tripping over it.
+
+    The figure plan is part of the same chain: it is declared at Stage 03, one
+    stage before the freeze, and its single slot is drawn from the same evidence
+    artifact the verdict cites.
     """
     evidence_path = paths.workspace_root / evidence
     if not evidence_path.exists():
@@ -115,6 +171,7 @@ def write_validity_chain(
 
     write_hypothesis_manifest(paths)
     write_experimental_protocol(paths)
+    write_report_plan(paths, source_artifact=evidence)
     prereg = freeze_preregistration(paths)
     if prereg is None:  # pragma: no cover - only if the manifest write failed
         raise AssertionError("preregistration did not freeze from the test manifest")

@@ -18,6 +18,8 @@ Interpret the available evidence rigorously and determine what claims the curren
 - Put analysis notes, evaluation breakdowns, and interpretive documents under `{{WORKSPACE_RESULTS_DIR}}` or `{{WORKSPACE_NOTES_DIR}}`.
 - Put figures, plots, or tables created for interpretation under `{{WORKSPACE_FIGURES_DIR}}` or `{{WORKSPACE_RESULTS_DIR}}`.
 - Create real figure files (`.png`, `.pdf`, `.svg`, `.jpg`) under `{{WORKSPACE_FIGURES_DIR}}`; a described figure is not a figure.
+- Produce the figures `{{WORKSPACE_NOTES_DIR}}/report_plan.json` claims, under `{{WORKSPACE_FIGURES_DIR}}`, using exactly the filename each slot declares.
+- If a planned figure cannot be produced from the artifact its slot names, set `dropped_because` on that slot and say what happened to the claim it carried. Do not substitute an unrelated plot into its filename.
 - Every figure supporting a verdict must show the dispersion that verdict rests on — error bars, per-seed points, or a band — with n stated in the caption.
 - Read `{{WORKSPACE_RESULTS_DIR}}/experiment_manifest.json` before drawing conclusions, so the analysis tracks the actual standardized experiment bundle.
 

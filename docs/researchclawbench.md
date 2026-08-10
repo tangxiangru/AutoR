@@ -77,7 +77,7 @@ After the pipeline finishes — **whether or not it succeeded** — the adapter 
 | `report/report.md` | see below |
 | `report/images/*.png` | `workspace/report/images` first, then `figures`, `writing`, `results`, `artifacts` (PNG only, capped — see below) |
 | `code/` | `workspace/code` |
-| `outputs/` | `workspace/results` and `workspace/notes`, **images excluded** |
+| `outputs/` | `workspace/results` and `workspace/notes`, **images excluded** — and any image a stage wrote straight to `<workspace>/outputs/`, or anywhere under `<workspace>/report/` other than a published slot, is deleted; see below |
 
 Run-tree figures under `report/images/` keep their filenames, because those are the names
 `report.md` references. A same-named figure swept up from elsewhere is the one that gets
@@ -86,30 +86,84 @@ qualified.
 #### The five image slots
 
 This is where most of the score is. Across the 40 shipped tasks, 91 of 154 checklist items
-are `type: image` and they carry **60.6% of total weight** (median 62%; images are the
-majority of weight in 25 of 40 tasks). The scorer shows the judge at most five agent images
-per item:
+are `type: image` and they carry **60.6% of total weight** (median 62.5%; images are the
+strict majority of weight in **24 of 40** tasks and at or above half in 25 — `Material_000`
+is exactly 50/50). Every number in this section is re-derivable from
+`tasks/*/target_study/checklist.json`: sum `weight` grouped on `type` for the weights, count
+the `type: image` entries per task for the criterion counts. They move when the task set
+does, and they were last measured on 2026-08-10 against the 40 shipped tasks.
+
+The judge is **not** shown five images chosen for the item. `evaluation/score.py` collects
+one set per *workspace* and hands the first five of that same set to every image criterion:
 
 ```python
+generated_images = _find_generated_images(workspace)               # once, per workspace
+...
 for search_dir in [workspace / "outputs", workspace / "report"]:   # outputs first
     for ext in IMAGE_EXTENSIONS:
         images.extend(search_dir.rglob(f"*{ext}"))                 # filesystem order
 ...
-for img in generated_images[:5]:
+for img in generated_images[:5]:                                   # per item, the same five
 ```
 
-Two consequences drive the export:
+Four consequences drive the export, and the plan the run writes at Stage 03:
 
-1. **`outputs/` is drained before `report/`.** A diagnostic plot left in `workspace/results`
-   would take a slot from a figure the report argues with, so images are excluded from the
-   `outputs/` mirror entirely. The machine-readable results still go across.
+1. **`outputs/` is drained before `report/`.** A diagnostic plot there takes a slot from a
+   figure the report argues with, so images are excluded from the `outputs/` mirror
+   entirely — the machine-readable results still go across — **and** `collect_figures`
+   deletes any image a stage wrote directly to `<workspace>/outputs/`, which the goal
+   contract's own instruction to keep `outputs/` up to date makes easy to do by accident.
+   Withholding them from the mirror is only half the defence: six stray PNGs there take all
+   five slots and the report's figures reach the judge as nothing.
 2. **`rglob` order is filesystem order, not alphabetical.** Naming cannot influence which
    five survive. The only lever is publishing no more than five — so `collect_figures`
    enforces `MAX_REPORT_FIGURES`, picks by the report's own reference order, and prunes
    anything else already at the benchmark path. A figure the report references is never
    pruned; Stage 07's gate is what keeps a run from arriving over budget.
+   The prune is the *same walk* as the sweep, over both trees: `rglob` over `outputs/` and
+   over `report/`, not `iterdir()` over `report/images/`. `report/images/` is not the only
+   place under `report/` the scorer looks, so a loose `report/panel.png` or a nested
+   `report/images/panels/*.png` takes a slot exactly the way a stray `outputs/` plot does —
+   and both sort *ahead* of `report/images/` in the walk. The only images that survive the
+   prune are the published slots and any image the winning report links directly.
+3. **No shipped task has more than five image criteria**, and 34 of 40 have three or fewer
+   (distribution over image criteria per task: 0×3, 1×10, 2×9, 3×12, 4×3, 5×3). Five is a
+   ceiling, not a target. The weight is earned by figures that settle *different* questions;
+   several views of one result spend most of the budget on one criterion.
+4. **Image criteria are shown only the first 10,000 characters of `report.md`**
+   (`report_text[:10000]` in `_build_image_prompt`; `_build_text_prompt` interpolates
+   `report_text` whole, so text criteria are *not* truncated). This is an ordering
+   constraint, not a length limit, and the goal text has to say so in those words: the
+   ~39% of weight the text criteria carry reads the entire report, so a run told its report
+   is "forfeited" past 10,000 characters would cut methodology and discussion that were
+   still being scored. The headline numbers, the results and the figure captions come
+   first; everything else comes after them, not instead of them.
+   That number is the benchmark's, not AutoR's: it lives in this file and in
+   `build_benchmark_goal`'s prose, and deliberately not as a constant in `src/` — nothing in
+   AutoR should start truncating on it.
 
 A sixth figure does not add a sixth chance to match. It randomises which five are seen.
+
+#### Where the five are chosen
+
+Not at export, and not at Stage 07. The run commits to its figures at **Stage 03**, in
+`workspace/notes/report_plan.json`: one entry per slot, each naming the claim it settles,
+what the reader should see, what the figure looks like if that claim holds and if it does
+not, and the result file it will be computed from. Stage 06 produces them, Stage 07
+publishes them in slot order, and — in markdown mode, which is what the benchmark runs — a
+planned figure that was neither published nor explicitly dropped is a refusal rather than a
+silence. `docs/stage-contract.md` carries the gate rows and `src/report_plan.py` the
+validator.
+
+That machinery is **not** benchmark-specific. It is the discipline
+`hypothesis_manifest.json` and `experimental_protocol.json` already apply — commit to the
+choice before the results can influence it — applied a third time, to figures, and every
+AutoR run gets it. What *is* benchmark-specific is everything above: the ~61% image weight,
+the one fixed set of five, the 10,000-character excerpt and the `outputs/`-before-`report/`
+sweep. Those reach the run through one place only, `build_benchmark_goal`, which a
+non-benchmark run never receives. Outside the benchmark a markdown run is told only that at
+most `MAX_REPORT_FIGURES` figures reach its reader — which `validate_markdown_report` has
+always enforced — and a LaTeX run is told there is no ceiling at all.
 
 #### Reference papers
 
@@ -151,13 +205,19 @@ not whether every stage was approved.
 | Triage artifact | `artifacts/report_review.json` | `artifacts/layout_review.json` |
 | Also required | `citation_verification.json`, `self_review.json` | same, plus `build_log.txt` and a `.bib` |
 | Figure budget | at most 5, all referenced | none |
+| Report plan | required at Stage 03; every slot must be published or carry `dropped_because` | required at Stage 03; coverage not checked |
 | Post-approval | — | `writing/paper_package/` bundle |
 
 The markdown gates are not "a file exists". Stage 07 fails and retries if `report.md` is
 shorter than 1,200 characters, references no figures, still holds placeholder text, or
 carries a figure reference that is absolute, remote, unrenderable, or points at a file that
-is not there, or publishes more than five figures. A broken figure link is the expensive
+is not there, or publishes more than five figures, or leaves a figure the Stage 03 plan
+committed to neither published nor explicitly dropped. A broken figure link is the expensive
 defect here: the judge reads the prose promising a figure and is shown nothing.
+
+The coverage check is narrowed to markdown on purpose: a LaTeX run has no single
+well-defined published-figure location for it to match against, and `layout_review.json`
+covers that branch instead.
 
 ### 3. Spends the time it is given
 

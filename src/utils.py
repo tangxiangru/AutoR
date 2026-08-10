@@ -74,6 +74,11 @@ class RunPaths:
     hypothesis_manifest: Path
     preregistration: Path
     experimental_protocol: Path
+    #: Which figures the report will carry and which claim each one settles,
+    #: declared at Stage 03. Under ``notes/`` rather than ``data/`` on purpose:
+    #: ``.json`` is a machine-data suffix, so a plan under ``data/`` would
+    #: satisfy the Stage 03 data gate, which exists to prove work happened.
+    report_plan: Path
     research_rounds: Path
     round_decision: Path
     hypothesis_outcomes: Path
@@ -194,10 +199,11 @@ MIN_REPORT_CHARS = 1200
 
 #: How many figures may reach the judge.
 #:
-#: ResearchClawBench's scorer attaches at most five agent images per checklist item
-#: (``generated_images[:5]``), selected by an unsorted ``rglob`` over ``outputs/`` and then
-#: ``report/``. Filesystem order is not alphabetical, so naming cannot influence which five
-#: survive — the only way to choose them is to publish no more than five. Image items carry
+#: ResearchClawBench's scorer collects one set of agent images per *workspace*, by an
+#: unsorted ``rglob`` over ``outputs/`` and then ``report/``, and attaches the first five of
+#: that same set to every image checklist item (``generated_images[:5]``) — not five chosen
+#: per item. Filesystem order is not alphabetical, so naming cannot influence which five
+#: survive; the only way to choose them is to publish no more than five. Image items carry
 #: ~61% of the benchmark's total weight, so a sixth figure does not dilute the score, it
 #: randomises it.
 MAX_REPORT_FIGURES = 5
@@ -254,6 +260,7 @@ def build_run_paths(run_root: Path) -> RunPaths:
         hypothesis_manifest=workspace_root / "notes" / "hypothesis_manifest.json",
         preregistration=workspace_root / "notes" / "preregistration.json",
         experimental_protocol=workspace_root / "notes" / "experimental_protocol.json",
+        report_plan=workspace_root / "notes" / "report_plan.json",
         research_rounds=workspace_root / "notes" / "research_rounds.json",
         round_decision=workspace_root / "notes" / "round_decision.json",
         hypothesis_outcomes=workspace_root / "results" / "hypothesis_outcomes.json",
@@ -1288,6 +1295,16 @@ def validate_stage_artifacts(
                 f"{stage.stage_title} requires machine-readable data artifacts produced or updated during the current stage execution."
             )
 
+        # Which figures the report will carry, held at the stage that writes it.
+        # The experimental protocol is the counter-example: the Stage 03 prompt
+        # asks for it and the gate first fires at Stage 05, so a Stage 03 that
+        # skipped it is approved and the failure surfaces two stages later,
+        # where the only repair is a rollback.
+        from .report_plan import validate_report_plan
+
+        for problem in validate_report_plan(paths, selected_output_format(paths)):
+            problems.append(f"{stage.stage_title} {problem}")
+
     if stage.number >= 5:
         # The scientific-validity chain, distinct from the artifact gates around
         # it: the hypotheses were frozen before results existed (05), every one
@@ -1320,10 +1337,22 @@ def validate_stage_artifacts(
     if stage.number >= 6:
         from .experimental_protocol import validate_outcome_statistics
         from .preregistration import validate_hypothesis_outcomes
+        from .report_plan import validate_report_plan_sources
 
         for problem in validate_hypothesis_outcomes(paths):
             problems.append(f"{stage.stage_title} {problem}")
         for problem in validate_outcome_statistics(paths):
+            problems.append(f"{stage.stage_title} {problem}")
+        # Never draw a figure from numbers you did not compute — checked at the
+        # stage that draws them, where producing the missing file is still a
+        # move the run can make.
+        for problem in validate_report_plan_sources(
+            paths,
+            [
+                *(artifact_dirs or {}).get("results", ()),
+                *(artifact_dirs or {}).get("data", ()),
+            ],
+        ):
             problems.append(f"{stage.stage_title} {problem}")
 
         if count_in("figures", paths.figures_dir, FIGURE_SUFFIXES) == 0:
@@ -1344,9 +1373,17 @@ def validate_stage_artifacts(
             problems.append(f"{stage.stage_title} {problem}")
 
     if stage.number >= 7 and selected_output_format(paths) == "markdown":
+        from .report_plan import validate_report_plan_coverage
+
         problems.extend(
             f"{stage.stage_title}: {problem}"
             for problem in validate_markdown_report(paths)
+        )
+        problems.extend(
+            f"{stage.stage_title}: {problem}"
+            for problem in validate_report_plan_coverage(
+                paths, [*(artifact_dirs or {}).get("figures", ())]
+            )
         )
 
         if not (paths.artifacts_dir / "citation_verification.json").exists():

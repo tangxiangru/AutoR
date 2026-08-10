@@ -82,6 +82,7 @@ VALIDATOR_SOURCES = (
     "utils.py",
     "preregistration.py",
     "experimental_protocol.py",
+    "report_plan.py",
     "validity_review.py",
     "research_rounds.py",
     "evidence_ledger.py",
