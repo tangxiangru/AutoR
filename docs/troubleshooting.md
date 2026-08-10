@@ -184,6 +184,16 @@ know that intake will not run.
 
 ---
 
+## The run stopped with "Backend unavailable"
+
+The model backend refused every request — exhausted quota, rejected credentials, or a provider
+outage. AutoR stops rather than writing a locally generated stage summary and continuing,
+because a run that cannot reach a model has produced no findings, and a fallback draft would
+be indistinguishable from research by the end of the run.
+
+The backend's own message is in `logs.txt` under `<stage> backend_unavailable`. Fix the cause
+and resume with `--resume-run latest`; approved stages are kept.
+
 ## Stage 07 writing
 
 Stage 07's requirements depend on the run's `output_format`, recorded in
