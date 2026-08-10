@@ -103,6 +103,20 @@ MIN_SHOWS_CHARS = 40
 MIN_BRANCH_CHARS = 20
 MIN_DROP_REASON_CHARS = 20
 
+#: How much of the report a figure criterion's grader actually reads.
+#:
+#: ResearchClawBench's scorer passes ``report_text[:10000]`` when it grades an
+#: image criterion (evaluation/score.py:138) while passing the whole report for a
+#: text criterion. Image criteria carry 60.6% of the benchmark's weight, so the
+#: prose that argues for a figure is worth nothing past this point — the grader
+#: is shown the picture and, beyond the window, none of the argument for it.
+#:
+#: Only the *first* slot is held to it. Requiring every figure's argument inside
+#: 10k characters would refuse a long paper whose fifth figure is legitimately
+#: discussed late; requiring the highest-ranked one is a claim about the report's
+#: own priorities, which is what the slot ranking already declares.
+JUDGE_VISIBLE_PREFIX_CHARS = 10_000
+
 #: A ceiling, so the field cannot become a list that satisfies a count.
 MAX_HEADLINE_NUMBERS = 8
 
@@ -873,6 +887,7 @@ def validate_report_plan_coverage(
         return []
 
     referenced = set()
+    report_text = ""
     if paths.report_file.is_file():
         try:
             report_text = paths.report_file.read_text(encoding="utf-8")
@@ -882,6 +897,10 @@ def validate_report_plan_coverage(
             PurePosixPath(target.split("#", 1)[0].split("?", 1)[0].strip()).name.casefold()
             for target in extract_markdown_image_targets(report_text)
         }
+    visible = {
+        PurePosixPath(target.split("#", 1)[0].split("?", 1)[0].strip()).name.casefold()
+        for target in extract_markdown_image_targets(report_text[:JUDGE_VISIBLE_PREFIX_CHARS])
+    }
 
     search_dirs = [paths.report_images_dir, *figures_dirs]
     problems: list[str] = []
@@ -900,6 +919,24 @@ def validate_report_plan_coverage(
             "and reference it from report.md, or record `dropped_because` on that slot in "
             f"report_plan.json ({MIN_DROP_REASON_CHARS} characters or more) saying what "
             "happened to the claim it carried."
+        )
+
+    lead = next((item for item in sorted(plan.figures, key=lambda x: x.slot) if not item.is_dropped), None)
+    if (
+        lead is not None
+        and lead.filename
+        and lead.filename.casefold() in referenced
+        and lead.filename.casefold() not in visible
+        and len(report_text) > JUDGE_VISIBLE_PREFIX_CHARS
+    ):
+        # The report does reference it — just too late to count where it counts.
+        problems.append(
+            f"the report first references slot {lead.slot} ({lead.filename}) after "
+            f"{JUDGE_VISIBLE_PREFIX_CHARS:,} characters. A grader scoring a figure sees the "
+            f"picture and only the first {JUDGE_VISIBLE_PREFIX_CHARS:,} characters of the "
+            "prose, so the argument for the report's own highest-ranked figure lands outside "
+            "what is read. Move the result it settles forward, or move the figure's discussion "
+            "into the section that states the headline numbers."
         )
 
     if all(item.is_dropped for item in plan.figures):

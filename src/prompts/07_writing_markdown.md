@@ -37,6 +37,22 @@ up its figures, checking evidence-to-claim alignment, and producing the structur
 - Keep the story centered on one clear contribution rather than a bag of unrelated observations.
 - Where the run reproduces published work, state the comparison explicitly: the published number, your number, and whether they agree.
 
+## What Gets Read First
+
+A reader — human or automated — forms a verdict on the result before reaching the
+methodology. Where the deliverable is graded, that is not a metaphor: a grader scoring a
+figure may be shown the picture and only the opening of the report, while a grader scoring a
+written result sees all of it. Write for that.
+
+- The headline numbers go in the Abstract and again in Results, with units, not only in a
+  table further down.
+- The figure ranked first in `report_plan.json` is discussed early. If it is only referenced
+  in a late section, the argument for it lands where nobody is reading.
+- Long methodology belongs after the result it produced, not before it.
+
+This is the ordinary shape of a well-written paper; the grading only makes the cost of
+getting it wrong concrete.
+
 ## Report Structure
 
 Use this section layout unless the research genuinely calls for a different one. Depth matters far
