@@ -826,6 +826,17 @@ Required: non-empty string `overall_status`; booleans `pdf_available` and
 Validated by `validate_layout_review` in
 [`src/writing_manifest.py`](../src/writing_manifest.py).
 
+### `workspace/reviews/scorecard.json` and `scorecard.md`
+
+Written when a run finishes with any optional feature enabled. Reads every other ledger and
+says which features earned their cost — `keep`, `drop`, or `unproven` — plus the total extra
+model calls they spent.
+
+`unproven` means the measurement could not run, and is deliberately not merged with `drop`. A
+ledger that exists but cannot be parsed is reported as unreadable rather than as a null result.
+
+See [Scorecard](scorecard.md).
+
 ### `workspace/reviews/effort.json`
 
 Written under `--effort-tiers`. Which tier each stage ran in, who chose it, why, and both
