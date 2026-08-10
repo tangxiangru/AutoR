@@ -265,10 +265,26 @@ A run that navigates its own topology produces something a linear pipeline never
 could: evidence about the topology. One run means nothing. Forty mean the backward
 edge out of Stage 06 is worth taking, and that is a fact about the harness.
 
-For each edge, the archive compares runs that took it against runs that **reached
-the same node and did not**. Comparing against the whole archive would credit the
-edge with the difference between runs that got as far as Stage 06 and runs that
-never did.
+For each edge, the archive compares decisions that took it against decisions that
+were **offered it and declined**.
+
+That distinction is the estimator. The obvious control arm — runs that reached the
+node and did not take the edge — pools four unrelated states: the guard was shut,
+`--final-stage` pruned the move, the visit budget was spent, or the topology never
+had the edge at all. Only the first kind of "did not" is a *choice*, and only a
+choice is evidence about a choice.
+
+It is not a fine distinction. Five of the seven guards read the same disk predicates
+the rubric scores, so a shut guard is correlated with a weak run. Pooling those into
+the control arm makes the guard a selection mechanism on the outcome, and the
+contrast then measures how much worse a run is when its artifacts are missing while
+reporting it as the payoff of an edge nobody could have taken. On a fixture where
+routing has no effect at all, the two arms give opposite signs.
+
+The choice set is recorded on every visit (`offered`), so "was declined" is a fact
+on disk rather than an inference. The older run-level contrast is still computed and
+still printed, under a heading saying it is not acted on, so the two can be seen to
+disagree.
 
 ```
 | Edge                            | Took | Mean  | Skipped | Mean  | Delta  | Believable |
@@ -337,12 +353,16 @@ Three further refusals hold this together:
   somewhere other than where the last closed visit was heading is an operator
   overruling that move; it went off the router with no choice set, so it is marked
   bypassed rather than counted as a traversal.
-- **Below `min_observations` on each side, nothing is acted on.** A variant that
-  beat the incumbent once beat it once. Be aware this bound is a guard rather than
-  a derivation: a two-sided permutation test over *n* per side attains at best
-  `2/C(2n,n)`, so `n=3` can reach `p=0.10` at best, and a family correction over 18
-  edges would demand far less. Three stops a single lucky run from moving the
-  topology; it does not license the claim.
+- **Below `min_observations` on each side, nothing is acted on — and that bound is
+  now derived.** An exact two-sided permutation test over arms of *a* and *b* has
+  `C(a+b,a)` labellings, so no result can go below `2/C(a+b,a)`. Three a side bottoms
+  out at `p = 0.10`; against the adaptive graph's edge family the corrected threshold
+  needs six. `minimum_arms_for` computes it. The previous value was three, with a
+  docstring about intent, which meant the archive was licensing topology changes at a
+  sample size where the arithmetic forbids the claim.
+- **A p-value is never reported without the floor its sample size could attain.**
+  *Did not show an effect* and *could not have shown one* print identically as "not
+  significant" and mean opposite things.
 - **A run is only compared against runs that walked the same topology, measured the
   same stages, and were driven by a real backend.** A fake operator's scores measure
   the script. A linear run never had the revisit edges, so counting it as one that

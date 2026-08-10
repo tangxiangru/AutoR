@@ -15,12 +15,14 @@ from pathlib import Path
 
 from src.archive import (
     Archive,
+    DEFAULT_MIN_OBSERVATIONS,
     BASELINE_VARIANT,
     RunRecord,
     Variant,
     edge_payoffs,
     resolve_graph,
 )
+from src.inference import unpaired_floor
 from src.rubric import RUBRIC_VERSION
 from src.stage_graph import StageGraph
 from src.utils import append_jsonl
@@ -35,7 +37,22 @@ def record(
     rubric_version: str | None = None,
     topology: str = "adaptive",
     provenance: str = "live",
+    offered: dict[str, list[str]] | None = None,
 ) -> RunRecord:
+    """A run record, with a decision per edge it took.
+
+    ``offered`` gives the choice set at each source; it defaults to "the target
+    taken plus the other target this file uses at that node", so a record built the
+    short way still produces a usable contrast. The estimator needs the choice set:
+    an edge that was never offered is not an edge that was declined.
+    """
+    decisions = []
+    for edge in edges:
+        source, target = edge.split("->", 1)
+        alternatives = (offered or {}).get(source)
+        if alternatives is None:
+            alternatives = sorted({target, "07_writing", "05_experimentation"})
+        decisions.append({"source": source, "chose": target, "offered": list(alternatives)})
     return RunRecord(
         run_id=run_id,
         variant_id=variant_id,
@@ -50,6 +67,7 @@ def record(
         agent_directed=0,
         bypassed=0,
         recorded_at="2026-08-06T00:00:00",
+        decisions=decisions,
     )
 
 
@@ -68,9 +86,15 @@ class ArchiveTests(unittest.TestCase):
             append_jsonl(self.archive.runs_file, item.to_dict())
 
     def seed_a_believable_payoff(self, *, taken: float = 0.85, skipped: float = 0.60) -> None:
+        """Six a side, which is the derived floor rather than a round number.
+
+        An exact two-sided permutation test over three and three bottoms out at
+        0.10, so the old fixture could not have licensed anything the corrected
+        threshold would accept. `minimum_arms_for` computes six.
+        """
         self.seed(
-            [record(f"back{i}", edges={BACK: 1}, fitness=taken) for i in range(3)]
-            + [record(f"fwd{i}", edges={FORWARD: 1}, fitness=skipped) for i in range(3)]
+            [record(f"back{i}", edges={BACK: 1}, fitness=taken) for i in range(6)]
+            + [record(f"fwd{i}", edges={FORWARD: 1}, fitness=skipped) for i in range(6)]
         )
 
     # -- payoff arithmetic ---------------------------------------------------
@@ -330,11 +354,33 @@ class ArchiveTests(unittest.TestCase):
     def test_an_improvement_that_replays_is_promoted(self) -> None:
         self.archive._save_variants([BASELINE_VARIANT, Variant("challenger", "adaptive", parent_id="baseline")])
         self.seed(
-            [record(f"b{i}", edges={}, fitness=0.50) for i in range(3)]
-            + [record(f"c{i}", edges={}, fitness=0.80, variant_id="challenger") for i in range(3)]
+            [record(f"b{i}", edges={}, fitness=0.50) for i in range(DEFAULT_MIN_OBSERVATIONS)]
+            + [
+                record(f"c{i}", edges={}, fitness=0.80, variant_id="challenger")
+                for i in range(DEFAULT_MIN_OBSERVATIONS)
+            ]
         )
         self.assertTrue(self.archive.promote("challenger"))
         self.assertTrue(self.archive.variant("challenger").promoted)
+
+    def test_three_a_side_cannot_promote_however_large_the_gap(self) -> None:
+        """The floor is derived, and this is what deriving it changed.
+
+        `DEFAULT_MIN_OBSERVATIONS` was 3, with a docstring saying three "is enough to
+        stop acting on a single lucky run" — intent, not arithmetic. An exact
+        two-sided permutation test over three and three bottoms out at p = 0.10, so
+        three a side could never have licensed a claim at any threshold anyone would
+        use, whatever the effect size.
+        """
+        self.assertGreaterEqual(DEFAULT_MIN_OBSERVATIONS, 6)
+        self.assertGreater(unpaired_floor(3, 3), 0.05)
+
+        self.archive._save_variants([BASELINE_VARIANT, Variant("challenger", "adaptive")])
+        self.seed(
+            [record(f"b{i}", edges={}, fitness=0.10) for i in range(3)]
+            + [record(f"c{i}", edges={}, fitness=0.99, variant_id="challenger") for i in range(3)]
+        )
+        self.assertFalse(self.archive.promote("challenger"))
 
     def test_a_challenger_that_only_ties_is_not_promoted(self) -> None:
         self.archive._save_variants([BASELINE_VARIANT, Variant("challenger", "adaptive")])
