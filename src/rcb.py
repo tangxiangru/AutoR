@@ -298,6 +298,31 @@ def build_benchmark_goal(
                 "(no PDF, EPS, SVG, TIFF, or BMP — the judge cannot render them).\n"
                 f"- `{resolved}/report/report.md` — the final research report.\n"
             ),
+            "## How This Report Is Graded",
+            (
+                "Each criterion is scored 0-100 against the *original published paper*, where "
+                "**50 means as good as that paper**. The bands that matter most are the cheap "
+                "ones at the bottom:\n\n"
+                "- **0** — the criterion is absent from the report.\n"
+                "- **1-10** — mentioned, but with no quantitative result, or only a vague "
+                "generic statement.\n"
+                "- **41-50** — comparable to the published paper.\n\n"
+                "So the first thing worth having is coverage: a result the report never "
+                "mentions scores zero, and there is no partial credit for a result the run "
+                "produced but did not write down. The second is that every covered result "
+                "carries its number — mentioning it without one caps that criterion in single "
+                "digits.\n\n"
+                "Two grader rules to write against, verbatim from the rubric: *no credit for "
+                "vague or generic statements*, and *no inflation for well-written but shallow "
+                "content; substance over style; longer does not mean better*. The grader is "
+                "also told to be sceptical of plausible-sounding AI text with fabricated "
+                "numbers, so a number without a file behind it is worse than no number.\n\n"
+                "**A figure criterion is graded on the picture plus only the first 10,000 "
+                "characters of this report.** Text criteria see all of it. Figures carry the "
+                "majority of the weight, so the argument for your most important figure has to "
+                "be inside that window — put the headline numbers and the main result early, "
+                "and leave the long methodology for later in the document."
+            ),
             "## Report Requirements",
             (
                 f"`{resolved}/report/report.md` is the scored deliverable. It must be a standalone "

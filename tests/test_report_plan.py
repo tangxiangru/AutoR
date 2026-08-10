@@ -809,3 +809,110 @@ class NoFigureFloorTest(unittest.TestCase):
         self.paths = build_run_paths(Path(self._tmp.name) / "run_0001")
         ensure_run_layout(self.paths)
         write_text(self.paths.user_input, "goal")
+
+
+class JudgeVisibleWindowTest(unittest.TestCase):
+    """A figure's argument has to be where a figure grader reads.
+
+    ResearchClawBench's scorer passes ``report_text[:10000]`` when grading an
+    image criterion and the whole report when grading a text one
+    (evaluation/score.py:138). Image criteria carry 60.6% of the weight, so
+    prose arguing for a figure is worth nothing past that point — the grader
+    sees the picture and none of the case for it.
+
+    Only the highest-ranked undropped slot is held to this. Requiring every
+    figure's argument inside 10k characters would refuse a long paper whose
+    fifth figure is legitimately discussed late.
+    """
+
+    def setUp(self) -> None:
+        import json
+        import tempfile
+        from pathlib import Path
+
+        from src.utils import build_run_paths, ensure_run_layout, write_text
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.paths = build_run_paths(Path(self._tmp.name) / "run_0001")
+        ensure_run_layout(self.paths)
+        write_text(self.paths.user_input, "goal")
+        write_text(
+            self.paths.report_plan,
+            json.dumps(
+                {
+                    "figures": [
+                        {
+                            "slot": 1,
+                            "filename": "main.png",
+                            "supports": ["H1"],
+                            "shows": "Accuracy against context length for the method and the baseline.",
+                            "if_supported": "the method's curve stays above the baseline",
+                            "if_refuted": "the two curves overlap within their bands",
+                            "source_artifact": "results/acc.json",
+                            "dropped_because": "",
+                        }
+                    ],
+                    "headline_numbers": [
+                        {"quantity": "accuracy", "unit": "percent", "source_artifact": "results/acc.json"}
+                    ],
+                }
+            ),
+        )
+        self.paths.report_images_dir.mkdir(parents=True, exist_ok=True)
+        (self.paths.report_images_dir / "main.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+
+    def _report(self, *, reference_late: bool, long: bool = True) -> None:
+        from src.report_plan import JUDGE_VISIBLE_PREFIX_CHARS
+        from src.utils import write_text
+
+        filler = "Methodology prose that occupies space without saying much. " * (
+            260 if long else 2
+        )
+        ref = "![Main](images/main.png)"
+        body = (
+            f"# R\n\n## Abstract\n\nshort\n\n{filler}\n\n{ref}\n"
+            if reference_late
+            else f"# R\n\n## Abstract\n\n{ref}\n\n{filler}"
+        )
+        write_text(self.paths.report_file, body)
+        if long:
+            self.assertGreater(len(body), JUDGE_VISIBLE_PREFIX_CHARS)
+
+    def _window_problems(self) -> list[str]:
+        from src.report_plan import validate_report_plan_coverage
+
+        # "characters" also appears in the not-published message ("20 characters
+        # or more"), so match the window message specifically.
+        return [
+            p for p in validate_report_plan_coverage(self.paths) if "first references slot" in p
+        ]
+
+    def test_the_lead_figure_discussed_early_passes(self) -> None:
+        self._report(reference_late=False)
+        self.assertEqual(self._window_problems(), [])
+
+    def test_the_lead_figure_discussed_only_late_is_refused(self) -> None:
+        self._report(reference_late=True)
+        self.assertTrue(self._window_problems())
+
+    def test_a_short_report_is_never_held_to_the_window(self) -> None:
+        """Nothing falls outside a window the report never reaches."""
+        self._report(reference_late=True, long=False)
+        self.assertEqual(self._window_problems(), [])
+
+    def test_an_unpublished_figure_is_reported_as_missing_not_as_late(self) -> None:
+        """The two failures are different and must not be conflated."""
+        from src.report_plan import validate_report_plan_coverage
+        from src.utils import write_text
+
+        (self.paths.report_images_dir / "main.png").unlink()
+        write_text(self.paths.report_file, "# R\n\nno figure here\n")
+        problems = validate_report_plan_coverage(self.paths)
+        self.assertTrue(any("neither published nor dropped" in p for p in problems))
+        self.assertEqual(self._window_problems(), [])
+
+    def test_the_window_matches_the_scorer(self) -> None:
+        from src.report_plan import JUDGE_VISIBLE_PREFIX_CHARS
+
+        self.assertEqual(JUDGE_VISIBLE_PREFIX_CHARS, 10_000)
