@@ -90,12 +90,18 @@ class StageRouter:
         *,
         mode: str = "auto",
         fake_mode: bool = False,
+        archive: Any | None = None,
     ) -> None:
         if mode not in ROUTING_MODES:
             raise ValueError(f"Unknown routing mode: {mode!r}. Expected one of {', '.join(ROUTING_MODES)}.")
         self.mode = mode
         self.operator = operator
         self.fake_mode = fake_mode
+        # What the cross-run archive has learned, if the caller is willing to let it
+        # be *seen*. It reaches the agent as numbers in the prompt and nothing else:
+        # not `default_move`, not a guard, not a recommendation. The archive knows
+        # about other research questions; the agent can see this one.
+        self.archive = archive
 
     def choose(
         self,
@@ -285,6 +291,29 @@ class StageRouter:
             return None
         return extract_json_payload(stdout_text)
 
+    def _archive_evidence(self, source: str, targets: list[str]) -> str:
+        """What the archive can show about the moves on this menu, or nothing.
+
+        Best-effort. A archive that cannot be read is a research aid that is
+        unavailable, not a reason to fail a routing decision.
+        """
+        if self.archive is None or not targets:
+            return ""
+        try:
+            from .decisions import (
+                believable_evidence,
+                decisions_from,
+                format_evidence_for_prompt,
+                offered_payoffs,
+            )
+
+            payoffs = offered_payoffs(decisions_from(self.archive.runs()))
+            live = believable_evidence(payoffs, targets, source)
+            return format_evidence_for_prompt(live, max(len(payoffs), 1))
+        except Exception:  # noqa: BLE001 - never fail a route over a report
+            return ""
+
+
     def build_prompt(
         self,
         *,
@@ -339,6 +368,10 @@ class StageRouter:
         if score is not None:
             sections += ["", "## Measured standing of the stage you just finished", "",
                          format_score_for_prompt(score)]
+
+        evidence = self._archive_evidence(stage.slug, [move.target for move in moves if move.admissible])
+        if evidence:
+            sections += ["", evidence]
 
         sections += [
             "",

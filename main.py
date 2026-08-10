@@ -1045,6 +1045,7 @@ def main() -> int:
             graph_max_steps=args.graph_max_steps,
             graph_max_visits=args.graph_max_visits,
             archive_steer=bool(walk["archive_steer"]),
+            archive=archive if walk["archive_steer"] else None,
             web_search_mode=web_search_mode,
         )
         manager.ideation_panel = create_ideation_panel(
@@ -1131,6 +1132,7 @@ def main() -> int:
         graph_max_steps=args.graph_max_steps,
         graph_max_visits=args.graph_max_visits,
         archive_steer=bool(walk["archive_steer"]),
+        archive=archive if walk["archive_steer"] else None,
         web_search_mode=web_search_mode,
     )
 

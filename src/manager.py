@@ -218,6 +218,7 @@ class ResearchManager:
         graph_max_steps: int | None = None,
         graph_max_visits: int | None = None,
         archive_steer: bool = False,
+        archive: "Any | None" = None,
         cross_reviewer: GeminiCrossReviewer | None = None,
     ) -> None:
         self.project_root = project_root
@@ -301,6 +302,7 @@ class ResearchManager:
             operator=operator,
             mode=routing_mode,
             fake_mode=bool(getattr(operator, "fake_mode", False)),
+            archive=archive,
         )
         # Measuring is on unless a caller turns it off: scoring a draft and running
         # the ratchet spends no backend call, and the property it buys — the draft

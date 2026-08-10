@@ -212,3 +212,58 @@ def format_offered_payoffs(
         "threshold is reporting its sample size, not its effect."
     )
     return "\n".join(lines)
+
+def believable_evidence(
+    payoffs: dict[str, OfferedPayoff], targets: Sequence[str], source: str
+) -> list[OfferedPayoff]:
+    """The contrasts for these moves that the arithmetic actually licenses.
+
+    The filter is the whole design. An archive with three runs in it has an opinion
+    about every edge and is entitled to none of them, and a routing prompt that
+    printed those opinions would be an unrandomised, guard-selected statistic at
+    n=3 arguing for a move at the moment a guard has just failed. Only rows that
+    clear the family-corrected threshold *and* could have cleared it at this sample
+    size are shown; everything else is not shown at all, rather than shown with a
+    caveat nobody reads.
+    """
+    family = max(len(payoffs), 1)
+    live = []
+    for target in targets:
+        payoff = payoffs.get(f"{source}->{target}")
+        if payoff is not None and payoff.test.believable(family=family):
+            live.append(payoff)
+    return sorted(live, key=lambda item: abs(item.delta), reverse=True)
+
+
+def format_evidence_for_prompt(payoffs: Sequence[OfferedPayoff], family: int) -> str:
+    """Numbers, not a recommendation.
+
+    The archive does not get to author a sentence inside the prompt that decides the
+    route. It gets to show what earlier runs measured, with the sample sizes and the
+    test beside it, and the agent — which can see the actual research and the archive
+    cannot — decides what that is worth.
+    """
+    if not payoffs:
+        return ""
+    lines = [
+        "## What earlier runs measured about these moves",
+        "",
+        "Observational and from other research questions, so it is weaker than what you can "
+        "see in front of you. Only contrasts that clear a family-corrected threshold are "
+        "shown; the rest are omitted rather than shown weakly.",
+        "",
+        "| Move | Took it | Declined it | Difference | Test |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for payoff in payoffs:
+        lines.append(
+            f"| `{payoff.edge}` | {payoff.taken_mean:.3f} (n={payoff.taken_n}) | "
+            f"{payoff.declined_mean:.3f} (n={payoff.declined_n}) | {payoff.delta:+.3f} | "
+            f"{payoff.test.describe(family=family)} |"
+        )
+    lines.append("")
+    lines.append(
+        "This is evidence, not an instruction. A move that paid on average across other runs "
+        "can still be wrong here, and the reason you give should be about this run's results."
+    )
+    return "\n".join(lines)
