@@ -65,6 +65,8 @@ class FeatureReport:
 @dataclass
 class Scorecard:
     features: list[FeatureReport] = field(default_factory=list)
+    #: The dial the run was started with, so the card can be read against what was asked for.
+    level: str = ""
 
     @property
     def optional_calls(self) -> int:
@@ -94,6 +96,7 @@ class Scorecard:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "rigor": self.level,
             "headline": self.headline(),
             "optional_model_calls": self.optional_calls,
             "keep": [r.key for r in self.by_verdict(KEEP)],
@@ -243,8 +246,10 @@ FEATURES: tuple[dict[str, Any], ...] = (
 )
 
 
-def build_scorecard(paths: RunPaths) -> Scorecard:
-    return Scorecard(features=[_report(paths=paths, **feature) for feature in FEATURES])
+def build_scorecard(paths: RunPaths, level: str = "") -> Scorecard:
+    return Scorecard(
+        features=[_report(paths=paths, **feature) for feature in FEATURES], level=level
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +270,11 @@ def render_markdown(scorecard: Scorecard) -> str:
     lines = [
         "# What the optional machinery bought",
         "",
+        (
+            f"Run at `--rigor {scorecard.level}`."
+            if scorecard.level
+            else ""
+        ),
         scorecard.headline(),
         "",
         "| Feature | Flag | Verdict | Extra calls |",
@@ -300,9 +310,9 @@ def render_markdown(scorecard: Scorecard) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def write_scorecard(paths: RunPaths) -> Scorecard:
+def write_scorecard(paths: RunPaths, level: str = "") -> Scorecard:
     """Build the scorecard and leave it where the run's other review artifacts live."""
-    scorecard = build_scorecard(paths)
+    scorecard = build_scorecard(paths, level)
     paths.reviews_dir.mkdir(parents=True, exist_ok=True)
     write_text(paths.reviews_dir / SCORECARD_JSON, json.dumps(scorecard.to_dict(), indent=2, ensure_ascii=False))
     write_text(paths.reviews_dir / SCORECARD_MD, render_markdown(scorecard))

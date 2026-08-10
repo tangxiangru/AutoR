@@ -59,6 +59,9 @@ from src.rcb import (  # noqa: E402
 )
 from src.terminal_ui import TerminalUI  # noqa: E402
 from src.deliberation import DEFAULT_MAX_DELIBERATIONS  # noqa: E402
+from src.rigor import DEFAULT_LEVEL, LEVELS, feature_flags  # noqa: E402
+from src.rigor import help_text as rigor_help_text  # noqa: E402
+from src.rigor import resolve as resolve_rigor  # noqa: E402
 from src.utils import (  # noqa: E402
     DEFAULT_OUTPUT_FORMAT,
     DEFAULT_VENUE,
@@ -160,8 +163,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "that can cut a stage short.",
     )
     parser.add_argument(
+        "--rigor",
+        choices=list(LEVELS),
+        default=DEFAULT_LEVEL,
+        help=rigor_help_text(),
+    )
+    parser.add_argument(
         "--review-panel",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=None,
         help="Replace the single reviewer agent with a deliberating panel of role-differentiated "
              "reviewers ("
              + ", ".join(role.key for role in DEFAULT_PANEL)
@@ -185,7 +195,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--effort-tiers",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=None,
         help="Run each stage as routine or deliberative rather than treating them alike. A "
              "routine stage gets a lean prompt, a single reviewer, and no escalation offer; a "
              "deliberative one gets everything configured. Each stage declares what the next "
@@ -200,7 +211,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--deliberation",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=None,
         help="Let a stage stop and pull in a panel when it hits a genuine crux. The agent "
              "names the question, finishes with its working answer, and a focused panel "
              "resolves it for the next pass. Most steps are execution; this is for the few "
@@ -227,7 +239,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--ideation-panel",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=None,
         help="Widen Stage 02's hypotheses with a panel of proposers working from distinct "
              "lenses (mechanism, contrarian, adjacent field, null/artifact, regime). They "
              "propose blind to each other; candidates are deduplicated, scored on novelty, "
@@ -401,6 +414,10 @@ def _run_tree_duration(workspace: Path) -> int | None:
 
 
 def run(args: argparse.Namespace) -> BenchmarkResult:
+    for flag, on in resolve_rigor(
+        args.rigor, {flag: getattr(args, flag, None) for flag in feature_flags()}
+    ).items():
+        setattr(args, flag, on)
     started_at = time.monotonic()
     workspace = Path(args.workspace).expanduser().resolve()
     if not workspace.exists():

@@ -198,6 +198,17 @@ converted to a refinement in code. Each run also writes
 baseline so it can report that it did not earn its cost. Full description, including the
 pre-registered evidence against multi-agent deliberation, in [Review Panel](review-panel.md).
 
+### Rigor
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--rigor {fast,standard,thorough,max}` | `standard` | How much optional machinery to run. One dial in place of four switches. |
+
+`fast` nothing · `standard` effort tiers · `thorough` + crux deliberation and the ideation
+panel · `max` + the review panel. The levels nest, and every individual switch below still
+works as an override in both directions (`--no-ideation-panel`, `--review-panel`). Full
+description in [Rigor](rigor.md).
+
 ### Effort tiers
 
 | Flag | Default | Description |

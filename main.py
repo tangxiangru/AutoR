@@ -6,6 +6,9 @@ from pathlib import Path
 
 from src.approval_agent import AutomatedReviewer
 from src.deliberation import DEFAULT_MAX_DELIBERATIONS
+from src.rigor import DEFAULT_LEVEL, LEVELS, describe as describe_rigor
+from src.rigor import help_text as rigor_help_text
+from src.rigor import feature_flags, resolve as resolve_rigor
 from src.effort import EffortPlan
 from src.review_panel import (
     DEFAULT_PANEL,
@@ -141,8 +144,15 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--rigor",
+        choices=list(LEVELS),
+        default=DEFAULT_LEVEL,
+        help=rigor_help_text(),
+    )
+    parser.add_argument(
         "--review-panel",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=None,
         help="Replace the single reviewer agent with a deliberating panel of role-differentiated "
              "reviewers (PI, domain expert, methodologist, reproducibility engineer, adversarial "
              "reviewer). They review independently, then cross-examine, then a chair synthesizes "
@@ -168,7 +178,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--effort-tiers",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=None,
         help="Run each stage as routine or deliberative rather than treating them alike. A "
              "routine stage gets a lean prompt, a single reviewer, and no escalation offer; a "
              "deliberative one gets everything configured. Each stage declares what the next "
@@ -183,7 +194,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--deliberation",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=None,
         help="Let a stage stop and pull in a panel when it hits a genuine crux. The agent "
              "names the question, finishes with its working answer, and a focused panel "
              "resolves it for the next pass. Most steps are execution; this is for the few "
@@ -210,7 +222,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--ideation-panel",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=None,
         help="Widen Stage 02's hypotheses with a panel of proposers working from distinct "
              "lenses (mechanism, contrarian, adjacent field, null/artifact, regime). They "
              "propose blind to each other; candidates are deduplicated, scored on novelty, "
@@ -845,6 +858,7 @@ def resolve_search_context(ui: TerminalUI, *, mode: str, operator: str, codex_sa
 def configure_effort(manager, args, *, backend_name: str, model: str, ui: TerminalUI, fake_mode: bool,
                      stage_timeout: int) -> None:
     """Turn on effort tiering, and give routine stages a cheap gate to use."""
+    manager.rigor_level = getattr(args, "rigor", "")
     if not getattr(args, "effort_tiers", False):
         return
     manager.effort_plan = EffortPlan(enabled=True)
@@ -904,6 +918,12 @@ def main() -> int:
     args = parse_args()
     repo_root = Path(__file__).resolve().parent
     runs_dir = repo_root / args.runs_dir
+    resolved_rigor = resolve_rigor(
+        args.rigor, {flag: getattr(args, flag, None) for flag in feature_flags()}
+    )
+    for flag, on in resolved_rigor.items():
+        setattr(args, flag, on)
+
     unattended = resolve_unattended(args)
     persona_text = load_persona(args.persona)
     ui = TerminalUI(interactive=not unattended)
@@ -925,6 +945,7 @@ def main() -> int:
         return 0
 
     ui.show_banner()
+    ui.show_status(describe_rigor(args.rigor, resolved_rigor), level="info")
 
     if args.resume_run:
         start_stage = resolve_stage(args.redo_stage)
