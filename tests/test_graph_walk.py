@@ -167,7 +167,7 @@ class GraphWalkTests(unittest.TestCase):
         _operator, manager = self.build(stage_graph=StageGraph.adaptive(), routing_mode="agent")
         sent_back = {"done": False}
 
-        def choose(*, paths, stage, graph, state, score=None, final_stage=None):
+        def choose(*, paths, stage, graph, state, score=None, final_stage=None, **_kwargs):
             if stage.slug == STAGE_06.slug and not sent_back["done"]:
                 sent_back["done"] = True
                 return RoutingDecision(
@@ -206,7 +206,7 @@ class GraphWalkTests(unittest.TestCase):
         _operator, manager = self.build(stage_graph=StageGraph.adaptive(), routing_mode="agent")
         seen: list[str] = []
 
-        def choose(*, paths, stage, graph, state, score=None, final_stage=None):
+        def choose(*, paths, stage, graph, state, score=None, final_stage=None, **_kwargs):
             if stage.slug == STAGE_06.slug and STAGE_06.slug not in seen:
                 seen.append(STAGE_06.slug)
                 manifest_before = load_run_manifest(paths.run_manifest)
@@ -237,7 +237,7 @@ class GraphWalkTests(unittest.TestCase):
             graph_max_visits=99,
         )
 
-        def choose(*, paths, stage, graph, state, score=None, final_stage=None):
+        def choose(*, paths, stage, graph, state, score=None, final_stage=None, **_kwargs):
             if stage.slug == STAGE_05.slug:
                 return RoutingDecision(STAGE_06.slug, "advance", "on", STAGE_06.slug, True)
             if stage.slug == STAGE_06.slug:

@@ -22,6 +22,9 @@ from unittest.mock import patch
 
 from src.evolution import EvolutionConfig
 from src.manager import ResearchManager
+from src.review_policy import policy_path
+from src.router import routing_summary
+from src.stage_graph import StageGraph, load_graph_state
 from src.research_rounds import (
     DECISIONS,
     current_round_number,
@@ -35,7 +38,14 @@ from src.research_rounds import (
     unreopened_abandonment,
     validate_round_decision,
 )
-from src.utils import STAGES, build_run_paths, ensure_run_layout, validate_stage_artifacts, write_text
+from src.utils import (
+    STAGES,
+    build_run_paths,
+    ensure_run_layout,
+    read_text,
+    validate_stage_artifacts,
+    write_text,
+)
 from tests.prereg_support import write_round_decision, write_validity_chain
 
 
@@ -289,6 +299,127 @@ class AbandonmentStandsUntilOverruledTest(RoundTestCase):
         standing = unreopened_abandonment(self.paths)
         self.assertIsNotNone(standing)
         self.assertEqual(standing.number, 1)
+
+
+class RoundIntentGoesThroughTheRouterTest(unittest.TestCase):
+    """A round's decision is a proposal, not a jump.
+
+    `06->03` and `06->02` are edges the graph already has. Going around the router
+    meant the run's most consequential routing decisions reached the archive as
+    `bypassed` with no choice set — the exact observations `Visit.offered` exists to
+    keep out of the estimator — and were taken whatever the guards said.
+    """
+
+    def _manager(self, tmp_dir: str, max_rounds: int = 3):
+        from tests.test_manager_smoke import ScriptedSmokeOperator
+
+        operator = ScriptedSmokeOperator()
+        manager = ResearchManager(
+            project_root=REPO_ROOT,
+            runs_dir=Path(tmp_dir) / "runs",
+            operator=operator,
+            output_stream=io.StringIO(),
+            max_rounds=max_rounds,
+            stage_graph=StageGraph.adaptive(),
+            evolution=EvolutionConfig(rounds=0),
+        )
+        return operator, manager
+
+    def _declare(self, manager, decision: str, **extra):
+        original = manager.operator.run_stage
+
+        def run_stage(stage, prompt, run_paths, attempt_no, continue_session=False):
+            result = original(stage, prompt, run_paths, attempt_no, continue_session)
+            if stage.number == 6 and not load_rounds(run_paths):
+                payload = {
+                    "decision": decision,
+                    "rationale": "The first design could not separate the effect from noise.",
+                    "what_we_learned": "The comparison was confounded by tuning on the split.",
+                    "what_changes_next": "Tune both arms on a held-out development split.",
+                    "negative_result": False,
+                }
+                payload.update(extra)
+                write_text(run_paths.round_decision, json.dumps(payload))
+            return result
+
+        manager.operator.run_stage = run_stage
+
+    def test_a_round_revisit_is_recorded_as_a_decision_with_its_choice_set(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            operator, manager = self._manager(tmp_dir)
+            paths = manager._create_run("Round routing.", venue="neurips_2025")
+            self._declare(manager, "refine_design")
+            with patch.object(manager, "_ask_choice", return_value="5"):
+                self.assertTrue(manager._run_from_paths(paths))
+
+            state = load_graph_state(paths)
+            revisits = [visit for visit in state.path if visit.kind == "revisit"]
+            self.assertTrue(revisits)
+            move = revisits[0]
+            self.assertEqual(move.chose, "03_study_design")
+            self.assertFalse(move.bypassed, msg="a routed decision must not read as a jump")
+            self.assertIn("03_study_design", move.offered)
+            self.assertTrue(move.agent_directed)
+
+            summary = routing_summary(paths)
+            self.assertIn("06_analysis->03_study_design", summary["edges"])
+            self.assertEqual(summary["bypassed"], 0)
+
+    def test_a_round_revisit_still_plants_the_rollback_correction(self) -> None:
+        """`_rollback_and_jump` recorded one and the router path did not, so moving
+        the decision across would have silently dropped a rigour signal: standing
+        rules from a rollback are the highest-weight group in the approval prompt,
+        and losing them makes the gate get easier with each round."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            _operator, manager = self._manager(tmp_dir)
+            paths = manager._create_run("Round routing.", venue="neurips_2025")
+            self._declare(manager, "refine_design")
+            with patch.object(manager, "_ask_choice", return_value="5"):
+                manager._run_from_paths(paths)
+
+            policy = read_text(policy_path(paths))
+            self.assertIn('"source": "rollback"', policy)
+            self.assertIn("rolled back to Stage 03: Study Design", policy)
+            self.assertIn("refine_design", policy)
+
+    def test_the_ledger_says_a_refused_intent_was_not_acted_on(self) -> None:
+        """`record_round` runs at approval, before the router has ruled. Written
+        then and left, the ledger could claim a round was acted on when the move it
+        asked for was refused — in the one artifact a reader consults to find out
+        what the run decided."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            _operator, manager = self._manager(tmp_dir)
+            paths = manager._create_run("Round routing.", venue="neurips_2025")
+            self._declare(manager, "refine_design")
+
+            real_choose = manager.router.choose
+
+            def refuse(**kwargs):
+                kwargs.pop("declared", None)
+                return real_choose(**kwargs)
+
+            with patch.object(manager, "_ask_choice", return_value="5"), patch.object(
+                manager.router, "choose", side_effect=refuse
+            ):
+                manager._run_from_paths(paths)
+
+            rounds = load_rounds(paths)
+            self.assertTrue(rounds)
+            self.assertFalse(rounds[0].acted_on)
+
+    def test_a_skipped_stage_does_not_leave_its_declaration_behind(self) -> None:
+        """A skipped Stage 06 never reaches `record_round`, so nothing unlinks the
+        file, and the next Stage 06 would close its round from the previous visit's
+        conclusion — drawn from results it did not produce."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            _operator, manager = self._manager(tmp_dir)
+            paths = manager._create_run("Skip probe.", venue="neurips_2025")
+            write_text(paths.round_decision, json.dumps({"decision": "refine_design"}))
+
+            manager._skip_stage(paths, STAGE_06, attempt_no=1, reason="out of attempts", kind="auto")
+
+            self.assertFalse(paths.round_decision.exists())
+            self.assertIn("round_decision_discarded", read_text(paths.logs))
 
 
 class PromptCarryForwardTest(RoundTestCase):
