@@ -25,6 +25,7 @@ from src.rcb import (
     reference_papers,
 )
 from src.utils import (
+    read_text,
     FIXED_STAGE_OPTIONS,
     MAX_REPORT_FIGURES,
     STAGES,
@@ -220,6 +221,17 @@ class FigureBudgetGateTests(unittest.TestCase):
             ),
         )
         write_text(paths.artifacts_dir / "self_review.json", json.dumps({"overall_score": 8}))
+        from src.deliverables import COVERAGE_FILENAME, demanding_sentences
+
+        _statement = read_text(paths.user_input)
+        write_text(
+            paths.artifacts_dir / COVERAGE_FILENAME,
+            json.dumps({"deliverables": [
+                {"task_quote": s, "addressed": False, "reason": "fixture does no research."}
+                for s in demanding_sentences(_statement)
+            ] or [{"task_quote": " ".join(_statement.split())[:120] or "goal",
+                   "addressed": False, "reason": "fixture does no research."}]}),
+        )
         write_validity_chain(paths, evidence="results/metrics.json")
         generate_report_review(paths)
 
