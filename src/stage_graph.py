@@ -369,6 +369,29 @@ TERMINAL_EDGES = (
 #: normal way research goes, not an error path.
 REVISIT_EDGES: tuple[Edge, ...] = (
     Edge(
+        "02_hypothesis_generation", "01_literature_survey", "revisit",
+        "Stating the hypotheses showed the gap they rest on is not a gap — the work exists and "
+        "the survey did not find it, or the literature that would settle the question was never "
+        "searched. A hypothesis whose novelty claim is an unsearched query is not worth designing "
+        "a study around.",
+        guard="always", priority=2,
+    ),
+    Edge(
+        "03_study_design", "02_hypothesis_generation", "revisit",
+        "Designing the study showed a hypothesis cannot be brought to a decision — no measurement "
+        "available here separates it from its alternative, or two of them collapse into the same "
+        "comparison. Weakening the hypothesis until the design can test it is how a run ends up "
+        "testing something nobody asked.",
+        guard="always", priority=2,
+    ),
+    Edge(
+        "06_analysis", "04_implementation", "revisit",
+        "The analysis showed the numbers are wrong rather than disappointing — the metric is "
+        "computed on the wrong axis, the split leaks, or the aggregation averages over the wrong "
+        "grouping. Re-running the same code produces the same defect with more seeds behind it.",
+        guard="runnable_code", priority=3,
+    ),
+    Edge(
         "04_implementation", "03_study_design", "revisit",
         "Building it showed the design is not executable as specified — the metric cannot be "
         "computed, the dataset does not contain what the plan assumed, or the budget is off by "
@@ -597,6 +620,31 @@ def save_graph_state(paths: RunPaths, state: GraphState) -> None:
 BLOCK_KINDS = ("guard", "visits", "steps", "concluded", "pruned")
 
 
+def replay_cost(source: str, target: str) -> int:
+    """Stages this move discards, derived from the ordering — never written down.
+
+    A backward move throws away the work between target and source and has to
+    redo it: ``07_writing -> 01_literature_survey`` costs seven stages,
+    ``07_writing -> 06_analysis`` costs two. Presenting those as equally
+    available is how a run spends most of its step budget on a move a cheaper
+    one would have settled.
+
+    Derived rather than tabulated on purpose. A per-edge cost constant sitting
+    beside a derivable one is where drift starts, and inserting a stage would
+    silently falsify every entry in such a table.
+    """
+    order = [item.slug for item in STAGES]
+    if target == FINISH:
+        return 0
+    try:
+        source_index, target_index = order.index(source), order.index(target)
+    except ValueError:
+        return 0
+    if target_index >= source_index:
+        return 0
+    return source_index - target_index + 1
+
+
 @dataclass(frozen=True)
 class Move:
     """An edge the run is allowed to take right now, and why."""
@@ -611,6 +659,11 @@ class Move:
     blocked_kind: str = ""
     #: Taken because nothing else was available, with its guard still failing.
     last_resort: bool = False
+
+    @property
+    def replay_cost(self) -> int:
+        """Stages this move discards and has to redo. 0 for a forward move."""
+        return replay_cost(self.edge.source, self.edge.target)
 
     @property
     def admissible(self) -> bool:
@@ -800,11 +853,25 @@ class StageGraph:
         return normalized in state.revisit_reasons(target)
 
     def describe_for_prompt(self, moves: Sequence[Move]) -> str:
-        lines = ["| Move | Target | Kind | Available | Why this move exists |", "| --- | --- | --- | --- | --- |"]
+        """The menu, with what each move costs.
+
+        Cost is shown because it is real and invisible otherwise: two backward
+        moves out of Stage 07 differ by 3.5x in the work they discard, and an
+        agent shown only the rationales cannot tell. It is deliberately *not*
+        framed as a reason to prefer the cheap move — a correct expensive
+        correction beats a wrong cheap one, and a router that shops on price
+        writes up around the flaw it should have gone back for.
+        """
+        lines = [
+            "| Move | Target | Kind | Discards | Available | Why this move exists |",
+            "| --- | --- | --- | --- | --- | --- |",
+        ]
         for index, move in enumerate(moves, start=1):
             availability = "yes" if move.admissible else f"**no** — {move.blocked_because}"
+            cost = move.replay_cost
+            discards = "—" if cost == 0 else f"{cost} stage{'s' if cost != 1 else ''}"
             lines.append(
-                f"| {index} | `{move.edge.target}` | {move.edge.kind} | {availability} | "
+                f"| {index} | `{move.edge.target}` | {move.edge.kind} | {discards} | {availability} | "
                 f"{move.edge.rationale} |"
             )
         return "\n".join(lines)

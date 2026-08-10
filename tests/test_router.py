@@ -156,7 +156,7 @@ class RouterTests(unittest.TestCase):
         self.assertIn(prereg_support.HYPOTHESIS_ID, decision.reason)
 
     def test_a_move_that_does_not_exist_is_refused(self) -> None:
-        decision, _ = self.choose(json.dumps({"target": "04_implementation", "reason": "Rebuild."}))
+        decision, _ = self.choose(json.dumps({"target": "08_dissemination", "reason": "Ship it."}))
         self.assertFalse(decision.agent_directed)
         self.assertIn("not a move", decision.refusal)
 
@@ -218,7 +218,7 @@ class RouterTests(unittest.TestCase):
         self.assertTrue(decision.target)
 
     def test_every_refusal_is_written_where_it_can_be_read_later(self) -> None:
-        self.choose(json.dumps({"target": "04_implementation", "reason": "Rebuild."}))
+        self.choose(json.dumps({"target": "08_dissemination", "reason": "Ship it."}))
         rows = [
             json.loads(line)
             for line in read_text(self.paths.evolution_dir / "routing_refusals.jsonl").splitlines()
@@ -382,7 +382,7 @@ class RouterTests(unittest.TestCase):
         genuinely had none."""
         prereg_support.write_hypothesis_manifest(self.paths)
         prereg_support.freeze_preregistration(self.paths)
-        decision, _ = self.choose(json.dumps({"target": "04_implementation", "reason": "Rebuild."}))
+        decision, _ = self.choose(json.dumps({"target": "08_dissemination", "reason": "Ship it."}))
         self.assertTrue(decision.refusal)
         self.assertIn("05_experimentation", decision.offered)
         self.assertEqual(decision.blocked.get("07_writing"), "guard")

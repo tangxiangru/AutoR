@@ -302,6 +302,12 @@ class StageRouter:
             "actionable — if the writing stage is closed because a hypothesis has no verdict, the "
             "move that opens it is the one to take.",
             "",
+            "**Discards** is how many stages the move throws away and the run has to redo. It is "
+            "there so the choice is informed, not so you make the cheap one: a correct expensive "
+            "correction beats a wrong cheap one every time, and a run that shops on price writes "
+            "up around the flaw it should have gone back for. Use it only to break a tie between "
+            "two moves that would fix the same thing.",
+            "",
             "## Route so far",
             "",
             route,
