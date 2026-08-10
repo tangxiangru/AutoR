@@ -384,6 +384,37 @@ Parents are sampled by fitness with a novelty bonus for under-observed variants.
 Pure fitness-proportional sampling locks onto whatever won first and stops
 generating the observations that would overturn it.
 
+### What the archive is allowed to do with what it learned
+
+Nothing, until `--archive-steer`. And then only this: **show the agent the numbers.**
+
+The learned value reached nothing before. Measured over 50 random priority
+assignments across all 8 nodes: 0/400 `default_move` answers change, 207/400 menu
+orderings do — `default_move` filters to forward edges and every node has exactly
+one, so a learned priority could only ever reorder rows in a table.
+
+Wiring the statistic into `default_move` was the obvious fix and three independent
+reviews refused it, for the same reason: it would put an unrandomised,
+guard-selected statistic in charge of what the run does at the moment a guard has
+just failed. The route taken instead is that the archive prints what earlier runs
+measured — the two means, the sample sizes, the p-value and the floor — into the
+routing prompt, and the agent decides. The agent can see this research question; the
+archive has only seen other ones.
+
+Three properties hold it:
+
+- **Only believable contrasts appear.** A row must clear the family-corrected
+  threshold *and* have been able to. Anything else is omitted rather than shown with
+  a caveat, because the caveat would not be read.
+- **Numbers, not a recommendation.** No sentence authored by the archive enters the
+  prompt, because there would be no gate that could fire on a wrong sentence.
+- **Nothing about admissibility depends on it.** Guards and `default_move` are
+  untouched, and a test asserts the live move set and the default are identical with
+  and without an archive that strongly prefers something else.
+
+A broken archive is a research aid that is unavailable, not a reason to fail a
+routing decision.
+
 ### Recording is on; steering is not
 
 The archive records every run by default, because recording is free and it is the
