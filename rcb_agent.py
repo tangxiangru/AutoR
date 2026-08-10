@@ -192,6 +192,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "needs, and a routine stage that keeps failing is promoted automatically.",
     )
     parser.add_argument(
+        "--routine-model",
+        metavar="MODEL",
+        help="Model for stages running in the routine tier, so the strong model is kept for "
+             "the few steps whose output the rest of the run inherits. Requires "
+             "--effort-tiers; without it every stage is deliberative and this does nothing.",
+    )
+    parser.add_argument(
         "--deliberation",
         action="store_true",
         help="Let a stage stop and pull in a panel when it hits a genuine crux. The agent "
@@ -504,6 +511,9 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
             fake_mode=args.fake_operator,
             ui=ui,
             stage_timeout=args.stage_timeout,
+            # The benchmark run has no human to interpret an unreadable verdict, and
+            # aborting at Stage 01 forfeits the task outright.
+            unattended=True,
         )
     manager = ResearchManager(
         project_root=REPO_ROOT,

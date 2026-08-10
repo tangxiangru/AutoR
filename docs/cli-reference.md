@@ -202,9 +202,10 @@ pre-registered evidence against multi-agent deliberation, in [Review Panel](revi
 
 | Flag | Default | Description |
 | --- | --- | --- |
+| `--routine-model MODEL` | - | Model for routine-tier stages, keeping the strong model for the few steps whose output the rest of the run inherits. Requires `--effort-tiers`. |
 | `--effort-tiers` | off | Run each stage as `routine` or `deliberative` instead of treating them alike. Routine gets a lean prompt, a single reviewer, and no escalation offer. Each stage declares what the next needs; a routine stage that fails twice is promoted automatically. |
 
-Off means exactly the previous behaviour. Both directions of mis-spending are recorded in
+Under tiering, polish rounds — the run's most expensive setting — are withheld from routine stages entirely, so the same rounds land only where something is still undecided. Off means exactly the previous behaviour. Both directions of mis-spending are recorded in
 `workspace/reviews/effort.json`. Full description in [Effort Tiers](effort-tiers.md).
 
 ### Crux deliberation
@@ -291,6 +292,10 @@ mechanism and the reasoning behind each refusal.
 | `--no-archive` | off | Do not record this run in the archive. |
 | `--archive-steer` / `--no-archive-steer` | **off** | Let the archive choose the topology this run uses, rather than only recording what it did. A run silently using a different topology from the one asked for is not a surprise a research tool gets to spring on anyone; turn this on once `--archive-report` shows the archive has something to say. A learned prior only reorders which move is preferred — it can never open a guarded edge. Preserved on resume. |
 | `--archive-report` | off | Print what the archive has learned, and exit. |
+| `--trial ID` | — | Tag this run as one arm of a paired trial. Two runs of the **same goal** sharing a `--trial` ID, with the same `--capability` and different `--arm` labels, become a pair; the statistic is the within-pair difference, which cancels goal difficulty. Requires `--capability` and `--arm` — a partial tag is refused, because a run tagged with only some of them can never be paired. |
+| `--capability NAME` | — | What the trial is testing, e.g. `effort_tiers`. Runs pair only within one capability. |
+| `--arm LABEL` | — | Which side of the pair, e.g. `off` / `on`. `off`, `control`, `baseline` and `0` are recognised as the control when the report has to guess. |
+| `--trial-report` | off | Print what the paired trials show, and exit: mean within-pair difference, an exact two-sided sign-flip p, the smallest p the sample size could have produced, and the per-criterion decomposition. See [Recursive Self-Improvement](self-improvement.md#5-paired-trials--does-any-of-this-help). |
 | `--max-rounds N` | `1` | How many times Stages 03-06 may run. A round ends when Stage 06 records `converged`, `refine_design`, `new_hypothesis` or `abandon`. The default keeps the single-pass behaviour: the decision is still recorded, so a one-round run says whether it converged or merely stopped, but a round that asks to go back is recorded with `acted_on: false` and the run continues. Raise it to let a refuted hypothesis lead to a second round. |
 
 ### Optional enhancements

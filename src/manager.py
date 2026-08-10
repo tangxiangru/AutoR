@@ -122,6 +122,7 @@ from .deliberation import (
     record_resolution,
 )
 from .effort import (
+    Concentration,
     DELIBERATIVE,
     EffortPlan,
     parse_declaration,
@@ -244,6 +245,10 @@ class ResearchManager:
         self.ideation_panel: IdeationPanel | None = None
         self.crux_panel: CruxPanel | None = None
         self.effort_plan = EffortPlan(enabled=False)
+        self.concentration = Concentration()
+        #: A cheaper operator for routine stages. The strong model stays for the few steps
+        #: whose output the rest of the run inherits.
+        self.routine_operator: OperatorProtocol | None = None
         #: A plain reviewer kept alongside a panel, so a routine stage can be gated cheaply.
         self.solo_reviewer: AutomatedReviewer | None = None
         self._crux_resolutions: list[Any] = []
@@ -466,6 +471,10 @@ class ResearchManager:
         state = load_graph_state(
             paths, max_steps=self.graph_max_steps, max_visits=self.graph_max_visits
         )
+        # A new walk has not halted. Without this the reason a *previous* invocation
+        # stopped survives into this one, and the run that recovers from a halt is
+        # reported as the run that halted.
+        state.halted_because, state.halted_kind = "", ""
         stage: StageSpec | None = entry
 
         while stage is not None:
@@ -473,6 +482,7 @@ class ResearchManager:
                 state.halted_because = (
                     f"the run reached the {state.max_steps}-step limit for this graph"
                 )
+                state.halted_kind = "steps"
                 save_graph_state(paths, state)
                 self.ui.show_status(state.halted_because, level="warn")
                 break
@@ -538,7 +548,17 @@ class ResearchManager:
         history and is not an abandoned run, and the status it ends with decides how
         every downstream reader treats it.
         """
-        if state is None or not state.path:
+        if state is None:
+            # No walk happened at all, which is what a refused resume looks like.
+            # Falling through to `completed` here relabelled an abandoned run as a
+            # finished one — `run_status` went `abandoned` -> `completed` while
+            # Stages 07 and 08 stayed pending and no report existed.
+            #
+            # The ledger is the right fallback precisely here: a laundered
+            # abandonment is already excluded by `unreopened_abandonment`, so what is
+            # left is a standing one.
+            return unreopened_abandonment(paths)
+        if not state.path:
             return None
         last = state.path[-1]
         if last.chose != GRAPH_FINISH or not last.closed_round:
@@ -556,6 +576,38 @@ class ResearchManager:
         # `completed` and `cancelled` are both wrong, and `cancelled` is the worse
         # of the two: it is what an abort writes, so the honest outcome would be
         # indistinguishable from a crash in every downstream reader.
+        # A run that stopped because a budget ran out did not finish, and saying it
+        # did is the worst available outcome: `run_status` reads `completed`, the exit
+        # code is 0, the log says "All stages approved", and four stages never ran.
+        # Anything checking either would score an empty run as a success.
+        #
+        # `pruned` is excluded on purpose. That is `--final-stage`, where stopping is
+        # exactly what the caller asked for.
+        halted = state.halted_kind if state is not None else ""
+        if halted in {"steps", "visits", "guard", "none"}:
+            unsettled = [
+                entry.slug for entry in ensure_run_manifest(paths).stages if not entry.settled
+            ]
+            append_log_entry(
+                paths.logs,
+                "run_halted",
+                f"{state.halted_because}\nRoute: {route}\nNot produced: "
+                + (", ".join(unsettled) or "nothing"),
+            )
+            update_manifest_run_status(
+                paths,
+                run_status="halted",
+                last_event="run.halted",
+                current_stage_slug=None,
+            )
+            self.ui.show_status(f"Run stopped early: {state.halted_because}", level="error")
+            self._print(
+                "Run stopped early and did not produce: "
+                + (", ".join(unsettled) or "nothing")
+                + ". Raise the budget and resume: --resume-run latest --graph-max-steps N."
+            )
+            return False
+
         abandoned = self._run_was_abandoned(paths, state)
         if abandoned is not None:
             append_log_entry(
@@ -808,6 +860,27 @@ class ResearchManager:
         except Exception as exc:  # noqa: BLE001 - measurement must not derail the stage
             append_log_entry(paths.logs, f"{stage.slug} anchored_revision_failed", str(exc))
 
+    def _evolution_applies(self, stage: StageSpec) -> bool:
+        """Whether this stage may spend polish rounds.
+
+        A polish round is a full stage execution — the most expensive thing the loop does. A
+        stage whose decisions are already made has nothing to polish toward, so withholding
+        the rounds there is what turns tiering from a label into a reallocation.
+        """
+        assert self.evolution is not None
+        if not self.evolution.config.applies_to(stage):
+            return False
+        if self.effort_plan.enabled and not self.concentration.polish_routine:
+            return not self.effort_plan.is_routine(stage)
+        return True
+
+    def _operator_for(self, stage: StageSpec) -> OperatorProtocol:
+        """The cheaper backend for routine work, the configured one for everything else."""
+        if self.routine_operator is not None and self.effort_plan.is_routine(stage):
+            self.concentration.note_cheap_model(stage.slug)
+            return self.routine_operator
+        return self.operator
+
     def _stage_after(self, stage: StageSpec) -> StageSpec | None:
         """The next stage in the fixed order, for the tier declaration to name."""
         return next((later for later in STAGES if later.number == stage.number + 1), None)
@@ -889,7 +962,7 @@ class ResearchManager:
                     f"{stage.slug} effort_declaration",
                     f"{following.slug}: {tier}" + (f" — {reason}" if reason else ""),
                 )
-            record_plan(paths, self.effort_plan)
+            record_plan(paths, self.effort_plan, self.concentration)
         except Exception as exc:  # noqa: BLE001 - tiering must never disturb an approval
             append_log_entry(paths.logs, f"{stage.slug} effort_failed", str(exc))
 
@@ -909,7 +982,7 @@ class ResearchManager:
                     f"{stage.slug} effort_promoted",
                     self.effort_plan.decision_for(stage).reason,
                 )
-            record_plan(paths, self.effort_plan)
+            record_plan(paths, self.effort_plan, self.concentration)
         except Exception as exc:  # noqa: BLE001
             append_log_entry(paths.logs, f"{stage.slug} effort_failed", str(exc))
 
@@ -1045,7 +1118,7 @@ class ResearchManager:
             prompt = self._build_stage_prompt(paths, stage, revision_feedback, continue_session)
             append_log_entry(paths.logs, f"{stage.slug} attempt {attempt_no} prompt", prompt)
 
-            result = self.operator.run_stage(stage, prompt, paths, attempt_no, continue_session=continue_session)
+            result = self._operator_for(stage).run_stage(stage, prompt, paths, attempt_no, continue_session=continue_session)
             append_log_entry(
                 paths.logs,
                 f"{stage.slug} attempt {attempt_no} result",
@@ -1329,7 +1402,7 @@ class ResearchManager:
             )
             append_log_entry(paths.logs, f"project_bootstrap attempt {attempt_no} prompt", prompt)
 
-            result = self.operator.run_stage(stage, prompt, paths, attempt_no, continue_session=continue_session)
+            result = self._operator_for(stage).run_stage(stage, prompt, paths, attempt_no, continue_session=continue_session)
             append_log_entry(
                 paths.logs,
                 f"project_bootstrap attempt {attempt_no} result",
@@ -1488,7 +1561,7 @@ class ResearchManager:
             prompt = self._build_bootstrap_prompt(paths, stage, corpus_prompt_section, revision_feedback, continue_session)
             append_log_entry(paths.logs, f"bootstrap attempt {attempt_no} prompt", prompt)
 
-            result = self.operator.run_stage(stage, prompt, paths, attempt_no, continue_session=continue_session)
+            result = self._operator_for(stage).run_stage(stage, prompt, paths, attempt_no, continue_session=continue_session)
             append_log_entry(
                 paths.logs,
                 f"bootstrap attempt {attempt_no} result",
@@ -1858,7 +1931,7 @@ class ResearchManager:
                 prompt,
             )
 
-            result = self.operator.run_stage(
+            result = self._operator_for(stage).run_stage(
                 stage,
                 prompt,
                 paths,
@@ -2071,7 +2144,8 @@ class ResearchManager:
                 continue
 
             # The draft is valid. Measure it, and decide whether it may stand.
-            if self.evolution is not None and self.evolution.config.applies_to(stage):
+            if self.evolution is not None and self._evolution_applies(stage):
+                self.concentration.note_round(self.effort_plan.tier_for(stage))
                 outcome = self.evolution.consider(
                     paths=paths,
                     stage=stage,

@@ -26,7 +26,8 @@ from src.web_search import (
     resolve_web_search_context,
     web_search_notice,
 )
-from src.archive import Archive, resolve_graph
+from src.archive import Archive, TrialTag, resolve_graph
+from src.trials import format_all_trials
 
 #: Where the cross-run archive lives when nobody says otherwise. Under the user's
 #: home rather than the checkout: it outlives any one clone, and an archive inside
@@ -172,6 +173,13 @@ def parse_args() -> argparse.Namespace:
              "routine stage gets a lean prompt, a single reviewer, and no escalation offer; a "
              "deliberative one gets everything configured. Each stage declares what the next "
              "needs, and a routine stage that keeps failing is promoted automatically.",
+    )
+    parser.add_argument(
+        "--routine-model",
+        metavar="MODEL",
+        help="Model for stages running in the routine tier, so the strong model is kept for "
+             "the few steps whose output the rest of the run inherits. Requires "
+             "--effort-tiers; without it every stage is deliberative and this does nothing.",
     )
     parser.add_argument(
         "--deliberation",
@@ -465,6 +473,40 @@ def parse_args() -> argparse.Namespace:
         help="Print what the archive at --archive has learned so far, and exit.",
     )
     parser.add_argument(
+        "--trial",
+        metavar="ID",
+        help=(
+            "Tag this run as one arm of a paired trial. Two runs of the *same goal* sharing a "
+            "--trial ID, with the same --capability and different --arm labels, become a pair. "
+            "The statistic is the within-pair difference, which cancels goal difficulty — the "
+            "confound that makes the archive's observational comparison need more runs than "
+            "anyone will do. Requires --capability and --arm."
+        ),
+    )
+    parser.add_argument(
+        "--capability",
+        metavar="NAME",
+        help="What the trial is testing, e.g. `effort_tiers`. Runs pair only within one capability.",
+    )
+    parser.add_argument(
+        "--arm",
+        metavar="LABEL",
+        help=(
+            "Which side of the pair this run is, e.g. `off` or `on`. `off`, `control`, `baseline` "
+            "and `0` are recognised as the control when the report has to guess."
+        ),
+    )
+    parser.add_argument(
+        "--trial-report",
+        action="store_true",
+        help=(
+            "Print what the paired trials in the archive show, and exit. Reports the mean "
+            "within-pair difference, an exact two-sided sign-flip p-value, the smallest p that "
+            "sample size could have produced, and the per-criterion decomposition — a capability "
+            "whose whole effect sits in one criterion is a flag, not a result."
+        ),
+    )
+    parser.add_argument(
         "--stage-timeout",
         type=int,
         default=14400,
@@ -558,6 +600,7 @@ def create_reviewer(
     fake_mode: bool,
     ui: TerminalUI,
     stage_timeout: int,
+    unattended: bool = False,
     panel_roles: list[str] | None = None,
     panel_models: list[str] | None = None,
     use_panel: bool = False,
@@ -585,6 +628,7 @@ def create_reviewer(
         fake_mode=fake_mode,
         ui=ui,
         stage_timeout=stage_timeout,
+        unattended=unattended,
     )
 
 
@@ -678,6 +722,17 @@ def _build_resource_entries(paths: list[str]) -> list[ResourceEntry]:
     return entries
 
 
+def resolve_trial_tag(args: argparse.Namespace) -> "TrialTag | None":
+    """The trial tag for this run, or None if the run is not part of one.
+
+    Any one of the three flags commits the caller to all three. Accepting a partial
+    tag would write a record that looks like trial data and can never be paired.
+    """
+    if not (args.trial or args.capability or args.arm):
+        return None
+    return TrialTag.build(args.trial or "", args.capability or "", args.arm or "")
+
+
 def open_archive(args: argparse.Namespace) -> Archive | None:
     """The archive this invocation records into, or ``None`` if it was declined.
 
@@ -697,6 +752,7 @@ def record_into_archive(
     variant_id: str,
     ui: TerminalUI,
     args: argparse.Namespace,
+    completed: bool,
 ) -> None:
     """Fold a finished run into the archive, and let it propose and promote.
 
@@ -706,6 +762,15 @@ def record_into_archive(
     """
     if archive is None or manager.last_run_paths is None:
         return
+    if not completed:
+        # A halted or aborted run is a partial specimen: it measured some stages and
+        # stopped, so its mean sits on an easier composition than a run that
+        # finished. `comparability_basis` would keep it out of most comparisons, but
+        # not all, and it has nothing to contribute to any of them.
+        ui.show_status(
+            "Not recorded in the archive: the run did not finish.", level="warn"
+        )
+        return
     try:
         record = archive.record_run(
             manager.last_run_paths,
@@ -714,6 +779,7 @@ def record_into_archive(
             # the archive — it is the only end-to-end exercise of this seam — and
             # excluded from every estimate.
             provenance="fake" if args.fake_operator else "live",
+            trial=resolve_trial_tag(args),
         )
         if record is None:
             ui.show_status(
@@ -781,6 +847,17 @@ def configure_effort(manager, args, *, backend_name: str, model: str, ui: Termin
     if not getattr(args, "effort_tiers", False):
         return
     manager.effort_plan = EffortPlan(enabled=True)
+    if getattr(args, "routine_model", None):
+        manager.routine_operator = create_operator(
+            # The execution backend, not the reviewer's: this operator runs stages.
+            getattr(manager.operator, "backend_name", "claude"),
+            model=args.routine_model,
+            fake_mode=fake_mode,
+            ui=ui,
+            codex_sandbox=getattr(args, "codex_sandbox", None) or DEFAULT_CODEX_SANDBOX,
+            stage_timeout=stage_timeout,
+        )
+        manager.concentration.routine_model = args.routine_model
     if isinstance(manager.reviewer, AutomatedReviewer):
         manager.solo_reviewer = manager.reviewer
     elif manager.reviewer is not None:
@@ -830,11 +907,20 @@ def main() -> int:
     persona_text = load_persona(args.persona)
     ui = TerminalUI(interactive=not unattended)
 
-    if args.archive_report:
+    if args.archive_report or args.trial_report:
         archive = open_archive(args)
         if archive is None:
-            raise ValueError("--archive-report needs --archive PATH to say which archive to read.")
-        print(archive.report())
+            raise ValueError(
+                "--archive-report and --trial-report read the archive; --no-archive leaves nothing "
+                "to read."
+            )
+        if args.archive_report:
+            print(archive.report())
+        if args.trial_report:
+            if args.archive_report:
+                print()
+            print("# Paired trials\n")
+            print(format_all_trials(archive.runs()))
         return 0
 
     ui.show_banner()
@@ -910,6 +996,7 @@ def main() -> int:
                 fake_mode=args.fake_operator,
                 ui=ui,
                 stage_timeout=args.stage_timeout,
+                unattended=unattended,
                 use_panel=args.review_panel,
                 panel_roles=args.panel_roles,
                 panel_models=args.panel_models,
@@ -957,7 +1044,7 @@ def main() -> int:
             output_format=output_format,
             final_stage=final_stage,
         )
-        record_into_archive(archive, manager, variant_id, ui, args)
+        record_into_archive(archive, manager, variant_id, ui, args, completed)
         return 0 if completed else 1
 
     operator_name = (args.operator or "claude").strip().lower()
@@ -995,6 +1082,7 @@ def main() -> int:
             fake_mode=args.fake_operator,
             ui=ui,
             stage_timeout=args.stage_timeout,
+            unattended=unattended,
             use_panel=args.review_panel,
             panel_roles=args.panel_roles,
             panel_models=args.panel_models,
@@ -1061,7 +1149,7 @@ def main() -> int:
         output_format=output_format,
         final_stage=final_stage,
     )
-    record_into_archive(archive, manager, variant_id, ui, args)
+    record_into_archive(archive, manager, variant_id, ui, args, completed)
     return 0 if completed else 1
 
 

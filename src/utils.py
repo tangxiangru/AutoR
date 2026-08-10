@@ -1730,6 +1730,55 @@ def build_decision_ledger_context(paths: RunPaths, upto_stage: StageSpec | None 
     return "\n\n".join(entries)
 
 
+#: Directory roots a run-relative path can start with. A backticked span beginning with
+#: one of these is a path reference even without a file extension, because a stage may
+#: legitimately point at a directory.
+PATH_ROOT_PREFIXES = (
+    "./", "../", "/",
+    "workspace/", "stages/", "prompt_cache/", "operator_state/", "handoff/",
+    "literature/", "code/", "data/", "results/", "figures/", "writing/",
+    "artifacts/", "notes/", "reviews/", "outputs/", "report/", "src/", "tests/", "docs/",
+)
+
+#: A trailing `.ext` on the final segment. The bound rules out `p(a*|M, mu, 1/f)`, whose
+#: last segment ends in `f)` rather than an extension.
+_FILE_EXTENSION_RE = re.compile(r"\.[A-Za-z0-9_+-]{1,12}$")
+
+#: Characters that appear in mathematics and prose but not in a path AutoR would write.
+#: Whitespace is the strongest of these: `tau_SR < tau_BH / ln(N)` is an inequality.
+_NOT_IN_A_PATH_RE = re.compile(r"[\s<>|=^≤≥±→,;]")
+
+
+def looks_like_path_reference(candidate: str) -> bool:
+    """Whether a backticked span is a file path rather than mathematics.
+
+    The old rule was "contains a slash", which counted `1/f`, `alpha/l ≤ 1/2`,
+    `p(a*|M, mu, 1/f)` and the GitHub slug `sebhoof/bhsr` as paths. That matters twice
+    over: `Files Produced` validation demands every listed path exist, and the rubric's
+    grounding criterion scores the fraction that resolve — so inline mathematics silently
+    drove the score down, and the cheapest way for a stage to recover the points was to
+    stop writing mathematics in backticks. A measurement that rewards mangling the prose
+    is worse than no measurement.
+
+    Accepted when the span has no path-hostile character and either starts at a known
+    run-relative root or ends in a file extension.
+    """
+    if _NOT_IN_A_PATH_RE.search(candidate):
+        return False
+    if "/" not in candidate:
+        return False
+    if candidate.startswith(PATH_ROOT_PREFIXES):
+        return True
+    # A DOI (`10.1103/PhysRevD.83.044026`) or a URL (`arxiv.org/abs/2309.17453`) has a
+    # slash and an extension-shaped tail, and a literature survey is full of both. The
+    # tell is a dot in the segment before the first slash, which no run-relative path
+    # AutoR writes has.
+    first_segment = candidate.split("/", 1)[0]
+    if "." in first_segment or "://" in candidate:
+        return False
+    return bool(_FILE_EXTENSION_RE.search(candidate.rstrip("/").rsplit("/", 1)[-1]))
+
+
 def _extract_path_references(text: str) -> list[str]:
     seen: set[str] = set()
     paths: list[str] = []
@@ -1743,12 +1792,7 @@ def _extract_path_references(text: str) -> list[str]:
         if "\n" in normalized or "\r" in normalized or len(normalized) > 512:
             continue
 
-        if not (
-            normalized.startswith("workspace/")
-            or normalized.startswith("stages/")
-            or normalized.startswith("prompt_cache/")
-            or "/" in normalized
-        ):
+        if not looks_like_path_reference(normalized):
             continue
 
         if normalized in seen:

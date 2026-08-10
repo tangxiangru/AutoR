@@ -370,6 +370,68 @@ deliberately, once `--archive-report` shows the archive has something to say.
 
 ---
 
+## 5. Paired trials — does any of this help?
+
+`src/trials.py`
+
+Everything above is argued for from first principles and defended by unit tests.
+None of it has evidence that it improves a research output. The rubric measures a
+draft; nothing has compared a run that had a mechanism against a run that did not.
+
+The archive cannot supply that. Its comparisons are observational — runs differ by
+goal, and goal difficulty swamps everything, so six runs on each side of a contrast
+tells you which questions were easier.
+
+A **paired trial** fixes it cheaply. Run the same goal twice, once with the
+capability and once without, and the statistic becomes the within-pair difference.
+Goal difficulty cancels.
+
+```bash
+python main.py --goal "$GOAL" --trial g1 --capability effort_tiers --arm off
+python main.py --goal "$GOAL" --trial g1 --capability effort_tiers --arm on --effort-tiers
+# ... repeat with g2, g3, ... on different goals
+python main.py --trial-report
+```
+
+All three tags are required together: a `--trial` with no `--capability` cannot be
+grouped with anything, and an `--arm` with no `--trial` is a label on a run nobody
+can pair. Both would look like data and be none.
+
+### What it refuses to compute
+
+**It does not compare across a composition difference, even inside a pair.** If the
+treatment arm abandoned at Stage 06 and the control ran to Stage 08, their mean
+fitness is not one measurement of two configurations — the arm that stopped early
+scores higher *for stopping early*. That is the bias the comparability basis exists
+to remove, reappearing within a pair. The difference is taken over the stages both
+arms measured, and pairs whose shapes differed are counted and reported separately:
+a capability that changes how far runs get has done something, and it is not a
+score.
+
+**It does not report a total without the criterion decomposition.** A capability
+that writes more files raises `artifact_breadth` whether or not the research
+improved. The report prints the per-criterion difference and a concentration figure;
+above 60% in one criterion it says so. A win concentrated in a single criterion is a
+flag, not a result.
+
+**It does not call an unattainable result "not significant".** An exact two-sided
+sign-flip test over *n* pairs cannot go below `2 / 2**n` — three pairs bottom out at
+0.25, six at 0.031. Below six pairs, no result reaches 0.05 at any effect size. The
+floor is printed beside the p-value, so *did not show an effect* stays
+distinguishable from *could not have shown one*.
+
+**It does not estimate from fake runs.** One `--fake-operator` arm disqualifies the
+pair, because a scripted operator's score measures the script.
+
+### What it does not measure
+
+The rubric score, which is a proxy for rigour and not a measure of insight. A
+capability can raise it without making the research better, and can make the
+research better without raising it. The decomposition and the shape counts are there
+so a reader can argue with the number instead of accepting it.
+
+---
+
 ## The constraint the whole design is built around
 
 A fitness function plus a loop is an optimiser. Point an optimiser at a research
