@@ -48,6 +48,7 @@ def record(
         steps=len(edges),
         revisits=0,
         agent_directed=0,
+        bypassed=0,
         recorded_at="2026-08-06T00:00:00",
     )
 
@@ -118,7 +119,7 @@ class ArchiveTests(unittest.TestCase):
             run_id="short", variant_id="baseline", rubric_version=RUBRIC_VERSION,
             edges={BACK: 1}, stage_fitness={"01_literature_survey": 0.97, "02_hypothesis_generation": 1.0},
             topology="adaptive", provenance="live",
-            route="", steps=2, revisits=0, agent_directed=0, recorded_at="t",
+            route="", steps=2, revisits=0, agent_directed=0, bypassed=0, recorded_at="t",
         )
         long_runs = [
             RunRecord(
@@ -126,7 +127,7 @@ class ArchiveTests(unittest.TestCase):
                 edges={FORWARD: 1},
                 stage_fitness={f"0{n}_s": 0.80 for n in range(1, 9)},
                 topology="adaptive", provenance="live",
-                route="", steps=8, revisits=0, agent_directed=0, recorded_at="t",
+                route="", steps=8, revisits=0, agent_directed=0, bypassed=0, recorded_at="t",
             )
             for i in range(3)
         ]
@@ -160,7 +161,7 @@ class ArchiveTests(unittest.TestCase):
                 run_id=name, variant_id=variant, rubric_version=RUBRIC_VERSION, edges={},
                 stage_fitness={k: value for k in shape}, topology="adaptive",
                 provenance="live", route="", steps=len(shape),
-                revisits=0, agent_directed=0, recorded_at="t",
+                revisits=0, agent_directed=0, bypassed=0, recorded_at="t",
             )
 
         self.seed(
@@ -185,6 +186,7 @@ class ArchiveTests(unittest.TestCase):
             steps=1,
             revisits=0,
             agent_directed=0,
+            bypassed=0,
             recorded_at="t",
         )
         self.assertAlmostEqual(partial.mean_fitness, 0.8)
