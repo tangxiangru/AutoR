@@ -102,6 +102,19 @@ class Round:
         }
 
 
+@dataclass(frozen=True)
+class RoundIntent:
+    """What a closed round asked the run to do next.
+
+    A request, not an instruction. It goes to the router like any other proposed
+    move: admissible or refused, and recorded either way with its choice set.
+    """
+
+    target: str
+    reason: str
+    number: int
+
+
 def load_rounds(paths: RunPaths) -> list[Round]:
     payload = _load_json(paths.research_rounds)
     if not isinstance(payload, dict):
@@ -351,3 +364,48 @@ def format_round_status(paths: RunPaths, max_rounds: int) -> str:
     else:
         shape = final.decision
     return f"{len(rounds)} round(s); {shape}"
+
+def amend_last_round(paths: RunPaths, *, acted_on: bool, budget_note: str = "") -> Round | None:
+    """Correct the last round's record once the router has ruled on its intent.
+
+    `record_round` runs at Stage 06 approval; whether the intent was honoured is not
+    known until the router has evaluated it, which happens afterwards. Writing
+    `acted_on` at approval time and leaving it meant the ledger could claim a round
+    was acted on when the move it asked for was refused — a claim nothing later would
+    contradict, in the one artifact a reader consults to find out what the run
+    decided.
+    """
+    rounds = load_rounds(paths)
+    if not rounds:
+        return None
+    last = rounds[-1]
+    amended = Round(
+        number=last.number,
+        decision=last.decision,
+        rationale=last.rationale,
+        what_we_learned=last.what_we_learned,
+        what_changes_next=last.what_changes_next,
+        negative_result=last.negative_result,
+        hypothesis_verdicts=last.hypothesis_verdicts,
+        recorded_at=last.recorded_at,
+        acted_on=acted_on,
+        budget_note=budget_note,
+        reopens_round=last.reopens_round,
+    )
+    _write_rounds(paths, [*rounds[:-1], amended])
+    return amended
+
+
+def discard_pending_decision(paths: RunPaths) -> bool:
+    """Drop a round declaration that no round will close.
+
+    `_skip_stage` returns before the approval branch, so a Stage 06 that exhausted
+    its retries never reaches `record_round` and never unlinks the file. Left there,
+    the *next* Stage 06 closes its round from the previous visit's declaration —
+    inheriting a conclusion drawn from results it did not produce.
+    """
+    if not paths.round_decision.exists():
+        return False
+    paths.round_decision.unlink(missing_ok=True)
+    return True
+

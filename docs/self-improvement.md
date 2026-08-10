@@ -137,6 +137,25 @@ The division of labour is the point:
   refused, recorded, and replaced by the default edge — which at every node is the
   forward one, so a refusal degrades to the old pipeline rather than to a stall.
 
+### A research round's decision goes through the router too
+
+`src/research_rounds.py` closes a round at Stage 06 with `converged`,
+`refine_design` (back to 03), `new_hypothesis` (back to 02) or `abandon`. The two
+backward decisions are edges the graph already has, and they used to reach them by
+setting `_jump_target_stage` — around the router entirely.
+
+That had two costs. The run's most consequential routing decisions arrived at the
+archive marked `bypassed` with no choice set, so the estimator excluded exactly the
+moves it most wanted to learn about. And the jump happened whatever the guards said.
+
+A closed round now *declares* an intent, and the router treats it as a proposal that
+outranks the backend — the round has already reasoned about the results and written
+its conclusion to disk, so asking again would be buying an opinion on a settled
+question. What it does not outrank is the guards. A refused intent falls to the
+forward edge and the round ledger records that it was not acted on, which it could
+not do before: `record_round` runs at approval, before the router has ruled, so the
+ledger could claim a round was acted on when its move was refused.
+
 Blocked moves are shown to the agent *with the reason they are blocked*. Hiding
 them is the more obvious design and it is the wrong one: an agent that can see
 "`07_writing` is closed because H2 has no verdict" routes to the analysis stage
