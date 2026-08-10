@@ -936,6 +936,26 @@ Original stderr:
                     "priority_fixes": ["Replace this placeholder with a real report review."],
                 },
             )
+            # A coverage record the real gate accepts, saying plainly that it is fake.
+            # It quotes the task statement verbatim rather than inventing a requirement,
+            # because that is exactly the rule a real run is held to.
+            from .deliverables import COVERAGE_FILENAME, demanding_sentences
+
+            _statement = read_text(paths.user_input)
+            _fake_reason = (
+                "fake-operator mode does not do research; nothing was actually derived."
+            )
+            _entries = [
+                {"task_quote": sentence, "addressed": False, "reason": _fake_reason}
+                for sentence in demanding_sentences(_statement)
+            ] or [
+                {
+                    "task_quote": " ".join(_statement.split())[:120],
+                    "addressed": False,
+                    "reason": _fake_reason,
+                }
+            ]
+            _write_json(paths.artifacts_dir / COVERAGE_FILENAME, {"deliverables": _entries})
 
         if stage.number >= 7:
             venue = selected_venue_key(paths)

@@ -416,6 +416,24 @@ class ScriptedSmokeOperator:
                 paths.artifacts_dir / "self_review.json",
                 json.dumps({"overall_score": 8.5, "final_verdict": "ready", "rounds": 1}),
             )
+            # The Stage 07 gate now also asks what the task demanded and where the report
+            # answers it. Quote the statement verbatim, as a real run must.
+            from src.deliverables import COVERAGE_FILENAME, demanding_sentences
+
+            statement = read_text(paths.user_input)
+            write_text(
+                paths.artifacts_dir / COVERAGE_FILENAME,
+                json.dumps({
+                    "deliverables": [
+                        {"task_quote": sentence, "addressed": False,
+                         "reason": "scripted smoke operator does no research."}
+                        for sentence in demanding_sentences(statement)
+                    ] or [
+                        {"task_quote": " ".join(statement.split())[:120], "addressed": False,
+                         "reason": "scripted smoke operator does no research."}
+                    ]
+                }),
+            )
 
         if stage.number >= 8:
             review_path = paths.reviews_dir / "readiness.md"
