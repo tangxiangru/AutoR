@@ -3082,8 +3082,32 @@ class ResearchManager:
         reason: str,
         kind: str,
     ) -> bool:
-        stage_markdown = self._build_skipped_stage_markdown(paths, stage, reason, kind)
         final_stage_path = paths.stage_file(stage)
+        rescued = self._validated_draft_for_skip(paths, stage) if kind == "auto" else None
+        if rescued is not None:
+            # The stage ran out of attempts, but its last draft is complete and passes the
+            # same markdown and artifact gates an approval requires. Overwriting that with
+            # a stub destroys real work and tells every downstream stage the output is
+            # missing when it is on disk. Observed on a benchmark run: a 7,492-word Stage
+            # 06 summary with thirteen figures was replaced by a 301-word stub, and the
+            # exclusion-curve figure the task was scored on never reached the report.
+            #
+            # It is still not an approval -- no reviewer accepted it -- so the manifest and
+            # the log keep saying so, and the stub is preserved beside it for the audit
+            # trail rather than thrown away.
+            stage_markdown = rescued
+            write_text(paths.stages_dir / f"{stage.slug}.skip_stub.md",
+                       self._build_skipped_stage_markdown(paths, stage, reason, kind))
+            reason = (
+                reason
+                + " The stage's final draft validated, so it was preserved rather than "
+                "replaced by the skip stub; it is promoted but was never reviewed."
+            )
+            # `kind` stays "auto": the manifest's vocabulary is human-or-auto, and this
+            # is still an auto-skip. What changed is the reason, which now records that a
+            # validated draft was kept and that nobody reviewed it.
+        else:
+            stage_markdown = self._build_skipped_stage_markdown(paths, stage, reason, kind)
         write_text(final_stage_path, stage_markdown)
         append_approved_stage_summary(paths.memory, stage, stage_markdown)
         mark_stage_skipped_manifest(
@@ -3112,6 +3136,25 @@ class ResearchManager:
             level="warn",
         )
         return True
+
+    def _validated_draft_for_skip(self, paths: RunPaths, stage: StageSpec) -> str | None:
+        """The stage's draft, if it would have passed the gate anyway.
+
+        Exhausting the retry budget is not the same as failing: a stage can burn its
+        attempts on revision rounds and still end with a draft that clears both gates.
+        Returns None whenever there is any doubt, so the stub remains the default.
+        """
+        draft_path = paths.stage_tmp_file(stage)
+        if not draft_path.exists():
+            return None
+        # No separate empty-draft guard: an empty string fails the markdown gate's
+        # "must begin with '# Stage '", so a second check would be an unpinned branch.
+        draft = read_text(draft_path)
+        if validate_stage_markdown(draft, stage=stage, paths=paths):
+            return None
+        if validate_stage_artifacts(stage, paths):
+            return None
+        return draft
 
     def _build_skipped_stage_markdown(
         self, paths: RunPaths, stage: StageSpec, reason: str, kind: str
