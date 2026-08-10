@@ -246,6 +246,8 @@ class ResearchManager:
         self.ideation_panel: IdeationPanel | None = None
         self.crux_panel: CruxPanel | None = None
         self.effort_plan = EffortPlan(enabled=False)
+        #: The `--rigor` level this run was started with, recorded on the scorecard.
+        self.rigor_level: str = ""
         self.concentration = Concentration()
         #: A cheaper operator for routine stages. The strong model stays for the few steps
         #: whose output the rest of the run inherits.
@@ -905,7 +907,7 @@ class ResearchManager:
         the reason one looks unfinished.
         """
         try:
-            scorecard = write_scorecard(paths)
+            scorecard = write_scorecard(paths, self.rigor_level)
         except Exception as exc:  # noqa: BLE001
             append_log_entry(paths.logs, "scorecard_failed", str(exc))
             return
