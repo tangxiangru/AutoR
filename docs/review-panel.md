@@ -180,12 +180,22 @@ This is deliberately mechanical. The chair is a model, and a model asked to weig
 be argued into discounting it. A prompt-level rule the chair can talk itself out of is not a
 rule, and a gate that cannot say no is not a gate.
 
-Two guards sit alongside it:
+Three guards sit alongside it:
 
 - A member that could not be reached is **not** counted as agreeing. It breaks unanimity and
   forces deliberation.
 - An unparseable answer degrades to `abort`, and cannot also count as a blocking veto — one
   malformed response should not be able to stop a run.
+- **A panel nobody could reach refuses rather than approves.** When the chair is unreachable
+  the panel falls back to its own seats' objections, and an unreachable seat is filtered out of
+  that list because it has no opinion to weigh. With *every* seat down — the ordinary shape of a
+  backend outage, five seats and a chair against one dead endpoint — the objection list came out
+  empty and the empty list read as consent, so a total review outage approved the stage.
+  `_decision_from_dissent` now takes an outage arm first, and the refusal it returns carries
+  `CRASHED_REASON`, so `is_degraded_verdict` keeps it out of `review_policy.json`: an outage is
+  not a correction anybody demanded. The guard is `all(...)` and not `any(...)` on purpose — four
+  dead seats and one that answered is a panel degraded to a solo reviewer, which is thin but is
+  still a judgement somebody made, and refusing on one flaky seat would make the panel unusable.
 
 ## The persona
 

@@ -36,7 +36,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .approval_agent import DECISION_TO_CHOICE, AutomatedReviewer, ReviewDecision
+from .approval_agent import (
+    CRASHED_REASON,
+    DECISION_TO_CHOICE,
+    AutomatedReviewer,
+    ReviewDecision,
+)
 from .terminal_ui import TerminalUI
 from .utils import RunPaths, StageSpec, append_log_entry, read_text, truncate_text, write_text
 
@@ -873,6 +878,31 @@ class ReviewPanel:
         return overridden
 
     def _decision_from_dissent(self, verdicts: list[PanelVerdict], *, reason: str) -> ReviewDecision:
+        # A room nobody could reach did not agree; it did not meet. `objections` filters
+        # out `failed` seats because an unreachable seat has no opinion to weigh -- but
+        # when *every* seat failed that leaves an empty list, and the arm below reads an
+        # empty objection list as consent. This method is only called when the chair is
+        # also gone, so "every seat failed" is the ordinary shape of a review-backend
+        # outage: five seats and a chair against one dead endpoint. Approving there is
+        # the one outcome the whole apparatus exists to prevent, and it is the only place
+        # in the tree where silence is upgraded to a pass.
+        #
+        # Refused with CRASHED_REASON on purpose, so `is_degraded_verdict` recognises it
+        # and `_record_review_correction` keeps it out of `review_policy.json`: an outage
+        # is not a correction anyone demanded, and recording it as a standing rule would
+        # teach every later review a lesson no reviewer taught.
+        if verdicts and all(verdict.failed for verdict in verdicts):
+            return ReviewDecision(
+                choice="4",
+                decision_token="revise",
+                reason=f"{CRASHED_REASON} No panel seat could be reached, and neither could the chair.",
+                feedback=(
+                    "The review panel could not be reached, so this stage was not approved. "
+                    "Re-examine the draft against the stage contract and the artifacts it "
+                    "claims, strengthen whatever is weakest, and restate the summary."
+                ),
+            )
+
         objections = [v for v in verdicts if not v.approves and not v.failed]
         if not objections:
             return ReviewDecision(choice="5", decision_token="approve", reason=reason)

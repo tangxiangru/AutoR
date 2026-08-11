@@ -13,7 +13,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.approval_agent import ReviewDecision
+from src.approval_agent import AutomatedReviewer, ReviewDecision
 from src.review_panel import (
     DEFAULT_PANEL,
     PANEL_EFFECT_FILENAME,
@@ -425,6 +425,69 @@ class MemberFailureTests(unittest.TestCase):
 
         self.assertEqual(decision.choice, "4")
         self.assertIn("Add an ablation.", decision.feedback)
+
+
+class TotalOutageTests(unittest.TestCase):
+    """A room nobody could reach did not agree; it did not meet.
+
+    Found by asking what happens to `--review-panel` when the reviewer backend is simply
+    down. `_decision_from_dissent` filters `failed` seats out of `objections` — correctly,
+    an unreachable seat has no opinion to weigh — and then reads an empty objection list as
+    consent. With every seat *and* the chair gone, that returned `choice="5"`: a total
+    review outage approved the stage. Nothing pinned it, and it is the one outcome the whole
+    apparatus exists to prevent, so the tests are here rather than folded into
+    `MemberFailureTests` where a partial failure is the subject.
+    """
+
+    ALL_DEAD = {role.key: ["__FAIL__", "__FAIL__"] for role in DEFAULT_PANEL} | {
+        "__chair__": ["__FAIL__", "__FAIL__"]
+    }
+
+    def test_a_total_outage_refuses_instead_of_approving(self) -> None:
+        decision = _ScriptedPanel(self, dict(self.ALL_DEAD)).review()
+
+        self.assertEqual(decision.choice, "4", "a review nobody could reach approved the stage")
+        self.assertNotEqual(decision.decision_token, "approve")
+
+    def test_the_outage_refusal_is_degraded_so_it_never_becomes_a_standing_rule(self) -> None:
+        # `_record_review_correction` early-returns on a degraded verdict, so carrying
+        # CRASHED_REASON is what stops one outage from teaching every later review a
+        # lesson no reviewer taught. A refusal that merely says "revise" would be
+        # recorded in review_policy.json as a correction somebody demanded.
+        decision = _ScriptedPanel(self, dict(self.ALL_DEAD)).review()
+
+        self.assertTrue(
+            AutomatedReviewer.is_degraded_verdict(decision),
+            f"outage refusal would be recorded as a reviewer's demand: {decision.reason!r}",
+        )
+
+    def test_one_reachable_seat_still_decides(self) -> None:
+        """The guard is `all(...)`, not `any(...)`, and that is deliberate.
+
+        Four dead seats and one that approved is a panel degraded to a solo reviewer,
+        which is thin but is still a judgement somebody made. Widening the guard to
+        `any` would turn one unreachable seat into a refusal and make the panel
+        unusable on a flaky backend, so the narrow scope is pinned here to make
+        widening it a deliberate act rather than a drive-by.
+        """
+        script = {role.key: ["__FAIL__", "__FAIL__"] for role in DEFAULT_PANEL}
+        script["pi"] = [_verdict_json("approve"), _verdict_json("approve")]
+        script["__chair__"] = ["__FAIL__"]
+
+        decision = _ScriptedPanel(self, script).review()
+
+        self.assertEqual(decision.choice, "5")
+
+    def test_an_empty_verdict_list_is_not_read_as_a_total_outage(self) -> None:
+        # `all()` over an empty list is True, so the `verdicts and` guard is load-bearing:
+        # without it a panel that produced no verdicts at all would take the outage arm
+        # and mask a different bug as a backend failure.
+        panel = ReviewPanel(DEFAULT_PANEL, backend_name="claude", model="sonnet")
+
+        decision = panel._decision_from_dissent([], reason="nobody voted")
+
+        self.assertEqual(decision.choice, "5")
+        self.assertEqual(decision.reason, "nobody voted")
 
 
 class RecordTests(unittest.TestCase):
