@@ -765,10 +765,36 @@ the loop and exports the benchmark's deliverables (`report/report.md`, `report/i
 `outputs/`). Scoring is the benchmark's own rubric judge; `tools/score_rcb_run.py` defaults to the
 reference judge, **gpt-5.1**, which is what ResearchClawBench itself scores with.
 
-**Judge choice is worth roughly sixteen points.** On one identical artifact set, Opus scored 52.6
-where gpt-5.1 scored 46.0; on another, Gemini 2.5 Flash scored 37.0 where Opus scored 20.8. A number
+**Judge choice can move a score by more than the gap between the top and the bottom third of the
+leaderboard.** On one identical artifact set Gemini 2.5 Flash scored 37.0 where Opus scored 20.8, a
+spread of 16.2; on another, Opus scored 52.6 where gpt-5.1 scored 46.0, a spread of 6.6. A number
 carrying the wrong judge is not a smaller number, it is an incomparable one. Quote the judge with
 every total.
+
+### Where AutoR lands, on all forty tasks
+
+One attempt per task, Claude Opus executing and reviewing, judged by `gpt-5.1`. The three
+comparison agents were re-scored from their public runs under that same judge:
+
+| agent | mean | median | max | tasks scoring 0 |
+|:---|---:|---:|---:|---:|
+| Codex CLI | 19.53 | 17.73 | 48.40 | 2 |
+| ResearchHarness (GPT-5.4) | 15.40 | 10.85 | 45.10 | 1 |
+| ARIS Codex | 15.02 | 12.65 | 46.90 | 2 |
+| **AutoR** | **14.16** | 11.50 | 47.70 | **7** |
+
+**AutoR is last**, below the bare Codex CLI it can be configured to run on top of. Eight of the
+forty runs shipped a 197-byte "incomplete run" stub, and the deficit is almost entirely those. Four
+caveats travel with the number and none can be dropped: it is **single-attempt** where the
+leaderboard aggregates the best score per (task, agent) pair; it is **cross-model**, since all three
+comparators run GPT-5.4; it is a `gpt-5.1` number; and it is **pre-repair** — #180 and #181 closed
+the routes that produced the stubs, and a re-run is in flight.
+
+[The framework document's §6](docs/framework.md#6-the-system-measured-against-itself) is the full
+account, including the part that is worse than the mean: the two highest scores came from runs that
+halted at hypothesis generation, and across 133 stage visits the graph took **one** backward edge.
+
+### One task, before and after a targeted fix
 
 Measured on `Astronomy_000`, reference judge gpt-5.1, before and after the export and figure-budget
 fixes in #147 / #149 / #153:
@@ -912,9 +938,13 @@ code that would have to change.
 - **The cross-model veto is unreachable from `main.py`.** `--cross-review` is declared and parsed
   there, but `resolve_cross_reviewer` is called only from `rcb_agent.py`. The feature is live on the
   benchmark path only.
-- **The validity chain is bypassable in unattended mode.** A stage that burns its five attempts
-  against the gate is auto-skipped, up to `--max-auto-skips` (default 3), and the run proceeds past a
-  gate it never passed.
+- **The validity chain is bypassable in unattended mode, and past the skip budget it is bypassed
+  deliberately.** A stage that burns its attempts against the gate is auto-skipped, up to
+  `--max-auto-skips` (default 3). Past that, `_route_to_deliverable` routes to the writing stage
+  *around* the validity guard rather than exiting with nothing — the rule and its cost are
+  [§2.7](docs/framework.md#27-a-gate-an-unattended-run-cannot-satisfy-must-disclose-not-refuse).
+  What the run owes instead is disclosure: every stage the route stepped over is named in the
+  report. Whether a banner is enough is a fair thing to push on.
 - **No mechanism here has evidence that it improves a research output.** `src/trials.py` is the
   apparatus built to produce that evidence; not one paired trial has been run. The scorecard says
   when a feature did not change a decision *in this run*, which is a different and weaker claim.
