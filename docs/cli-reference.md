@@ -1,42 +1,76 @@
 # CLI Reference
 
-Complete reference for AutoR's entry points:
+The commands AutoR is meant to be run with, each with a section below:
 
-- `python main.py` — the terminal research workflow ([source](../main.py))
-- `python studio.py` — the local browser workspace
-  ([source](../src/backend/studio_http.py))
-- `python rcb_agent.py` — the unattended ResearchClawBench agent
-  ([source](../rcb_agent.py))
-- `python tools/web_search.py` — Gemini-backed web search
-  ([source](../src/web_search.py))
+| Command | What it is |
+| --- | --- |
+| `python main.py` | The terminal research workflow. ([source](../main.py)) |
+| `python studio.py` | The local browser workspace. ([source](../src/backend/studio_http.py)) |
+| `python rcb_agent.py` | The unattended ResearchClawBench agent. ([source](../rcb_agent.py)) |
+| `python tools/web_search.py` | Gemini-backed web search. ([source](../src/web_search.py)) |
+| `python tools/score_rcb_run.py` | Scores a finished benchmark workspace. ([source](../tools/score_rcb_run.py)) |
+| `python tools/archive_sample_complexity.py` | How many runs the archive needs before it can steer. ([source](../tools/archive_sample_complexity.py)) |
+
+Two further modules are executable and are deliberately not listed as commands,
+because nothing expects a person to type them:
+[`src/mcp_web_search.py`](../src/mcp_web_search.py) is the MCP stdio server the
+Claude operator launches for itself (see [How the agent reaches
+it](#how-the-agent-reaches-it)), and `docs/ui-design/generate_progress_docx.py`
+regenerates one design document and needs `python-docx`.
+
+Every flag on those six is named below: `main.py`'s 61, `studio.py`'s 5,
+`tools/web_search.py`'s 4 and `tools/score_rcb_run.py`'s 8 each get their own
+table row, and `rcb_agent.py`'s 37 are covered as the six that are its own plus
+the 31 it shares with `main.py`, every one of the 31 spelled out by name.
+`tools/archive_sample_complexity.py` has none.
+
+Two of the six synopsis blocks are **subsets** — the common flags — and say so
+underneath: `main.py`'s and `rcb_agent.py`'s. The other four are not. `studio.py`,
+`tools/web_search.py` and `tools/score_rcb_run.py` show every flag their command
+declares, and `tools/archive_sample_complexity.py` has nothing to omit. Either
+way the tables are the surface.
 
 For a task-oriented introduction, read the [English Guide](tutorial_en.md)
-instead. This page is the exhaustive list.
+instead.
 
 ---
 
 ## `main.py`
 
 ```
-python main.py [--goal GOAL] [--goal-file PATH] [--runs-dir DIR] [--fake-operator]
-               [--model MODEL] [--operator {claude,codex}]
-               [--codex-sandbox {read-only,workspace-write,danger-full-access}]
-               [--approval-mode {manual,agent}] [--full-auto]
-               [--unattended] [--max-auto-skips N]
-               [--review-operator {claude,codex}] [--review-model MODEL]
-               [--web-search {auto,gemini,native}]
-               [--venue VENUE] [--resume-run RUN_ID] [--redo-stage STAGE]
-               [--rollback-stage STAGE] [--resources PATH [PATH ...]]
-               [--skip-intake] [--research-diagram]
-               [--project-root PATH] [--paper-corpus PATH]
-               [--stage-timeout SECONDS] [--max-attempts N]
+python main.py [--goal GOAL | --goal-file PATH] [--runs-dir DIR]
+               [--operator {claude,codex}] [--model MODEL]
+               [--rigor {fast,standard,thorough,max}]
+               [--approval-mode {manual,agent}] [--full-auto] [--unattended]
+               [--resources PATH [PATH ...]] [--venue VENUE]
+               [--output-format {markdown,md,latex,tex}]
+               [--resume-run RUN_ID] [--redo-stage STAGE] [--rollback-stage STAGE]
+               [--final-stage STAGE] [--stage-timeout SECONDS] [--max-attempts N]
+               [--fake-operator]
 ```
+
+**That synopsis is a subset, not the surface.** `parse_args` declares 61 flags;
+the 19 shown above are the ones a first run usually needs. Every one of the 61
+has a row in the tables that follow, grouped by what it does, and
+`python main.py --help` prints the same set in declaration order.
+
+Four of them — `--effort-tiers`, `--deliberation`, `--ideation-panel` and
+`--review-panel` — are `argparse.BooleanOptionalAction` switches with
+`default=None`, which does not mean "off". It means *nobody said*, and
+[`--rigor`](#rigor) then decides; `--rigor` itself defaults to `standard`, which
+turns effort tiers **on**. Passing either direction of the switch overrides the
+level. `--evolve` and `--archive-steer` are the same kind of switch but are not
+rigor-controlled: their unset values are filled in by `normalize_walk_settings`,
+from `DEFAULT_EVOLVE_MEASURE` (on) and `DEFAULT_ARCHIVE_STEER` (off). The
+switches that behave this way are the ones `main.py` declares with
+`action=argparse.BooleanOptionalAction`, and every one of them is declared
+`default=None`.
 
 ### Goal and run location
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--goal GOAL` | prompted interactively | The research goal. If omitted, AutoR reads a multi-line goal from stdin and stops at the first empty line. An empty goal is an error. Unattended runs cannot be prompted, so one of `--goal` or `--goal-file` is required there. |
+| `--goal GOAL` | prompted interactively | The research goal. If omitted, AutoR reads a multi-line goal from stdin, skipping leading blank lines and stopping at the first blank line *after* some text. An empty goal is an error (`Research goal cannot be empty.`). Unattended runs cannot be prompted, so one of `--goal` or `--goal-file` is required there. |
 | `--goal-file PATH` | — | Read the goal from a file instead. Mutually exclusive with `--goal`. Use this when the goal is too long to pass as a shell argument. |
 | `--runs-dir DIR` | `runs` | Where run directories are created. Resolved **relative to the repository root**, not the current working directory. Point this at a large disk for heavy experiments. |
 
@@ -81,11 +115,25 @@ automated dry runs.
 
 Replacing the human approval gate is not by itself enough to make a run
 unattended: a handful of prompts sit outside that gate. `--unattended` closes
-them, and is implied by `--full-auto` and by `--approval-mode agent`.
+them.
+
+`resolve_unattended` returns true for **four** things, not one:
+
+- `--unattended`
+- `--full-auto`
+- `--approval-mode agent`
+- `--review-panel`
+
+The last one has a consequence worth stating on its own. `--rigor` is resolved
+*before* `resolve_unattended` runs, and `--rigor max` is the level that turns the
+review panel on — so **`--rigor max` silently makes a run unattended**, with no
+`--unattended` anywhere on the command line. If you want the panel and a human at
+the gate, you cannot have both: there is no one left to answer the prompts,
+which is the reasoning the function's own docstring gives.
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--unattended` | off (implied by `--full-auto`) | Never block on terminal input. The resource prompt is skipped even on a TTY, and any interactive prompt that is still reachable raises `UnattendedInputError` instead of waiting. |
+| `--unattended` | off (implied by `--full-auto`, `--approval-mode agent`, `--review-panel`, and therefore by `--rigor max`) | Never block on terminal input. The resource prompt is skipped even on a TTY, and any interactive prompt that is still reachable raises `UnattendedInputError` instead of waiting. |
 | `--max-auto-skips N` | `3` | How many stages may be auto-skipped after exhausting their retry budget before the run aborts. Only applies unattended. |
 
 Two behaviours change unattended:
@@ -184,13 +232,26 @@ approval. See [Stage Contract](stage-contract.md#2-the-artifact-gate).
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--review-panel` | off | Replace the single reviewer agent with a deliberating panel: independent round, cross-examination on disagreement, then a chair synthesis. Implies `--approval-mode agent`. |
-| `--panel-roles ROLE...` | all five | Seat only these roles, in this order: `pi`, `domain`, `method`, `repro`, `skeptic`. The first seat chairs unless `pi` is present. An unknown name is an error. |
+| `--review-panel` / `--no-review-panel` | off at `fast`, `standard` and `thorough`; **on at `--rigor max`** | Replace the single reviewer agent with a deliberating panel: independent round, cross-examination on disagreement, then a chair synthesis. Implies `--approval-mode agent` **and** unattended — see [Unattended execution](#unattended-execution). |
+| `--panel-roles ROLE...` | the default panel — `pi`, `domain`, `method`, `repro`, `skeptic` | Seat only these roles, in this order. `resolve_roles` accepts six keys, not five: the default panel above plus `reader`, the **Area Chair**, which is in `OPTIONAL_ROLES` rather than `DEFAULT_PANEL` and is seated only when you name it here — it is the one seat that reads the artifact as a document. The first seat chairs unless `pi` is present, so `--panel-roles reader domain` puts the Area Chair in the chair. An unknown name raises `Unknown panel role: <value>. Known roles: domain, method, pi, reader, repro, skeptic.` (`main.py --help` lists only the default five; the error message is the complete set.) |
 | `--panel-rounds N` | `2` | Maximum deliberation rounds. Round 1 is always independent; later rounds run only on disagreement. |
 | `--panel-models ROLE=MODEL...` | — | Assign a model per seat, as `role=model` or `role=backend:model` (`pi=opus skeptic=codex:default`). Heterogeneity is the lever with the best evidence behind it. |
 | `--persona PATH` | — | Markdown description of the researcher the panel stands in for, injected into every seat so they hold one consistent bar. |
-| `--cross-review {auto,gemini,off}` | `auto` | Independent second opinion on each approval, from a different model family. It can veto an approval it cannot defend and can never override a refusal, so it only makes the gate stricter. `auto` enables it when a Gemini backend is configured. Only meaningful with an agent approval gate. |
-| `--cross-review-model MODEL` | `gemini-3.1-pro-preview` | Model for the cross-model reviewer (`DEFAULT_CROSS_REVIEW_MODEL`, `src/cross_reviewer.py`). |
+| `--cross-review {auto,gemini,off}` | `auto` | Independent second opinion on each approval, from a different model family. It can veto an approval it cannot defend and can never override a refusal, so it only makes the gate stricter. `auto` enables it when a Gemini backend is configured. **Accepted but inert here** — see below. |
+| `--cross-review-model MODEL` | `gemini-3.1-pro-preview` | Model for the cross-model reviewer (`DEFAULT_CROSS_REVIEW_MODEL`, `src/cross_reviewer.py`). Inert on `main.py` for the same reason. |
+
+> **Both cross-review flags do nothing on `main.py` today.** `main.py` imports
+> `resolve_cross_reviewer` and never calls it; the only production caller is
+> `rcb_agent.py`, which passes the result to `ResearchManager` as
+> `cross_reviewer`. The flags parse and are then **dropped** — nothing in
+> `main.py` reads `args.cross_review` or `args.cross_review_model` after
+> `parse_args`, and neither value is recorded anywhere: `initialize_run_config`
+> has no such key, and `main.py` never dumps its argv. So a resumed or audited
+> run carries no trace that they were passed, which makes the inertness harder
+> to notice than it would be if the values were written down. Tracked in
+> [Framework → What has not been
+> established](framework.md#7-what-has-not-been-established) and in the README's
+> Limits section.
 
 A blocking objection from any member cannot be approved over — the chair's approval is
 converted to a refinement in code. Each run also writes
@@ -205,9 +266,13 @@ pre-registered evidence against multi-agent deliberation, in [Review Panel](revi
 | `--rigor {fast,standard,thorough,max}` | `standard` | How much optional machinery to run. One dial in place of four switches. |
 
 `fast` nothing · `standard` effort tiers · `thorough` + crux deliberation and the ideation
-panel · `max` + the review panel. The levels nest, and every individual switch below still
-works as an override in both directions (`--no-ideation-panel`, `--review-panel`). Full
-description in [Rigor](rigor.md).
+panel · `max` + the review panel. The levels nest (`_LEVEL_FEATURES`), and every individual
+switch below still works as an override in both directions (`--no-ideation-panel`,
+`--review-panel`). Full description in [Rigor](rigor.md).
+
+`--rigor max` has one effect that is not on the list: because it turns the review panel on,
+and the review panel is one of the things `resolve_unattended` reads, `--rigor max` also
+makes the run unattended. `--rigor max --no-review-panel` does not.
 
 ### Effort tiers
 
@@ -223,7 +288,7 @@ Under tiering, polish rounds — the run's most expensive setting — are withhe
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--deliberation` | off | Let a stage stop and pull in a panel when it hits a genuine crux. The agent names the question, finishes with its working answer, and the resolution reaches the next pass. |
+| `--deliberation` / `--no-deliberation` | off at `fast` and `standard`; **on at `--rigor thorough` and `max`** | Let a stage stop and pull in a panel when it hits a genuine crux. The agent names the question, finishes with its working answer, and the resolution reaches the next pass. |
 | `--max-deliberations N` | `3` | Cruxes a run may escalate. Scarcity is what makes "think hard here" mean anything. |
 | `--deliberation-voices VOICE...` | all four | `theorist`, `empiricist`, `critic`, `pragmatist`. |
 | `--deliberation-models VOICE=MODEL...` | - | Assign a model per voice. |
@@ -235,7 +300,7 @@ description in [Raising a Crux](deliberation.md).
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--ideation-panel` | off | Widen Stage 02's hypotheses with proposers working from distinct lenses. Candidates are deduplicated, scored, and injected as material. It decides nothing. |
+| `--ideation-panel` / `--no-ideation-panel` | off at `fast` and `standard`; **on at `--rigor thorough` and `max`** | Widen Stage 02's hypotheses with proposers working from distinct lenses. Candidates are deduplicated, scored, and injected as material. It decides nothing. |
 | `--ideation-lenses LENS...` | all five | Seat only these lenses: `mechanism`, `contrarian`, `adjacent`, `null`, `regime`. |
 | `--ideation-models LENS=MODEL...` | - | Assign a model per lens, as `lens=model` or `lens=backend:model`. |
 | `--ideas-per-proposer N` | `2` | Candidates each proposer may return. |
@@ -296,7 +361,7 @@ mechanism and the reasoning behind each refusal.
 | `--routing {off,auto,agent}` | `auto` | Who chooses the move out of a completed stage. `auto` asks the backend only where more than one move is live, so a linear run never pays for it. `agent` asks at every node; `off` always takes the graph's default edge. AutoR decides which moves are available by evaluating guards against artifacts on disk; the backend only chooses among those, and a choice outside the menu falls back to the forward edge. Preserved on resume. |
 | `--graph-max-steps N` | `20` | Stage executions allowed in one walk. Only bites in adaptive mode; a linear walk cannot exceed eight. |
 | `--graph-max-visits N` | `3` | Times one stage may be entered. A revisit is a productive move; the fourth entry into the same stage is a loop. |
-| `--evolve` / `--no-evolve` | on | Score every valid draft against a rigour rubric read off disk and run the champion ratchet: the best-scoring draft is promoted, not the last one, and a self-initiated round that scores worse is reverted. Costs nothing — the rubric never calls a backend. `--no-evolve` restores the old behaviour, where whichever draft came last was promoted. Preserved on resume. |
+| `--evolve` / `--no-evolve` | on | Score every valid draft against a rigour rubric read off disk and run the champion ratchet: the best-scoring draft is promoted, not the last one, and a self-initiated round that scores worse is reverted. Costs nothing — the rubric never calls a backend. `--no-evolve` restores the old behaviour, where whichever draft came last was promoted, and in `resolve_walk_settings` it also sets the rounds budget to zero — the rounds are steered by the score, so without a score there is nothing to steer them with. Passing `--evolve-rounds` above zero in the same command reverses both. Preserved on resume. |
 | `--evolve-rounds N` | `2` | Improvement rounds per stage beyond the first draft. This is the half that costs backend calls. A stage whose rubric has no shortfall worth acting on spends none of them, and a `--fake-operator` run spends none at all. Budgeted separately from `--max-attempts`, which bounds a stage that is failing rather than one being improved. `0` measures without polishing. Preserved on resume. |
 | `--evolve-stages STAGE [...]` | all | Restrict improvement rounds to these stage slugs or numbers, e.g. `06_analysis` or `5 6 7`. |
 | `--archive PATH` | `~/.autor/archive` | Where the cross-run archive lives. Each finished run records its route and measured fitness, and each edge is compared against runs that reached the same node and did not take it. Recording only. |
@@ -317,10 +382,11 @@ mechanism and the reasoning behind each refusal.
 
 ### Reliability
 
-The Gemini call retries and times out. Stage 01 issues dozens of searches over
-hours, and the SDK's defaults are one attempt and no timeout, so a single `429`
-killed a search outright and a hung connection could burn the whole
-`--stage-timeout` (4 hours by default).
+The Gemini **search** call retries and times out (`SEARCH_TIMEOUT_MS`,
+`SEARCH_RETRY_ATTEMPTS` and the two delay bounds in `src/web_search.py`). Stage
+01 issues dozens of searches over hours, and the SDK's defaults are one attempt
+and no timeout, so a single `429` killed a search outright and a hung connection
+could burn the whole `--stage-timeout` (4 hours by default).
 
 | | Value |
 | --- | --- |
@@ -358,9 +424,8 @@ control commands are accepted where the UI offers a recovery prompt:
 Anything else is rejected with
 `Unknown control command. Supported commands are '/skip' and '/back <stage>'.`
 
-A stage gets at most `--max-attempts` attempts (default `MAX_STAGE_ATTEMPTS`, 5, in
-[`src/utils.py`](../src/utils.py))
-attempts before AutoR stops and escalates to you.
+A stage gets at most `--max-attempts` attempts (default `MAX_STAGE_ATTEMPTS`, 5,
+in [`src/utils.py`](../src/utils.py)) before AutoR stops and escalates to you.
 
 ### Examples
 
@@ -444,28 +509,107 @@ Runs AutoR unattended against a
 and exports the benchmark's deliverables. Never reads stdin.
 
 ```
-python rcb_agent.py [--workspace PATH] [--prompt TEXT | --prompt-file PATH]
+python rcb_agent.py [--workspace PATH] [--prompt TEXT] [--prompt-file PATH]
                     [--operator {claude,codex}] [--model MODEL]
                     [--review-operator {claude,codex}] [--review-model MODEL]
                     [--codex-sandbox MODE] [--venue VENUE]
-                    [--stage-timeout SECONDS] [--max-attempts N]
-                    [--max-auto-skips N]
+                    [--rigor {fast,standard,thorough,max}]
+                    [--output-format {markdown,md,latex,tex}] [--final-stage STAGE]
+                    [--stage-timeout SECONDS] [--max-attempts N] [--max-auto-skips N]
                     [--intake] [--web-search {auto,gemini,native}]
                     [--no-synthesis] [--export-only] [--fake-operator]
 ```
 
+Again a subset: `rcb_agent.py`'s own `parse_args` declares 37 flags.
+
+### The six flags that are its own
+
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--workspace PATH` | `.` | Benchmark workspace. The harness runs the agent with this as its working directory, so the default is usually right. |
+| `--workspace PATH` | `.` | Benchmark workspace. The harness runs the agent with this as its working directory, so the default is usually right. Run directories are created under `<workspace>/.autor/`, which is why there is no `--runs-dir`. |
 | `--prompt TEXT` | — | Benchmark instructions as a literal string. This is what the harness's `<PROMPT>` placeholder expands to. |
-| `--prompt-file PATH` | `<workspace>/INSTRUCTIONS.md` | Read the instructions from a file instead. |
-| `--stage-timeout SECONDS` | `14400` | The benchmark harness imposes no timeout of its own — neither the UI runner nor the batch CLI puts one on the agent subprocess — so this is the only thing that can cut a stage short. |
-| `--max-attempts N` | `8` | Higher than `main.py`'s default. An exhausted stage is auto-skipped, and a skipped stage costs real score, so the extra retries are worth their wall-clock. |
-| `--intake` | off | Run Stage 00. Off by default: the benchmark instructions are already a complete task specification. |
+| `--prompt-file PATH` | `<workspace>/INSTRUCTIONS.md` | Read the instructions from a file. Not mutually exclusive with `--prompt`: `resolve_instructions` takes `--prompt` when it is non-empty, then the first of `--prompt-file` and `<workspace>/INSTRUCTIONS.md` that exists and is non-empty. A `--prompt-file` that does not exist therefore falls through to the workspace default rather than failing. With none of the three available it raises `No benchmark instructions found.` |
+| `--intake` | off | Run Stage 00. Off by default: the benchmark instructions are already a complete task specification. This is the inverse of `main.py`'s `--skip-intake`, not a copy of it. |
 | `--no-synthesis` | off | Skip the operator-backed report synthesis pass and use only the deterministic fallback. |
 | `--export-only` | off | Re-export the most recent run in the workspace without re-running the pipeline. Use this to recover deliverables from an interrupted job. |
 
-Every other flag mirrors its `main.py` counterpart.
+### The 31 it shares, and where they diverge
+
+The remaining 31 have the same names as `main.py`'s and, unless noted below, the
+same defaults and the same meaning. All 31, by name:
+
+| Group | Shared flags |
+| --- | --- |
+| Backend | `--operator`, `--model`, `--codex-sandbox`, `--fake-operator`, `--stage-timeout`, `--max-attempts` |
+| Reviewer | `--review-operator`, `--review-model` |
+| Unattended | `--max-auto-skips` |
+| Web search | `--web-search` |
+| Output and stopping | `--output-format`, `--venue`, `--final-stage` |
+| Rigor dial | `--rigor` |
+| Effort tiers | `--effort-tiers` / `--no-effort-tiers`, `--routine-model` |
+| Crux deliberation | `--deliberation` / `--no-deliberation`, `--max-deliberations`, `--deliberation-voices`, `--deliberation-models` |
+| Ideation panel | `--ideation-panel` / `--no-ideation-panel`, `--ideation-lenses`, `--ideation-models`, `--ideas-per-proposer` |
+| Review panel | `--review-panel` / `--no-review-panel`, `--panel-roles`, `--panel-rounds`, `--panel-models`, `--persona`, `--cross-review`, `--cross-review-model` |
+
+Read the `main.py` tables above for what each one does. Three of them differ in
+kind rather than in default, and the two parsers are mirror images about it —
+each declares a flag the other one honours and it does not:
+
+- **`--cross-review` and `--cross-review-model` are live here and inert on
+  `main.py`.** `rcb_agent.py` is the only production caller of
+  `resolve_cross_reviewer`, and it hands the result to `ResearchManager` as
+  `cross_reviewer`, so the second opinion described in [Review
+  panel](#review-panel) actually runs on this path. Defaults match `main.py`'s:
+  `auto`, and `gemini-3.1-pro-preview` for the model.
+- **`--routine-model` is inert here and live on `main.py`.** It parses, and its
+  `--help` text promises a cheaper model for routine-tier stages, but
+  `args.routine_model` is read nowhere in `rcb_agent.py`: under `--effort-tiers`
+  the adapter builds `EffortPlan(enabled=True)` and never constructs the second
+  operator that `main.py` builds for the routine tier. Tiering still applies —
+  lean prompts, one reviewer, no escalation offer — but every stage runs on
+  `--model`.
+
+Every remaining divergence is a default or a validation. Diffing the two
+parsers' actions turns up four, and the last row below is the one behavioural
+consequence of the adapter being unattended by construction:
+
+| Flag | `main.py` | `rcb_agent.py` | Why |
+| --- | --- | --- | --- |
+| `--max-attempts N` | `5` | `8` | An exhausted stage is auto-skipped, and a skipped stage costs real score, so the extra retries are worth their wall-clock. |
+| `--final-stage STAGE` | run every stage | `07_writing` | The benchmark scores `report/report.md`, which Stage 07 writes. Stage 08 produces posters, slides and release notes the judge never opens. Pass `08_dissemination` for the full workflow. |
+| `--operator`, `--venue`, `--output-format`, `--web-search` | declared unset, so a resumed run's recorded value can win | the literal default (`claude`, `neurips_2025`, `markdown`, `auto`) | Same effective value on a fresh run. There is no resume path here, so nothing has to be reconciled. |
+| `--codex-sandbox MODE` | validated by argparse against `CODEX_SANDBOX_CHOICES`, declared unset | any string is accepted, defaulting to the literal `workspace-write` | The adapter declares no `choices`. An invalid mode is caught by `CodexOperator` as a runtime `ValueError` rather than as a usage error — and only if `--operator codex` is actually in play, since nothing else reads it. |
+| `--review-panel`, `--rigor max` | make the run unattended | no additional effect | The run is unattended either way: `ResearchManager` is constructed with `unattended=True` unconditionally. |
+
+`--stage-timeout` is `14400` on both. The benchmark harness imposes no timeout of
+its own — neither the UI runner nor the batch CLI puts one on the agent
+subprocess — so on this path it is the only thing that can cut a stage short.
+
+### The 30 flags it does not have
+
+`rcb_agent.py` is **not** a mirror of `main.py`. Of `main.py`'s 61 flags it
+carries 31; the other 30 are not declared, and passing one is an argparse error
+(`unrecognized arguments`), not a no-op:
+
+| Group | Absent | Why |
+| --- | --- | --- |
+| Goal | `--goal`, `--goal-file` | The goal is built from the benchmark instructions by `build_benchmark_goal`. |
+| Run location and resume | `--runs-dir`, `--resume-run`, `--redo-stage`, `--rollback-stage` | The run directory is derived from `--workspace`. There is no resume; `--export-only` is the only recovery path. |
+| Interactive gate | `--approval-mode`, `--full-auto`, `--unattended` | Hardwired: the adapter constructs `ResearchManager` with `approval_mode="agent"` and `unattended=True`. There is nothing to switch. |
+| Intake and priming | `--skip-intake`, `--resources`, `--project-root`, `--paper-corpus` | Intake is off unless `--intake` says otherwise, and the benchmark's own reference material is collected by `collect_reference_resources`. |
+| Stage graph | `--stage-graph`, `--routing`, `--graph-max-steps`, `--graph-max-visits` | Not exposed. The manager's defaults still apply: adaptive graph, `auto` routing, and the step and visit ceilings. |
+| Improvement loop | `--evolve`, `--evolve-rounds`, `--evolve-stages`, `--max-rounds` | Not exposed. The defaults still apply: the champion ratchet is on with 2 rounds, and Stages 03-06 run once. |
+| Archive | `--archive`, `--no-archive`, `--archive-steer`, `--archive-report` | A benchmark run records nothing into the cross-run archive: `rcb_agent.py` never constructs an `Archive`. |
+| Paired trials | `--trial`, `--capability`, `--arm`, `--trial-report` | Same reason — a trial arm is an archive row. |
+| Report extras | `--research-diagram` | The benchmark judge scores the report's own figures. |
+
+31 shared + 30 absent = `main.py`'s 61; 31 shared + 6 of its own = 37.
+
+The shape of the difference is the point: what is missing is the **interactive**
+surface (goal prompting, approval modes, resume and rollback) and the
+**cross-run** surface (archive, trials, topology search). Neither has a meaning
+inside a benchmark harness that launches one process per task, hands it a
+workspace, and reads a report out of it.
 
 ### Exit codes
 
@@ -491,7 +635,11 @@ agent's built-in `WebSearch` tool is disabled.
 
 ```
 python tools/web_search.py QUERY... [--json] [--model MODEL] [--max-results N]
+                                    [--no-resolve-urls]
 ```
+
+`QUERY...` is a required positional taking one or more words, joined with spaces.
+Those four options are the whole flag surface.
 
 | Flag | Default | Description |
 | --- | --- | --- |
@@ -509,6 +657,11 @@ Two backends are supported and auto-detected:
   location from `AUTOR_VERTEX_LOCATION` or `GOOGLE_CLOUD_LOCATION` (default `global`).
 
 An explicit API key wins; `AUTOR_WEB_SEARCH_BACKEND=vertex|api_key` forces the choice.
+
+Either backend needs `google-genai`, which is **not** a default dependency —
+`pip install google-genai`. The Vertex probe uses `google.auth`, a different
+distribution that can be present without it, so credentials alone are not enough
+(see [What "can actually run" means](#what-can-actually-run-means)).
 
 ### Exit codes
 
@@ -532,3 +685,128 @@ under a source link reads as a quotation, which is how a real paper acquires a s
 it never contained.
 
 To quote a source, fetch it and quote what it says.
+
+---
+
+## `tools/score_rcb_run.py`
+
+Scores a finished ResearchClawBench workspace. It drives the benchmark's own
+`score_workspace`, so every number it prints is that scorer's rather than a
+reimplementation; what it changes is the judge object and the helper that runs the
+judge calls, which is where a failed call becomes a score of zero, and it refuses
+to print a total while any call failed.
+
+```
+python tools/score_rcb_run.py --workspace PATH --bench PATH
+                              [--judge {reference,vertex}] [--model MODEL]
+                              [--key-file PATH] [--endpoint URL]
+                              [--project-id ID] [--out PATH]
+```
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--workspace PATH` | **required** | The finished benchmark workspace to score. |
+| `--bench PATH` | **required** | A checkout of ResearchClawBench. It is prepended to `sys.path` so `evaluation.score` can be imported; the scoring logic is the bench's, not this repo's. |
+| `--judge {reference,vertex}` | `reference` | Which judge scores the run. See below — this is the single most consequential flag on the tool. |
+| `--model MODEL` | `gpt-5.1` under `reference` (`REFERENCE_JUDGE_MODEL`), `claude-opus-4-5@20251101` under `vertex` (`FALLBACK_JUDGE_MODEL`) | Override the judge model id. Whatever it resolves to is printed twice — the `judge:` header line and the `TOTAL (judge …)` line — and recorded as `judge_model` in the `--out` JSON. The per-item lines carry no judge. |
+| `--key-file PATH` | `~/api.txt` (`DEFAULT_KEY_FILE`) | File holding the reference judge's key. Outside any repository on purpose: a default inside the tree is one `git add -A` away from a leak. There is deliberately no flag that takes the key itself — it would land in the shell history and in the process table. The file may be a bare token, `KEY=token`, or a quoted value. |
+| `--endpoint URL` | `REFERENCE_JUDGE_ENDPOINT` | The OpenAI-compatible base URL the reference judge is served from. Only read under `--judge reference`. |
+| `--project-id ID` | `$ANTHROPIC_VERTEX_PROJECT_ID`, else empty | Vertex project for `--judge vertex`. Empty and unset exits `2` with `Set ANTHROPIC_VERTEX_PROJECT_ID or pass --project-id.` |
+| `--out PATH` | — | Also write the full result, including `judge_model`, `judge_calls` and `judge_failures`, as JSON. |
+
+### `--judge reference` is the default, and the only comparable one
+
+`reference` means **gpt-5.1**, which is what ResearchClawBench itself scores with
+(`evaluation/.env.example`). Use it unless you cannot.
+
+The judge is part of the result, not a detail of how it was obtained. On
+identical artifacts, Gemini 2.5 Flash scored 37.0 where Claude Opus scored 20.8 —
+a spread of about sixteen points that is a property of the judge and not of the
+run. A benchmark number quoted without its judge is therefore not comparable to
+anything, which is why the tool leads with a `judge:` line, repeats the judge
+inside the `TOTAL (judge …)` line so the number cannot be copied out without it,
+and stores `judge_model` in the `--out` JSON. (The module docstring claims the
+judge is on *every* line of output; it is not — the per-item rows, the
+`workspace:` line and the `items judged:` line carry none.)
+`--judge vertex` exists for when no reference key is available;
+its numbers are internally consistent and are **not** comparable to a published
+figure.
+
+### The default only works on one kind of box
+
+`REFERENCE_JUDGE_ENDPOINT` is a site-specific Azure AI OpenAI-compatible URL, and
+the key is read from `~/api.txt`. Out of the box the tool therefore only runs
+where both of those hold: that tenancy plus a key file at that path. Elsewhere,
+either point `--endpoint` and `--key-file` at your own OpenAI-compatible
+deployment of the reference model, or fall back to `--judge vertex` and quote the
+number with its judge attached. The endpoint is in source deliberately — an
+endpoint is not a secret, the key that opens it is, and keeping the two visibly
+different is what stops the second from being pasted next to the first.
+
+### The stock defaults this tool does not inherit
+
+Each of the failure modes below records as
+`{"score": 0, "reasoning": "Failed to parse scoring response."}`, which is
+indistinguishable in the output from a criterion the report genuinely missed.
+
+None of them is fixed by raising a stock number. `score` replaces the bench's
+judge object outright (`scorer.LLMAgent = lambda **_: judge`) and its concurrency
+helper with a serial loop (`scorer.multi_thread = serial`), so the stock settings
+below are discarded rather than tuned, and what applies instead is whatever the
+tool's own judge class sends on the call.
+
+| Stock setting | Why it fails | What applies instead |
+| --- | --- | --- |
+| `max_tokens=500` | a reasoning judge spends the budget thinking and returns an empty body | `VertexJudge.__call__` sends `max_tokens=JUDGE_MAX_TOKENS` (4096). `ReferenceJudge.__call__` — the default judge — sends no token cap at all, so the bound there is the `openai` client's, not one this tool sets. |
+| `time_limit=120` | too short for a multimodal call carrying a target image plus five agent images | Neither judge class passes a timeout, so each call is bounded by whatever its client defaults to. `JUDGE_TIME_LIMIT` states the intended bound but is not passed to either judge. |
+| `multi_thread(max_workers=min(len(checklist), 16))` | concurrent multimodal calls were the actual cause of most failures | The `serial` replacement calls the judge once per checklist item, in order. It accepts a `max_workers` argument and ignores it; `JUDGE_WORKERS` records the intent, the serial loop is what enforces it. |
+
+### Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Every item was judged. The total is printed with the judge's name beside it. |
+| `1` | `score_workspace` returned an error, **or** at least one judge call failed — in which case the tool prints each reason and refuses to quote a total at all. |
+| `2` | `--judge vertex` with no project id. |
+
+Requires the `openai` package for `reference`, `anthropic` for `vertex`, plus the
+bench's `structai` — `evaluation.score` imports it at module load, before the
+judge is swapped in. The two client imports sit inside the judge classes, so
+importing this module needs neither of them; the AutoR package itself still has
+no third-party runtime dependency.
+
+The same tool is described from the benchmark's side, with the worked example, in
+[researchclawbench.md](researchclawbench.md#scoring-a-run-locally).
+
+---
+
+## `tools/archive_sample_complexity.py`
+
+```
+python tools/archive_sample_complexity.py
+```
+
+**No flags.** It takes no arguments and reads nothing off disk; the sweep
+constants (`POLICIES`, `SAMPLE_SIZES`, `REPLICATES`) are edited in the file.
+
+It answers one question: how many runs the cross-run archive needs before
+`--archive-steer` would be deciding on signal rather than on noise. It walks the
+real `StageGraph.adaptive()` under synthetic routing policies, feeds the
+resulting records to the real `edge_payoffs`, and counts how many edges satisfy
+the real `EdgePayoff.believable`. Nothing in it reimplements the payoff
+arithmetic, so every number it prints is a property of `src/archive.py` and
+`src/stage_graph.py` as they stand.
+
+It prints three things and exits: a believable-edge count per policy and sample
+size, a per-edge table at the most generous policy, and a precision sweep — how
+often the edge `propose_variant` would pick turns out to be one with no true
+effect at all. Standard library only. It is not instant. `len(POLICIES) ×
+len(SAMPLE_SIZES) × REPLICATES` is 9,600 replicate *cells*, and each cell of the
+main sweep builds `n` records rather than one, so the work is
+`len(POLICIES) × REPLICATES × sum(SAMPLE_SIZES)` = 6 × 200 × 1,890 = 2,268,000
+simulated runs, plus 1,000 for the per-edge pass and 685,000 for the precision
+sweep. It is single-threaded; a full run measured 3m38s of CPU here. Run it once
+and read the tables, rather than in a loop.
+
+The reading of its output, and what it implies for `--archive-steer`, is in
+[Recursive Self-Improvement](self-improvement.md).

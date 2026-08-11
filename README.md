@@ -132,7 +132,7 @@ naming them.
 | Flags on `main.py` / `rcb_agent.py` | `parse_args` | 61 / 37 |
 | Python modules / lines / tests | the tree | 150 / 62 k / 1826 |
 
-`python -m unittest discover -s tests -p "test_*.py"` runs **1826 tests in ~69 s** across 83 test
+`python -m unittest discover -s tests -p "test_*.py"` runs **1826 tests in ~69 s** across 82 test
 modules, with no third-party dependency.
 
 ## Quick start
@@ -193,11 +193,16 @@ Every flag, its default, and what is preserved on resume:
 **[docs/cli-reference.md](docs/cli-reference.md)**. Stage identifiers accept `03`, `3` or
 `03_study_design`; `--venue` defaults to `neurips_2025`.
 
-> **Four paths remove the human from the gate**, not two. `resolve_unattended` returns `True` for
-> `--unattended`, `--full-auto`, `--review-panel` *and* `--approval-mode agent`, and `approval_mode`
-> becomes `agent` for `--full-auto` or `--review-panel`. Because `--rigor` is resolved **before**
-> `resolve_unattended` runs, a plain `--rigor max` sets `review_panel = True` and silently converts an
-> interactive run into an unattended agent-gated one. Under a badge reading *Human approval required*,
+> **Three flags put an agent in the approval seat, not two** — and a fourth removes the human
+> without replacing them. `approval_mode` becomes `agent` for `--approval-mode agent`, `--full-auto`
+> and `--review-panel`, and `create_reviewer` is called only when it does. `--unattended` on its own
+> is the odd one: `resolve_unattended` returns `True` for all four, but with `approval_mode` still
+> `manual` there is no reviewer to install, so the first approval menu raises `UnattendedInputError`
+> rather than being decided. For a run with nobody at the terminal, pass `--full-auto`.
+>
+> Because `--rigor` is resolved **before** `resolve_unattended` runs, a plain `--rigor max` sets
+> `review_panel = True` and silently converts an interactive run into an unattended agent-gated one.
+> Under a badge reading *Human approval required*,
 > the flag that looks like more review is the flag that removes the reviewer. Three headline
 > mechanisms — obligations, the standing review policy, the cross-model veto — also run only behind
 > that agent gate, as do anchored comments. Manual approval is the default and remains the path for

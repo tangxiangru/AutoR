@@ -32,7 +32,9 @@ a hard error rather than a hang.
 The harness substitutes `<WORKSPACE>` with the absolute workspace path and `<PROMPT>` with
 the contents of the generated `INSTRUCTIONS.md`. Both flags are optional when running by
 hand: the workspace defaults to the current directory (which is what the harness sets it
-to) and the instructions default to `<workspace>/INSTRUCTIONS.md`.
+to) and the instructions default to `<workspace>/INSTRUCTIONS.md`. `logo` is only an icon —
+point it at whatever exists under the bench's own `static/logos/`; `rcb_agent.py`'s module
+docstring shows the same entry with `autor.svg`.
 
 Run one task manually:
 
@@ -75,13 +77,32 @@ After the pipeline finishes — **whether or not it succeeded** — the adapter 
 | Benchmark path | Source |
 |:---|:---|
 | `report/report.md` | see below |
-| `report/images/*.png` | `workspace/report/images` first, then `figures`, `writing`, `results`, `artifacts` (PNG only, capped — see below) |
+| `report/images/*.png` | whatever is already at the benchmark path, then the run tree's `workspace/report/images`, `figures`, `writing`, `results`, `artifacts`, and the benchmark's own `outputs/` **last** (PNG only, capped — see below) |
 | `code/` | `workspace/code` |
-| `outputs/` | `workspace/results` and `workspace/notes`, **images excluded** — and any image a stage wrote straight to `<workspace>/outputs/`, or anywhere under `<workspace>/report/` other than a published slot, is deleted; see below |
+| `outputs/` and `outputs/notes/` | `workspace/results` and `workspace/notes`, **images excluded** |
 
 Run-tree figures under `report/images/` keep their filenames, because those are the names
 `report.md` references. A same-named figure swept up from elsewhere is the one that gets
-qualified.
+qualified — `_figure_candidates` prefixes it with the directory it came from. The benchmark's
+own `outputs/` is ranked last on purpose: an image there must never outrank a figure the
+report argues with, but a run whose only plots landed there is published from them rather
+than shipped with an empty `report/images/`.
+
+> **Warning — the export deletes files.** `collect_figures` finishes by walking
+> `<workspace>/outputs/` and `<workspace>/report/` exactly as far as the scorer's sweep does —
+> `rglob` over both whole trees, nested and hidden files included — and **unlinks every image
+> it finds that is neither a published slot nor a file the winning report links directly**.
+> "Image" there is the scorer's set (`JUDGE_IMAGE_SUFFIXES`: `.png`, `.jpg`, `.jpeg`, `.gif`,
+> `.bmp`, `.webp`, `.svg`, matched case-insensitively), while only `.png` is eligible to be
+> published — so an `.svg` or a `.jpg` under `outputs/` is always deleted and could never have
+> filled a slot. The prune runs on every export: after a completed run, after a crashed one,
+> and again on each `--export-only`. A figure a stage wrote somewhere sensible but
+> unpublished — `outputs/diagnostics/fit.png`, a loose `report/panel.png` — is **lost**, not
+> merely unscored. Anything the pipeline produced inside the run tree still exists under
+> `<workspace>/.autor/<run_id>/workspace/`, which the prune never touches; a file written only
+> to the benchmark workspace has no second copy. Why it is a delete rather than a warning is
+> the next section: the scorer sweeps `outputs/` before `report/`, so a stray plot does not
+> add a figure, it takes a slot away from one.
 
 #### The five image slots
 
@@ -123,9 +144,12 @@ Four consequences drive the export, and the plan the run writes at Stage 03:
    The prune is the *same walk* as the sweep, over both trees: `rglob` over `outputs/` and
    over `report/`, not `iterdir()` over `report/images/`. `report/images/` is not the only
    place under `report/` the scorer looks, so a loose `report/panel.png` or a nested
-   `report/images/panels/*.png` takes a slot exactly the way a stray `outputs/` plot does —
-   and both sort *ahead* of `report/images/` in the walk. The only images that survive the
-   prune are the published slots and any image the winning report links directly.
+   `report/images/panels/*.png` takes a slot exactly the way a stray `outputs/` plot does.
+   The loose one is worse: `rglob` yields a directory's own entries before it descends, so
+   `report/panel.png` is reached *ahead* of everything in `report/images/`, while the nested
+   one is reached after — but both are competing for the same five slots. The only images
+   that survive the prune are the published slots and any image the winning report links
+   directly.
 3. **No shipped task has more than five image criteria**, and 34 of 40 have three or fewer
    (distribution over image criteria per task: 0×3, 1×10, 2×9, 3×12, 4×3, 5×3). Five is a
    ceiling, not a target. The weight is earned by figures that settle *different* questions;
@@ -138,9 +162,11 @@ Four consequences drive the export, and the plan the run writes at Stage 03:
    is "forfeited" past 10,000 characters would cut methodology and discussion that were
    still being scored. The headline numbers, the results and the figure captions come
    first; everything else comes after them, not instead of them.
-   That number is the benchmark's, not AutoR's: it lives in this file and in
-   `build_benchmark_goal`'s prose, and deliberately not as a constant in `src/` — nothing in
-   AutoR should start truncating on it.
+   That number is the benchmark's, not AutoR's. It reaches the run as prose, through
+   `build_benchmark_goal`, and it exists in `src/` in exactly one place — `report_plan.py`'s
+   `JUDGE_VISIBLE_PREFIX_CHARS` — where it is used as an *ordering* gate and nothing else:
+   Stage 07 refuses a markdown report longer than the window whose highest-ranked planned
+   figure is referenced for the first time past it. Nothing in AutoR truncates on it.
 
 A sixth figure does not add a sixth chance to match. It randomises which five are seen.
 
@@ -150,10 +176,13 @@ Not at export, and not at Stage 07. The run commits to its figures at **Stage 03
 `workspace/notes/report_plan.json`: one entry per slot, each naming the claim it settles,
 what the reader should see, what the figure looks like if that claim holds and if it does
 not, and the result file it will be computed from. Stage 06 produces them, Stage 07
-publishes them in slot order, and — in markdown mode, which is what the benchmark runs — a
-planned figure that was neither published nor explicitly dropped is a refusal rather than a
-silence. `docs/stage-contract.md` carries the gate rows and `src/report_plan.py` the
-validator.
+publishes them in slot order, and — in markdown mode, which is what the benchmark runs —
+`validate_report_plan_coverage` turns three silences into refusals: a planned slot that was
+not both published under `report/images/` *and* referenced from `report.md`, unless it
+carries a `dropped_because` of at least `MIN_DROP_REASON_CHARS` characters; a plan whose
+every slot is dropped, so the report argues for nothing the reader can see; and a report
+past the judge's window whose highest-ranked surviving slot is first referenced after it.
+`docs/stage-contract.md` carries the gate rows and `src/report_plan.py` the validator.
 
 That machinery is **not** benchmark-specific. It is the discipline
 `hypothesis_manifest.json` and `experimental_protocol.json` already apply — commit to the
@@ -161,9 +190,15 @@ choice before the results can influence it — applied a third time, to figures,
 AutoR run gets it. What *is* benchmark-specific is everything above: the ~61% image weight,
 the one fixed set of five, the 10,000-character excerpt and the `outputs/`-before-`report/`
 sweep. Those reach the run through one place only, `build_benchmark_goal`, which a
-non-benchmark run never receives. Outside the benchmark a markdown run is told only that at
-most `MAX_REPORT_FIGURES` figures reach its reader — which `validate_markdown_report` has
-always enforced — and a LaTeX run is told there is no ceiling at all.
+non-benchmark run never receives. Outside the benchmark the `report_contract` channel still
+describes the deliverable's shape: to a markdown run it gives the ceiling, interpolated from
+`MAX_REPORT_FIGURES` so the prompt cannot drift away from the gate that enforces it; to a
+LaTeX run it says the venue named in `## Run Configuration` sets the count, since a conference
+paper routinely carries eight or ten. Read `_report_contract` for the wording it actually
+sends — and do not read that block as the whole of the figure rule, because the floor is not
+in it. Its markdown text tells the run there is no floor, while `validate_markdown_report`
+refuses a report that references no figures and `resolve_min_report_figures` clamps every
+run's floor to at least one.
 
 #### Reference papers
 
@@ -178,18 +213,27 @@ cannot cite the very work it is reproducing.
 and readiness checklists that the judge never opens; the wall-clock is better spent on
 analysis. Pass `--final-stage 08_dissemination` for the full workflow.
 
-The report comes from the first of four paths that yields real content:
+The report comes from the first of four paths that yields real content — "real" meaning at
+least `MIN_REPORT_CHARS` (1,200) characters, below which the candidate is treated as a stub:
 
 1. **`agent`** — something wrote `report/report.md` at the benchmark path directly. The goal
-   contract injected into every stage prompt names the exact path.
+   contract injected into every stage prompt names the exact path. A report AutoR exported on
+   an earlier pass does not count as the agent's: `_publish_report` records its digest in
+   `.autor_export.json`, which is what stops `--export-only` re-publishing the first fallback
+   forever.
 2. **`stage`** — Stage 07 ran in markdown mode, so its gate-checked report already exists in
    the run tree and is promoted verbatim. **This is the normal case.**
 3. **`synthesized`** — one extra operator call converts the approved artifacts into the
-   benchmark's markdown format. This is what a `latex` run uses.
+   benchmark's markdown format. This is what a `latex` run uses. The call is retried up to
+   `ReportSynthesizer.MAX_ATTEMPTS` times, and a thin answer is retried like a failed one.
 4. **`fallback`** — pure-Python assembly from the approved stage summaries, with any
-   auto-skipped stages named explicitly. AutoR's own control-loop headings
-   (`Your Options`, `Decision Ledger`, `Previously Approved Stage Summaries`) are stripped:
-   a judge told to be skeptical reads them as an agent's run log, not as research.
+   auto-skipped stages named explicitly. When *no* stage was approved it falls back further,
+   to each stage's champion draft under `evolution/` (or, absent a champion, that stage's
+   newest attempt), labelled "unapproved draft" — unapproved work is worth less than approved
+   work, not less than nothing. AutoR's own control-loop headings are stripped, all five of
+   them: `Previously Approved Stage Summaries`, `Decision Ledger`, `Suggestions for
+   Refinement`, `Your Options`, `Files Produced`. A judge told to be skeptical reads them as
+   an agent's run log, not as research.
 
 A partial report scores better than no report, so a crashed or incomplete pipeline still
 exports everything it produced. The exit code tracks whether a report reached the harness,
@@ -204,16 +248,30 @@ not whether every stage was approved.
 | Figures | `workspace/report/images/*.png`, referenced as `images/<name>.png` | `workspace/figures`, `\includegraphics` |
 | Triage artifact | `artifacts/report_review.json` | `artifacts/layout_review.json` |
 | Also required | `citation_verification.json`, `self_review.json` | same, plus `build_log.txt` and a `.bib` |
-| Figure budget | at most 5, all referenced | none |
-| Report plan | required at Stage 03; every slot must be published or carry `dropped_because` | required at Stage 03; coverage not checked |
+| Figure budget | at least 3 on this path (`BENCHMARK_MIN_REPORT_FIGURES`), 1 on an ordinary run; at most 5; every one referenced | set by the venue, not by AutoR |
+| Report plan | required at Stage 03; every slot must be published *and* referenced, or carry `dropped_because` | required at Stage 03; coverage not checked |
 | Post-approval | — | `writing/paper_package/` bundle |
 
-The markdown gates are not "a file exists". Stage 07 fails and retries if `report.md` is
-shorter than 1,200 characters, references no figures, still holds placeholder text, or
-carries a figure reference that is absolute, remote, unrenderable, or points at a file that
-is not there, or publishes more than five figures, or leaves a figure the Stage 03 plan
-committed to neither published nor explicitly dropped. A broken figure link is the expensive
-defect here: the judge reads the prose promising a figure and is shown nothing.
+The markdown gates are not "a file exists". `validate_markdown_report` fails Stage 07, which
+retries it, if `report.md` is missing, is shorter than `MIN_REPORT_CHARS` (1,200) characters,
+references no figures, still holds placeholder text, or carries a figure reference that is
+absolute, remote, unrenderable, or points at a file that is not there — or if
+`report/images/` holds more than `MAX_REPORT_FIGURES` (5) rendered figures, or fewer than the
+run's floor. `validate_report_plan_coverage` adds the plan gates listed above. A broken figure
+link is the expensive defect here: the judge reads the prose promising a figure and is shown
+nothing.
+
+**The floor is 3 on this path and 1 everywhere else.** `rcb_agent.py` passes
+`min_report_figures=BENCHMARK_MIN_REPORT_FIGURES` (`src/utils.py`), against the ordinary
+`MIN_REPORT_FIGURES = 1`; the value is clamped into `[1, MAX_REPORT_FIGURES]` by
+`resolve_min_report_figures`, written into `run_config.json`, and read back by the gate. The
+argument for raising it is the benchmark's, not a general one: its instructions ask every
+agent for "data overview, main results, and validation/comparison plots" — three distinct
+questions — and 27 of the 40 shipped tasks carry two or more image criteria, together holding
+most of the weight. A one-figure report clears the ordinary gate while structurally forfeiting
+criteria it never addressed, because one image cannot answer two different questions. It is a
+count of *distinct* figures and never a target to pad toward: the ceiling is still 5, and a
+sixth is not shown to the judge at all.
 
 The coverage check is narrowed to markdown on purpose: a LaTeX run has no single
 well-defined published-figure location for it to match against, and `layout_review.json`
@@ -325,62 +383,161 @@ prompt telling the operator that `WebSearch` is disabled, how to call the replac
 that every citation must come from a URL the tool actually returned. `auto` degrades to
 native rather than advertising a tool that would fail on first use.
 
-The search model defaults to `gemini-2.5-flash` and is overridable with
-`AUTOR_WEB_SEARCH_MODEL` or `GEMINI_MODEL`.
+The search model defaults per backend — `gemini-2.5-flash` on the Developer API,
+`gemini-3.6-flash` on Vertex, as in the table above — and `resolve_search_model` lets an
+explicit `--model` win over `AUTOR_WEB_SEARCH_MODEL` or `GEMINI_MODEL`, which in turn win over
+both defaults.
 
 ---
 
 ## Options
 
+All 37 of them, in `parse_args`'s own order. `rcb_agent.py` does **not** mirror `main.py`: 31
+flags are shared, 6 exist only here (`--workspace`, `--prompt`, `--prompt-file`, `--intake`,
+`--no-synthesis`, `--export-only`), and the 30 of main.py's it does not declare —
+`--full-auto`, `--unattended`, `--approval-mode`, `--resume-run`, `--max-rounds`,
+`--stage-graph`, `--evolve`, `--archive`, `--trial`, and the rest — are argparse errors here,
+not no-ops. The adapter is unattended by construction, which is why it needs no approval-mode
+or unattended switch of its own.
+
 ```
---workspace PATH        Benchmark workspace. Defaults to the current directory.
+--workspace PATH        Benchmark workspace. Default: the current directory, which is what
+                        the harness sets it to.
 --prompt TEXT           Instructions as a literal string (this is what <PROMPT> expands to).
---prompt-file PATH      Instructions from a file. Defaults to <workspace>/INSTRUCTIONS.md.
+--prompt-file PATH      Instructions from a file. Default: <workspace>/INSTRUCTIONS.md.
 
---operator {claude,codex}       Execution backend. Default: claude.
---model NAME                    Execution model. Default: the backend default.
---review-operator {claude,codex}  Reviewer backend. Default: the execution backend.
---review-model NAME             Reviewer model. Default: the backend default.
-
---stage-timeout SECONDS  Per stage attempt. Default: 14400. The harness enforces no wall
-                         clock of its own, so this is the only thing that can cut a stage
-                         short.
---max-attempts N         Attempts per stage before it is auto-skipped. Default: 8, higher
-                         than the interactive default because a skipped stage costs score.
---max-auto-skips N       Stages that may be auto-skipped before aborting. Default: 3.
---intake                 Run the intake stage. Off by default: the benchmark instructions
-                         are already a complete task specification.
+--operator {claude,codex}         Execution backend. Default: claude.
+--model NAME                      Execution model. Default: sonnet for claude, "default"
+                                  for codex.
+--review-operator {claude,codex}  Backend for the reviewer agent that replaces the human
+                                  approval gate. Default: the execution backend.
+--review-model NAME               Reviewer model. Default: the backend default, as above.
+--codex-sandbox MODE              Codex CLI sandbox, used only with --operator codex.
+                                  Default: workspace-write — which restricts outbound
+                                  network access and so blocks the Gemini search fallback.
+--venue KEY                       Venue profile for Stage 07 writing. Default: neurips_2025.
+                                  It reaches every stage through `## Run Configuration`; the
+                                  manuscript-style gate that reads it is latex-only.
 --output-format {markdown,md,latex,tex}
-                         Stage 07's deliverable. Default: markdown, which writes
-                         report/report.md directly. Use latex to produce the paper package
-                         and leave the report to the synthesis step.
---final-stage STAGE      Stop after this stage. Default: 07_writing, because Stage 08
-                         produces nothing the judge reads.
+                        Stage 07's deliverable. Default: markdown, which writes
+                        report/report.md directly. Use latex to produce the paper package
+                        and leave the report to the synthesis step.
+--final-stage STAGE     Stop after this stage. Default: 07_writing, because Stage 08
+                        produces nothing the judge reads.
+--stage-timeout SECONDS Per stage attempt. Default: 14400. The harness enforces no wall
+                        clock of its own, so this is the only thing that can cut a stage
+                        short.
+
+--rigor {fast,standard,thorough,max}
+                        How much optional machinery to run. Default: standard, which turns
+                        --effort-tiers ON. thorough adds --deliberation and
+                        --ideation-panel; max adds --review-panel; fast turns all four off.
+                        The four switches below are argparse BooleanOptionalAction with
+                        default=None, so omitting one means "the level decides" rather than
+                        "off": `--rigor thorough --no-ideation-panel` does what it says, and
+                        `--effort-tiers` is already on unless you pass --no-effort-tiers or
+                        --rigor fast.
+--review-panel / --no-review-panel
+                        Replace the single reviewer agent with a deliberating panel of
+                        role-differentiated reviewers (pi, domain, method, repro, skeptic).
+                        A blocking objection cannot be approved over. On at --rigor max.
+--panel-roles ROLE [ROLE ...]     Seat only these panel roles, in this order.
+--panel-models ROLE=MODEL [...]   Model per seat, as role=model or role=backend:model
+                                  (pi=opus skeptic=codex:default). Unassigned seats use the
+                                  reviewer default.
+--effort-tiers / --no-effort-tiers
+                        Run each stage as routine or deliberative rather than treating them
+                        alike. On at --rigor standard, which is the default.
+--routine-model MODEL   Parsed here and read nowhere. The second, cheaper operator a
+                        routine stage would run on is built by main.py's configure_effort,
+                        which this adapter never calls: under --effort-tiers it sets an
+                        EffortPlan and a solo reviewer and nothing else, so every stage
+                        runs on --model. Tiering itself still applies — a routine stage
+                        gets the tier notice in its prompt and the single reviewer rather
+                        than the panel — the model is the part that does not change.
+--deliberation / --no-deliberation
+                        Let a stage stop and pull in a voice panel when it hits a genuine
+                        crux. On at --rigor thorough.
+--max-deliberations N   Cruxes a run may escalate. Default: 3.
+--deliberation-voices VOICE [...]   Seat only these: theorist, empiricist, critic,
+                                    pragmatist.
+--deliberation-models VOICE=MODEL [...]   Model per voice, voice=model or voice=backend:model.
+--ideation-panel / --no-ideation-panel
+                        Widen Stage 02's hypotheses with proposers working from five
+                        distinct lenses. It decides nothing. On at --rigor thorough.
+--ideation-lenses LENS [...]      Seat only these: mechanism, contrarian, adjacent, null,
+                                  regime.
+--ideation-models LENS=MODEL [...]  Model per lens.
+--ideas-per-proposer N  Candidate hypotheses each proposer may return. Default: 2.
+--panel-rounds N        Maximum deliberation rounds for the review panel; later rounds run
+                        only on disagreement. Default: 2.
+--persona PATH          Markdown description of the researcher the panel stands in for,
+                        injected into every panelist.
+
+--max-attempts N        Attempts per stage before it is auto-skipped. Default: 8, higher
+                        than the interactive default because a skipped stage costs score.
+--max-auto-skips N      Stages that may be auto-skipped before aborting. Default: 3.
+--intake                Run the intake stage. Off by default: the benchmark instructions
+                        are already a complete task specification.
+--cross-review {auto,gemini,off}
+                        Independent second opinion on each approval from a different model
+                        family. It can veto an approval and can never override a refusal.
+                        Default: auto, which enables it when a Gemini backend is configured
+                        and stays silent when none is.
+--cross-review-model NAME         Default: gemini-3.1-pro-preview
+                                  (`DEFAULT_CROSS_REVIEW_MODEL`).
 --web-search {auto,gemini,native}
---no-synthesis           Skip the operator-backed report synthesis pass.
---export-only            Re-export the latest run without re-running the pipeline. Use this
-                         to recover deliverables from an interrupted job.
---fake-operator          Smoke-test the adapter without touching a real backend.
+                        Default: auto. See the section above.
+--no-synthesis          Skip the operator-backed report synthesis pass and use only the
+                        deterministic fallback.
+--fake-operator         Smoke-test the adapter. rcb_agent.py threads fake_mode into the
+                        operator, the approval reviewer and each panel it seats. It does
+                        not reach the cross-model reviewer, which is built separately by
+                        resolve_cross_reviewer and has no fake mode: pair it with
+                        --cross-review off for a run that makes no external call.
+--export-only           Skip the pipeline and only re-export the most recent run in the
+                        workspace. Use this to recover deliverables from an interrupted job
+                        — but note that the export prunes images, so it is not a read-only
+                        operation.
 ```
+
+**`--cross-review` is live on this path only.** `main.py` declares and parses the same two
+flags, but `resolve_cross_reviewer` is called from `rcb_agent.py` and nowhere else, so on the
+interactive CLI the flags are accepted and then do nothing. The benchmark adapter is the only
+place the cross-model veto is actually wired to a gate.
+
+That inertness runs both ways, and `--cross-review` is not the only flag it touches: the two
+parsers are mirror images, each declaring something the other honours and it does not —
+`--routine-model` is the one that works on `main.py` and not here. `docs/cli-reference.md`
+diffs the two parsers row by row.
 
 ### Layout inside the workspace
 
 ```
 <workspace>/
 ├── INSTRUCTIONS.md        # written by the harness
+├── _meta.json             # run record; written by the harness, updated by write_run_meta
+├── .autor_export.json     # digest of the report AutoR last exported
 ├── data/                  # read-only input, never modified
 ├── related_work/          # read-only references, never modified
 ├── code/                  # exported
-├── outputs/               # exported
+├── outputs/               # exported; images are pruned from here
+│   └── notes/             # workspace/notes from the run tree
 ├── report/
 │   ├── report.md          # the scored deliverable
-│   └── images/            # PNG figures
+│   └── images/            # PNG figures — the only place an image survives the export
 └── .autor/                # the full AutoR run tree, kept for inspection
     └── <run_id>/
 ```
 
-Everything AutoR needs lives under `.autor/`, so a workspace stays self-contained and a run
-can be inspected or resumed after the fact.
+Everything AutoR needs lives under `.autor/` and two dotfile-sized records at the root, so a
+workspace stays self-contained and a run can be inspected or resumed after the fact.
+`_meta.json` is the one the harness and the leaderboard importer read: a run launched by hand
+has no one else to write it, and without `status: "completed"` plus `task_id` and
+`duration_seconds` the workspace cannot be scored. On `--export-only` the duration is not
+re-measured: `_recorded_duration` keeps a value already on record, or, for a run killed
+before it wrote one, estimates the span of the run tree's file timestamps. Reporting the
+export's own few seconds would put a multi-hour run on the leaderboard at near-zero cost.
 
 ---
 
@@ -398,7 +555,20 @@ python3 tools/score_rcb_run.py \
   --out score.json
 ```
 
-Needs `anthropic`, the bench's `structai`, and `ANTHROPIC_VERTEX_PROJECT_ID`.
+**What it needs depends on the judge, and the default judge needs none of Vertex.**
+
+| | `--judge reference` (the default) | `--judge vertex` |
+|:---|:---|:---|
+| Judge | `gpt-5.1` (`REFERENCE_JUDGE_MODEL`), what the benchmark scores with | `claude-opus-4-5@20251101` (`FALLBACK_JUDGE_MODEL`) |
+| Python package | `openai` | `anthropic` |
+| Credential | a key in `~/api.txt` (`DEFAULT_KEY_FILE`, moved with `--key-file`) | `ANTHROPIC_VERTEX_PROJECT_ID`, or `--project-id`; exits 2 without one |
+| Endpoint | the OpenAI-compatible base URL in `REFERENCE_JUDGE_ENDPOINT`, overridable with `--endpoint` | Vertex, region `global` |
+
+Either judge also needs the ResearchClawBench checkout at `--bench`, since the tool imports
+`evaluation.score` from it and drives the bench's own `score_workspace`; that import is what
+pulls in the bench's `structai`, and the judge object replaces `structai.LLMAgent` afterwards.
+`--model` overrides the model id for whichever judge is selected. Nothing on the default path
+reads a Vertex project, and nothing on either path accepts a key as an argument.
 
 ### The three ways the stock scorer fakes a low score
 
@@ -419,32 +589,44 @@ is not a measurement of the run.
 
 ### The judge is part of the result
 
-The reference judge is `gpt-5.1` (`evaluation/.env.example`), and it is what
-`score_rcb_run.py` uses by default:
+**Score with `gpt-5.1`, and quote the judge next to every total you publish.** That is
+the whole rule, and it is not a style preference:
+
+- **`gpt-5.1` is the reference judge** — it is what ResearchClawBench itself scores with
+  (`evaluation/.env.example`), it is `REFERENCE_JUDGE_MODEL`, and `--judge reference` is
+  the tool's default. Anything else is a local measurement that no published figure can
+  be compared against.
+- **Judge choice is worth roughly sixteen points.** On one identical artifact set, Gemini
+  2.5 Flash scored **37.0** where Claude Opus scored **20.8**. That is not a smaller
+  number, it is an **incomparable** one: the spread is a property of the grader, not of
+  the run, so a total quoted without its judge compares to nothing — including to the
+  same run scored yesterday.
+- **The tool makes this hard to get wrong.** It prints `judge: <model>` before the
+  per-item table, repeats it inside the `TOTAL (judge …)` line, and writes `judge_model`
+  into the result file. Carry that string wherever the number goes.
 
 ```bash
-# Reads the key from ~/api.txt. Never pass a key as an argument — it lands in the
-# shell history and in the process table.
+# The default path: gpt-5.1, key read from ~/api.txt. Never pass a key as an argument —
+# it lands in the shell history and in the process table.
 python3 tools/score_rcb_run.py --workspace <ws> --bench <bench>
 
-# No reference key available:
+# Fallback when no reference key is available. Label the result as Claude-judged; do not
+# put it beside a gpt-5.1 number.
 python3 tools/score_rcb_run.py --workspace <ws> --bench <bench> --judge vertex
 ```
 
 Either judge is a drop-in for `structai.LLMAgent` — `score.py` only ever calls the
-agent as `agent(prompt, image_paths=, return_example=, max_try=)` and expects a dict.
+agent as `agent(prompt, image_paths=, return_example=, max_try=)` and expects a dict —
+so switching judges changes the grader and nothing else about the measurement.
 
 The key is read from a file outside the repository. `DEFAULT_KEY_FILE` is
 `~/api.txt` deliberately: a default inside the tree is one `git add -A` away from a
-leak. Error text is redacted before printing, because an HTTP client's exception can
-carry the request that produced it and this output gets pasted into issues. A test
-scans every tracked file for a key-shaped literal, so a key pasted into a docstring
-or a fixture fails the suite rather than reaching a remote.
-
-On identical artifacts, **Gemini 2.5 Flash scored 37.0 where Claude Opus scored 20.8**.
-A sixteen-point spread is a property of the judge, not of the run, so a number quoted
-without naming its judge compares to nothing. The tool prints the judge on every run
-and writes it into the result file.
+leak. `read_api_key` accepts a bare token, `KEY=token`, or a quoted value, so nobody has
+to print the file to find out its shape, and it exits with instructions rather than a
+traceback when the file is missing. Error text is redacted before printing, because an
+HTTP client's exception can carry the request that produced it and this output gets pasted
+into issues. A test scans every tracked file for a key-shaped literal, so a key pasted
+into a docstring or a fixture fails the suite rather than reaching a remote.
 
 ### What the scale means
 
@@ -559,6 +741,11 @@ read `workspace/reviews/` at all, so a run that argued with itself for six voice
 wrote its report as though the argument had not happened — spending the calls and
 collecting none of the weight they could have earned.
 
+Both files are produced by optional machinery, so a run that seats neither panel has nothing
+to publish here: `deliberations.json` needs `--deliberation` and `idea_pool.json` needs
+`--ideation-panel`, and at the default `--rigor standard` both are off. `--rigor thorough`
+turns both on.
+
 The channel is Stage 07 only, and deliberately thin:
 
 - **An unanswered crux contributes nothing.** A panel that could not be reached is not
@@ -566,8 +753,9 @@ The channel is Stage 07 only, and deliberately thin:
   reasoning that did not happen. (`deliberation.md` covers how the two are told apart.)
 - **A duplicate or adopted candidate is not a road not taken.** Listing a restatement of
   the adopted hypothesis as an alternative overstates how wide the search was.
-- **Counts and field lengths are capped.** Image criteria see only the first 10,000
-  characters and the rubric says "longer is not better" in as many words, so an
+- **Counts and field lengths are capped** — `MAX_CRUXES`, `MAX_REJECTED` and
+  `MAX_FIELD_CHARS` in `src/settled_reasoning.py`. Image criteria see only the first
+  10,000 characters and the rubric says "longer is not better" in as many words, so an
   unbounded transcript costs more than it earns. The preface sends the material to
   Discussion, after the numbers.
 - **A run that argued nothing sends nothing.** An empty heading invites the stage to
@@ -648,11 +836,31 @@ print(r.workspace.resolve())
 "
 
 cd workspaces/Astronomy_000_*
-python3 /abs/path/to/AutoR/rcb_agent.py --fake-operator --no-synthesis --max-auto-skips 9
+python3 /abs/path/to/AutoR/rcb_agent.py --fake-operator --no-synthesis \
+  --cross-review off --max-auto-skips 9
 ```
 
-This exercises the whole path — unattended pipeline, auto-skip recovery, export — without
-spending tokens. Expect exit code 0 and a `report/report.md` assembled by the fallback.
+This exercises the unattended pipeline, the auto-skip recovery and the export without calling
+an execution backend. Expect exit code 0, a `report/report.md`, and a figure published under
+`report/images/`. Do not expect a particular report path: the fake operator writes a report
+into the run tree, so a fake run normally exports `"report_source": "stage"` even while
+auto-skipping stages. Read the source off the final JSON line rather than assuming it.
+
+**`--cross-review off` is not optional if you want a free run.** `--fake-operator` does not
+reach the cross-model reviewer: `rcb_agent.py` builds that one through
+`resolve_cross_reviewer`, whose default `auto` seats a live `GeminiCrossReviewer` whenever
+`resolve_backend` finds a usable Gemini backend — and the Vertex project it will accept
+includes `ANTHROPIC_VERTEX_PROJECT_ID`, so the boxes the web-search section above is written
+for are exactly the ones where a "fake" run makes real calls, one per approval, each capable
+of vetoing it.
+
+`--max-auto-skips 9` lifts the budget above the default of 3, so a fake run whose stages
+exhaust their retries reaches the export instead of aborting part-way; how many it actually
+skips is not fixed, and the export event on stdout carries `auto_skipped_stages`.
+
+The same run works without a bench checkout — any directory with an `INSTRUCTIONS.md` in it
+will do — which is the cheapest way to see what the adapter writes where.
+
 
 ---
 

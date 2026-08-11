@@ -5,8 +5,11 @@ Everything a run produces lives inside one directory, `runs/<run_id>/`, where
 nothing is stored globally, and a run directory can be copied, archived, or
 handed to someone else and remain complete.
 
-This page documents every file in that directory and the schema of every
-machine-readable one.
+This page documents every file **AutoR itself writes** into that directory, and
+the schema of every machine-readable one. It is not a listing of everything you
+will find there: `workspace/` is the agent's own working directory, and a stage
+may put any file it likes under `code/`, `data/`, `results/` or `notes/`. Those
+are inventoried by `artifact_index.json` rather than enumerated here.
 
 ---
 
@@ -16,17 +19,20 @@ machine-readable one.
 runs/<run_id>/
 ├── .claude/skills/             # agent skills, installed from src/skills/ (this is the operator's cwd)
 ├── user_input.txt              # the original research goal, verbatim
-├── memory.md                   # approved cross-stage memory (the only shared context)
+├── memory.md                   # settled stage summaries: the free-text cross-stage memory
 ├── run_config.json             # backend, model, venue, approval mode, sandbox, stage graph
 ├── run_manifest.json           # stage lifecycle state — the machine-readable source of truth
-├── artifact_index.json         # index over workspace/{data,results,figures}
+├── artifact_index.json         # index over workspace/{data,results,figures} and report/images
 ├── intake_context.json         # Stage 00 Q&A, ingested resources, refined goal
+├── obligations.json            # what a reviewer said a later stage still owes (agent gate only)
+├── review_policy.json          # standing rules learned from this run's refusals and rollbacks
+├── report_plan_stamp.json      # AutoR's copy of the report plan's date and digest
 ├── logs.txt                    # human-readable workflow log
 ├── logs_raw.jsonl              # raw backend stream-json events
 ├── prompt_cache/               # the exact prompt sent for every attempt
-├── operator_state/             # per-stage session IDs, attempt state, start markers
+├── operator_state/             # per-stage session IDs, attempt state, start markers, MCP config
 ├── handoff/                    # compressed per-stage handoff summaries
-├── evolution/                  # stage graph route, rubric scores, champions, candidates (--evolve / --stage-graph)
+├── evolution/                  # stage graph route, rubric scores, champions, candidates
 ├── stages/                     # stage summaries: <slug>.tmp.md draft, <slug>.md approved
 ├── notebook/                   # Studio Notebook session and transcript (Studio runs only)
 ├── sessions/                   # Studio trace events per stage (Studio runs only)
@@ -39,15 +45,22 @@ runs/<run_id>/
     ├── writing/                # LaTeX sources, sections/, bibliography, tables (latex mode)
     ├── figures/                # plots and paper figures
     ├── artifacts/              # compiled PDFs, build_log.txt, review JSON, deliverables
-    ├── notes/                  # supporting notes, hypothesis_manifest.json, preregistration.json
+    ├── notes/                  # supporting notes, report_plan.json, hypothesis_manifest.json, preregistration.json
     ├── reviews/                # readiness, critique, dissemination material
-    ├── bootstrap/              # --paper-corpus / --project-root scan output
-    └── profile/                # derived researcher profile
+    ├── bootstrap/              # --project-root scan output
+    └── profile/                # --paper-corpus scan output: derived researcher profile
 ```
 
 The directory shape is created by `ensure_run_layout` and the paths are
 defined once, in `build_run_paths` ([`src/utils.py`](../src/utils.py)). If you
 need a path in code, take it from `RunPaths` rather than joining strings.
+
+Three files sit at the run root rather than under `workspace/` on purpose:
+`obligations.json`, `review_policy.json` and `report_plan_stamp.json` are
+records *about* the run rather than part of its answer, and every stage prompt
+directs the agent at `workspace/` paths. Same reason `evolution/` is out here —
+and, like `evolution/`, it also keeps them out of a benchmark export that
+packages the workspace.
 
 ---
 
@@ -60,13 +73,25 @@ resume; a run without it cannot be resumed.
 
 ### `memory.md`
 
-The **only** context shared across stages. A stage does not see another
-stage's conversation — it sees this file.
+The only *free-text* context shared across stages, and the largest one. A stage
+does not see another stage's conversation — it sees this file. It is not the
+only channel, though: `build_handoff_context` sends the last few stages' trimmed
+summaries, `build_decision_ledger_context` broadcasts every prior `Decision
+Ledger` section separately, and the typed channels in `information_flow.py`
+carry the machine-readable artifacts. What crosses a stage boundary is
+enumerable from `build_prompt` and `CHANNELS`; the sections below cover each
+carrier in turn.
 
-Each approved stage contributes one entry containing its `Objective`,
-`What I Did`, `Key Results`, and `Files Produced` sections. Nothing enters
-`memory.md` before you approve it, which is what makes "approval" mean
-something: an unapproved stage cannot influence the rest of the run.
+Each **settled** stage contributes one entry containing its `Objective`,
+`What I Did`, `Key Results`, and `Files Produced` sections. Settled, not
+approved: `_skip_stage` appends a skipped stage's summary here too, and
+`rebuild_memory_from_manifest` iterates on each entry's `settled` flag rather
+than its `approved` flag when it reconstructs the file after a rollback. That
+is deliberate — a later stage has to know the gap exists — but it means this
+file is not a record of accepted work, and "approval" does not gate what the
+rest of the run sees. Read `approved` in `run_manifest.json` when you want to
+know what was actually accepted. A `--project-root` bootstrap adds entries for
+the stages it declares already done, without any of them being run or reviewed.
 
 Required for resume. Rebuilt from `run_manifest.json` after a rollback.
 
@@ -90,6 +115,7 @@ The settings the run was started with, so a resume reproduces them.
   "evolve_measure": true,
   "archive_steer": false,
   "web_search": "auto",
+  "min_report_figures": 1,
   "created_at": "2026-03-30T10:12:22"
 }
 ```
@@ -110,6 +136,7 @@ The settings the run was started with, so a resume reproduces them.
 | `evolve_rounds` | Improvement rounds per stage; `2` by default, `0` measures without polishing. |
 | `archive_steer` | Whether the cross-run archive may choose this run's topology, as opposed to only recording what it did. `false` by default. |
 | `web_search` | `auto`, `gemini`, or `native`. The mode, not the resolved backend. Absent in runs created before it existed, and read as `auto`. |
+| `min_report_figures` | Distinct rendered figures `workspace/report/images/` must hold before Stage 07 can be approved in `markdown` mode. `MIN_REPORT_FIGURES` = 1 for an ordinary run; `rcb_agent.py` sets `BENCHMARK_MIN_REPORT_FIGURES` = 3. `resolve_min_report_figures` clamps whatever it reads into `[1, MAX_REPORT_FIGURES]`, so a value of `0`, `99` or `"three"` becomes 1, 5 and 1 respectively rather than failing the run. Read as a hard gate by `validate_markdown_report`. |
 | `created_at` | ISO-8601 to the second. Preserved across rewrites. |
 
 A missing or corrupt file falls back to defaults rather than failing the run.
@@ -160,10 +187,21 @@ what rollback rewrites. Written by [`src/manifest.py`](../src/manifest.py).
 ```
 
 **`run_status`** — one of `pending`, `running`, `human_review`, `completed`,
-`failed`, `cancelled`.
+`failed`, `cancelled`, `halted`, `abandoned`.
 
-**Stage `status`** — one of `not_started`, `pending`, `running`,
-`human_review`, `approved`, `skipped`, `completed`, `failed`, `cancelled`.
+The last two are the ones worth knowing about, because both are stops that are
+*not* failures and are *not* completions. `halted` means a budget ran out
+(`--graph-max-steps`, `--graph-max-visits`, or no admissible move) with stages
+still unsettled — a run reported as `completed` there would read as a success
+holding four stages that never ran. `abandoned` means a research round
+concluded `abandon`: the run decided the question could not be answered with
+the resources available, which is a real conclusion and is recorded as one.
+`--final-stage` stopping a run is neither; that is the caller getting what they
+asked for, and it completes.
+
+**Stage `status`** — one of `pending`, `running`, `human_review`, `approved`,
+`skipped`, `failed`, `stale`. `stale` is written by a rollback to every stage
+*after* the one rolled back to; the stage rolled back to returns to `pending`.
 
 **Stage flags:**
 
@@ -197,10 +235,14 @@ Safe to delete: it is rebuilt on the next resume.
 
 ### `artifact_index.json`
 
-An index over `workspace/data/`, `workspace/results/`, and
-`workspace/figures/`, regenerated whenever artifacts change and fed into later
-stages' prompts so a stage can find data without guessing filenames. Written
-by [`src/artifact_index.py`](../src/artifact_index.py).
+An index over `workspace/data/`, `workspace/results/`, `workspace/figures/`
+and — also under the `figures` category — `workspace/report/images/`,
+regenerated whenever artifacts change and fed into later stages' prompts so a
+stage can find data without guessing filenames. `report/images/` is included
+because in markdown mode the report's own figures live beside it rather than in
+`workspace/figures/`, and leaving them out would show Stage 07 an empty figure
+inventory for the figures it had just made. Written by
+[`src/artifact_index.py`](../src/artifact_index.py).
 
 ```json
 {
@@ -225,8 +267,23 @@ by [`src/artifact_index.py`](../src/artifact_index.py).
 }
 ```
 
-`experiment_manifest.json` and any `*.schema.json` sidecar are excluded from
-the index — the manifest is a view of the index, not an entry in it.
+Any `*.schema.json` sidecar is excluded, and so is every path in
+`RECORD_ARTIFACTS`: `results/experiment_manifest.json`,
+`results/hypothesis_outcomes.json`, `notes/hypothesis_manifest.json`,
+`notes/preregistration.json`, `notes/experimental_protocol.json`,
+`notes/report_plan.json`, `notes/research_rounds.json` and
+`notes/round_decision.json`. (Only the two under `results/` are ever in the
+index's scan range; the `notes/` entries do their work in
+`experiment_manifest.json`, which shares the same list.)
+
+These are records *about* the science rather than experimental output. The
+manifest is a view of the index, not an entry in it, and counting the
+preregistration would make a stage that declared its hypotheses look like a
+stage that produced results — measurably: the manifest is rewritten on the way
+*into* every stage from 05 on, so counted as output, a Stage 05 that produced
+literally nothing scored a third of `artifact_breadth` off a file whose own body
+reads `result_artifact_count: 0`. `is_autor_own_record` is the single rule, read
+by both this module and the rubric, so the two cannot drift.
 
 #### Schema metadata
 
@@ -253,7 +310,7 @@ rather than crashing the index.
 | --- | --- |
 | `.json` | `object` with up to 20 sorted `keys`, or `array` with `item_count` and `item_keys` |
 | `.jsonl` | `jsonl` with `row_count` and the union of keys across rows |
-| `.csv`, `.tsv` | column names |
+| `.csv`, `.tsv` | `table` with `columns` (the header row, stripped) and `row_count` |
 | `.yaml`, `.yml` | `yaml_document` |
 | `.parquet` | `parquet_table` |
 | `.npz` / `.npy` | `numpy_archive` / `numpy_array` |
@@ -285,8 +342,156 @@ transcript, the ingested resources, and free-form notes.
 }
 ```
 
-`resource_type` is one of `pdf`, `bib`, `code`, `dataset`, `notes`, `other`;
-`dest_dir` is the workspace subdirectory the resource was copied into.
+`resource_type` is one of `pdf`, `bib`, `code`, `dataset`, `notes`, `tex`,
+`other`, assigned by `classify_resource` from the file suffix (a directory
+holding `.py` or `.ipynb` files is `code`, any other directory is `other`).
+`dest_dir` is the workspace subdirectory the resource was copied into:
+`literature`, `code`, `data`, `notes`, `writing` or `artifacts`.
+
+### `obligations.json`
+
+The obligation ledger: what an *approving* reviewer said a later stage still
+owes. Written by [`src/obligations.py`](../src/obligations.py).
+
+Most stages are approved, and an approval used to discard everything the
+reviewer noticed. A real reviewer approving a literature survey says "fine, but
+you owe me a power analysis at design time" — and then checks. Each obligation
+is injected into the prompts of the stages it targets *and* into the review of
+those stages, so the reviewer that inherits one is asked whether it was met.
+
+```json
+{
+  "version": 1,
+  "obligations": [
+    {
+      "obligation_id": "O001",
+      "text": "State a power analysis justifying the sample size before running the comparison.",
+      "origin_stage": "01_literature_survey",
+      "target_stage": "03_study_design",
+      "status": "open",
+      "deferrals": 0,
+      "discharged_by": null,
+      "discharge_note": ""
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `obligation_id` | `O001`-style, referenced by the reviewer that discharges it. |
+| `text` | The reviewer's condition, verbatim and whitespace-collapsed. Shorter than `MIN_OBLIGATION_CHARS` (20) is dropped: "do better" is not checkable. |
+| `origin_stage` | The stage whose approval attached it. |
+| `target_stage` | The stage on the hook, or `null`. `normalize_stage_slug` accepts `05`, `5`, `05_experimentation` and the display name, because models reach for the display name and silently degrading that to "any later stage" loses the targeting the reviewer intended. A `null` target applies to **every** stage after `origin_stage`. |
+| `status` | `open` or `discharged`. |
+| `deferrals` | How many times a stage it applied to was approved without discharging it. Counted on approval only — a refused stage gets another attempt and has not deferred anything. |
+| `discharged_by` / `discharge_note` | Which stage's review closed it, and why. |
+
+**Only a reviewer discharges an obligation.** The stage that owes it can do the
+work and say so; it cannot mark its own homework. Deferral is allowed and never
+silent: the count is shown to every later reviewer. The set is deduplicated on
+normalized text and capped at `MAX_OBLIGATIONS` (30), so a reviewer restating
+one point cannot inflate the ledger.
+
+Absent unless the run uses the **automated** approval gate — `record_obligations`
+and `discharge_obligations` are reached only from the automated reviewer's
+decision, so a manual human gate never writes this file. See
+[Limits](../README.md#limits): obligations are injected into the solo reviewer's
+prompt only — `_build_review_prompt` carries the ledger and the panel's
+`_build_member_prompt` does not — so a seated review panel never sees them,
+however it was seated.
+
+### `review_policy.json`
+
+The standing rules the run has learned about its own work. Written by
+[`src/review_policy.py`](../src/review_policy.py) whenever a correction is
+demanded or an already-given approval is undone, and injected into every
+subsequent *solo* review prompt. As with obligations, the injection point is
+`_build_review_prompt`; a review panel's seats and chair are prompted elsewhere
+and are not shown the rules.
+
+```json
+{
+  "version": 1,
+  "rules": [
+    {
+      "rule_id": "R001",
+      "text": "The design lacks a stated power analysis and the sample size is unjustified.",
+      "origin_stage": "03_study_design",
+      "origin_attempt": 2,
+      "source": "refinement"
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `rule_id` | Stable identifier, referenced in the review prompt and the run log. |
+| `text` | The correction verbatim, as the reviewer worded it — or, for a rollback, the sentence AutoR writes naming the two stages and the reason. Whitespace-collapsed; shorter than `MIN_RULE_CHARS` (25) is dropped. |
+| `origin_stage` / `origin_attempt` | Which review produced the rule. This is what makes the mechanism auditable rather than assertable. A rollback has no attempt to point at and records `0`. |
+| `source` | `refinement` for a demanded correction, `rollback` for an approval that later proved wrong. Rollbacks are rendered first in the prompt. |
+
+Absent until the first correction is recorded. Unlike `obligations.json`, this
+is **not** an automated-reviewer-only file. Two of `record_correction`'s callers
+need a reviewer: `_record_review_correction`, which turns a refusal into a
+`refinement` rule, and the cross-model audit, which records a vetoed approval.
+The rest do not. `_rollback_and_jump` is reached from the operator typing
+`/back <stage>` into the manual gate's feedback prompt, and from choice `2`
+("Roll back to an earlier stage") on the recovery menu an attended run on a tty
+gets when a stage exhausts its retries; the router records one of its own when a
+graph `revisit` re-enters an earlier stage. All three write `source: rollback`
+with text well over `MIN_RULE_CHARS`, so a run on the manual gate with no
+reviewer at all can carry this file. What is never recorded is an approval that
+stood: approvals teach nothing.
+
+Rules are deduplicated on normalized text (casing, punctuation
+and stage numbers collapse) and capped at `MAX_RULES` (40), so a reviewer
+restating one complaint cannot inflate it. A corrupt file is treated as an empty
+policy: the gate falls back to baseline strictness rather than taking the run
+down.
+
+### `report_plan_stamp.json`
+
+AutoR's own copy of the three fields in
+[`workspace/notes/report_plan.json`](#workspacenotesreport_planjson) that the
+agent must not be trusted to write. Written by `stamp_report_plan` in
+[`src/report_plan.py`](../src/report_plan.py).
+
+```json
+{
+  "declared_at": "2026-03-30T13:05:41",
+  "digest": "9c1f0b7e...",
+  "amendments": [
+    {
+      "recorded_at": "2026-03-30T18:44:02",
+      "reason": "round 1: tune both arms on a held-out development split and re-run",
+      "previous_digest": "3ab5c9d1...",
+      "new_digest": "9c1f0b7e..."
+    }
+  ]
+}
+```
+
+The plan itself has to stay in `workspace/notes/`: the agent writes it, amends
+it, and is shown it. But that means the agent also has write access to the
+fields that are supposed to prove *when* it was written, and a stamp kept only
+there is a receipt the payer prints. `recorded_report_plan_stamp` therefore
+reads the previous digest from here, never from the plan file — and the failure
+this catches is the ordinary one, not the hostile one. A stage that regenerates
+the whole plan from its own template, obeying "do not write `declared_at`,
+`digest` or `amendments`", leaves a plan with no header at all. Read from the
+file that is indistinguishable from a first declaration, and `declared_at`
+silently becomes a post-results timestamp with an empty amendment ledger. Read
+from the stamp, it is an amendment, and the plan file is repaired on the spot.
+
+Written when Stage 03 is approved, and again from Stage 06 on for runs that
+reach there without passing a Stage 03 approval (`--resume-run`,
+`--redo-stage`, a `--project-root` bootstrap). Stamping is **idempotent by
+content**: a round that left the plan alone adds no amendment and leaves the
+plan file's bytes alone, so carrying a correct plan through a second round does
+not manufacture a spurious record of having changed it. Absent until a
+`report_plan.json` exists.
 
 ### `logs.txt` and `logs_raw.jsonl`
 
@@ -307,8 +512,16 @@ session trace renders.
 
 - `<slug>.tmp.md` — the current draft, rewritten on each attempt.
 - `<slug>.md` — the approved summary. Only appears after you approve.
+- `<slug>.skip_stub.md` — only when an auto-skipped stage's last draft was
+  *rescued*. A stage that burns its attempt budget unattended is normally
+  replaced by a short stub saying the work was not done; when the final draft
+  passes the same markdown and artifact gates an approval requires, that draft
+  is promoted instead and the stub is kept here rather than thrown away. It is
+  still not an approval — the manifest keeps saying `skipped` — and the skip
+  reason records that a validated draft was preserved and nobody reviewed it.
 
-The required shape of both is the [stage contract](stage-contract.md).
+The required shape of `<slug>.tmp.md` and `<slug>.md` is the
+[stage contract](stage-contract.md).
 
 ### `prompt_cache/`
 
@@ -318,23 +531,63 @@ The exact prompt text sent to the backend, one file per attempt:
 | --- | --- |
 | `<slug>_attempt_NN.prompt.md` | a normal stage attempt |
 | `<slug>_attempt_NN_repair.prompt.md` | a repair pass after a malformed summary |
-| `<slug>_review_attempt_NN.prompt.md` | the automated reviewer in `--full-auto` |
+| `<slug>_route.prompt.md` | the [router](self-improvement.md) asking the agent which move to take |
+| `<slug>_validity_review.prompt.md` | the adversarial reviewer after Stage 05 and Stage 06 |
+| `09_benchmark_report.prompt.md` | the ResearchClawBench report synthesiser (`rcb_agent.py` only) |
 
-Nothing is elided: if you want to know why a stage did what it did, the prompt
-that caused it is on disk. Prompts are passed to the backend by reference
-(`-p @<path>`), so these files are load-bearing during a run, not just a log.
+Every *reviewer-style* call — the solo gate, every panel seat, every crux voice,
+every ideation proposer — goes through `AutomatedReviewer.run_prompt` and lands
+as `<slug>_<label>_attempt_NN.prompt.md`, so the table above is not the whole
+set. Every `label` the code passes, and nothing else:
+
+| `label` | Written by |
+| --- | --- |
+| `review` | the solo automated gate |
+| `panel_<seat>_r<N>` · `panel_chair` | each seat of a [review panel](review-panel.md), per round, and the chair's synthesis |
+| `crux_<voice>` · `crux_brief` · `crux_resolve` | a [crux deliberation](deliberation.md) |
+| `ideate_<lens>` · `ideate_score` | the [ideation panel](ideation-panel.md)'s proposers, one per lens, and its pool scorer |
+| `review_verdict` · `panel_<seat>_verdict` · `panel_chair_verdict` | `parse_with_retry`'s single re-ask, present only when that reviewer's first answer could not be parsed |
+
+The same labels name the per-call records in `operator_state/`. The three
+`*_verdict` files are the useful tell: their presence means a verdict came back
+unreadable and was asked for again.
+
+One prompt is missing from this directory, and it is one that can change what a
+stage did: the cross-model audit's. `CrossReviewer.build_prompt` builds its text
+and hands it straight to the model API, and nothing in
+[`src/cross_reviewer.py`](../src/cross_reviewer.py) writes to `prompt_cache/`,
+`operator_state/` or `logs_raw.jsonl`. When that audit vetoes an approval and
+sends the stage back for another attempt, `logs.txt` records the verdict and
+`review_policy.json` records the rule it produced — but the text that produced
+both is not kept anywhere.
+
+Every prompt that *is* here is the exact text the backend was given, and the run
+reads it from disk rather than from memory. How it reaches the CLI differs by
+backend, which matters if you are
+reproducing a call by hand: the Claude operator passes the path by reference
+(`_build_cli_command` emits `-p @<prompt_path>`), while the Codex operator reads
+the file, rewrites every occurrence of the run root to the temp-directory
+symlink it invokes under (`_rewrite_prompt_for_alias`), and pipes the result on
+stdin against a bare `-`. Under `--operator codex` the prompt file's path is
+never handed to the CLI, and what is on disk is the pre-rewrite text.
 
 ### `operator_state/`
 
 | File | Contents |
 | --- | --- |
 | `<slug>.session_id.txt` | the backend session ID for that stage |
-| `<slug>.session.json` | session bookkeeping |
-| `<slug>.attempt_NN.json` | per-attempt state: command line, mode (`start`/`resume`), prompt path, timestamps |
+| `<slug>.session.json` | `session_id`, plus `broken` / `broken_reason` / `updated_at` when a resume was refused — so the next attempt starts a fresh conversation instead of retrying a dead one |
+| `<slug>.attempt_NN.json` | per-attempt state: `status`, `mode` (`start`/`resume`), session ID, prompt path, the literal `command` argv, `exit_code`, stdout/stderr excerpts, stream metadata, timestamps |
+| `<slug>.<label>_attempt_NN.json` | the same record for a reviewer-style call, under the same labels as the prompt files above |
 | `<slug>.started_at.txt` | the freshness cutoff used by the [artifact gate](stage-contract.md#freshness-checks) |
+| `<slug>.attempt_count.txt` · `<slug>.polish_count.txt` | attempts and improvement rounds this stage has spent, persisted because a stage can be entered more than once (a resume, a rollback, a graph revisit) and the attempt number keeps counting up across all of them |
+| `<slug>.pending_feedback.txt` | opt-in revision feedback injected into the **first** attempt's prompt rather than waiting for attempt 2. Written by the Studio's feedback action, or by any caller that drops one there; absent on a plain CLI run, where behaviour is unchanged |
+| `mcp_config.json` | the `--mcp-config` payload handing the agent an `mcp__autor-search__web_search` tool, written whenever the [MCP search server](configuration.md#web-search-optional) is active. Kept in the run rather than a temp file so a run can say what tools its agent was given, not only what it was told. Claude operator only — the Codex adapter takes no MCP config |
 
-`<slug>.attempt_NN.json` records the literal argv used, which makes a failed
-attempt reproducible by hand.
+`<slug>.attempt_NN.json` records the literal argv used, which is most of what
+you need to reproduce a failed attempt by hand. On the Codex backend it is not
+all of it: the argv ends in a bare `-` and the prompt arrives on stdin, so
+replaying that command means feeding it the prompt file yourself.
 
 ### `handoff/`
 
@@ -342,20 +595,27 @@ One `<slug>.md` per completed stage: a compressed view carrying only
 `Objective`, `Key Results`, `Files Produced`, and the `Decision Ledger`.
 
 At most the four most recent handoffs before the current stage are injected
-into a prompt, and the `Decision Ledger` section is stripped from that
-injection — the ledger is kept on disk for audit, not spent on context. This
-is what keeps long runs from growing their prompts without bound.
+into a prompt, which is what keeps long runs from growing their prompts without
+bound. The `Decision Ledger` section is stripped from *that* injection because
+it travels separately: `build_decision_ledger_context` collects the ledger
+sections from **every** prior handoff into their own channel, broadcast to every
+stage from 02 on. A locked decision binds every stage after it, so trimming it
+to the last four would be the wrong four.
 
 ### `evolution/`
 
-Written only when `--evolve` or a non-linear `--stage-graph` is in use. Outside
-`workspace/` on purpose: this records *how* the run reached its answer, not part of
-the answer, and a benchmark export that swept it up would ship the losing drafts
-alongside the report.
+Present on a default run. The champion ratchet is on unless you pass
+`--no-evolve` (`evolve_measure` defaults to `true`; it costs no backend call),
+and `stage_graph.json` is written on every run including `--stage-graph linear`,
+because the walk is driven by a graph either way.
+
+Outside `workspace/` on purpose: this records *how* the run reached its answer,
+not part of the answer, and a benchmark export that swept it up would ship the
+losing drafts alongside the report.
 
 | Path | Contents |
 | --- | --- |
-| `stage_graph.json` | Every visit: the stage, when it was entered and left, the move chosen out of it, its kind, the stated reason, what AutoR would have chosen, whether the agent chose it, the rubric total at the time, **the targets that were live at the moment of choosing (`offered`) and why the rest were not (`blocked`, target → `guard`/`visits`/`steps`/`pruned`/`concluded`)**, whether the move bypassed the router entirely (`bypassed` — a `/back`, a rollback, or a research-round decision; these are counted but never enter the archive's edge observations, because nothing chose between anything), and the research round this visit closed (`closed_round`). The choice set cannot be reconstructed afterwards: re-evaluating a guard needs the workspace as it was at that moment. |
+| `stage_graph.json` | The walk. Top level: `path`, `route` (the visited slugs joined by `->`), `max_steps`, `max_visits`, `halted_because` and `halted_kind` — the last being what tells `--final-stage` (`pruned`, a completion) apart from a spent budget (`steps`/`visits`, a halt). Each visit in `path`: the stage, when it was entered and left, the move chosen out of it, its kind, the stated reason, what AutoR would have chosen, whether the agent chose it, the rubric total at the time, **the targets that were live at the moment of choosing (`offered`) and why the rest were not (`blocked`, target → `guard`/`visits`/`steps`/`pruned`/`concluded`)**, whether the move bypassed the router entirely (`bypassed` — a `/back`, a rollback, or a research-round decision; these are counted but never enter the archive's edge observations, because nothing chose between anything), and the research round this visit closed (`closed_round`). The choice set cannot be reconstructed afterwards: re-evaluating a guard needs the workspace as it was at that moment. |
 | `improvement_ledger.jsonl` | One row per measured round: stage, attempt, per-criterion scores, delta against the champion, the verdict (`first`, `promoted`, `frontier`, `regressed`, `directed`, `verdict_drift`), whether the draft was reverted, and the verdict digest. |
 | `routing_refusals.jsonl` | Every agent routing choice AutoR refused, why, and which edge it fell back to. |
 | `summary.json` | The settled champion score per stage. This is what the cross-run archive reads. |
@@ -376,18 +636,97 @@ See [Recursive Self-Improvement](self-improvement.md).
 | `figures/` | plots, diagrams, paper figures | Stage 06+ |
 | `report/` | `report.md` and `images/*.png` | Stage 07+ (markdown mode) |
 | `writing/` | `main.tex`, `sections/*.tex`, `.bib`, tables | Stage 07+ (latex mode) |
-| `artifacts/` | compiled PDF, `build_log.txt`, review JSON, packaged deliverables | Stage 07+ |
-| `reviews/` | readiness checklists, threats to validity, critique notes | Stage 08+ |
-| `notes/` | supporting notes, `hypothesis_manifest.json`, `preregistration.json` | — |
-| `bootstrap/` | `--paper-corpus` / `--project-root` scan output | — |
-| `profile/` | derived researcher profile and style notes | — |
+| `artifacts/` | compiled PDF, `build_log.txt`, `self_review.json`, `citation_verification.json`, `claim_provenance.json`, `deliverables_coverage.json`, the format's review JSON, packaged deliverables | Stage 07+ |
+| `reviews/` | readiness checklists, threats to validity, critique notes, the feature ledgers (`scorecard.*`, `effort.json`, `deliberations.json`, `comment_ledger.json`, `panel/`), `validity_review_*.json` / `validity_response_*.json` | Stage 08+ |
+| `notes/` | supporting notes, `report_plan.json`, `hypothesis_manifest.json`, `preregistration.json`, `experimental_protocol.json`, `research_rounds.json` | no directory gate; the individual files are gated from Stage 03 on |
+| `bootstrap/` | the `--project-root` scan, all of it: `project_state.json`, `experiment_inventory.json`, `writing_state.json`, `stage_assessments.json`, `scan_metadata.json`, `bootstrap_summary.md` | — |
+| `profile/` | the `--paper-corpus` scan — derived researcher profile and style notes: `research_profile.json`, `citation_neighborhood.json`, `style_profile.json`, `corpus_manifest.json`, `style_notes.md`, `bootstrap_summary.md` | — |
+
+The two scans do not share a directory. `--project-root` is the only writer of
+`bootstrap/`: `save_project_bootstrap` emits all six files there in one call,
+before the bootstrap stage runs. `--paper-corpus` writes nothing to
+`bootstrap/`; its whole output set goes to `profile/`, and it gets there a
+different way — `src/prompts/bootstrap.md` points the agent at
+`{{WORKSPACE_PROFILE_DIR}}` and asks it for `research_profile.json`,
+`citation_neighborhood.json`, `style_profile.json`, `style_notes.md` and
+`bootstrap_summary.md`, and `missing_bootstrap_profile_artifacts` then refuses
+to approve the bootstrap stage while any entry of `_REQUIRED_PROFILE_FILENAMES`
+is missing from `workspace/profile/`. Those two sets are not the same set:
+`_REQUIRED_PROFILE_FILENAMES` also holds `corpus_manifest.json`, which the
+prompt never mentions and which no live code path writes — `save_bootstrap_result`
+is its only writer and nothing outside the tests calls it. The gate is therefore
+holding the bootstrap stage on a file neither the prompt nor AutoR produces; when
+it refuses, it names the file in the refinement feedback, and that feedback is
+the only place the agent is ever asked for it. `bootstrap_summary.md` is the one
+filename both scans produce, each in its own directory.
+
+The "gated at" column says from which stage `validate_stage_artifacts` starts
+refusing a stage over that directory. Do not read it as one mechanism: only four
+of the rows are directory-level counts, and the rest check named files.
+
+- **Counted.** `data/` from Stage 03, `results/` from 05 and `figures/` from 06
+  fail when `count_in` finds no file carrying one of that category's suffixes
+  (`.json .jsonl .csv .tsv .parquet .yaml .yml` for data, plus `.npz`/`.npy` and
+  minus the YAML pair for results, `.png .pdf .svg .jpg .jpeg` for figures).
+  `reviews/` from 08 fails when the directory holds no file at all, of any
+  kind. Stages 03, 06 and 08 additionally require that at least one such file
+  was written during the current stage execution — the count alone would pass on
+  a file an earlier stage left behind.
+- **Named files, not a count.** `literature/` at Stage 01 is
+  `validate_literature_evidence` over `sources.json` and `claims.json`. A
+  directory holding fifty reading notes and neither of those two fails it, and
+  its errors are about IDs and cross-references, not about how much is there.
+- **Per-file existence, then freshness.** `report/`, `writing/` and `artifacts/`
+  at Stage 07+ are checked file by file rather than counted, and which files
+  depends on the output format: `report.md` and `report_review.json` in markdown
+  mode; `main.tex`, `sections/*.tex`, a bibliography, a compiled PDF,
+  `build_log.txt` and `layout_review.json` in latex mode;
+  `citation_verification.json` and `self_review.json` in both. Do not read that
+  as the whole set — further per-file gates hang off the same Stage 07 branches
+  (`claim_provenance.json` in both formats, `deliverables_coverage.json` in
+  markdown), and the `stage.number >= 7` branches of `validate_stage_artifacts`
+  are where the current list lives. Freshness is narrower still: at Stage 07
+  itself the files named in that branch's `stage7_required_files`, plus the PDF
+  and the section sources in latex mode, must be newer than the stage's start
+  marker. The bibliography is not among them, so one an earlier stage wrote
+  satisfies Stage 07.
+
+`results/` is the one row where both apply: the count, and `experiment_manifest.json`
+by name. Individual files inside a directory carry their own content gates on
+top of all this; those are the section below.
+
+A few more AutoR-written things live under `workspace/` and are not gates:
+
+- `writing/manifest.json`, rebuilt from the artifact index every time the
+  Stage 07 prompt is composed.
+- The `paper_package/` and `release_package/` bundles that Stage 07 (latex mode)
+  and Stage 08 emit into `writing/`, `artifacts/` and `reviews/`.
+- Under `--research-diagram`, a generated method illustration:
+  `report/images/method_overview.png` with a reference injected into `report.md`
+  in markdown mode, or `figures/method_overview.jpg` in latex mode. Skipped with
+  a log line rather than failing when the method section is too short to work
+  from.
+- Under `--fake-operator`, a set of stand-in files (`data/fake_dataset.json`,
+  `notes/autor_intro.md`, `reviews/readiness_review.json` and similar) that
+  exist only to exercise the gates locally. They are not part of a real run.
 
 ---
 
 ## Validated JSON files
 
-These are the files AutoR parses and rejects rather than merely counting. Each
-schema below is what the validator actually requires.
+Most of these AutoR parses and rejects rather than merely counting, and where a
+section names a validator, the schema below is what that validator actually
+requires. **A file's gate is not always a function named after it**, so do not
+read "no validator of its own" as "unchecked": `hypothesis_manifest.json` is
+refused from Stage 05 on by `validate_preregistration`, through the frozen
+preregistration derived from it. Where a file really is unchecked, its own
+section says so — `self_review.json` is gated on existence
+alone, and `deliberation_request.json` is read leniently and never refuses a
+stage. The feature ledgers — `scorecard.json` and
+`scorecard.md`, `effort.json`, `deliberations.json`, `comment_ledger.json`,
+`idea_pool.json` and everything under `panel/` — are written by AutoR and read
+back by AutoR, and have no validator at all; the field tables below describe
+what is written, not a contract anything enforces.
 
 ### `workspace/literature/sources.json`
 
@@ -482,6 +821,12 @@ as support, and what would count as refutation — stated before any experiment
 runs. A hypothesis with no decision rule cannot come out negative, which makes
 "falsifiable" a word rather than a property, and Stage 05 refuses the run.
 
+The gate is `validate_preregistration`, which runs from Stage 05 on and reaches
+this file three ways: it refuses a run that has no `hypothesis_manifest.json` at
+all, it refuses a frozen empirical hypothesis carrying no decision rule, and it
+compares `hypothesis_manifest_digest` of this file against the digest the
+[preregistration](#workspacenotespreregistrationjson) froze.
+
 ### `workspace/notes/research_rounds.json`
 
 Stages 03-06 form a **research round**: design, implement, experiment, analyse.
@@ -490,6 +835,7 @@ round.
 
 ```json
 {
+  "updated_at": "2026-03-30T18:52:10",
   "rounds": [
     {
       "round": 1,
@@ -499,8 +845,10 @@ round.
       "what_changes_next": "Tune both arms on a held-out development split and re-run.",
       "negative_result": false,
       "hypothesis_verdicts": {"H1": "refuted"},
+      "recorded_at": "2026-03-30T18:52:10",
       "acted_on": true,
-      "budget_note": ""
+      "budget_note": "",
+      "reopens_round": 0
     }
   ]
 }
@@ -512,6 +860,10 @@ round.
 | `refine_design` | same hypotheses, next round restarts at Stage 03 |
 | `new_hypothesis` | next round restarts at Stage 02; the preregistration records an amendment |
 | `abandon` | the run stops, and Stage 07 refuses to write up a question the run declared unanswerable |
+
+An abandonment is not permanent, but overruling it has to be said out loud: a
+later round sets `reopens_round: <N>` naming the abandoned round it overrules,
+and until something does, `validate_round_decision` refuses every stage past 06.
 
 There is no `continue`: a round that wants another one has to say what would
 change, because repeating a design without changing what it got wrong produces
@@ -540,8 +892,10 @@ Validated by `validate_round_decision` in
 ### `workspace/notes/preregistration.json`
 
 The hypothesis set, frozen. Written when Stage 04 is approved — design settled,
-code written, nothing measured — and again lazily at the start of Stage 05 for
-runs that arrive by resume, `--redo-stage`, or a `--project-root` bootstrap.
+code written, nothing measured — and again lazily on the way into any stage from
+05 on, for runs that arrive by resume, `--redo-stage`, or a `--project-root`
+bootstrap. `freeze_preregistration` never overwrites, so the second call on a
+run that already froze is a no-op.
 
 ```json
 {
@@ -556,11 +910,13 @@ runs that arrive by resume, `--redo-stage`, or a `--project-root` bootstrap.
 }
 ```
 
-`source_digest` hashes the statements and decision rules in
-`hypothesis_manifest.json`, deliberately ignoring the timestamp and the
-self-declared `status`. From Stage 06 on, a manifest whose digest no longer
-matches — a hypothesis edited after results existed — fails validation unless
-an amendment is on record.
+`source_digest` hashes the id, type, statement and decision rule of every entry
+in `hypothesis_manifest.json`, deliberately ignoring the timestamp and the
+self-declared `status` — rewriting Stage 02 without changing a statement is not
+tampering. From Stage 05 on — the same gate that requires the
+frozen file to exist at all — a manifest whose digest no longer matches, a
+hypothesis edited after results existed, fails validation unless an amendment is
+on record.
 
 Hypotheses may be revised. A rollback to Stage 02 is a legitimate reason, and
 re-running Stage 02 appends an `amendments` entry carrying the reason and the
@@ -600,6 +956,105 @@ any experiment runs, and enforced from Stage 05.
 
 Validated by `validate_experimental_protocol` in
 [`src/experimental_protocol.py`](../src/experimental_protocol.py).
+
+### `workspace/notes/report_plan.json`
+
+Which figures the report will carry, and which claim each one settles — chosen
+at Stage 03, before any result exists. The same discipline as the
+preregistration, applied to what the reader is shown: a figure set assembled at
+the end out of whatever the run happened to produce is evidence chosen after
+seeing it, one level up.
+
+```json
+{
+  "declared_at": "2026-03-30T13:05:41",
+  "digest": "9c1f0b7e...",
+  "no_figures_because": "",
+  "task_outputs": [
+    {"stated": "upper limits on the self-interaction coupling", "covered_by": "figure:1", "why_not": ""},
+    {"stated": "a mass exclusion band", "covered_by": "number:0", "why_not": ""}
+  ],
+  "amendments": [],
+  "figures": [
+    {
+      "slot": 1,
+      "filename": "coupling_limits.png",
+      "supports": ["H1"],
+      "shows": "95% CL coupling limit (GeV^-1) against ULB mass (eV), log-log, with the prior bound overlaid",
+      "if_supported": "our band sits below the prior bound across the whole mass range",
+      "if_refuted": "the two bands overlap and no improvement is visible",
+      "source_artifact": "results/coupling_scan.json",
+      "dropped_because": ""
+    }
+  ],
+  "headline_numbers": [
+    {"quantity": "best-fit coupling upper limit", "unit": "GeV^-1", "source_artifact": "results/coupling_scan.json"}
+  ]
+}
+```
+
+**AutoR owns the header, the agent owns the body.** `declared_at`, `digest` and
+`amendments` are written by `stamp_report_plan` and mirrored to
+[`report_plan_stamp.json`](#report_plan_stampjson); the validators ignore all
+three, because asking a language model for a sha256 is a wish rather than a
+gate. The agent writes `figures`, `headline_numbers`, `task_outputs` and
+`no_figures_because`.
+
+Three gates hang off it, deliberately at three different stages:
+
+| From | What it checks | Function |
+| --- | --- | --- |
+| Stage 03 | Shape — held at the stage that writes it, so a plan-less design is refused while the design can still change | `validate_report_plan` |
+| Stage 06 | Every live slot's and headline number's `source_artifact` resolves to a non-empty file, checked while a stage that could still compute it exists | `validate_report_plan_sources` |
+| Stage 07 (markdown only) | Every planned slot was published under `report/images/` **and** referenced from `report.md`, or dropped on the record | `validate_report_plan_coverage` |
+
+What the shape gate holds, and why each rule is shaped the way it is:
+
+- **Slots are a ranking.** They must be unique and contiguous from 1, so the
+  weakest figure is identifiable now rather than at export. `filename` is a bare
+  filename (it is the join key against the published report) and, in markdown
+  mode, must be `.png`.
+- **Every figure names a claim no other figure carries.** Cite an id from
+  `hypothesis_manifest.json`, or `exploratory:<slug>` for a question the run did
+  not preregister. This is the one rule that pushes the figure count *down*: a
+  run that cannot name a distinct claim for slot 5 has no slot 5. Nothing here
+  ever asks for *more* figures — the only count refusal is "more than
+  `MAX_REPORT_FIGURES`", and only in markdown mode, because that is a ceiling
+  and a gate that restated it as a goal would have turned it into a quota.
+- **`if_supported` must differ from `if_refuted`.** A figure whose two branches
+  are one sentence cannot come out either way, so it carries no claim. Trivially
+  defeated by inserting "not", and that is fine: the guard's job is to make the
+  empty move cost a written sentence and put it where a reviewer reads it.
+- **`source_artifact` is a workspace-relative path under `results/`, `data/` or
+  `outputs/`.** `notes/` is deliberately excluded — a figure computed from a
+  note is a figure computed from prose.
+- **The length floors** (40 characters on `shows`, 20 on each branch and on
+  `dropped_because`) are floors under *a sentence was written*, nothing more.
+  Whether a figure is a good figure is the reviewer's judgement; a gate that
+  tried to measure it would only be measuring length.
+- **A plan with no figures is unusual, not wrong** — three of the forty
+  ResearchClawBench tasks have no image criterion at all. Set
+  `no_figures_because` to the reason instead, in at least 40 characters.
+- **`dropped_because` records a slot abandoned once the results were in.** A
+  slot dropped in the same plan that declares it is refused: five slots with
+  four born dropped reads as a five-slot plan and commits to one.
+- **`headline_numbers` is required and capped at `MAX_HEADLINE_NUMBERS` (8).**
+  Each needs a `quantity`, a `unit` (`dimensionless` and `count` are units; an
+  empty string is not) and a `source_artifact`. A result the prose never puts a
+  number on is a result the reader has to take on trust; a list of everything
+  measured is not a set of headline numbers.
+- **`task_outputs`** answers the task description item by item — `covered_by` is
+  `figure:<slot>`, `number:<index>` (zero-based into `headline_numbers`),
+  `prose`, or `not_attempted` with a `why_not` of at least 20 characters. A
+  deliverable the task named and the report never mentions is the cheapest score
+  there is to lose. An empty `task_outputs` is refused outright.
+
+The Stage 07 gate also flags a lead figure the report first references beyond
+10,000 characters: the benchmark's scorer passes only `report_text[:10000]` when
+grading an image criterion, so the argument for the report's own highest-ranked
+figure would land outside what is read. Only the first slot is held to it.
+
+Written by [`src/report_plan.py`](../src/report_plan.py).
 
 ### `workspace/results/hypothesis_outcomes.json`
 
@@ -651,8 +1106,10 @@ wrong* — reads the run and files specific, checkable objections.
 
 ```json
 {
+  "generated_at": "2026-03-30T19:04:18",
   "reviewed_stage": "05_experimentation",
   "reviewer_failed": false,
+  "note": "",
   "findings": [
     {
       "id": "V1",
@@ -681,14 +1138,28 @@ an argument is a complete answer, and so is `accepted_limitation`. There is no
 `noted`. What is refused is silence, because a finding nobody responded to is
 indistinguishable in the run directory from one nobody raised.
 
-A reviewer that crashed records `reviewer_failed: true`. An empty finding list
-from a failed critique would read as "nothing wrong".
+`category` is one of ten named failure modes — `confound`, `weak_baseline`,
+`insufficient_replication`, `leakage`, `metric_cherry_picking`,
+`effect_within_noise`, `overclaim`, `unsupported_generalization`,
+`missing_ablation`, `irreproducible_procedure`. Naming them beats asking for
+"any problems": an open-ended critique reliably returns prose quality, which is
+not what is dangerous here. `severity` is `critical`, `major` or `minor`.
 
-**When `--review-panel` is on**, the panel's own Methodologist and Reviewer 2
-already cover these categories, so no second critic runs: the concerns still
-standing after the panel's final round *become* the findings, and the next stage
-owes them the same answer. A concern a member withdrew during deliberation was
-answered inside the panel and is not re-raised. What this adds on top of the
+A reviewer that crashed records `reviewer_failed: true`, and `note` carries
+what went wrong. An empty finding list from a failed critique would read as
+"nothing wrong" — though see [Limits](../README.md#limits): the flag is written
+and nothing currently reads it.
+
+**When a review panel left concerns standing**, those concerns *become* the
+findings and no second critic runs: `ValidityReviewer.review` calls
+`findings_from_panel` first and adopts its result whenever it is non-empty,
+because the panel's own Methodologist and Reviewer 2 already cover these
+categories and re-asking would pay for the same questions twice. Only the final
+round counts — a concern a member withdrew during deliberation was answered
+inside the panel and is not re-raised. The switch is the concerns, not the
+seating: a panel that finished unanimous with nothing on the record yields an
+empty list, and the separate adversarial critic then runs as it would with no
+panel at all, at the cost of one more backend call. What this adds on top of the
 panel is the part the panel does not have — an obligation on the **next** stage,
 in its own artifacts, rather than a decision at this one's gate.
 
@@ -712,15 +1183,19 @@ Stage 07's map from each claim in the manuscript to what established it.
 }
 ```
 
-A `confirmatory` claim requires a hypothesis whose verdict is `supported` — the
-run predicted it in advance and the evidence bore it out. Everything else is
-`exploratory`: permitted, often the most interesting part of a run, but it has
-to say so. A post-hoc finding presented as a confirmed prediction is the exact
-failure preregistration exists to prevent.
+`status` is `confirmatory` or `exploratory`, and there is no third value. A
+`confirmatory` claim requires a `hypothesis_id` that was preregistered **and**
+whose verdict is `supported` — the run predicted it in advance and the evidence
+bore it out. Everything else is `exploratory`: permitted, often the most
+interesting part of a run, but it has to say so. A post-hoc finding presented as
+a confirmed prediction is the exact failure preregistration exists to prevent.
 
-Validated by `validate_claim_provenance`.
+Every claim, whichever status, must cite at least one `evidence` path that
+resolves to a file in the run. The whole check is skipped when there is no
+frozen preregistration to compare against.
 
-Written by [`src/hypothesis_manifest.py`](../src/hypothesis_manifest.py).
+Written by Stage 07. Validated by `validate_claim_provenance` in
+[`src/preregistration.py`](../src/preregistration.py).
 
 ### `workspace/artifacts/citation_verification.json`
 
@@ -751,13 +1226,27 @@ The markdown deliverable, and the only Stage 07 output an automated research
 benchmark reads. Required at Stage 07+ in `markdown` mode, and required to be
 *fresh* — written during the Stage 07 execution that is asking for approval.
 
-Content requirements are enforced, not just existence: at least 1,200
-characters, no placeholder text, and at least one figure reference where every
-reference is report-relative, resolves to a real file under
-`workspace/report/`, and uses a format the report viewer can render
-(`.png .jpg .jpeg .gif .webp`). Figures live in `workspace/report/images/` and
-are referenced as `images/<name>.png`, with at most `MAX_REPORT_FIGURES` (5) published —
-a benchmark judge is shown only the first five it finds, in filesystem order.
+Content requirements are enforced, not just existence: at least
+`MIN_REPORT_CHARS` (1,200) characters, no placeholder text, and at least one
+figure reference where every reference is report-relative, resolves to a real
+file under `workspace/report/`, and uses a format the report viewer can render
+(`.png .jpg .jpeg .gif .webp`). A reference that climbs out of `report/` is
+refused even when it resolves on this machine: only `report/` travels to a
+benchmark workspace, so `../figures/x.png` is a link that works here and is
+broken everywhere the report is actually read.
+
+Figures live in `workspace/report/images/` and are referenced as
+`images/<name>.png`. The count of rendered files in that directory — not the
+count of references — is held between two bounds:
+
+- **at least `min_report_figures`**, the [run config](#run_configjson) field.
+  1 for an ordinary run, 3 under `rcb_agent.py`. One figure cannot answer more
+  than one question, and a report that under-illustrates forfeits the criteria
+  it never addresses.
+- **at most `MAX_REPORT_FIGURES` (5)**, because a benchmark judge is shown only
+  the first five it finds, in filesystem order. Filesystem order is not
+  alphabetical, so a sixth figure does not dilute the score, it randomises it —
+  the only way to choose the five is to publish no more than five.
 
 Validated by `validate_markdown_report` in [`src/utils.py`](../src/utils.py).
 
@@ -782,6 +1271,7 @@ each Stage 07 attempt and fed back into the next attempt's prompt.
     "unrenderable_images": 0,
     "non_png_images": 0,
     "unreferenced_images": 1,
+    "unplanned_images": 0,
     "figures_over_budget": 0,
     "total": 2
   },
@@ -799,21 +1289,39 @@ each Stage 07 attempt and fed back into the next attempt's prompt.
 
 Required: non-empty string `overall_status`; boolean `report_available`;
 integer `referenced_image_count`; object `issue_counts`; list `issues`; and
-`priority_fixes` as a list of non-empty strings.
+`priority_fixes` as a list of non-empty strings. AutoR writes `overall_status`
+as `clean` or `needs_attention`.
+
+`unplanned_images` counts figures under `report/images/` that are not slots in
+`report_plan.json` — advisory rather than a refusal, because the plan is
+amendable and a late figure that earns its slot is a legitimate move. Only
+checked once a plan exists.
 
 Validated by `validate_report_review` in
 [`src/writing_manifest.py`](../src/writing_manifest.py).
 
 ### `workspace/artifacts/layout_review.json`
 
-The `latex`-mode triage artifact.
+The `latex`-mode triage artifact, generated after each Stage 07 attempt by
+parsing the LaTeX build log.
 
 ```json
 {
-  "overall_status": "pass",
+  "generated_at": "2026-08-06T02:14:03",
+  "overall_status": "needs_attention",
   "pdf_available": true,
+  "pdf_relative_path": "workspace/writing/main.pdf",
+  "estimated_page_count": 9,
   "build_log_checked": true,
-  "issue_counts": { "overfull_hbox": 3, "missing_figure": 0 },
+  "build_log_relative_path": "workspace/artifacts/build_log.txt",
+  "issue_counts": {
+    "overfull_hboxes": 3,
+    "underfull_hboxes": 0,
+    "undefined_references": 0,
+    "undefined_citations": 1,
+    "missing_file_warnings": 0,
+    "total": 4
+  },
   "issues": [],
   "priority_fixes": ["Trim Section 4 to fit the 9-page limit."]
 }
@@ -821,16 +1329,19 @@ The `latex`-mode triage artifact.
 
 Required: non-empty string `overall_status`; booleans `pdf_available` and
 `build_log_checked`; object `issue_counts`; list `issues`; and
-`priority_fixes` as a list of non-empty strings.
+`priority_fixes` as a list of non-empty strings. AutoR writes `overall_status`
+as `clean` or `needs_attention`.
 
 Validated by `validate_layout_review` in
 [`src/writing_manifest.py`](../src/writing_manifest.py).
 
 ### `workspace/reviews/scorecard.json` and `scorecard.md`
 
-Written when a run finishes with any optional feature enabled. Reads every other ledger and
-says which features earned their cost — `keep`, `drop`, or `unproven` — plus the total extra
-model calls they spent.
+Written at the end of every **completed** run — not a halted or abandoned one,
+which stop before the completion path. Reads every other ledger and says which
+features earned their cost — `keep`, `drop`, or `unproven` — plus the total extra
+model calls they spent. A run with no optional feature enabled still gets the
+files; every feature just reads `not enabled`, and the terminal says nothing.
 
 `unproven` means the measurement could not run, and is deliberately not merged with `drop`. A
 ledger that exists but cannot be parsed is reported as unreadable rather than as a null result.
@@ -839,15 +1350,54 @@ See [Scorecard](scorecard.md).
 
 ### `workspace/reviews/effort.json`
 
-Written under `--effort-tiers`. Which tier each stage ran in, who chose it, why, and both
+Written when effort tiering is on — which is the **default**, since `--rigor`
+defaults to `standard` and `standard` turns `effort_tiers` on. `--rigor fast` or
+an explicit `--no-effort-tiers` is what leaves this file absent.
+
+Which tier each stage ran in, who chose it, why, and both
 directions of mis-spending: `promoted_after_failing` (ran cheap and should not have) and
 `deliberative_but_uncontested` (paid for ceremony nobody used).
 
 See [Effort Tiers](effort-tiers.md).
 
+### `workspace/notes/deliberation_request.json`
+
+Where an executing stage raises a crux. Not written by AutoR — the *agent*
+writes it mid-stage, when it hits a question whose answer is genuinely unclear
+and getting it wrong would invalidate work downstream.
+
+```json
+{
+  "question": "the specific question, answerable and decidable",
+  "why_it_matters": "what breaks downstream if this is wrong",
+  "already_considered": ["what you have already ruled out, and why"],
+  "working_answer": "your best answer right now, so the panel can disagree with it",
+  "help_wanted": "both"
+}
+```
+
+A bare object or a list of them is accepted, because this file is written by a
+model mid-stage and a malformed escalation should cost the escalation rather
+than the stage. Entries whose `question` is under `MIN_QUESTION_CHARS` (25) are
+dropped silently; `help_wanted` outside `perspectives` / `expertise` / `both`
+falls back to `both`. There is no gate — nothing refuses a stage for writing a
+bad one.
+
+**Unlinked once consumed.** `clear_requests` deletes the file as soon as the
+requests are read, so one crux is not deliberated twice. The stage is not
+blocked while the panel sits: it finishes with its working answer, and the
+resolution is handed back on the next pass. Reading it requires an active crux
+panel (`--deliberation`, or `--rigor thorough`/`max`) — with none seated the
+file is never read and never removed. The run-wide budget is
+`DEFAULT_MAX_DELIBERATIONS` (3).
+
+The resolutions land in `workspace/reviews/deliberations.json`. See
+[Raising a Crux](deliberation.md).
+
 ### `workspace/reviews/deliberations.json`
 
-Written when a stage raises a crux under `--deliberation`. Every question escalated, the
+Written when a stage raises a crux and a panel is seated to take it —
+`--deliberation`, or `--rigor thorough`/`max`. Every question escalated, the
 expert brief, each voice's position and self-objection, and the resolution with its falsifier
 and surviving dissent.
 
@@ -858,22 +1408,27 @@ See [Raising a Crux](deliberation.md).
 
 ### `workspace/reviews/comment_ledger.json`
 
-Written when a reviewer anchors its objections to quoted passages. One entry per review round,
-each holding the comments raised and — once the revision arrives — what happened to them.
+Written when a reviewer anchors its objections to quoted passages. `rounds` holds
+one entry per review round — the comments raised and, once the revision arrives,
+its `outcome`. `summary` aggregates across all rounds, and is the part worth
+reading:
 
-| Field | Meaning |
+| `summary` field | Meaning |
 | --- | --- |
+| `rounds` / `comments_raised` | How many anchored rounds ran, and how many comments they raised. |
 | `comments_addressed` | Quoted passages that actually changed. |
 | `comments_left_untouched` | Passages that did not, carried into the next round. |
 | `comments_quoting_absent_text` | Comments whose quote was not in the draft; dropped rather than sent on. |
 | `lines_changed_on_target` / `lines_changed_as_collateral` | Whether the revision stayed local. |
 | `collateral_ratio` | 0.0 for a targeted patch; 0.5 and up means the stage was rewritten, not patched. |
+| `verdict` | One sentence over the above. |
 
 See [Anchored Review Comments](stage-comments.md).
 
 ### `workspace/notes/idea_pool.json`
 
-Written only when `--ideation-panel` is active. The Stage 02 candidate pool, with every
+Written when the ideation panel is seated — `--ideation-panel`, or `--rigor
+thorough`/`max`, which turn it on without a flag. The Stage 02 candidate pool, with every
 proposal, which ones were folded in as restatements, their novelty/feasibility/relevance
 scores, and an `effect` block.
 
@@ -887,29 +1442,86 @@ See [Ideation Panel](ideation-panel.md).
 
 ### `workspace/reviews/panel/`
 
-Written only when `--review-panel` is active. Per gate, `<stage>_attempt_NN.json` and a
+Written when the review panel is seated — `--review-panel`, or `--rigor max`,
+the only level that includes it. Per gate, `<stage>_attempt_NN.json` and a
 readable `.md` hold every position from every round, including dissent that lost and any
 chair override.
 
 Alongside them, `panel_effect.json` accumulates the panel against its own single-pass
-baseline — the chair's round-1 verdict, which is one model, one call, no peer input:
+baseline — the chair's round-1 verdict, which is one model, one call, no peer input. It
+holds `gates`, the per-gate rows, and `summary`, which is where these live:
 
-| Field | Meaning |
+| `summary` field | Meaning |
 | --- | --- |
 | `gates_reviewed` | Gates the panel has judged this run. |
 | `gates_where_the_panel_changed_the_decision` | How often deliberation reached a different decision than the baseline. **If this stays 0, the panel is not earning its cost.** |
 | `gates_where_round_1_disagreed` | How often the seats were not already unanimous. |
 | `chair_overrides` | Approvals converted to refinements by a blocking objection. |
+| `panel_calls` / `single_pass_calls` | The two call counts the ratio below is built from. |
 | `cost_multiple` | Reviewer calls spent per single-pass call. |
 | `verdict` | One plain sentence, written to be unflattering when that is the truth. |
 
 See [Review Panel](review-panel.md) for the pre-registered evidence this measurement exists
 to answer.
 
+### `workspace/artifacts/deliverables_coverage.json`
+
+Did the run answer what the task statement actually demanded? Everything else
+about Stage 07 measures how well the report was *made*; this measures whether it
+answered the question. Required at Stage 07+ in `markdown` mode.
+
+Observed on ResearchClawBench `Astronomy_000`. The task asked for upper limits
+on masses **and self-interaction coupling strengths**; the run produced a
+rigorous mass exclusion band and never reported a coupling limit. Its own rubric
+scored 1.000, and the criterion asking for the coupling constant — half the
+task's weight — scored 25/100. Nothing in the pipeline was comparing the report
+against the ask.
+
+```json
+{
+  "deliverables": [
+    {
+      "task_quote": "derive statistically rigorous upper limits on ULB masses",
+      "addressed": true,
+      "where": "Section 4: Mass Exclusion"
+    },
+    {
+      "task_quote": "and self-interaction coupling strengths",
+      "addressed": false,
+      "reason": "the available spectra do not constrain the coupling at any mass we can probe"
+    }
+  ]
+}
+```
+
+Four checks, all of them things a machine can settle:
+
+- **`task_quote` must be a verbatim span of the task statement** (whitespace
+  collapsed, case-insensitive). Without this, a stage can restate the
+  requirement as something it already did and mark it answered.
+- **Every demanding sentence in the task statement must be spoken to by some
+  quote.** A "demanding sentence" is one of at least 25 characters carrying a
+  verb from `DEMAND_VERBS` (34 of them: `derive`, `compute`, `compare`,
+  `constrain`, `evaluate`, …). Overlap is scored on content words at a 34%
+  threshold rather than exact containment, so a stage may legitimately quote the
+  clause instead of the whole sentence.
+- **`addressed: true` needs a `where` that actually appears in `report.md`.**
+  Deliberately loose — a section title, a figure filename, a heading all count.
+  The point is that the pointer is not fabricated, not that it follows a format.
+- **`addressed: false` needs a `reason`.** Reporting a requirement as unmet is a
+  valid outcome. Omitting it is not.
+
+What the gate deliberately does not do is judge whether the answer is *correct*.
+That is the same line every other AutoR validator holds.
+
+Validated by `validate_deliverables_coverage` in
+[`src/deliverables.py`](../src/deliverables.py), against the verbatim text of
+`user_input.txt`.
+
 ### `workspace/artifacts/self_review.json`
 
-Required to exist at Stage 07+. Its contents are not schema-validated, so its
-shape is up to the writing stage.
+Required to exist at Stage 07+, in both output formats. Its contents are not
+schema-validated, so its shape is up to the writing stage.
 
 ### `workspace/artifacts/build_log.txt`
 
@@ -938,7 +1550,11 @@ it loses the Studio's project groupings; the runs themselves are unaffected.
 ## Practical notes
 
 - **A run directory is self-contained.** Copy or archive `runs/<run_id>/` and
-  you have the whole record.
+  you have the whole record. Two things live outside it and neither is needed to
+  read a run: the Studio's project index at `<repo>/.autor/projects.json`, and
+  the cross-run topology archive at `~/.autor/archive` (`runs.jsonl`,
+  `variants.json`), which records this run's route and fitness so *other* runs
+  can be compared against it. `--archive PATH` moves the latter.
 - **`runs/` is gitignored.** Runs are outputs, not source. Archive them
   yourself if you need them.
 - **`--runs-dir` is resolved relative to the repository root.** Point it at a
@@ -946,37 +1562,3 @@ it loses the Studio's project groupings; the runs themselves are unaffected.
   checkpoints gets big.
 - **Read `logs.txt`, then `logs_raw.jsonl`, then `prompt_cache/`.** That is
   the fastest path from "the output is wrong" to "here is why".
-
-## `review_policy.json`
-
-The standing rules the approval gate has learned during this run. Written by
-[`src/review_policy.py`](../src/review_policy.py) whenever the reviewer demands a
-correction, and injected into every subsequent review prompt.
-
-```json
-{
-  "version": 1,
-  "rules": [
-    {
-      "rule_id": "R001",
-      "text": "The design lacks a stated power analysis and the sample size is unjustified.",
-      "origin_stage": "03_study_design",
-      "origin_attempt": 2,
-      "source": "refinement"
-    }
-  ]
-}
-```
-
-| Field | Meaning |
-| --- | --- |
-| `rule_id` | Stable identifier, referenced in the review prompt and the run log. |
-| `text` | The correction verbatim, as the reviewer worded it. |
-| `origin_stage` / `origin_attempt` | Which review produced the rule. This is what makes the mechanism auditable rather than assertable. |
-| `source` | `refinement` for a demanded correction, `rollback` for an approval that later proved wrong. Rollbacks are rendered first in the prompt. |
-
-Absent until the first correction is recorded. Approvals teach nothing and are not
-recorded. Rules are deduplicated on normalized text (casing, punctuation and stage numbers
-collapse) and the set is capped, so a reviewer restating one complaint cannot inflate it.
-A corrupt file is treated as an empty policy: the gate falls back to baseline strictness
-rather than taking the run down.

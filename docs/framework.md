@@ -308,7 +308,7 @@ The chain that runs unconditionally at every rigor level, `fast` included:
 | Stage 06+ | Exactly one verdict per frozen hypothesis, nothing unpreregistered adjudicated, every `supported`/`refuted` verdict citing an evidence file that exists | `validate_hypothesis_outcomes` |
 | Stage 06+ | A verdict carries `n_seeds`, a `dispersion_type` from a fixed vocabulary, and a written justification if a single seed settled it | `validate_outcome_statistics` |
 | Stage 06 close | `converged` is refused when nothing came out supported, unless the round declares `negative_result: true` | `validate_round_decision` |
-| Stage 06→07 edge | The router keeps writing closed until every empirical id has a verdict and a figure exists | `_guard_validity_chain` |
+| Stage 06→07 edge | The move into Writing is taken off the agent's menu until every empirical id has a verdict and a figure exists — a routing preference, not the gate; see below | `_guard_validity_chain` |
 | Stage 07+ | Every manuscript claim is `confirmatory` on a `supported` hypothesis, or labelled `exploratory` — and cites a file that exists | `validate_claim_provenance` |
 | Stage 07 | The report answers every demanding sentence of the task statement, quoting the task verbatim | `validate_deliverables_coverage` |
 
@@ -439,12 +439,23 @@ Many systems ask a model to state hypotheses before experimenting. AutoR makes t
 echoed into the outcomes file at Stage 06, and `validate_hypothesis_outcomes` refuses a run that
 adjudicates something not in the frozen set, omits something that is, or cites an evidence path that
 does not resolve. Changing the set later is legal, but only as an `amendment` row carrying
-`previous_digest`. A dropped hypothesis leaves a trace; it cannot be silently deleted.
+`previous_digest`, so a dropped hypothesis leaves a trace on the path the run is meant to take.
+It is not tamper-proof, and §7 says how far short it falls.
 
 The distinctive part is not the freeze — it is the **chain**: freeze at 04, adjudicate at 06 against
 a file that exists, trace every manuscript claim at 07 to a `supported` hypothesis or an explicit
-`exploratory` label, and close the router edge into writing until all of that holds. Each link is a
-function that returns problems, and a run cannot advance while any of them does.
+`exploratory` label. Each link is a function that returns problems, and a run cannot be *approved*
+while any of them does.
+
+Be precise about which of those refusals is load-bearing, because the router's is not.
+`_guard_validity_chain` takes the move into Writing off the agent's menu, but `StageGraph.default_move`
+returns a guard-blocked advance edge anyway with `last_resort=True` — its own docstring is titled
+"When nothing is live, the forward edge is taken anyway", and `router.py` says in a comment that "a
+guard is a routing preference, not a correctness gate". So a run nobody is steering, or one whose
+routing answer was refused, still arrives at Stage 07 with hypotheses unadjudicated. What stops it
+there is `validate_stage_artifacts`, which refuses the stage. That is the design — §3.2's third
+property is exactly this, and halting instead would throw the evidence away — but a document that
+said the edge "stays shut" would be describing a stronger system than the one in the tree.
 
 We are not aware of another agentic research harness in which the post-hoc hypothesis is refused by a
 validator rather than discouraged by a prompt.
@@ -463,8 +474,16 @@ an assertion, so there is no gradient toward a nicer conclusion. And it is backe
 independent guard: `verdict_digest()` hashes the `(id, verdict)` set, and an AutoR-initiated polish
 round that moves it is rejected outright with a `verdict_drift` row — whatever it scored.
 
-The pairing is the point. Verdict-blindness removes the *incentive* to improve the answer; drift
-rejection removes the *possibility*. A revision a **human** asked for is exempt by design: the
+The pairing is the point, with one limit worth stating rather than glossing. Verdict-blindness
+removes the *incentive* to improve the answer; drift rejection removes the *reward* — the round is
+refused and a `verdict_drift` row is written. It does not undo the edit: `_revert` copies the
+champion markdown back over the draft and touches nothing else, so a polish round that rewrote
+`hypothesis_outcomes.json` leaves it rewritten, and the promoted summary and the outcomes file end
+up disagreeing. Detection is real; restoration is not implemented. Nor is the exemption human-only —
+`consider` returns "directed" for any attempt with `is_polish_round=False`, and the manager sets
+that for a *reviewer's* decision as well as a human's, its own comment reading "a human or reviewer
+decision". Unattended, the reviewer is a model, so a model-directed revision can move a verdict
+without meeting the drift check at all. A revision a **human** asked for is exempt by design: the
 ratchet governs AutoR's own rounds, not the direction it is given.
 
 ### 5.3 Machinery that reports on itself, in the unflattering direction
@@ -891,6 +910,25 @@ any.
   benchmark score. It is not enough to quantify the relationship, and it does not establish that the
   rubric is measuring nothing: rigour and rubric-coverage are different objectives, and §2.4 chose
   the first deliberately. What it does establish is that the second is not a corollary of the first.
+- **The freeze can be reset, not just edited.** `_build_stage_prompt` calls
+  `_freeze_preregistration` unconditionally for every stage from 05 on, and `freeze_preregistration`
+  writes a fresh freeze from the current manifest whenever `preregistration.json` is absent — with
+  `amendments: []`. `_amend_preregistration` early-returns when the file is gone, so no amendment is
+  ever considered. Both files live under the agent's own `workspace/notes/`, so deleting the freeze
+  and rewriting the manifest yields a clean, unamended preregistration for a different hypothesis
+  set, and every downstream validator passes. The only residue is a second `preregistration frozen`
+  line in a log no validator reads.
+- **A rejected polish round is not undone, only refused.** `_revert` restores the champion stage
+  summary and nothing else, so a round that rewrote `hypothesis_outcomes.json` and was rejected for
+  `verdict_drift` leaves the new verdicts on disk, disagreeing with the summary that was promoted.
+- **The drift check exempts a reviewer, not just a human.** `consider` returns "directed" whenever
+  `is_polish_round` is false, and the manager sets that for a reviewer's decision as well as a
+  person's. Unattended — the only mode the benchmark uses — the reviewer is a model, so a
+  model-directed revision can move a verdict without meeting the check.
+- **The router does not close the edge into Writing.** `_guard_validity_chain` removes it from the
+  agent's menu, but `default_move` takes a guard-blocked advance as a last resort. The refusal that
+  actually stops an unadjudicated Stage 07 is `validate_stage_artifacts`. This is deliberate — see
+  §5.4 — but it means "the graph will not let you write up" is the wrong mental model.
 - **The frozen preregistration is not checked against itself.** `validate_preregistration` compares
   the *manifest's* digest to the recorded `source_digest`; it never recomputes the digest of the
   frozen file. Editing `preregistration.json` in place passes. The honest claim is that a manifest
