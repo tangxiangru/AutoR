@@ -136,6 +136,14 @@ Rules:
   whether a reader can accept it from a number in the prose or needs to see it. Only the
   second kind gets a slot. A question no slot settles is one the prose has to carry alone, and
   that is often correct.
+- `task_outputs` answers the task description item by item. Read what the task says it
+  wants — many task descriptions carry a literal `Outputs:` sentence naming the constraints,
+  comparisons, distributions or tables expected — and list each one, with what in this plan
+  produces it: `figure:<slot>`, `number:<index>`, `prose`, or `not_attempted` with a reason.
+  This is the closest thing to a specification of the deliverable that exists, and a
+  deliverable the task named which the report never mentions is the cheapest thing there is
+  to lose. Splitting it finely is better than one line saying "everything".
+
 - Do not write `declared_at`, `digest` or `amendments` — the workflow manager stamps those on
   approval, and a later round amends this file rather than rewriting it.
 - **Produce no figure files at this stage.** This is a plan. The figures are drawn at Stage 06,

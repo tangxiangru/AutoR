@@ -209,6 +209,10 @@ class IdeaPool:
                 distinct=len(distinct),
                 added=len(added),
                 calls=self.proposer_calls,
+                unreachable=len(self.unreachable),
+                seated=len(self.unreachable) + len(self.abstentions) + len(
+                    {c.proposer for c in self.candidates}
+                ),
                 adoption_measured=self.adoption_measured,
                 adopted=sum(1 for c in distinct if c.adopted),
                 adopted_from_others=sum(1 for c in added if c.adopted),
@@ -230,6 +234,8 @@ def _pool_verdict(
     distinct: int,
     added: int,
     calls: int,
+    unreachable: int = 0,
+    seated: int = 0,
     adoption_measured: bool = False,
     adopted: int = 0,
     adopted_from_others: int = 0,
@@ -242,8 +248,23 @@ def _pool_verdict(
     speculative candidates that require expert validation". Until Stage 02 has actually been
     approved this can only report the first claim, and it says which one it is making.
     """
+    # ``unreachable`` being truthy already carries the "at least one seat" case, so a
+    # missing ``seated`` (older records predate the count) still reads as a total outage
+    # rather than being silently downgraded.
+    if unreachable and unreachable >= seated:
+        return (
+            f"No proposer could be reached ({unreachable} of {seated} failed); the panel "
+            "never sat. The stage proceeds without a pool, and this run says nothing about "
+            "whether widening the candidate pool helps — it was never tried."
+        )
+
     if distinct == 0:
-        return "No candidate hypotheses survived; the stage proceeds without a pool."
+        reached = (
+            f" {unreachable} of {seated} proposer(s) could not be reached." if unreachable else ""
+        )
+        return (
+            "No candidate hypotheses survived; the stage proceeds without a pool." + reached
+        )
 
     if added == 0:
         widened = (

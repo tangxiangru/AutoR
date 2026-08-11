@@ -197,6 +197,46 @@ class HeadlineNumber:
         }
 
 
+#: How a stated deliverable is accounted for. ``not_attempted`` is a real
+#: answer — a task can ask for something the data cannot support — but it has
+#: to be said rather than left out.
+COVERAGE_KINDS = ("figure", "number", "prose", "not_attempted")
+
+
+@dataclass(frozen=True)
+class TaskOutput:
+    """One deliverable the task asked for, and what in this plan produces it.
+
+    The task description is the only statement of what the run is for that the
+    run can read, and it is routinely explicit: 22 of the 40 ResearchClawBench
+    tasks carry a literal ``Outputs:`` sentence naming the constraints, the
+    comparisons and the distributions the study is expected to produce. Where a
+    deliverable is graded, that sentence is the closest thing to the grading
+    criteria that the run is allowed to see — the criteria themselves live with
+    the target study, which the run has no access to and must not be shown.
+
+    Reading it and answering it item by item is therefore the cheapest coverage
+    available, and nothing was doing it: the description reached every stage as
+    an undifferentiated goal blob.
+    """
+
+    stated: str
+    covered_by: str
+    why_not: str = ""
+
+    def to_dict(self) -> dict[str, str]:
+        return {"stated": self.stated, "covered_by": self.covered_by, "why_not": self.why_not}
+
+    @property
+    def kind(self) -> str:
+        return self.covered_by.split(":", 1)[0].strip().casefold()
+
+    @property
+    def target(self) -> str:
+        _, _, rest = self.covered_by.partition(":")
+        return rest.strip()
+
+
 @dataclass(frozen=True)
 class ReportPlan:
     figures: list[PlannedFigure]
@@ -206,6 +246,8 @@ class ReportPlan:
     #: Why this study's report carries no figure. Required only when ``figures``
     #: is empty, which three of the forty benchmark tasks genuinely are.
     no_figures_because: str = ""
+    #: Every deliverable the task description states, and what produces it.
+    task_outputs: list[TaskOutput] = field(default_factory=list)
     amendments: list[dict[str, str]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, object]:
@@ -213,6 +255,7 @@ class ReportPlan:
             "declared_at": self.declared_at,
             "digest": self.digest,
             "no_figures_because": self.no_figures_because,
+            "task_outputs": [item.to_dict() for item in self.task_outputs],
             "amendments": [dict(item) for item in self.amendments],
             "figures": [item.to_dict() for item in self.figures],
             "headline_numbers": [item.to_dict() for item in self.headline_numbers],
@@ -289,6 +332,15 @@ def load_report_plan(paths: RunPaths) -> ReportPlan | None:
         declared_at=_text(payload.get("declared_at")),
         digest=_text(payload.get("digest")),
         no_figures_because=_text(payload.get("no_figures_because")),
+        task_outputs=[
+            TaskOutput(
+                stated=_text(item.get("stated")),
+                covered_by=_text(item.get("covered_by")),
+                why_not=_text(item.get("why_not")),
+            )
+            for item in _entries(payload, "task_outputs")
+            if isinstance(item, dict)
+        ],
         amendments=[dict(item) for item in _entries(payload, "amendments") if isinstance(item, dict)],
     )
 
@@ -408,6 +460,8 @@ def stamp_report_plan(paths: RunPaths, reason: str = "initial declaration") -> R
         stamped = ReportPlan(
             figures=plan.figures,
             headline_numbers=plan.headline_numbers,
+            no_figures_because=plan.no_figures_because,
+            task_outputs=plan.task_outputs,
             declared_at=declared_at,
             digest=current,
             amendments=amendments,
@@ -416,6 +470,8 @@ def stamp_report_plan(paths: RunPaths, reason: str = "initial declaration") -> R
         stamped = ReportPlan(
             figures=plan.figures,
             headline_numbers=plan.headline_numbers,
+            no_figures_because=plan.no_figures_because,
+            task_outputs=plan.task_outputs,
             declared_at=declared_at or _now(),
             digest=current,
             amendments=amendments,
@@ -424,6 +480,8 @@ def stamp_report_plan(paths: RunPaths, reason: str = "initial declaration") -> R
         stamped = ReportPlan(
             figures=plan.figures,
             headline_numbers=plan.headline_numbers,
+            no_figures_because=plan.no_figures_because,
+            task_outputs=plan.task_outputs,
             declared_at=declared_at or _now(),
             digest=current,
             amendments=[
@@ -513,6 +571,61 @@ def _allowed_figure_suffixes(output_format: str) -> set[str]:
     return set(FIGURE_SUFFIXES)
 
 
+def _task_output_problems(plan: "ReportPlan") -> list[str]:
+    """Every deliverable the task states is answered by something in the plan.
+
+    Structural only. Whether the agent read the task description correctly is a
+    review question — a gate cannot know what the description said without
+    parsing prose, and a gate that guessed would refuse correct plans. What it
+    can hold is that each stated deliverable was answered, that the answer
+    points at something that exists, and that a deliverable being skipped is
+    written down rather than dropped.
+    """
+    problems: list[str] = []
+    if not plan.task_outputs:
+        return [
+            "report_plan.json has no `task_outputs`. Read the task description, list every "
+            "deliverable it states — the constraints, comparisons, distributions or tables it "
+            "asks for — and say for each one what in this plan produces it. A deliverable the "
+            "task named and the report never mentions is the cheapest score there is to lose."
+        ]
+
+    slots = {item.slot for item in plan.figures}
+    numbers = range(len(plan.headline_numbers))
+    for index, output in enumerate(plan.task_outputs, start=1):
+        label = output.stated[:60] or f"task output {index}"
+        if not output.stated.strip():
+            problems.append(f"report_plan.json task output {index} states nothing.")
+            continue
+        if output.kind not in COVERAGE_KINDS:
+            problems.append(
+                f"report_plan.json task output {label!r} has covered_by "
+                f"{output.covered_by!r}; expected one of "
+                + ", ".join(f"`{kind}`" for kind in COVERAGE_KINDS)
+                + " (figure and number take a target, as `figure:1` or `number:0`)."
+            )
+            continue
+        if output.kind == "figure":
+            if not output.target.isdigit() or int(output.target) not in slots:
+                problems.append(
+                    f"report_plan.json task output {label!r} is covered by figure slot "
+                    f"{output.target!r}, which this plan does not declare."
+                )
+        elif output.kind == "number":
+            if not output.target.isdigit() or int(output.target) not in numbers:
+                problems.append(
+                    f"report_plan.json task output {label!r} is covered by headline number "
+                    f"{output.target!r}, which this plan does not declare."
+                )
+        elif output.kind == "not_attempted" and len(output.why_not.strip()) < MIN_BRANCH_CHARS:
+            problems.append(
+                f"report_plan.json leaves task output {label!r} unattempted without saying "
+                f"why, in at least {MIN_BRANCH_CHARS} characters. Not attempting something the "
+                "task asked for is a legitimate call and a reader has to be told it was a call."
+            )
+    return problems
+
+
 def validate_report_plan(
     paths: RunPaths,
     output_format: str = DEFAULT_OUTPUT_FORMAT,
@@ -542,6 +655,8 @@ def validate_report_plan(
     #: field. False means the plan is still being declared — the first Stage 03
     #: that writes it, or a re-attempt of that stage.
     declared = recorded_report_plan_stamp(paths) is not None
+
+    problems.extend(_task_output_problems(plan))
 
     if not figures:
         # A plan with no figures is unusual, not wrong. Measured over the 40

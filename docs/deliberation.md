@@ -114,8 +114,73 @@ panel asked it writes essays.
 
 Every position from every voice is kept, including the ones the resolution rejected.
 
+## A crux asked twice is one crux
+
+The same live run put the **identical** question to the panel on two consecutive attempts of
+one stage — byte-for-byte the same string, four voice calls each, and `cruxes_raised: 2`.
+
+The cause is structural, not a model quirk. A stage that fails its gate is sent back with the
+state it already had, regenerates its escalation from that state, and asks the same thing
+again. With the default `--max-deliberations 3` the budget is gone after three attempts of a
+single stage, and a genuinely new crux in Stage 04 is then refused.
+
+So before deliberating, the ledger is checked for the same question:
+
+- **Already answered** → the stored answer is handed straight back. No panel, no budget, no
+  second entry in the ledger. Re-asking a settled question is the stage failing to notice it
+  has the answer, not the run needing more thinking.
+- **Asked before but never answered** → the panel is called again. A panel that could not be
+  reached last time may be reachable now, and one outage should not permanently silence a crux.
+
+`REPEAT_THRESHOLD` is 0.6, calibrated against real questions rather than guessed:
+
+| Pair | Similarity |
+|:---|---:|
+| verbatim re-escalation across attempts *(the observed failure)* | 1.00 |
+| paraphrase of the same question | 0.34 |
+| narrowed follow-up that builds on the answer — a **new** crux | 0.21 |
+| a different crux from the same stage | 0.06 |
+
+0.6 sits well above the paraphrase, deliberately. Suppressing a deliberation the agent actually
+needed costs correctness; re-arguing a paraphrase costs four calls. **The threshold is set to
+fail in the cheap direction**, which means a heavy paraphrase will still be re-argued.
+
+## When no voice answers
+
+A panel that could not be convened and a panel that convened and added nothing are different
+outcomes, and for one live run they were reported with the same sentence.
+
+Vertex had exhausted the quota for the reviewer's base model while the run's own operator sat
+on a different, healthy one. All four voices failed. The ledger said:
+
+> 1 crux(es) escalated at 4 calls; no working answer was offered to compare against.
+
+**That is false.** The agent's `working_answer` was a thousand characters long. What was
+missing was the panel. Reading only the summary would send someone to tighten the escalation
+prompt — fixing a problem that does not exist, while the outage goes unnoticed.
+
+So the ledger now separates the two:
+
+| Situation | What the verdict says |
+|:---|:---|
+| Every voice failed, every crux | *not one panel could be convened … it was never tried* |
+| Every voice failed on some cruxes | *N never reached a panel … the remaining M are the only ones this run can speak to* |
+| Some voices failed, the panel still sat | the ordinary verdict, plus the unreachable count |
+| No voice failed, no answer emerged | unchanged — this is a real outcome |
+
+The distinction the code turns on is `all` versus `any`. *Every* voice failing means no panel;
+*a* voice failing means a smaller panel that still deliberated, and writing that off would
+subtract a real result from the evidence.
+
+The run is **not** stopped. Deliberation is an optional aid and a stage keeping its own answer
+is legitimate degradation — unlike a stage operator that cannot be reached, where the run has
+no findings at all and [stops](backend-health.md). The requirement here is visibility, not
+refusal.
+
 ## Limits worth knowing
 
+- **A dead panel is silent unless you read the ledger.** The run completes and the report is
+  real research; only `deliberations.json` records that no crux was ever argued.
 - **The agent chooses what is hard, and it may choose badly.** It can escalate a question it
   had already settled, or fail to escalate the one that mattered. The `confirmed` count catches
   the first; nothing catches the second.

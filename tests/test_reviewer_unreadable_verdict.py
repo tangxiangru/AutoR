@@ -19,6 +19,9 @@ from unittest.mock import patch
 from src.approval_agent import CLOSING_VERDICT_INSTRUCTION, DECISION_TO_CHOICE, UNSUPPORTED_REASON, UNREADABLE_REASON, AutomatedReviewer, ReviewDecision
 from src.terminal_ui import TerminalUI
 from src.utils import STAGES, build_run_paths, ensure_run_layout, write_text
+from src.approval_agent import DECISION_TO_CHOICE, UNSUPPORTED_REASON, UNREADABLE_REASON, AutomatedReviewer, ReviewDecision
+from src.terminal_ui import TerminalUI
+from src.utils import STAGES, build_run_paths, ensure_run_layout
 
 GOOD = '{"decision": "approve", "reason": "Artifacts check out."}'
 PROSE = "I reviewed the draft and the artifacts. Everything looks broadly reasonable."
