@@ -39,8 +39,14 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any, Callable
 
+from .deliberation import LEDGER_FILENAME as DELIBERATIONS_FILENAME
+from .effort import LEDGER_FILENAME as EFFORT_FILENAME
+from .ideation_panel import IDEA_POOL_FILENAME
+from .review_panel import PANEL_EFFECT_FILENAME
+from .stage_comments import COMMENT_LEDGER_FILENAME
 from .utils import RunPaths, read_text, write_text
 
 
@@ -117,11 +123,18 @@ class Scorecard:
 # ---------------------------------------------------------------------------
 
 
-def _load(paths: RunPaths, filename: str) -> tuple[dict[str, Any] | None, bool]:
-    """Return (payload, readable). A missing file is not the same as a broken one."""
-    path = paths.reviews_dir / filename
-    if not path.exists():
-        path = paths.notes_dir / filename
+def _load(paths: RunPaths, locate: Callable[[RunPaths], Path]) -> tuple[dict[str, Any] | None, bool]:
+    """Return (payload, readable). A missing file is not the same as a broken one.
+
+    ``locate`` rather than a filename plus a search, because the search was wrong and had no
+    way to say so. It looked in ``reviews_dir`` then ``notes_dir``; ``record_panel_effect``
+    writes to ``reviews_dir/panel/``, which is neither, so on every real ``--review-panel``
+    run this reported the panel ``unused`` -- "Not enabled on this run." -- while its ledger
+    sat on disk saying the panel had changed two of three gate decisions. A guessed location
+    degrades into a false negative shaped exactly like a feature nobody switched on, which is
+    the confusion this module's docstring exists to refuse.
+    """
+    path = locate(paths)
     if not path.exists():
         return None, True
     try:
@@ -137,10 +150,11 @@ def _report(
     name: str,
     flag: str,
     filename: str,
+    locate: Callable[[RunPaths], Path],
     paths: RunPaths,
     assess: Callable[[dict[str, Any]], tuple[str, str, int | None]],
 ) -> FeatureReport:
-    payload, readable = _load(paths, filename)
+    payload, readable = _load(paths, locate)
     if not readable:
         return FeatureReport(
             key=key, name=name, flag=flag, verdict=UNREADABLE, ledger=filename,
@@ -238,17 +252,28 @@ def _assess_effort(payload: dict[str, Any]) -> tuple[str, str, int | None]:
 
 
 #: Every optional feature that measures itself, and how to read its verdict.
+#: Each feature names its own ledger path. The filenames come from the producing modules
+#: rather than from literals here, so a rename moves both ends at once; the *directory* is
+#: the half that drifted, so it is spelled out per feature -- four of the five agree and the
+#: fifth does not.
 FEATURES: tuple[dict[str, Any], ...] = (
     {"key": "review_panel", "name": "Review panel", "flag": "--review-panel",
-     "filename": "panel_effect.json", "assess": _assess_review_panel},
+     "filename": PANEL_EFFECT_FILENAME, "assess": _assess_review_panel,
+     # `record_panel_effect` writes beside the per-gate transcripts, one directory down.
+     # This is the one that was being looked for a level too high.
+     "locate": lambda p: p.reviews_dir / "panel" / PANEL_EFFECT_FILENAME},
     {"key": "ideation_panel", "name": "Ideation panel", "flag": "--ideation-panel",
-     "filename": "idea_pool.json", "assess": _assess_ideation},
+     "filename": IDEA_POOL_FILENAME, "assess": _assess_ideation,
+     "locate": lambda p: p.notes_dir / IDEA_POOL_FILENAME},
     {"key": "anchored_comments", "name": "Anchored review comments", "flag": "(automatic)",
-     "filename": "comment_ledger.json", "assess": _assess_comments},
+     "filename": COMMENT_LEDGER_FILENAME, "assess": _assess_comments,
+     "locate": lambda p: p.reviews_dir / COMMENT_LEDGER_FILENAME},
     {"key": "deliberation", "name": "Crux deliberation", "flag": "--deliberation",
-     "filename": "deliberations.json", "assess": _assess_deliberation},
+     "filename": DELIBERATIONS_FILENAME, "assess": _assess_deliberation,
+     "locate": lambda p: p.reviews_dir / DELIBERATIONS_FILENAME},
     {"key": "effort_tiers", "name": "Effort tiers", "flag": "--effort-tiers",
-     "filename": "effort.json", "assess": _assess_effort},
+     "filename": EFFORT_FILENAME, "assess": _assess_effort,
+     "locate": lambda p: p.reviews_dir / EFFORT_FILENAME},
 )
 
 
