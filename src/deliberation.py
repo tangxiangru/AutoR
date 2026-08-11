@@ -39,6 +39,7 @@ from .utils import (
     RunPaths,
     StageSpec,
     append_log_entry,
+    goal_excerpt,
     read_text,
     truncate_text,
     write_text,
@@ -490,7 +491,7 @@ class CruxPanel:
             + (f"# The Agent's Working Answer\n\n{request.working_answer}\n\n" if request.working_answer else "")
             + (f"# Expert Brief\n\n{brief}\n\n" if brief else "")
             + "# Research Goal\n\n"
-            f"{truncate_text(_excerpt(paths.user_input), max_chars=3000)}\n\n"
+            f"{goal_excerpt(_excerpt(paths.user_input), max_chars=3000)}\n\n"
             "# Approved Memory\n\n"
             f"{truncate_text(_excerpt(paths.memory), max_chars=8000)}\n"
         )

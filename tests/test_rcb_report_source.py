@@ -13,7 +13,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.rcb import ReportSynthesizer, build_fallback_report, unapproved_stage_bodies
+from src.rcb import (
+    ReportSynthesizer,
+    _research_body,
+    build_fallback_report,
+    unapproved_stage_bodies,
+)
 from src.utils import MIN_REPORT_CHARS, build_run_paths, ensure_run_layout, write_text
 
 
@@ -81,6 +86,38 @@ class RecoverUnapprovedWorkTest(unittest.TestCase):
         body = unapproved_stage_bodies(self.paths)[0][1]
         self.assertNotIn("Abort", body)
         self.assertIn("0.42 eV", body)
+
+
+class StripWorkflowScaffoldingTest(unittest.TestCase):
+    """A stripped section ends at its own depth, not at the next heading of any depth."""
+
+    def test_a_subheading_does_not_reopen_a_stripped_section(self) -> None:
+        body = _research_body(
+            "# Stage 06: Analysis\n\n## Key Results\n\nThe barrier is 0.42 eV.\n\n"
+            "## Decision Ledger\n\nLEDGER\n\n### Why this move\n\nREOPENED\n"
+        )
+        self.assertIn("0.42 eV", body)
+        self.assertNotIn("LEDGER", body)
+        self.assertNotIn("REOPENED", body)
+
+    def test_the_worst_case_is_the_report_pasted_into_itself(self) -> None:
+        """`Previously Approved Stage Summaries` carries the earlier narrative under its
+        own sub-headings, so one `###` inside it duplicated half the deliverable."""
+        body = _research_body(
+            "# Stage 07: Writing\n\n## Findings\n\nThe barrier is 0.42 eV.\n\n"
+            "## Previously Approved Stage Summaries\n\n### Stage 01\n\nSECOND_COPY\n\n"
+            "#### deeper\n\nALSO_SECOND_COPY\n"
+        )
+        self.assertIn("0.42 eV", body)
+        self.assertNotIn("SECOND_COPY", body)
+        self.assertNotIn("ALSO_SECOND_COPY", body)
+
+    def test_a_sibling_heading_still_ends_the_stripped_section(self) -> None:
+        body = _research_body(
+            "# Stage 06: Analysis\n\n## Your Options\n\n6. Abort\n\n## Discussion\n\nREAL_CONTENT\n"
+        )
+        self.assertNotIn("Abort", body)
+        self.assertIn("REAL_CONTENT", body)
 
 
 class FallbackUsesRecoveredWorkTest(unittest.TestCase):
@@ -166,9 +203,40 @@ class FallbackUsesRecoveredWorkTest(unittest.TestCase):
         self.assertIn("DRAFT", report)
         self.assertIn("No stage was approved", report)
 
-    def test_a_draft_under_review_is_still_excluded(self) -> None:
-        write_text(self.paths.stages_dir / "01_literature_survey.tmp.md", f"# Stage 01\n\nUNDER_REVIEW {BODY}")
-        self.assertNotIn("UNDER_REVIEW", self._build())
+    def test_a_stage_that_never_reached_the_ratchet_is_recovered_from_its_tmp_draft(self) -> None:
+        """`stages/<slug>.tmp.md` is the last resort, and for these runs the only one.
+
+        #176 named the loss precisely: an unparseable reviewer verdict ended the run
+        "discarding stages/01_literature_survey.tmp.md -- 18,976 bytes that had passed
+        both gates with a rubric score of 1.0". It fixed the parser, which removes that
+        cause. This removes the consequence: an evolution directory appears when a draft
+        is *scored*, so a stage refused before it was scored has no champion and no
+        candidate, and the tmp draft is the only copy of the work.
+
+        Nothing here is under review. `export_run` runs after the pipeline has stopped,
+        so a tmp draft with no approved summary beside it is a draft that was never
+        approved, not one still being read.
+        """
+        write_text(self.paths.stages_dir / "01_literature_survey.tmp.md", f"# Stage 01\n\nONLY_COPY {BODY}")
+        report = self._build()
+        self.assertIn("ONLY_COPY", report)
+        self.assertIn("unapproved draft", report)
+        self.assertNotIn("No completed stage output was produced", report)
+
+    def test_a_tmp_draft_never_outranks_the_champion_for_the_same_stage(self) -> None:
+        self._champion("01_literature_survey", f"# Stage 01\n\nCHAMPION {BODY}")
+        write_text(self.paths.stages_dir / "01_literature_survey.tmp.md", f"# Stage 01\n\nSUPERSEDED {BODY}")
+        report = self._build()
+        self.assertIn("CHAMPION", report)
+        self.assertNotIn("SUPERSEDED", report)
+
+    def test_a_tmp_draft_is_never_mixed_with_an_approved_stage(self) -> None:
+        write_text(self.paths.stages_dir / "01_literature_survey.md", f"# Stage 01\n\nAPPROVED {BODY}")
+        write_text(self.paths.stages_dir / "02_hypothesis.tmp.md", f"# Stage 02\n\nDRAFT {BODY}")
+        report = self._build()
+        self.assertIn("APPROVED", report)
+        self.assertNotIn("DRAFT", report)
+        self.assertNotIn("unapproved draft", report)
 
     def test_figures_are_still_linked_after_a_draft_is_recovered(self) -> None:
         self._champion("01_literature_survey", f"# Stage 01\n\n{BODY}")

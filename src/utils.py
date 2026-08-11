@@ -974,6 +974,49 @@ def extract_markdown_section(markdown: str, heading: str) -> str | None:
     return match.group(1).strip()
 
 
+#: Fences around a verbatim task statement inside an assembled goal.
+#:
+#: A goal can carry a whole task document — the benchmark adapter writes one — and such
+#: a document brings its own ``##`` headings, so :func:`extract_markdown_section` cannot
+#: pick it out: the section ends at the first heading *inside* it. These delimit it
+#: instead. HTML comments, because a goal is prose an operator reads and a visible fence
+#: is a fence it can mistake for an instruction.
+TASK_BEGIN_MARKER = "<!-- autor:task:begin -->"
+TASK_END_MARKER = "<!-- autor:task:end -->"
+
+
+def extract_fenced_task(goal: str) -> str | None:
+    """The fenced task statement in ``goal``, or ``None`` if there is not one.
+
+    ``None`` means an ordinary goal — one a user typed, or one recorded before the
+    fences existed — and is the signal to fall back to reading the goal itself.
+    """
+    start = goal.find(TASK_BEGIN_MARKER)
+    if start < 0:
+        return None
+    start += len(TASK_BEGIN_MARKER)
+    end = goal.find(TASK_END_MARKER, start)
+    if end < 0:
+        return None
+    return goal[start:end].strip() or None
+
+
+def goal_excerpt(goal: str, max_chars: int) -> str:
+    """An excerpt of ``goal`` that is guaranteed to contain the question.
+
+    Several readers take a *prefix* of the goal to fit a budget: the router that
+    chooses the next graph move, the deliberation panel, the adversarial validity
+    reviewer. A prefix is only the question while nothing has been prepended to it,
+    and on a benchmark run the grading contract in front of the task had grown past
+    every one of those budgets — the router chose its move having read none of the
+    research question at all. Where a task is fenced, this returns the task and
+    truncates from the *tail*, so an overlong one loses its closing notes rather than
+    its subject.
+    """
+    task = extract_fenced_task(goal)
+    return truncate_text(task if task is not None else goal, max_chars=max_chars)
+
+
 def strip_markdown_section(markdown: str, heading: str) -> str:
     pattern = re.compile(
         rf"^## {re.escape(heading)}\s*$\n?(.*?)(?=^## |\Z)",

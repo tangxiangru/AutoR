@@ -3360,6 +3360,16 @@ class ResearchManager:
         Exhausting the retry budget is not the same as failing: a stage can burn its
         attempts on revision rounds and still end with a draft that clears both gates.
         Returns None whenever there is any doubt, so the stub remains the default.
+
+        "Both gates" has to mean the gates as the run configured them. This called
+        ``validate_stage_markdown`` and ``validate_stage_artifacts`` without
+        ``artifact_roots`` and ``artifact_dirs``, which the real gate passes at every one
+        of its three call sites -- so the rescue was *stricter* than the approval it
+        stands in for. On a benchmark run that is not a marginal difference:
+        ``validate_stage_artifacts`` says so itself, that the contract points stages at
+        ``<workspace>/outputs/`` and ``<workspace>/report/images/`` and "a compliant
+        stage would otherwise look like it produced nothing". A stage that had done
+        everything the contract asked failed the rescue and was replaced by the stub.
         """
         draft_path = paths.stage_tmp_file(stage)
         if not draft_path.exists():
@@ -3367,9 +3377,9 @@ class ResearchManager:
         # No separate empty-draft guard: an empty string fails the markdown gate's
         # "must begin with '# Stage '", so a second check would be an unpinned branch.
         draft = read_text(draft_path)
-        if validate_stage_markdown(draft, stage=stage, paths=paths):
+        if validate_stage_markdown(draft, stage=stage, paths=paths, artifact_roots=self.artifact_roots):
             return None
-        if validate_stage_artifacts(stage, paths):
+        if validate_stage_artifacts(stage, paths, self.artifact_dirs):
             return None
         return draft
 

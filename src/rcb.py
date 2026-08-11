@@ -54,10 +54,13 @@ from .utils import (
     DEFAULT_OUTPUT_FORMAT,
     MAX_REPORT_FIGURES,
     MIN_REPORT_CHARS,
+    TASK_BEGIN_MARKER,
+    TASK_END_MARKER,
     RunPaths,
     StageSpec,
     approved_stage_summaries,
     build_run_paths,
+    extract_fenced_task,
     extract_markdown_image_targets,
     read_text,
     resolve_output_format,
@@ -99,6 +102,7 @@ JUDGE_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".bmp", ".web
 EXPORT_SKIP_DIRS = frozenset({"__pycache__", ".git", ".ipynb_checkpoints", "node_modules"})
 
 
+
 @dataclass(frozen=True)
 class ExportResult:
     report_path: Path
@@ -128,8 +132,19 @@ class BenchmarkResult:
         The pipeline completing is not the bar: ResearchClawBench scores the report, so a
         run that auto-skipped a stage but still produced a substantive report is a success,
         and a "completed" run with an empty report is not.
+
+        That second half was the docstring's claim and not the code's: this tested
+        ``.exists()``, and a 197-byte "No completed stage output was produced" stub exists.
+        Eight of forty benchmark runs therefore reported ``exit_code: 0, status:
+        completed`` while shipping nothing, and the batch log, the run metadata and the
+        harness all agreed the runs had succeeded. Nothing surfaced it until the scoring
+        pass, thirteen hours later. Hold the file to ``MIN_REPORT_CHARS``, the same floor
+        every source inside :func:`export_run` is already held to.
         """
-        return 0 if self.export.report_path.exists() else 1
+        path = self.export.report_path
+        if not path.exists():
+            return 1
+        return 0 if len(read_text(path).strip()) >= MIN_REPORT_CHARS else 1
 
 
 # ---------------------------------------------------------------------------
@@ -307,6 +322,18 @@ def build_benchmark_goal(
         "unreferenced image under `report/` when it exports, so a plot saved outside "
         "`report/images/` is lost rather than merely unhelpful."
     )
+    # The task goes first, before any of AutoR's own contract prose.
+    #
+    # This document is `user_input.txt`, and four readers excerpt it by taking a
+    # prefix: the router that chooses the next graph move (`src/router.py`, 2,500
+    # chars), the deliberation panel (`src/deliberation.py`, 3,000), the adversarial
+    # validity reviewer (`src/validity_review.py`, 3,000) and the benchmark report
+    # synthesizer (:meth:`ReportSynthesizer.build_prompt`, 8,000). While the task sat
+    # last, the contract in front of it had grown past every one of those caps, so on
+    # a benchmark run the router, the panel and the reviewer saw *zero* characters of
+    # the research question and the synthesizer saw 331 of roughly 5,000. A prefix
+    # reader is not a bug to be fixed one call site at a time; what a prefix reader
+    # sees is decided here, by what this function puts first.
     return "\n\n".join(
         [
             "# Benchmark Run: ResearchClawBench",
@@ -315,6 +342,8 @@ def build_benchmark_goal(
                 "any point: no one will answer a question, approve a plan, or grant a permission. "
                 "Make the best judgement you can from the data and keep going."
             ),
+            "## Research Task",
+            f"{TASK_BEGIN_MARKER}\n{instructions.strip()}\n{TASK_END_MARKER}",
             "## Benchmark Workspace Contract",
             (
                 f"The benchmark workspace is `{resolved}`. It is separate from the AutoR run tree "
@@ -369,8 +398,6 @@ def build_benchmark_goal(
             "## How This Report Is Scored",
             scoring_block,
             reference_block,
-            "## Research Task",
-            instructions.strip(),
         ]
     )
 
@@ -619,21 +646,35 @@ def _research_body(stage_markdown: str) -> str:
     What is left is the part that reads as research: what was done and what came out of it.
     ``## Your Options / 1. Use suggestion 1 ... 6. Abort`` is not evidence of anything, and a
     reviewer told to distrust AI output will read it as exactly the padding it is.
+
+    A stripped section ends where a heading at its own depth or shallower begins, not at
+    the next heading of any depth. Ending it at any heading meant a *sub*-heading reopened
+    the stream and the rest of the section was emitted as research -- and the worst case is
+    the worst section: ``## Previously Approved Stage Summaries`` carries the whole earlier
+    narrative under its own sub-headings, so one ``###`` inside it pastes a second copy of
+    half the report into the deliverable. The judge is told that longer does not mean better
+    and to be sceptical of AI-generated text; a report that contains itself twice is scored
+    by someone primed to notice.
     """
     kept: list[str] = []
-    skipping = False
+    #: Depth of the workflow-only section being stripped, or ``None`` when emitting.
+    skip_depth: int | None = None
     for line in stage_markdown.splitlines():
-        heading = re.match(r"^#{1,6}\s+(.*?)\s*$", line)
+        heading = re.match(r"^(#{1,6})\s+(.*?)\s*$", line)
         if heading is not None:
-            title = heading.group(1).strip()
-            if title.startswith("Stage ") or title in _WORKFLOW_ONLY_HEADINGS:
-                skipping = title in _WORKFLOW_ONLY_HEADINGS
+            depth = len(heading.group(1))
+            title = heading.group(2).strip()
+            if skip_depth is not None and depth > skip_depth:
+                # Inside the stripped section. Drop it, heading and all.
                 continue
-            skipping = False
+            if title.startswith("Stage ") or title in _WORKFLOW_ONLY_HEADINGS:
+                skip_depth = depth if title in _WORKFLOW_ONLY_HEADINGS else None
+                continue
+            skip_depth = None
             # Demote to keep the report's own H1/H2 hierarchy intact.
             kept.append(f"### {title}")
             continue
-        if not skipping:
+        if skip_depth is None:
             kept.append(line)
 
     return "\n".join(kept).strip()
@@ -654,22 +695,44 @@ def unapproved_stage_bodies(paths: RunPaths) -> list[tuple[str, str]]:
     ratchet found. A candidate is read only when a stage has no champion, and only its
     single newest attempt, so a stage that failed six times contributes one section rather
     than six near-duplicates of the same rejected draft.
+
+    Last comes ``stages/<slug>.tmp.md``, the draft the stage has just written. It is the
+    only source for a stage that never reached the ratchet at all -- an evolution
+    directory appears when a draft is *scored*, and a stage whose first draft was refused
+    outright has none. That is exactly the shape of the runs this function exists for.
     """
-    if not paths.evolution_dir.exists():
-        return []
+    stage_dirs = (
+        sorted(p for p in paths.evolution_dir.iterdir() if p.is_dir())
+        if paths.evolution_dir.exists()
+        else []
+    )
+    tmp_drafts = (
+        {p.name[: -len(".tmp.md")]: p for p in sorted(paths.stages_dir.glob("*.tmp.md"))}
+        if paths.stages_dir.exists()
+        else {}
+    )
+    by_slug = {p.name: p for p in stage_dirs}
 
     recovered: list[tuple[str, str]] = []
-    for stage_dir in sorted(p for p in paths.evolution_dir.iterdir() if p.is_dir()):
-        source = stage_dir / "champion.md"
-        if not source.exists():
-            candidates = sorted((stage_dir / "candidates").glob("attempt_*.md"))
-            if not candidates:
-                continue
-            source = candidates[-1]
+    for slug in sorted(set(by_slug) | set(tmp_drafts)):
+        source: Path | None = None
+        stage_dir = by_slug.get(slug)
+        if stage_dir is not None:
+            champion = stage_dir / "champion.md"
+            if champion.exists():
+                source = champion
+            else:
+                candidates = sorted((stage_dir / "candidates").glob("attempt_*.md"))
+                if candidates:
+                    source = candidates[-1]
+        if source is None:
+            source = tmp_drafts.get(slug)
+        if source is None:
+            continue
         body = _research_body(read_text(source))
         if not body:
             continue
-        title = _STAGE_SECTION_TITLES.get(stage_dir.name, stage_dir.name.replace("_", " ").title())
+        title = _STAGE_SECTION_TITLES.get(slug, slug.replace("_", " ").title())
         recovered.append((f"{title} (unapproved draft)", body))
     return recovered
 
@@ -839,17 +902,24 @@ def export_run(
         # A synthesis attempt that came back thin is worse than the deterministic assembly,
         # so fall through rather than shipping it.
 
-    _publish_report(
-        workspace,
-        report_path,
-        build_fallback_report(
-            paths=paths,
-            figures=figures,
-            pipeline_completed=pipeline_completed,
-            auto_skipped_stages=auto_skipped_stages,
-        ),
-        "fallback",
+    fallback = build_fallback_report(
+        paths=paths,
+        figures=figures,
+        pipeline_completed=pipeline_completed,
+        auto_skipped_stages=auto_skipped_stages,
     )
+
+    # `existing` was read before synthesis ran. Synthesis writes straight to
+    # `report_path`, so by now the file may hold a report this function has not seen —
+    # one whose call returned nothing the caller could use, or returned after the
+    # timeout that killed it. Publishing the fallback over that is how a run holding
+    # tens of kilobytes of research shipped 197 bytes. Re-read, and only overwrite what
+    # is genuinely worse than what we are about to write.
+    on_disk = read_text(report_path).strip() if report_path.exists() else ""
+    if len(on_disk) >= MIN_REPORT_CHARS and len(on_disk) > len(fallback.strip()):
+        return result("synthesized")
+
+    _publish_report(workspace, report_path, fallback, "fallback")
     return result("fallback")
 
 
@@ -934,9 +1004,34 @@ class ReportSynthesizer:
         except Exception:  # noqa: BLE001 - synthesis is best-effort; the fallback still runs
             return None
 
-        if exit_code != 0 or not report_path.exists():
+        # The call's exit code is not the deliverable; the file is. A synthesis killed at
+        # `--stage-timeout` exits non-zero having already written a complete report, and
+        # discarding it on the exit code alone traded a finished report for the 197-byte
+        # fallback. Judge what is on disk: a report long enough to clear the same floor
+        # every other source is held to is a report, however the process ended.
+        if not report_path.exists():
             return None
-        return read_text(report_path)
+        written = read_text(report_path)
+        if exit_code != 0 and len(written.strip()) < MIN_REPORT_CHARS:
+            return None
+        return written
+
+    @staticmethod
+    def _task_block(paths: RunPaths) -> str:
+        """The research question, whole, however long the rest of the goal has grown.
+
+        A prefix of the goal is not a substitute. The synthesizer is the one call that
+        decides what the scored artifact is *about*, and it used to receive
+        ``truncate_text(goal, 8000)`` — which, once the grading contract in front of the
+        task crossed 7,600 characters, was 331 characters of the question and the rest
+        of AutoR's own prose. Tail-truncate instead of head-truncating: a task that
+        overruns loses its closing notes, not its subject.
+        """
+        goal = read_text(paths.user_input)
+        task = extract_fenced_task(goal)
+        if task is None:
+            return truncate_text(goal, max_chars=8000)
+        return truncate_text(task, max_chars=12000)
 
     def build_prompt(self, *, paths: RunPaths, workspace: Path, figures: list[str]) -> str:
         resolved_report = (workspace / "report" / "report.md").resolve()
@@ -975,8 +1070,11 @@ class ReportSynthesizer:
             f"- artifact index: `{paths.artifact_index.resolve()}`\n"
             f"- LaTeX paper package: `{paths.writing_dir.resolve()}`\n"
             f"- benchmark workspace: `{workspace.resolve()}`\n\n"
-            "## Original Task\n\n"
-            f"{truncate_text(read_text(paths.user_input), max_chars=8000)}\n\n"
+            "## The Task This Report Must Answer\n\n"
+            "Every requirement below is scored. A requirement the report does not mention "
+            "scores zero, so answer them item by item and in their own words — a complete "
+            "answer to a nearby question is worth less than a partial answer to this one.\n\n"
+            f"{self._task_block(paths)}\n\n"
             "## Approved Memory\n\n"
             f"{truncate_text(read_text(paths.memory), max_chars=16000)}\n"
         )
