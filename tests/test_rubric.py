@@ -361,6 +361,71 @@ class RubricTestCase(unittest.TestCase):
         self.assertEqual(before, after)
 
 
+class FabricationMustNotPayTest(RubricTestCase):
+    """Inventing numbers scored two weighted points above honestly reporting none.
+
+    `quantification` counts numbers in Key Results; `numeric_fidelity` checks them
+    against artifacts the draft did not write. Scored independently and summed, a
+    draft quoting six invented metrics collected the first and merely failed to
+    collect the second — so the composite *paid* for fabrication, and the champion
+    ratchet in `src.evolution` promotes on the composite. That is the failure the
+    module docstring says the whole design exists to prevent.
+    """
+
+    SILENT = "The method is better than the baseline on the held-out split."
+    NUMBERS = (
+        "Accuracy reached 0.912 against a baseline of 0.874, a gain of 3.8 points "
+        "over 5 seeds with a standard deviation of 0.007."
+    )
+
+    def _total(self, key_results: str, *, metrics: dict | None) -> float:
+        write_text(
+            self.paths.results_dir / "metrics.json",
+            json.dumps(metrics if metrics is not None else {"note": "nothing citable"}),
+        )
+        return score_stage(
+            paths=self.paths,
+            stage=STAGE_06,
+            markdown=stage_markdown(STAGE_06, key_results=key_results),
+        ).total
+
+    def test_invented_numbers_score_no_higher_than_saying_nothing(self) -> None:
+        silent = self._total(self.SILENT, metrics=None)
+        invented = self._total(self.NUMBERS, metrics=None)
+        self.assertLessEqual(invented, silent)
+
+    def test_numbers_that_check_out_still_score_higher_than_both(self) -> None:
+        silent = self._total(self.SILENT, metrics=None)
+        real = self._total(
+            self.NUMBERS,
+            metrics={"accuracy": 0.912, "baseline": 0.874, "gain": 3.8, "seeds": 5, "std": 0.007},
+        )
+        self.assertGreater(real, silent)
+
+    def test_the_cap_is_recorded_rather_than_silent(self) -> None:
+        """A stage told only the capped number cannot tell which half to fix."""
+        self._total(self.NUMBERS, metrics=None)
+        score = score_stage(
+            paths=self.paths,
+            stage=STAGE_06,
+            markdown=stage_markdown(STAGE_06, key_results=self.NUMBERS),
+        )
+        quantification = next(c for c in score.criteria if c.key == "quantification")
+        self.assertIn("capped at numeric fidelity", quantification.observed)
+
+    def test_stage_04_is_not_capped_because_fidelity_does_not_apply_there(self) -> None:
+        """Implementation reports parameter counts before any result exists."""
+        stage_04 = next(stage for stage in STAGES if stage.number == 4)
+        score = score_stage(
+            paths=self.paths,
+            stage=stage_04,
+            markdown=stage_markdown(stage_04, key_results=self.NUMBERS),
+        )
+        self.assertNotIn("numeric_fidelity", {c.key for c in score.criteria})
+        quantification = next(c for c in score.criteria if c.key == "quantification")
+        self.assertGreater(quantification.score, 0.0)
+
+
 def _criterion(key: str, score: float, *, weight: float):
     from src.rubric import CriterionScore
 
