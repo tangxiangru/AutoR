@@ -570,20 +570,27 @@ distribution rather than the mean: its best task (47.70) is competitive in a ben
 where only three agent-task pairs have ever crossed 50, and its deficit is entirely at the
 floor. Stratified by what the report physically is:
 
-| stratum | n | AutoR mean | the other three, same tasks |
+| stratum, by what the report *is* | n | AutoR mean | the other three, same tasks |
 |:---|---:|---:|---:|
 | 197-byte "incomplete run" stub | 8 | **0.78** | 18.99 |
-| Stage-01/02 dump | 10 | 12.88 | — |
+| Stage-01/02 dump | 10 | 12.88 | 12.17 |
 | paper-shaped report | 22 | 19.61 | 17.84 |
 
-**The 19.61 is a post-hoc subgroup mean and is not AutoR's number.** It locates the defect —
-the pipeline is capable and the deaths are the deficit — and nothing more. Only the 40-task
-mean counts.
+**The 19.61 is a post-hoc subgroup mean and is not AutoR's number.** Only the 40-task mean
+counts. It is also a subgroup of *legible* runs rather than correct ones: cutting by where
+the walk actually stopped, AutoR's two best scores — Astronomy_003 at 47.70 and Physics_002
+at 45.45 — came from runs that halted at `02_hypothesis_generation`, having never designed
+a study or run an experiment. Five runs of forty reached Stage 05 or later. Those reports
+were assembled by this adapter's synthesizer, not by the pipeline.
 
-Three caveats travel with every number above:
+Four caveats travel with every number above:
 
 - **Single attempt.** The public leaderboard aggregates the *best* score per (task, agent)
-  pair. 14.16 is one run per task. The two are not comparable in either direction.
+  pair (`RCB/README.md:280`). 14.16 is one run per task. The two are not comparable in
+  either direction.
+- **Cross-model.** All three comparison agents run GPT-5.4; AutoR ran Claude Opus. The table
+  is therefore not a clean harness comparison, and the same-model baseline the
+  [landscape study](researchclawbench-landscape.md) calls mandatory has not been run.
 - **The judge is part of the result.** `gpt-5.1` is the benchmark's own. On identical
   artifacts Gemini 2.5 Flash scored 37.0 where Claude Opus scored 20.8, so a number quoted
   without its judge compares to nothing.

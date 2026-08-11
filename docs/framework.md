@@ -74,6 +74,16 @@ stages is a directed graph the run navigates rather than a sequence it walks
 them, guards are functions over artifacts on disk, and after each stage the run chooses an edge and
 records why.
 
+**What a guard is and is not.** A failed guard removes an edge from the *menu* the agent chooses
+from; it is not an absolute barrier. When nothing forward is live, `default_move` advances anyway,
+and says why in its own docstring: *"A guard is a routing preference, not a correctness gate — the
+correctness gate is the stage's own validation."* Treating a failed guard as a barrier would mean a
+run that genuinely cannot satisfy it bounces between backward edges until its visit budget runs out
+and halts with nothing, where the linear pipeline would have produced a deliverable and failed the
+stage gate honestly. So the graph **orders and explains**; `validate_stage_artifacts` at the target
+stage **refuses**. Anywhere this document says a move is impossible, read: not offered to the agent,
+and taken by the default only when there is no alternative.
+
 The two halves of the problem are the same problem, and §6 is the episode that showed it:
 
 > **A warrant gate is only as good as the set of nodes it is reachable from.** A check that refuses
@@ -85,8 +95,9 @@ The two halves of the problem are the same problem, and §6 is the episode that 
 
 ## 2. The design commitments
 
-Six commitments determine most of the architecture. Each one is a decision that could have gone the
-other way, and each one costs something.
+Seven commitments determine most of the architecture. Each one is a decision that could have gone
+the other way, and each one costs something. Six were designed; the seventh was derived from a
+failure, which is the most credible provenance a design rule can have.
 
 ### 2.1 The human owns the approval gate
 
@@ -157,8 +168,9 @@ same credulity it is built to remove.
 
 ### 2.6 No runtime dependency outside the standard library
 
-AutoR's runtime imports nothing that is not in the Python standard library. 150 modules, ~62 k lines,
-1826 tests running in ~69 s with no install step. The MCP web-search server
+AutoR's runtime imports nothing that is not in the Python standard library. The runtime is 53
+modules and ~31 k lines; with the test suite the tree is 151 files and ~63 k lines, and 1826 tests
+run in ~69 s with no install step. The MCP web-search server
 ([`mcp_web_search.py`](../src/mcp_web_search.py)) is a stdlib JSON-RPC 2.0 implementation over stdio
 rather than an SDK. `google-genai` is needed only by three optional paths (`--web-search gemini`,
 `--cross-review`, `--research-diagram`), and each degrades to a recorded *unavailable* rather than a
@@ -167,6 +179,26 @@ crash.
 *Cost:* some wheels get reinvented.
 *Why anyway:* a research harness that cannot be run five years from now cannot be used to reproduce
 anything, and a dependency tree is the most common reason a scientific artifact stops running.
+
+### 2.7 A gate an unattended run cannot satisfy must disclose, not refuse
+
+The seventh was not designed. It was derived from the failure in §6, and it is kept here with the
+six because it constrains the architecture the same way they do.
+
+A guard is a repair instruction: it says what would make the move legal. The validity chain's repair
+is *go back and adjudicate the hypotheses* — a rollback. An unattended run whose budget is spent
+cannot perform a rollback, so for that run the guard states no repair at all, and a refusal whose
+repair is unaffordable is not a gate; it is an exit under another name. Eight of forty benchmark
+runs took that exit and published 197 bytes.
+
+> **The discriminating test is whether the repair is in-stage.** If the only repair is a rollback
+> the run cannot afford, the gate is a trapdoor, and what the run owes is *disclosure* — name the
+> stages that did not happen, in the deliverable — rather than silence plus a non-zero exit code.
+
+*Cost:* one guard is now bypassable by construction, and the honesty of the run rests on a banner in
+a report rather than on a refusal in code. That is strictly weaker.
+*Why anyway:* the alternative is not a stricter system, it is the same refusal with the evidence
+thrown away. §8 keeps this on the list of things a reviewer should push on.
 
 ---
 
@@ -184,7 +216,10 @@ decided is inside it. The only state written outside is the optional cross-run a
 Eight stages are nodes in a directed graph ([`stage_graph.py`](../src/stage_graph.py)); a `finish`
 node closes the walk. The default topology is `adaptive`: **22 edges** — eight advance edges of which
 six carry a guard, thirteen `REVISIT_EDGES` that go backward, and one conditional terminal that lets
-an abandoned round finish from Stage 06. `--stage-graph linear` is nine edges and no guards.
+an abandoned round finish from Stage 06. `--stage-graph linear` is nine edges: the eight-step
+sequence plus that same abandoned-round terminal, which both topologies carry because refusing to
+write up an abandoned round is a correctness property rather than a routing preference. What
+`linear` turns off is the six forward guards and the thirteen backward edges.
 
 ```
                         ┌──────────────── 13 backward edges ─────────────────┐
@@ -280,7 +315,7 @@ An explicit `--flag`/`--no-flag` always beats the level. The validity chain is n
 
 ## 4. The modules, by layer
 
-150 Python modules, ~62 k lines. Grouped by what they own rather than by directory.
+53 runtime modules, ~31 k lines. Grouped by what they own rather than by directory.
 
 ### Policy — what machinery this run uses
 
@@ -453,27 +488,46 @@ preferences but **never** to open a guarded edge, add an undeclared one, or remo
 component that learns is precisely the one that must not be able to weaken the correctness argument.
 
 **The claim, narrowed until it is defensible.** "Research is not linear" is too coarse to survive
-review, and two neighbouring ideas are established prior art:
+review, and three neighbouring ideas are established prior art. All three are conceded here by name,
+because the version of this claim that ignores them does not survive one reviewer:
 
 - **Branching search inside a stage.** The AI Scientist v2 does tree search over candidate
   experiments; EvoScientist does idea tree search in its first stage and experiment tree search in
-  its second (arXiv:2603.08127 §3.3–3.4). Neither is linear *within* a stage.
+  its second. Neither is linear *within* a stage.
 - **Closed-loop feedback between stages.** NovelSeek is subtitled "Building Closed-Loop System from
   Hypothesis to Verification"; InternAgent describes itself as a closed-loop multi-agent framework.
   Feedback from a later step to an earlier one is not new.
+- **A state graph as the LLM controller.** This is the one that bites. **StateFlow**
+  ([arXiv:2403.11322](https://arxiv.org/abs/2403.11322)) models task-solving as a state machine in
+  which "the transitions between states are controlled by heuristic rules or decisions made by the
+  LLM", which is very close to the arrangement described in §1.1. LangGraph's
+  `add_conditional_edges` is the same idea as a library. And the whole scientific-workflow tradition
+  — make, Snakemake, Nextflow, Airflow, Pegasus — has computed admissibility from predicates over
+  files on disk for decades. **A graph controller whose transition predicates are evaluated in code
+  is not a contribution**, and this document previously claimed it was.
 
-What remains uncontested is narrower:
+What survives is not the graph. It is what the predicates are *about*:
 
-> An explicit, inspectable **inter-stage dependency graph used as the controller** — an object that
-> decides which stage runs next and whether to re-enter a completed one, with the admissible set
-> computed mechanically rather than argued for in a prompt.
+> Existing workflow graphs put **data-dependency and freshness** predicates on their edges: does
+> file X exist, is it newer than Y. Existing agent state machines put **heuristics or LLM judgement**
+> on theirs. AutoR puts **scientific-validity** predicates there — a frozen preregistration whose
+> digest matches its source, exactly one verdict per preregistered hypothesis, every verdict citing
+> an evidence path that resolves to a file, every manuscript claim traced to a supported hypothesis
+> or labelled exploratory. The contribution is the predicate vocabulary and the fact that it is
+> evaluated from the filesystem rather than from the transcript — not the existence of the graph.
 
-The foil is concrete rather than rhetorical. EvoScientist's paper says "the pipeline proceeds in two
-stages" (§3.1), hardcoded 1→2 with a hardcoded s ∈ {1,2,3,4} inside the second; its shipped harness
-implements a six-step workflow that lives in a prompt string, whose only non-linear affordance is a
+Under that narrowing the honest one-line claim is *"scientific-validity predicates as edge
+conditions in an agent workflow graph"*, and §6 is where it is tested rather than asserted.
+
+**The foil, stated accurately.** EvoScientist's runtime does hold a LangGraph object: `deepagents`'
+`create_deep_agent` returns a `CompiledStateGraph`. But that is an *agent-execution* graph — the
+tool-calling loop — and it is composed by a library rather than authored. EvoScientist's *research*
+stages are a six-step workflow living in a prompt string, whose only non-linear affordance is a
 checkpoint asking a planner agent to emit a JSON plan update with `stage_modifications` and
-`new_stages` fields. That is replanning in text. There is no graph object, so there is nothing to
-guard, nothing to record, and nothing for a later run to learn from.
+`new_stages` fields, both of which appear only in `prompts.py` and `subagents/planner.yaml`. The
+distinction worth drawing is therefore not graph-versus-no-graph but **agent-execution graph versus
+research-stage graph**: nothing in the former can express "the analysis invalidated the design", and
+nothing about it is inspectable as a topology.
 
 The same narrowing applies to the improvement half. EvoScientist's critique axis is cross-run
 memory — "static execution pipelines … accumulated outcomes and failures are rarely distilled into
@@ -538,19 +592,40 @@ is not self-justifying; this is that principle applied to the whole system.
 
 ### 6.2 What the deficit was made of
 
-| stratum | n | AutoR mean | the other three, same tasks |
+| stratum, by what the report *is* | n | AutoR mean | the other three, same tasks |
 |:---|---:|---:|---:|
 | 197-byte "incomplete run" stub | 8 | **0.78** | 18.99 |
-| Stage-01/02 dump | 10 | 12.88 | — |
+| Stage-01/02 dump | 10 | 12.88 | 12.17 |
 | paper-shaped report | 22 | 19.61 | 17.84 |
 
 Eight runs shipped a 197-byte stub reading `_No completed stage output was produced._`, each
 reporting `exit_code: 0, status: completed`; one spent 6,150 seconds doing it. The tasks are not
 hard — the other three agents average 18.99 on those same eight.
 
-**The 19.61 is a post-hoc subgroup mean and is not AutoR's number.** It locates the defect and
-nothing more. Only the 40-task mean counts, and quoting the subgroup as a result would be exactly
-the move §2.4 and §5.2 exist to prevent the system from making about itself.
+**The 19.61 is a post-hoc subgroup mean and is not AutoR's number.** Only the 40-task mean counts,
+and quoting a subgroup as a result would be exactly the move §2.4 and §5.2 exist to prevent the
+system from making about itself.
+
+**It is also weaker than it looks, in a way worth spelling out.** The strata above are cut by what
+the file *looks like*, not by what produced it. Cutting instead by where the walk actually stopped
+(`evolution/stage_graph.json`, §6.6) gives a different picture:
+
+| task | score | terminal stage |
+|:---|---:|:---|
+| Astronomy_003 | 47.70 | `02_hypothesis_generation` |
+| Physics_002 | 45.45 | `02_hypothesis_generation` |
+| Astronomy_001 | 34.80 | `03_study_design` |
+| Earth_002 | 32.90 | `02_hypothesis_generation` |
+
+**AutoR's two best scores on this benchmark came from runs that never designed a study, never ran an
+experiment and never analysed a result.** Those reports were assembled by the benchmark adapter's
+synthesizer (`src/rcb.py`) out of Stage 01–02 material. Five runs of forty reached Stage 05 or
+later.
+
+So the reading "the pipeline is capable and the deaths are the deficit" — which an earlier draft of
+this section made, and which `docs/researchclawbench.md` repeated — **does not follow, and is
+withdrawn**. What 19.61 measures is a *legible* subgroup, not a correct one, and much of what it
+measures is the adapter's fallback path rather than the eight-stage pipeline this document is about.
 
 ### 6.3 Four defects, all of them topological
 
@@ -628,20 +703,82 @@ Landed as [#180](https://github.com/tangxiangru/AutoR/pull/180) and
 | phantom demands | `task_statement()` unwraps the goal at all four `deliverables` call sites |
 | five routes to the stub | synthesis judged on the file not the exit code; the fallback re-reads before overwriting; `stages/<slug>.tmp.md` as last-resort recovery; the skip-rescue passes the arguments the real gate passes; `exit_code` reads content, not `.exists()` |
 
-The terminal edge bypasses the validity-chain guard, and it is the only guard bypass in AutoR. The
-justification generalises into the design rule this episode produced, which belongs beside the six
-in §2:
+The terminal edge bypasses the validity-chain guard deliberately. It is not the only bypass in the
+system — `default_move` advances across a failed forward guard as a last resort (§1.1), and on this
+benchmark that path decided the route far more often than this one did — but it is the only one
+taken *knowingly*, and the reasoning behind it generalised into §2.7, the seventh design commitment,
+which was derived from this failure rather than designed.
 
-> **A gate whose repair an unattended run cannot perform must degrade to a disclosure requirement,
-> not a refusal.** A guard is a repair instruction. The validity chain's repair is *go back and
-> adjudicate the hypotheses* — a rollback costing more budget than the run has. A refusal whose only
-> repair is unaffordable is not a gate; it is an exit under another name. The discriminating test is
-> whether the repair is in-stage; if it is a rollback, the gate is a trapdoor. What the run owes
-> instead is disclosure: every stage the route stepped over is named in the report.
+Two smaller things worth recording precisely, because both are easy to overstate. The terminal edge
+is not an edge in `stage_graph.py`: `git diff` over that file is empty for #181, and
+`_route_to_deliverable` is a method on the manager that sets `_jump_target_stage` and is recorded on
+the route with `bypassed=True`. And it is a *route*, not a relaxation — the writing node still runs
+every gate it always ran.
 
 **The effect of these changes is not yet measured.** A 40-task re-run at the repaired HEAD is in
 flight. Until it lands, §6.5 is a description of code, not a result, and no claim in this document
 rests on it.
+
+### 6.6 The finding that most constrains what this document may claim
+
+§6 is titled "the system measured against itself". It is worth being exact about *which* system was
+measured, because it was not the one §1.1 describes.
+
+Every run writes its route to `evolution/stage_graph.json`. Across the 50 route files the batch left
+behind — 133 stage visits:
+
+| | |
+|:---|---:|
+| visits | 133 |
+| moves recorded as `advance` | 82 |
+| moves recorded as `revisit` | **1** |
+| visits where more than one move was on offer | 27 |
+| visits where a blocked move was shown to the agent with its reason | **2** |
+| visits where the agent, not the default, chose the move | **4** |
+
+And where the runs stopped:
+
+| terminal stage | 01 | 02 | 03 | 04 | 05 | 06 | 07 | 08 |
+|:---|---:|---:|---:|---:|---:|---:|---:|---:|
+| runs | 12 | 14 | 15 | 4 | 1 | 3 | 1 | **0** |
+
+`run_status` across the same manifests: 46 `cancelled`, 4 `running`, 3 `human_review`, **0
+completed**.
+
+So: **the thirteen backward edges that are "the reason the graph exists" were taken once in the
+entire batch, and the mechanism §5.4 calls the one that makes them usable — a blocked move handed to
+the agent with its blocking reason — fired twice.** Forty-one of fifty runs halted at or before
+Stage 03. On this benchmark the adaptive graph produced a walk that was, in every respect a
+`--stage-graph linear` run would also have produced, linear.
+
+Three consequences, and none of them is optional.
+
+1. **§6 does not test the thesis.** It measures a system dying early, and a system dying early is
+   exactly the case in which topology cannot matter — there is nothing to route about at Stage 02.
+   The four defects in §6.3 are real and were worth fixing, but they are defects in the *floor*, and
+   the paper's claim is about the *ceiling*.
+2. **Most of the validity chain never ran either.** `validate_preregistration`,
+   `validate_hypothesis_outcomes`, `validate_outcome_statistics` and `validate_claim_provenance` are
+   gated at Stage 05, 06, 06 and 07. Five runs of fifty reached Stage 05 or later. The predicate
+   vocabulary that §5.4 now claims as the contribution is, on this evidence, almost entirely
+   untested.
+3. **The control arm ships and was never run.** `--stage-graph linear` is one flag. Nothing in the
+   40-task batch passed it; every `run_config.json` says `"stage_graph": "adaptive"`. Comparing
+   against three other people's systems varies model, prompt, scaffolding and budget at once and
+   cannot isolate topology — and it is additionally confounded, because all three comparison agents
+   run GPT-5.4 while AutoR ran Claude Opus, so §6.1 reports a cross-model difference as a harness
+   result.
+
+**The experiment this document owes.** Same model, same judge, same 40 tasks, `--stage-graph
+adaptive` against `--stage-graph linear`, paired, with enough seeds to say something. It is not run
+here because its outcome is currently predetermined: a graph that produced one revisit in 133 visits
+cannot differ from a linear walk. The repairs in §6.5 are the precondition — they are what lets a
+run reach a stage where a routing decision exists — and the ordering is therefore repair, re-measure,
+*then* ablate. Until that ablation lands, the correct summary of this document is:
+
+> A system whose stated contribution is a topology has demonstrated that the topology is
+> inspectable and that four defects in it were findable **because** it is inspectable. It has not
+> demonstrated that the topology helps.
 
 ---
 
@@ -684,9 +821,10 @@ What a reader can take from this system, in descending order of how transferable
    and the ledger of why each was rejected. `evolution/` sits outside `workspace/` precisely so an
    export ships the answer and not the search.
 
-8. **A documented negative result about benchmark scoring.** Judge choice is worth roughly sixteen
-   points on ResearchClawBench: on one identical artifact set Opus scored 52.6 where the reference
-   judge gpt-5.1 scored 46.0. A score carrying the wrong judge is not a smaller number, it is an
+8. **A documented negative result about benchmark scoring.** Judge choice can move a score by more
+   than the gap between the top and the bottom third of the leaderboard. On one identical artifact
+   set Gemini 2.5 Flash scored 37.0 where Opus scored 20.8, a spread of 16.2; on another, Opus
+   scored 52.6 where the reference judge gpt-5.1 scored 46.0, a spread of 6.6. A score carrying the wrong judge is not a smaller number, it is an
    incomparable one — and a scorer that records a judge parse failure as `0` will quietly turn a
    working run into a broken-looking one. See [researchclawbench.md](researchclawbench.md).
 
@@ -697,8 +835,10 @@ What a reader can take from this system, in descending order of how transferable
 Stated as plainly as the rest, because a system built to refuse unwarranted claims should not make
 any.
 
-- **No mechanism in AutoR has evidence that it improves a research output.** Not the panel, not the
-  ideation lenses, not the crux deliberation, not the graph, not the ratchet.
+- **We make no efficacy claim for any individual mechanism.** Not for the panel, the ideation
+  lenses, the crux deliberation or the ratchet. What §7 claims is mechanism *design* — that these
+  constraints can be enforced from the filesystem at all — and §6 supplies a diagnostic result, not
+  an efficacy one.
   [`trials.py`](../src/trials.py) is the apparatus built to produce that evidence and **no paired
   trial has been run**. The run scorecard says when a feature did not change a decision *within one
   run*, which is a genuinely weaker claim than "it does not help".
@@ -708,7 +848,10 @@ any.
 - **The benchmark number is 14.16, and it is last.** §6 is the full account. Three things travel
   with it and none can be dropped: it is **single-attempt** where the public leaderboard aggregates
   the *best* score per (task, agent) pair, so the two are not comparable in either direction; it is
-  a `gpt-5.1` number, and judge choice is worth roughly sixteen points; and it is the **pre-repair**
+  a `gpt-5.1` number, and judge choice has been measured to move a score by up to 16.2; and it is
+  **cross-model** — all three comparison agents run GPT-5.4 where AutoR ran Claude Opus, so the
+  table is not a clean harness comparison and the same-model baseline the landscape study calls
+  mandatory has not been run; and it is the **pre-repair**
   batch, so the effect of #180 and #181 is unmeasured. The landscape study's first conclusion also
   stands: model choice dominates harness choice, and any result must be quoted against the
   same-model bare-harness baseline.
