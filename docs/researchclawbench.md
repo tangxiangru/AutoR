@@ -384,6 +384,73 @@ can be inspected or resumed after the fact.
 
 ---
 
+## Scoring a run locally
+
+`tools/score_rcb_run.py` drives ResearchClawBench's own `score_workspace`, so every
+number it prints is that scorer's rather than a reimplementation. What it changes is
+three defaults that turn a failed judge call into a score of zero, and it will not
+print a total until it has checked that every item was actually judged.
+
+```bash
+python3 tools/score_rcb_run.py \
+  --workspace /path/to/workspaces/Astronomy_001_20260811_022244 \
+  --bench /path/to/ResearchClawBench \
+  --out score.json
+```
+
+Needs `anthropic`, the bench's `structai`, and `ANTHROPIC_VERTEX_PROJECT_ID`.
+
+### The three ways the stock scorer fakes a low score
+
+All three record as `{"score": 0, "reasoning": "Failed to parse scoring response."}`,
+which is indistinguishable in the output from a criterion the report genuinely missed.
+Scoring one run here, two of three items were judge failures: the honest total was
+**37.0** and the number on screen was **19.5**.
+
+| Stock default | Why it fails | Used here |
+|:---|:---|:---|
+| `max_tokens=500` | a reasoning judge spends the budget thinking and returns an empty body | 4096 |
+| `time_limit=120` | too short for a multimodal call carrying a target image plus five agent images | 600 |
+| `multi_thread(max_workers=16)` | concurrent multimodal calls were the actual cause of most failures | serial |
+
+The tool counts failed calls separately from scored ones and **refuses to quote a
+total while any call failed**. A benchmark number computed over silent judge failures
+is not a measurement of the run.
+
+### The judge is part of the result
+
+The reference judge is `gpt-5.1` (`evaluation/.env.example`). Without that key, Claude
+Opus through `AnthropicVertex` is a drop-in for `structai.LLMAgent` — `score.py` only
+ever calls the agent as `agent(prompt, image_paths=, return_example=, max_try=)` and
+expects a dict.
+
+On identical artifacts, **Gemini 2.5 Flash scored 37.0 where Claude Opus scored 20.8**.
+A sixteen-point spread is a property of the judge, not of the run, so a number quoted
+without naming its judge compares to nothing. The tool prints the judge on every run
+and writes it into the result file.
+
+### What the scale means
+
+`evaluation/score.py` scores each criterion 0–100 against the *original published
+paper*, where **50 means as good as that paper**:
+
+| Band | Meaning |
+|:---|:---|
+| 0 | absent from the report |
+| 1–10 | mentioned, but no quantitative result, or only a vague generic statement |
+| 41–50 | comparable to the published paper |
+| >50 | better than the published paper |
+
+Two consequences for reading a score. A run that produced a result but never wrote it
+down scores zero for it, with no partial credit — coverage is the cheapest points on
+the board. And a criterion mentioned without its number is capped in single digits, so
+the gap between 10 and 45 is real work, not phrasing.
+
+Image criteria are graded on the picture plus only the **first 10,000 characters** of
+the report (`report_text[:10000]`, `evaluation/score.py:138`); text criteria see the
+whole document. Since image criteria carry 60.6% of the weight, prose arguing for a
+figure past that point is worth nothing.
+
 ## How other agents score
 
 [researchclawbench-landscape.md](researchclawbench-landscape.md) works through the public
