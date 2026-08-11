@@ -36,6 +36,15 @@ raises ``artifact_breadth`` whether or not the research is better. A win
 concentrated in one criterion is a flag, not a result, and the only way to see it
 is to print the vector next to the scalar.
 
+**It does not report a capability that selects on the outcome measure.** The
+champion ratchet keeps whichever polish round scored highest and reverts the rest —
+``argmax`` over drafts on ``score.total``, which is the number this module reports.
+Trialling it against ``--evolve-rounds 0`` therefore cannot lose: the treatment arm is
+the maximum of several draws from the same distribution the control arm draws once
+from, and a generator of random drafts would show the same "effect". The mean
+difference would be real, positive, and evidence of nothing. See
+:data:`SELECTS_ON_THE_OUTCOME`.
+
 **It does not call an unattainable result "not significant".** An exact two-sided
 paired sign-flip test over *n* pairs cannot go below ``2 / 2**n``: three pairs
 bottom out at 0.25, five at 0.0625, six at 0.031. Below six pairs no result can
@@ -73,6 +82,29 @@ from .archive import RunRecord
 #: Pairs below this cannot reach p < 0.05 at any effect size, because an exact
 #: two-sided sign-flip test over *n* pairs bottoms out at ``2 / 2**n``.
 MIN_PAIRS_FOR_SIGNIFICANCE = 6
+
+#: Capabilities whose mechanism is selection on the rubric total, which is the
+#: outcome this module reports. A paired trial of one of these measures
+#: ``max(N draws) >= 1 draw`` and nothing else.
+#:
+#: Found the hard way. The first paired trial anyone tried to run here was the
+#: champion ratchet, ``--evolve-rounds 0`` against ``2``, and twelve real runs were
+#: queued before the circularity was noticed. `EvolutionController.consider` promotes
+#: a round when ``delta >= min_gain`` and reverts it otherwise, so the arm with rounds
+#: is the running maximum over drafts, scored on exactly the total the report prints.
+#:
+#: This is not the same objection as the Goodhart one two paragraphs up. There the
+#: worry is that a capability raises the proxy without improving the work. Here the
+#: capability does not have to touch the work at all: the arithmetic guarantees the
+#: win before the first token is generated.
+#:
+#: A capability belongs here if the run *reads the rubric* in order to decide what to
+#: keep. `--effort-tiers`, the review panel, deliberation, the ideation panel and the
+#: stage graph do not — they change what gets written, and the rubric then scores it
+#: at arm's length. Those are trialable. These are not.
+SELECTS_ON_THE_OUTCOME: frozenset[str] = frozenset(
+    {"polish_rounds", "evolve_rounds", "evolution", "champion_ratchet", "pareto_frontier"}
+)
 
 #: Above this, the exact enumeration is replaced by the same arithmetic on a
 #: sampled basis. 2**18 is a quarter of a million sign assignments, which is
@@ -246,6 +278,17 @@ class TrialResult:
     def underpowered(self) -> bool:
         return self.n < MIN_PAIRS_FOR_SIGNIFICANCE
 
+    @property
+    def circular(self) -> bool:
+        """The capability selects on the number this report prints.
+
+        Reported instead of the p-value, not beside it. A reader who sees
+        "+0.0736, p = 0.031" takes the number; a caveat under it does not undo
+        that, and the number here is an artifact of the arithmetic rather than a
+        measurement of anything.
+        """
+        return self.capability in SELECTS_ON_THE_OUTCOME
+
     def criterion_differences(self) -> dict[str, float]:
         """Mean per-criterion difference across pairs, worst first.
 
@@ -357,8 +400,23 @@ def format_trial_report(result: TrialResult, *, unit: str = "rubric points") -> 
     0–100 points, that line printed "+24.6000 rubric points", which is a lie about the
     instrument in the one place a reader takes the number from.
     """
+    header = f"## `{result.capability}`  —  `{result.treatment_arm}` against `{result.control_arm}`"
+    if result.circular:
+        return "\n".join([
+            header,
+            "",
+            f"- pairs: **{result.n}**",
+            "- **refused: this capability selects on the outcome measure.** The champion "
+            "ratchet keeps the highest-scoring draft and reverts the rest, so the treatment "
+            "arm is the maximum of several draws on exactly the total reported here. It "
+            "cannot lose, a random draft generator would show the same effect, and a "
+            "positive mean difference would be arithmetic rather than evidence.",
+            "- To trial it, score the arms on something the ratchet does not read — a held-out "
+            "judge, a benchmark, or a human read of the draft.",
+        ])
+
     lines = [
-        f"## `{result.capability}`  —  `{result.treatment_arm}` against `{result.control_arm}`",
+        header,
         "",
         f"- pairs: **{result.n}**"
         + (f" ({len(result.excluded)} excluded)" if result.excluded else ""),
