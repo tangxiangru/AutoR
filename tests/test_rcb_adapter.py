@@ -400,14 +400,38 @@ class CliContractTest(unittest.TestCase):
             ensure_run_layout(paths)
             write_text(paths.user_input, "goal")
             write_text(paths.memory, "# Memory\n")
-            write_text(paths.stages_dir / "06_analysis.md", "# Stage 06\n\nRecovered analysis.\n")
+            write_text(paths.stages_dir / "06_analysis.md", _long_report("Recovered analysis"))
 
             exit_code = rcb_agent.main(
                 ["--workspace", str(workspace), "--export-only", "--no-synthesis"]
             )
 
             self.assertEqual(exit_code, 0)
-            self.assertIn("Recovered analysis.", read_text(workspace / "report" / "report.md"))
+            self.assertIn("Substantive analysis text.", read_text(workspace / "report" / "report.md"))
+
+    def test_a_run_that_produced_nothing_exits_non_zero(self) -> None:
+        """Eight benchmark runs reported `exit_code: 0, status: completed` over a stub.
+
+        `BenchmarkResult.exit_code` tested `report_path.exists()`, and a 197-byte
+        "No completed stage output was produced" report exists. So the batch log, the
+        run metadata and the harness all recorded eight successes, and nothing surfaced
+        the loss until the scoring pass thirteen hours later.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            ensure_workspace_layout(workspace)
+            paths = build_run_paths(runs_dir_for(workspace) / "run_0001")
+            ensure_run_layout(paths)
+            write_text(paths.user_input, "goal")
+            write_text(paths.memory, "# Memory\n")
+
+            exit_code = rcb_agent.main(
+                ["--workspace", str(workspace), "--export-only", "--no-synthesis"]
+            )
+
+            report = read_text(workspace / "report" / "report.md")
+            self.assertIn("No completed stage output was produced", report)
+            self.assertEqual(exit_code, 1)
 
 
 class SkippedStageNamesTest(unittest.TestCase):
