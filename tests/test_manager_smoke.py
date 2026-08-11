@@ -299,6 +299,13 @@ class ScriptedSmokeOperator:
                                 "source_artifact": "results/metrics.json",
                             }
                         ],
+                        "task_outputs": [
+                            {
+                                "stated": "the retrieval-on versus retrieval-off accuracy comparison",
+                                "covered_by": "figure:1",
+                                "why_not": "",
+                            }
+                        ],
                     }
                 ),
             )

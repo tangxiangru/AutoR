@@ -75,6 +75,9 @@ class ReportPlanRobustnessTestCase(unittest.TestCase):
                 {
                     "figures": figures,
                     "headline_numbers": HEADLINE if headline_numbers is None else headline_numbers,
+                    "task_outputs": [
+                        {"stated": "the comparison the task asks for", "covered_by": "figure:1"}
+                    ],
                 }
             ),
         )
