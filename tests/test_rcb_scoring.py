@@ -515,6 +515,47 @@ class CollectFiguresUnitTests(unittest.TestCase):
         self.assertEqual(published, ["b.png", "g.png"])
 
 
+class SynthesizedFiguresMatchTheReportThatShippedTest(unittest.TestCase):
+    """The published set has to describe the report, not the one that did not exist yet.
+
+    `export_run` selects figures before calling the synthesizer, because the synthesizer
+    is handed the list. On the synthesized path that first pass sees `report_text=""`, so
+    it cannot rank by what the report argues with and falls back to filesystem order —
+    and 39 of 40 benchmark runs took that path, so it was the only pass there was.
+    """
+
+    def test_the_published_list_is_recomputed_against_the_synthesized_report(self) -> None:
+        tmp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp_dir.cleanup)
+        root = Path(tmp_dir.name)
+        workspace = root / "workspace"
+        workspace.mkdir()
+        paths = build_run_paths(root / ".autor" / "run")
+        ensure_run_layout(paths)
+        write_text(paths.user_input, "Benchmark task")
+        write_text(paths.memory, "# Approved Run Memory\n")
+        ensure_run_config(paths, model="sonnet", venue="neurips_2025", output_format="markdown")
+        for name in ("a.png", "b.png", "c.png", "d.png", "e.png", "f.png", "g.png"):
+            (paths.figures_dir / name).write_bytes(b"\x89PNG " + name.encode())
+
+        body = "# Report\n\n## Results\n\n" + (_PARAGRAPH * 40) + "\n\n![g](images/g.png)\n"
+
+        def synthesize(*, paths, workspace, figures):  # noqa: ANN001, ARG001
+            write_text(workspace / "report" / "report.md", body)
+            return body
+
+        result = export_run(
+            paths=paths, workspace=workspace, pipeline_completed=False, synthesize=synthesize
+        )
+
+        self.assertEqual(result.report_source, "synthesized")
+        # Exactly what the report argues with — not five picked in filesystem order.
+        self.assertEqual(result.figures, ["g.png"])
+        self.assertEqual(
+            sorted(p.name for p in (workspace / "report" / "images").glob("*.png")), ["g.png"]
+        )
+
+
 class OutputsPruneIsNotADataLossTest(unittest.TestCase):
     """The prune deletes; so it has to offer a slot before it deletes.
 
