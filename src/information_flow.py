@@ -263,6 +263,12 @@ def _idea_pool(context: ChannelContext) -> str | None:
     return manager._build_idea_pool(context.paths, context.stage, context.attempt_no)  # noqa: SLF001
 
 
+def _settled_reasoning(context: ChannelContext) -> str | None:
+    from .settled_reasoning import build_block
+
+    return build_block(context.paths)
+
+
 def _writing_manifest(context: ChannelContext) -> str:
     from .writing_manifest import build_writing_manifest, format_manifest_for_prompt
 
@@ -445,6 +451,31 @@ CHANNELS: tuple[Channel, ...] = (
         consumed_by=_from("05_experimentation"),
         build=_preregistration,
         rationale="From the freeze onward this is the authoritative statement of what the run predicted.",
+    ),
+    Channel(
+        key="settled_reasoning",
+        heading="# Reasoning This Run Already Settled",
+        produced_by=None,
+        consumed_by=frozenset({"07_writing"}),
+        preface=(
+            "The panels below argued these points during the run and the arguments were "
+            "recorded rather than published. They belong in **Discussion**, after the "
+            "results — the opening of the report belongs to the numbers.\n"
+            "- A settled question, the alternatives rejected, and what would overturn the "
+            "answer is the substance of a real discussion section. Written as *\"we chose X "
+            "over Y because Z, and W would overturn it\"*, it is an argument; pasted as a "
+            "list of everything anyone said, it is padding, and padding is scored down.\n"
+            "- Use only what bears on a claim the report actually makes. Silence on a "
+            "settled point is better than a paragraph that discusses nothing."
+        ),
+        build=_settled_reasoning,
+        rationale=(
+            "Stage 07 only. Every earlier stage either produced this material or was told "
+            "the part of it that bound its own decision, so re-sending it upstream would "
+            "re-open questions the run closed. Writing is the first stage whose job is to "
+            "state why the run believes what it believes, and the first that had no access "
+            "to the record of the run deciding it."
+        ),
     ),
     Channel(
         key="report_plan",

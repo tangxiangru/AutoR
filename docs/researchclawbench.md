@@ -468,6 +468,90 @@ the report (`report_text[:10000]`, `evaluation/score.py:138`); text criteria see
 whole document. Since image criteria carry 60.6% of the weight, prose arguing for a
 figure past that point is worth nothing.
 
+### Two ladders, and only one of them has headroom
+
+The band table above is a simplification: `RUBRIC` makes the judge **classify each
+criterion first**, then apply one of two different scales.
+
+| | Above 50 requires |
+|:---|:---|
+| **Mode A** — quantitative results, metrics, benchmarks | metrics *better than the paper's* |
+| **Mode B** — mechanism, theory, interpretation | more supporting evidence than the paper (51–60); a more complete logical chain and more rigorous argumentation (61–70); insights the paper did not cover (71–80) |
+
+**Mode A has no reachable headroom on a reproduction task.** The agent is not given the
+target paper — `run_task.py:setup_workspace` copies `data/` and `related_work/` and
+leaves `target_study/` behind, and a hash comparison confirms the target paper is not
+hiding among the related work. Beating a number you cannot see, on the data that
+produced it, is not a strategy. Mode A is effectively capped at 50, and everything
+interesting about it is *below*: absent → 0, mentioned without a number → 1–10, a
+number from a methodology with a fundamental error → 11–20, a sound number → 41–50.
+
+Classifying all 154 shipped criteria against the two definitions gives:
+
+| | Mode A | Mode B | row |
+|:---|---:|---:|---:|
+| image criteria | 40.2% | 20.4% | 60.6% |
+| text criteria | 27.0% | 12.4% | 39.4% |
+| **column** | **67.2%** | **32.7%** | |
+
+Reproduce it with:
+
+```bash
+# For each item in tasks/*/target_study/checklist.json, ask a model which mode the
+# judge would pick, using score.py's own Mode A / Mode B definitions verbatim, then
+# aggregate by item weight. Weights sum to 1.0 per task, so the shares are directly
+# comparable across the 40 tasks.
+```
+
+The classification is a model's reading of a rubric, not ground truth — a criterion
+near the boundary could go either way, and the judge re-decides on every run. Treat the
+split as an order of magnitude: **roughly two-thirds capped, roughly one-third open.**
+
+Three consequences that invert the usual instinct, and which AutoR now passes to the
+run in its goal contract:
+
+1. **Covering one more result beats polishing every result you have.** Absent → sound
+   number is worth about 45 points on that criterion; sound number → better-written
+   sound number is worth nothing across two-thirds of the board.
+2. **Report the number you have with its caveat rather than omitting it.** Honest and
+   uncertain scores in the 40s if the method is sound; omitted scores 0. This is not
+   licence to invent one — the judge is told to be highly skeptical of fabricated
+   numbers, and an invented figure lands in the 11–20 band that a real one clears
+   anyway, so the honest version dominates on both correctness *and* score.
+3. **Prose quality is not a lever; evidence and argument are.** "No inflation for
+   well-written but shallow content" is in the rubric verbatim. What moves the
+   mechanistic third is the alternative ruled out, the sensitivity check run, and what
+   would overturn the claim — which is why
+   the `settled_reasoning` channel exists (below).
+
+### Publishing the reasoning the run already did
+
+Mode B's three bands above 50 — *more supporting evidence than the paper*, *a more
+complete logical chain and more rigorous argumentation*, *insights the paper did not
+cover* — describe the contents of `workspace/reviews/deliberations.json` almost
+literally: a settled methodological question, the alternatives rejected and why, a
+mandatory falsifier, and the dissent that lost. `idea_pool.json` holds hypotheses five
+distinct lenses proposed and the run did not pursue.
+
+Until the `settled_reasoning` channel, none of it reached the report. Stage 07 did not
+read `workspace/reviews/` at all, so a run that argued with itself for six voice calls
+wrote its report as though the argument had not happened — spending the calls and
+collecting none of the weight they could have earned.
+
+The channel is Stage 07 only, and deliberately thin:
+
+- **An unanswered crux contributes nothing.** A panel that could not be reached is not
+  an open question the run chose to leave open, and presenting it as one claims
+  reasoning that did not happen. (`deliberation.md` covers how the two are told apart.)
+- **A duplicate or adopted candidate is not a road not taken.** Listing a restatement of
+  the adopted hypothesis as an alternative overstates how wide the search was.
+- **Counts and field lengths are capped.** Image criteria see only the first 10,000
+  characters and the rubric says "longer is not better" in as many words, so an
+  unbounded transcript costs more than it earns. The preface sends the material to
+  Discussion, after the numbers.
+- **A run that argued nothing sends nothing.** An empty heading invites the stage to
+  fill it, and a discussion section about nothing scores below one that is absent.
+
 ## How other agents score
 
 [researchclawbench-landscape.md](researchclawbench-landscape.md) works through the public

@@ -82,7 +82,10 @@ At minimum the report must contain:
   and figures.
 - **Validation or comparison** — a figure that shows the result holds: an ablation, a baseline
   comparison, a held-out evaluation, or a robustness check.
-- **Discussion** — what the numbers mean mechanistically, not a restatement of them.
+- **Discussion** — what the numbers mean mechanistically, not a restatement of them. Where the
+  run settled a methodological question, argue it here: the alternative that was rejected, the
+  reason, and what would overturn the answer. A discussion that only restates the results is
+  the most commonly wasted section in an AI-written report.
 - **Limitations** — what the run did not establish.
 
 ## File Convention
@@ -215,7 +218,25 @@ shows the same thing. They were chosen at Stage 03; this phase produces them.
     DOI / CrossRef as fallback; if a citation stays unresolved, mark it as unresolved rather than
     pretending it is verified.
 
-### Phase 6: Self-Review
+### Phase 6: Argue the Discussion
+
+If a `Reasoning This Run Already Settled` section appears in your context, the run argued
+those points and recorded the arguments instead of publishing them. Work the ones that bear
+on a claim the report makes into Discussion:
+
+- **A settled question** becomes *"we chose X over Y because Z"* — a sentence a reader can
+  disagree with. Reproducing the panel's transcript is not that.
+- **A falsifier** becomes *"this would be overturned by W"*, attached to the claim it
+  qualifies. State it for each main claim, whether or not a panel supplied one.
+- **A hypothesis generated and not pursued** belongs in Discussion or Limitations only when
+  the report can say what ruling it out or in would take. An inventory of everything anyone
+  proposed adds length without adding an argument.
+
+Two guards. Nothing from that section goes before the Results — the opening of the report is
+where the headline numbers have to be. And silence beats padding: a settled point that bears
+on nothing the report claims is better left out than discussed.
+
+### Phase 7: Self-Review
 
 23. Score the draft on narrative clarity, claims-evidence alignment, technical rigor, experiment
     design, writing quality, structure and flow, references and figures, and completeness.
@@ -232,7 +253,7 @@ Minimum bar:
   referenced by the report
 - the overall self-review shows the report is ready or near-ready for approval
 
-### Phase 7: Stage Summary
+### Phase 8: Stage Summary
 
 26. Write the stage summary draft to `{{STAGE_OUTPUT_PATH}}`.
 
