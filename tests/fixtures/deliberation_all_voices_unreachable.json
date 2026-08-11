@@ -1,0 +1,61 @@
+{
+  "request": {
+    "question": "For a three-way comparison of LASSO, ridge and elastic net on selection stability, what should count as 'variable j was selected' for ridge, which never sets a coefficient to zero? Specifically: should the primary estimand be (a) top-k support with k matched per-resample to the lasso's cardinality, (b) rank agreement only, with no notion of a selected set, or (c) an absolute threshold on |beta-hat|?",
+    "why_it_matters": "The whole study is a comparison of between-regularizer disagreement against within-regularizer bootstrap noise. Ridge's native selection frequency is identically 1.0 for every variable, so under any naive support-based estimand ridge is trivially the 'most stable' method and the headline comparison ",
+    "working_answer": "Co-primary, not a single choice. (1) Matched-cardinality top-k support: on each bootstrap resample, k is the number of nonzeros the LASSO selected on that same resample, and the top-k rule is applied identically to all three estimators. This keeps set cardinality constant across methods within a res",
+    "help_wanted": "both",
+    "stage_slug": "01_literature_survey",
+    "already_considered": [
+      "Absolute threshold on |beta-hat|: rejected as primary. The shipped features have unit L2 norm rather than unit variance, so coefficient magnitudes sit on a scale with no interpretable cutoff, and the threshold can be tuned to produce any answer. Retained only as a declared sensitivity analysis."
+    ]
+  },
+  "positions": [
+    {
+      "voice": "theorist",
+      "title": "Theorist",
+      "backend": "claude",
+      "model": "sonnet",
+      "answer": "",
+      "argument": "",
+      "against_self": "",
+      "failed": true
+    },
+    {
+      "voice": "empiricist",
+      "title": "Empiricist",
+      "backend": "claude",
+      "model": "sonnet",
+      "answer": "",
+      "argument": "",
+      "against_self": "",
+      "failed": true
+    },
+    {
+      "voice": "critic",
+      "title": "Critic",
+      "backend": "claude",
+      "model": "sonnet",
+      "answer": "",
+      "argument": "",
+      "against_self": "",
+      "failed": true
+    },
+    {
+      "voice": "pragmatist",
+      "title": "Pragmatist",
+      "backend": "claude",
+      "model": "sonnet",
+      "answer": "",
+      "argument": "",
+      "against_self": "",
+      "failed": true
+    }
+  ],
+  "answer": "",
+  "reason": "",
+  "falsifier": "",
+  "dissent": "",
+  "voice_calls": 4,
+  "changed_the_answer": null,
+  "verdict": "The deliberation produced no answer; the stage keeps its own."
+}

@@ -120,7 +120,12 @@ review panel, which pays per gate.
 ## Limits worth knowing
 
 - **The pool is material, not a dependency.** A panel that cannot be reached logs the failure
-  and Stage 02 generates hypotheses the ordinary way.
+  and Stage 02 generates hypotheses the ordinary way. When *every* proposer fails the verdict
+  says so rather than reporting "no candidate hypotheses survived" — an empty pool from
+  proposers that ran is a result, an empty pool from proposers that never ran is an outage, and
+  the same sentence for both hides one behind the other. See
+  [the deliberation note](deliberation.md#when-no-voice-answers) for the live run this came
+  from.
 - **Scoring is one call over the whole pool**, not independent critics per candidate. It orders
   material a later reader judges anyway; paying per candidate would spend more on ranking the
   pool than on generating it.
