@@ -791,11 +791,29 @@ And where the runs stopped:
 `run_status` across the same manifests: 46 `cancelled`, 4 `running`, 3 `human_review`, **0
 completed**.
 
-So: **the thirteen backward edges that are "the reason the graph exists" were taken once in the
-entire batch, and the mechanism §5.4 calls the one that makes them usable — a blocked move handed to
-the agent with its blocking reason — fired twice.** Forty-one of fifty runs halted at or before
-Stage 03. On this benchmark the adaptive graph produced a walk that was, in every respect a
-`--stage-graph linear` run would also have produced, linear.
+So: **the agent chose a backward move zero times.** The single `revisit` in the table is not a
+routing decision — it is recorded `agent_directed: false` with the reason "Router fell back to the
+default move: `finish` is not a move out of 07_writing". The prompt had invited `finish` at a node
+with no finish edge, the off-menu target was refused, and the default at 07 happens to be backward.
+The mechanism §5.4 calls the one that makes the backward edges usable — a blocked move handed to the
+agent with its blocking reason — fired twice. Forty-one of fifty runs halted at or before Stage 03.
+On this benchmark the adaptive graph produced a walk that a `--stage-graph linear` run would have
+produced too.
+
+Two things stop this from being a clean measurement of the topology, and both were found by
+re-reading the corpus rather than by trusting the summary:
+
+- **It spans two topologies.** `02 → 01` and `03 → 02` were added on 2026-08-09; the batch ran on
+  08-06. Forty of the fifty runs — 89 of the 133 visits — had **ten** backward edges, not thirteen,
+  and were missing precisely the two at the stages where they died. "Thirteen backward edges taken
+  once" was the wrong denominator, and an earlier revision of this section said it.
+- **It is largely a parser census.** Of the 27 visits where more than one move was on offer, the
+  router was asked at all 27 and the backend answered; 22 answers were then discarded by an unkeyed
+  JSON extractor that could not find the object in an agent transcript. That was fixed in #176.
+  Replayed against the current parser, 24 of the 27 read cleanly. So `4 of 27 agent-directed` is a
+  measurement of a transport bug, not of the agent or the graph — **and every one of the recovered
+  answers still chose forward**, so the parser explains the whole agency gap and none of the revisit
+  gap.
 
 Three consequences, and none of them is optional.
 
@@ -815,12 +833,41 @@ Three consequences, and none of them is optional.
    run GPT-5.4 while AutoR ran Claude Opus, so §6.1 reports a cross-model difference as a harness
    result.
 
+### 6.7 The graph fires now, and that was not the predicate
+
+The batch in flight, on the repaired code, is already a different object. Both batches ran
+`adaptive` + `auto`:
+
+| | pre-repair batch | in flight |
+|:---|---:|---:|
+| visits offering more than one move | 20% | **58%** |
+| visits the agent, not the default, decided | 3% | **58%** |
+
+Nothing about the router changed to do that. §6.5's repairs let runs live long enough to produce the
+artifacts that open a forward guard, and a node with an open forward edge and an open backward one is
+a node with a decision at it. **The graph was quiet because the runs were dying, not because the
+controller was mis-wired** — which is the opposite of the first diagnosis this section reached, and
+the reason it is written down.
+
+Four narrower suppressors were real and are fixed (#191). The largest by far:
+`--final-stage 07_writing` is the benchmark's default, the advance past the requested final stage was
+recorded as a *pruned* move, and a node with no live forward move makes `default_move` return None —
+so `StageRouter.choose` halted and discarded the live backward edges at Stage 07 without asking.
+Every benchmark run ended by throwing away the `07 → 06` decision, which is where "does the write-up
+carry a claim the analysis does not support?" would be asked. Reaching the requested final stage is
+now the `finish` edge it always was.
+
+The others: `auto` asked only when more than one move was *live*, which skipped the node whose
+forward guard is unmet and whose repair edge is open (3/8 → 7/8 nodes on a fresh run); `_ask` had no
+retry, so any unreadable answer degraded forward; a refused route was recorded as a routing
+observation, so 23 of the 27 multi-choice visits entered the estimator as endorsements of a default
+nobody chose.
+
 **The experiment this document owes.** Same model, same judge, same 40 tasks, `--stage-graph
-adaptive` against `--stage-graph linear`, paired, with enough seeds to say something. It is not run
-here because its outcome is currently predetermined: a graph that produced one revisit in 133 visits
-cannot differ from a linear walk. The repairs in §6.5 are the precondition — they are what lets a
-run reach a stage where a routing decision exists — and the ordering is therefore repair, re-measure,
-*then* ablate. Until that ablation lands, the correct summary of this document is:
+adaptive` against `--stage-graph linear`, paired, with enough seeds to say something. The control arm
+is one flag and has never been passed. It is not run *here* because until the batch above lands there
+is no measurement of the treatment arm to pair it against; the ordering is repair, re-measure, then
+ablate. Until that ablation lands, the correct summary of this document is:
 
 > A system whose stated contribution is a topology has demonstrated that the topology is
 > inspectable and that four defects in it were findable **because** it is inspectable. It has not
