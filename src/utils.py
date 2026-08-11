@@ -9,6 +9,60 @@ from typing import Any, Mapping, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE_REGISTRY_PATH = REPO_ROOT / "templates" / "registry.yaml"
+
+#: What `code_version()` reports when it cannot tell. Never an empty string: a field that is
+#: sometimes absent and sometimes blank is one a reader has to guess about.
+UNKNOWN_CODE_VERSION = "unknown"
+
+_code_version_cache: str | None = None
+
+
+def code_version() -> str:
+    """The commit this run's code came from, with ``+dirty`` when the tree is modified.
+
+    A run could not say what produced it. ``run_manifest.json`` has the run id, timestamps,
+    status and stages; ``_meta.json`` has the model and the duration; neither has a version
+    of any kind. That is fine until the checkout moves, and on a shared clone it moves
+    constantly: during one 12-run benchmark batch this repository advanced twelve commits
+    under the running processes, so the first six runs and the last six did not use the same
+    code and nothing on disk recorded which was which. The provenance had to be reconstructed
+    by hand from shell history, which is not evidence.
+
+    ``+dirty`` matters as much as the sha. A run from a modified tree is not reproducible
+    from its commit, and a bare sha would claim it is.
+
+    Best-effort by construction: a tarball with no ``.git``, a missing git binary and a
+    non-repository all report :data:`UNKNOWN_CODE_VERSION` rather than failing a run over
+    metadata. Cached because it cannot change within a process and every run start would
+    otherwise pay for two subprocesses.
+    """
+    global _code_version_cache
+    if _code_version_cache is not None:
+        return _code_version_cache
+
+    import subprocess
+
+    def _git(*args: str) -> str | None:
+        try:
+            done = subprocess.run(
+                ["git", "-C", str(REPO_ROOT), *args],
+                capture_output=True, text=True, timeout=10, check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return done.stdout.strip() if done.returncode == 0 else None
+
+    sha = _git("rev-parse", "HEAD")
+    if not sha:
+        _code_version_cache = UNKNOWN_CODE_VERSION
+        return _code_version_cache
+
+    # `--porcelain` is empty exactly when the tree matches the commit. A failure to *ask*
+    # is not a clean tree, so it is reported as unknown rather than assumed either way.
+    status = _git("status", "--porcelain")
+    suffix = "" if status == "" else ("+dirty" if status else "+unknown")
+    _code_version_cache = sha[:12] + suffix
+    return _code_version_cache
 DEFAULT_VENUE = "neurips_2025"
 MAX_STAGE_ATTEMPTS = 5
 DEFAULT_CODEX_SANDBOX = "workspace-write"
@@ -481,6 +535,10 @@ def default_run_config() -> dict[str, Any]:
         **normalize_walk_settings({}),
         "web_search": DEFAULT_WEB_SEARCH_MODE,
         "min_report_figures": MIN_REPORT_FIGURES,
+        # A run whose config could not be read cannot claim a version either. This is the
+        # code reading it, not the code that produced it, and the two differ exactly when
+        # the question is being asked.
+        "code_version": UNKNOWN_CODE_VERSION,
     }
 
 
@@ -520,6 +578,9 @@ def initialize_run_config(
         **normalize_walk_settings(walk or {}),
         "web_search": normalize_web_search_mode(web_search),
         "min_report_figures": resolve_min_report_figures(min_report_figures),
+        # Stamped at run start, not read back at resume: it records the code this run began
+        # under, which is the question a later reader is asking.
+        "code_version": code_version(),
         "created_at": datetime.now().isoformat(timespec="seconds"),
     }
     write_text(paths.run_config, json.dumps(config, indent=2, ensure_ascii=False))
@@ -567,6 +628,16 @@ def load_run_config(paths: RunPaths) -> dict[str, Any]:
         **normalize_walk_settings(payload),
         "web_search": normalize_web_search_mode(payload.get("web_search")),
         "min_report_figures": resolve_min_report_figures(payload.get("min_report_figures")),
+        # Read back verbatim, never recomputed. This field answers "which code started this
+        # run", and recomputing it on load would answer "which code is reading it" -- the
+        # same string on the day the run happens and a different one every day after, which
+        # is precisely when a reader is asking. A config written before the field existed
+        # says so rather than borrowing today's commit.
+        "code_version": (
+            payload["code_version"].strip()
+            if isinstance(payload.get("code_version"), str) and payload["code_version"].strip()
+            else UNKNOWN_CODE_VERSION
+        ),
     }
     created_at = payload.get("created_at")
     if isinstance(created_at, str) and created_at.strip():
@@ -594,6 +665,15 @@ def save_run_config(paths: RunPaths, config: dict[str, Any]) -> None:
         **normalize_walk_settings(config),
         "web_search": normalize_web_search_mode(config.get("web_search")),
         "min_report_figures": resolve_min_report_figures(config.get("min_report_figures")),
+        # Carried through, not recomputed, for the same reason `created_at` below is: this
+        # says which code *started* the run. A resume runs newer code over an older run, and
+        # stamping today's commit here would quietly rewrite the run's history to claim it
+        # always ran on it. A config with nothing recorded says so.
+        "code_version": (
+            config["code_version"].strip()
+            if isinstance(config.get("code_version"), str) and config["code_version"].strip()
+            else UNKNOWN_CODE_VERSION
+        ),
     }
     created_at = config.get("created_at")
     if isinstance(created_at, str) and created_at.strip():

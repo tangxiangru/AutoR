@@ -60,6 +60,7 @@ from .utils import (
     StageSpec,
     approved_stage_summaries,
     build_run_paths,
+    code_version,
     extract_fenced_task,
     extract_markdown_image_targets,
     read_text,
@@ -193,6 +194,12 @@ def write_run_meta(
             "agent_name": meta.get("agent_name") or agent_name,
             "duration_seconds": duration_seconds,
             "model": model,
+            # Which AutoR produced this. `_meta.json` is the file the scorer and the
+            # leaderboard importer read, so it is the one place a published number can
+            # carry the code behind it. Written last-wins rather than preserved like
+            # `agent_cmd`: a re-export runs new code over an old workspace, and saying so
+            # is the point.
+            "code_version": code_version(),
         }
     )
     if extra:
