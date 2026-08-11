@@ -50,6 +50,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from .intake import ResourceEntry, classify_resource
+from .report_plan import load_report_plan
 from .utils import (
     DEFAULT_OUTPUT_FORMAT,
     MAX_REPORT_FIGURES,
@@ -526,6 +527,27 @@ def _figure_candidates(
     return candidates
 
 
+def _planned_rank(paths: RunPaths) -> dict[str, int]:
+    """Filename -> slot, from the run's own report plan. Empty when there is no plan.
+
+    Case-folded because the plan names a file the writing stage intends to produce and the
+    file on disk is whatever the code that made it chose to call it; a plan that loses to a
+    capital letter would be worse than no plan.
+
+    A dropped slot is skipped rather than ranked last. `dropped_because` records a figure
+    the run decided against, and reinstating it behind the survivors would quietly undo
+    that decision at export time.
+    """
+    plan = load_report_plan(paths)
+    if plan is None:
+        return {}
+    return {
+        figure.filename.casefold(): figure.slot
+        for figure in plan.figures
+        if figure.filename and not figure.dropped_because
+    }
+
+
 def collect_figures(paths: RunPaths, workspace: Path, report_text: str = "") -> list[str]:
     """Publish at most :data:`MAX_REPORT_FIGURES` figures into ``report/images/``.
 
@@ -574,7 +596,23 @@ def collect_figures(paths: RunPaths, workspace: Path, report_text: str = "") -> 
     # a synthesized or fallback report, which is assembled from this list in the first place.
     selected = list(referenced)
     if not selected:
-        for name, _source in candidates:
+        # Nothing in the report says which figures matter, so the run's own report plan is
+        # asked instead. Without it the order here is `_figure_candidates`' order, which
+        # resolves to filename order -- and the slots are contested: one benchmark run
+        # reached this branch holding 426 candidate PNGs, so five of them were published on
+        # the judge's ~61% of the weight because their names sorted first. The plan already
+        # ranks the figures by the claim each settles, was written before any of this, and
+        # is the only ranking in the run that means anything. Unplanned figures keep their
+        # existing order behind the planned ones rather than being dropped: a run whose plan
+        # is thin must still publish something.
+        ranked = _planned_rank(paths)
+        # Sentinel above every real slot, not `len(ranked)`: a two-slot plan would otherwise
+        # rank its own second figure equal to every unplanned one, and the stable sort would
+        # hand the tie to whichever filename came first -- losing a planned figure to the
+        # alphabet inside the fix meant to stop exactly that.
+        unplanned = max(ranked.values(), default=0) + 1
+        ordered = sorted(candidates, key=lambda item: ranked.get(item[0].casefold(), unplanned))
+        for name, _source in ordered:
             if len(selected) >= MAX_REPORT_FIGURES:
                 break
             selected.append(name)
