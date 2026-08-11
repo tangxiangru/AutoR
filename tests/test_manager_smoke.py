@@ -1026,6 +1026,49 @@ class ManagerSmokeTests(unittest.TestCase):
             self.assertEqual(manifest.current_stage_slug, INTAKE_STAGE.slug)
             self.assertIsNone(manifest.completed_at)
 
+    def test_an_unattended_abort_routes_to_the_deliverable_instead_of_cancelling(self) -> None:
+        """Abort is a person's decision, and unattended there is no person.
+
+        Eleven of the twelve dead ResearchClawBench runs reached this branch from an
+        automated reviewer whose verdict could not be parsed, and each one cancelled a
+        run that had already done the work. Interactive runs are unchanged --
+        `test_manager_abort_marks_run_cancelled` above is the same scenario with a human
+        at the gate, and it still cancels.
+        """
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            runs_dir = Path(tmp_dir) / "runs"
+            manager = ResearchManager(
+                project_root=REPO_ROOT,
+                runs_dir=runs_dir,
+                operator=ScriptedSmokeOperator(),
+                output_stream=io.StringIO(),
+                evolution=EvolutionConfig(rounds=0),
+                unattended=True,
+            )
+
+            # Abort once, at Stage 01; approve whatever the run reaches next.
+            choices = iter(["6"])
+
+            def choice(*_args: object, **_kwargs: object) -> str:
+                return next(choices, "5")
+
+            with self._auto_approve_intake(manager), patch.object(manager, "_ask_choice", side_effect=choice):
+                manager.run("Smoke-test the unattended abort route.", venue="neurips_2025")
+
+            paths = build_run_paths(self._run_roots(runs_dir)[0])
+            self.assertIn("routed_to_deliverable", read_text(paths.logs))
+            # It aborted at Stage 01 and still *ran* the node that writes the report,
+            # rather than leaving the process at Stage 01. Whether that node then passes
+            # its own gates is its business — this fixture's Stage 07 does not, with
+            # every upstream artifact missing, and that is the correct outcome.
+            self.assertTrue(paths.stage_tmp_file(STAGES[6]).exists())
+            self.assertFalse(paths.stage_tmp_file(STAGES[3]).exists())
+            # The stage that failed, plus every stage the route stepped over.
+            self.assertEqual(
+                sorted(manager.auto_skipped_stages),
+                sorted(stage.slug for stage in STAGES[:6]),
+            )
+
     def test_project_bootstrap_carries_forward_prior_stages(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             runs_dir, operator, manager = self._build_manager(tmp_dir)

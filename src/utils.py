@@ -146,6 +146,11 @@ STAGES: list[StageSpec] = [
     StageSpec(8, "08_dissemination", "Dissemination"),
 ]
 
+#: The node that produces the deliverable. Stage 08 comes after it and makes posters and
+#: release notes, so it is where a run *ends*, not where its output is written — the
+#: distinction matters to anything deciding where to route a run that is out of budget.
+WRITING_STAGE = STAGES[6]
+
 REQUIRED_STAGE_HEADINGS = [
     "Objective",
     "What I Did",
@@ -834,7 +839,7 @@ def build_prompt(
     # about the wrong question, and nothing else in the prompt notices.
     from .deliverables import format_deliverables_for_prompt
 
-    deliverables_block = format_deliverables_for_prompt(user_request)
+    deliverables_block = format_deliverables_for_prompt(task_statement(user_request))
     if deliverables_block:
         sections.extend(["# What the Task Asks For", deliverables_block])
     if obligations_context:
@@ -924,7 +929,7 @@ def build_continuation_prompt(
     # A contract that only appears on the first attempt is one every retry can forget.
     from .deliverables import format_deliverables_for_prompt
 
-    _deliverables = format_deliverables_for_prompt(read_text(paths.user_input))
+    _deliverables = format_deliverables_for_prompt(task_statement(read_text(paths.user_input)))
     if _deliverables:
         sections.extend(["# What the Task Asks For", _deliverables])
     if intake_context_text:
@@ -999,6 +1004,20 @@ def extract_fenced_task(goal: str) -> str | None:
     if end < 0:
         return None
     return goal[start:end].strip() or None
+
+
+def task_statement(goal: str) -> str:
+    """What the *task* asked for, with anything wrapped around it removed.
+
+    A goal is not always only the question. The benchmark adapter builds one that carries
+    a workspace contract, a grading rubric and a figure budget alongside the task, and
+    :mod:`src.deliverables` reads a goal for the sentences that ask for something. Read
+    off the whole thing, ``demanding_sentences`` returned 23 demands for Astronomy_000
+    where the task has 10 — thirteen phantoms, the first of which is "Benchmark Run:
+    ResearchClawBench". The stage was then told those were its requirements and the
+    coverage gate held the report to them.
+    """
+    return extract_fenced_task(goal) or goal
 
 
 def goal_excerpt(goal: str, max_chars: int) -> str:
@@ -1491,7 +1510,7 @@ def validate_stage_artifacts(
 
         problems.extend(
             f"{stage.stage_title}: {problem}"
-            for problem in validate_deliverables_coverage(paths, read_text(paths.user_input))
+            for problem in validate_deliverables_coverage(paths, task_statement(read_text(paths.user_input)))
         )
 
         if not (paths.artifacts_dir / "citation_verification.json").exists():

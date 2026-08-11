@@ -898,6 +898,14 @@ def export_run(
         synthesized = synthesize(paths=paths, workspace=workspace, figures=figures)
         if synthesized and len(synthesized.strip()) >= MIN_REPORT_CHARS:
             _publish_report(workspace, report_path, synthesized.strip(), "synthesized")
+            # Recompute against the report that shipped. The pass above ran before this
+            # report existed — `report_text` was empty, so `collect_figures` could not
+            # rank by what the report argues with and fell back to filesystem order,
+            # and its prune enforced the budget against a selection the report had no
+            # say in. On 39 of 40 benchmark runs that was the only pass there was, so
+            # `ExportResult.figures` described a set the deliverable did not reference
+            # and a figure the synthesizer did cite could already have been pruned.
+            figures = collect_figures(paths, workspace, report_text=synthesized)
             return result("synthesized")
         # A synthesis attempt that came back thin is worse than the deterministic assembly,
         # so fall through rather than shipping it.
@@ -917,6 +925,7 @@ def export_run(
     # is genuinely worse than what we are about to write.
     on_disk = read_text(report_path).strip() if report_path.exists() else ""
     if len(on_disk) >= MIN_REPORT_CHARS and len(on_disk) > len(fallback.strip()):
+        figures = collect_figures(paths, workspace, report_text=on_disk)
         return result("synthesized")
 
     _publish_report(workspace, report_path, fallback, "fallback")

@@ -163,6 +163,7 @@ from .utils import (
     INTAKE_STAGE,
     MAX_STAGE_ATTEMPTS,
     STAGES,
+    WRITING_STAGE,
     RunPaths,
     StageSpec,
     append_approved_stage_summary,
@@ -544,18 +545,22 @@ class ResearchManager:
             self._round_intent = None
             approved = self._run_stage(paths, stage)
 
-            # Three things reach this seam: `/back <stage>`, a rollback after retry
-            # exhaustion, and a research round that decided to refine its design or
-            # change its hypothesis. All of them outrank the router — the move is
-            # already made by the time the walk sees it — and all of them are
-            # recorded on the route as the revisits they are.
+            # Four things reach this seam: `/back <stage>`, a rollback after retry
+            # exhaustion, a research round that decided to refine its design or change
+            # its hypothesis, and the terminal route to the deliverable. All of them
+            # outrank the router — the move is already made by the time the walk sees it.
+            #
+            # The first three go backwards and the fourth does not, so the kind is read
+            # off the direction rather than assumed. Recording a forward route as a
+            # revisit would tell the archive that `04 -> 07` is a backward edge, and
+            # `REVISIT_EDGES` has no such edge to attribute it to.
             if self._jump_target_stage is not None:
                 target = self._jump_target_stage
                 graph_leave(
                     paths,
                     state,
                     chose=target.slug,
-                    kind="revisit",
+                    kind="revisit" if target.number <= stage.number else "advance",
                     reason=self._jump_reason or "The run was redirected to an earlier stage.",
                     default_choice="",
                     agent_directed=False,
@@ -2549,6 +2554,20 @@ class ResearchManager:
                 return True
 
             if choice == "6":
+                # Abort is a person's decision. Unattended there is no person, and this
+                # branch was reached by an automated reviewer that could not be read —
+                # eleven of the twelve dead benchmark runs, each ending a run that had
+                # already done the work. Route to the deliverable instead, which is the
+                # same move an exhausted stage makes, for the same reason: the run has
+                # something and exiting publishes nothing.
+                if self.unattended and self._route_to_deliverable(
+                    paths=paths,
+                    stage=stage,
+                    attempt_no=attempt_no,
+                    because=f"{stage.stage_title} was aborted at the approval gate with no human to ask",
+                    errors_note="- (the stage was aborted rather than failing validation)",
+                ):
+                    return True
                 update_manifest_run_status(
                     paths,
                     run_status="cancelled",
@@ -3155,11 +3174,23 @@ class ResearchManager:
         )
 
         if len(self.auto_skipped_stages) >= self.max_auto_skips:
+            if self._route_to_deliverable(
+                paths=paths,
+                stage=stage,
+                attempt_no=attempt_no,
+                because=(
+                    f"{stage.stage_title} exhausted its retries and the auto-skip budget "
+                    f"({self.max_auto_skips}) is spent"
+                ),
+                errors_note=errors_note,
+            ):
+                return True
             append_log_entry(
                 paths.logs,
                 f"{stage.slug} unattended_abort",
                 (
-                    "Unattended run aborted: the auto-skip budget is exhausted.\n"
+                    "Unattended run aborted: the auto-skip budget is exhausted and the run is "
+                    "already at the stage that writes the deliverable.\n"
                     f"auto_skip_budget: {self.max_auto_skips}\n"
                     f"already_skipped: {', '.join(self.auto_skipped_stages)}\n"
                     f"last validation errors:\n{errors_note}"
@@ -3241,6 +3272,93 @@ class ResearchManager:
             if normalized in {candidate.slug.lower(), str(candidate.number), f"{candidate.number:02d}"}:
                 return candidate
         return None
+
+    def _route_to_deliverable(
+        self,
+        *,
+        paths: RunPaths,
+        stage: StageSpec,
+        attempt_no: int,
+        because: str,
+        errors_note: str,
+    ) -> bool:
+        """Spend what is left of the run writing up, instead of exiting.
+
+        The graph has thirteen backward edges and no terminal one. Every way a stage can
+        fail terminally — an exhausted auto-skip budget here, an abort at the approval
+        gate — was ``return False``, which is not an edge but the absence of one, and the
+        runtime expresses the absence of an edge as process exit. On eight of forty
+        benchmark runs the only reachable terminal state was that exit, and a run holding
+        18 KB of survey and five rendered figures published 197 bytes.
+
+        The move is available under one predicate and it is not a quality judgement: the
+        budget for *doing more research* is spent and the node that produces the
+        deliverable has not been visited. Then the admissible set collapses to one move —
+        go and write up what the run has. Nothing about the writing node is relaxed; it
+        still runs its own gates, and if it too exhausts, this returns False and the run
+        aborts as before.
+
+        The guards on the ordinary edge into writing are bypassed on purpose, and this is
+        the only place in AutoR where that is true. A guard is a repair instruction, and
+        the validity chain's repair is "go back and adjudicate the hypotheses" — a
+        rollback that costs more budget than the run has. A refusal whose only repair is
+        unaffordable stops being a gate and becomes an exit. What the run owes instead is
+        disclosure: every bypassed stage is named in the run's not-completed list, which
+        reaches the report as its own banner, and the writing stage sees the skip summary
+        of the stage that failed.
+        """
+        # The node that produces the deliverable is the writing stage, not the last one:
+        # Stage 08 makes posters and release notes, which is not what a run short of
+        # budget should be spending it on. A run told to stop earlier than that is routed
+        # to where *it* was told to stop.
+        target = WRITING_STAGE
+        if self._final_stage is not None and self._final_stage.number < target.number:
+            target = self._final_stage
+        if stage.number >= target.number:
+            return False
+
+        bypassed = [
+            other.slug
+            for other in STAGES
+            if stage.number < other.number < target.number
+            and other.slug not in self.auto_skipped_stages
+        ]
+        # `auto_skipped_stages` is the run's "did not complete" record and the report
+        # prints it verbatim under **Stages not completed**, which is exactly what a
+        # bypassed stage is. The budget it also feeds has already fired by the time this
+        # runs, and the check above stops a second route, so nothing double-counts.
+        self.auto_skipped_stages.extend(bypassed)
+
+        reason = (
+            f"{because}, so the run routed to {target.stage_title} to produce its "
+            "deliverable rather than exiting with nothing."
+        )
+        append_log_entry(
+            paths.logs,
+            f"{stage.slug} routed_to_deliverable",
+            (
+                f"{reason}\n"
+                f"target: {target.slug}\n"
+                f"bypassed: {', '.join(bypassed) or '(none)'}\n"
+                f"already_skipped: {', '.join(self.auto_skipped_stages)}\n"
+                f"last validation errors:\n{errors_note}"
+            ),
+        )
+        self.ui.show_status(reason, level="warn")
+
+        # The stage that failed still gets its skip summary, so the writing stage reads
+        # what was missing rather than inferring it from an absence.
+        self.auto_skipped_stages.append(stage.slug)
+        self._skip_stage(
+            paths=paths,
+            stage=stage,
+            attempt_no=attempt_no,
+            reason=reason,
+            kind="auto",
+        )
+        self._jump_reason = reason
+        self._jump_target_stage = target
+        return True
 
     def _rollback_and_jump(
         self,
