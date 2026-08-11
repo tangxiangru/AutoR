@@ -67,14 +67,14 @@ still stops at an approval gate, and by default that gate is you.
 
 | Move | What runs | Where |
 | --- | --- | --- |
-| **Propose** | Five proposers work from distinct lenses — mechanism, contrarian, adjacent field, null/artifact, regime — blind to each other; two statements whose Jaccard overlap reaches 0.5 collapse into one idea | [`ideation_panel.py`](src/ideation_panel.py) · 735 L |
-| **Test** | Every baseline declares `why_competent` and a `tuning_budget` before it runs; the hypothesis set is frozen and hashed before any result exists, and a later change is legal only as a recorded amendment | [`experimental_protocol.py`](src/experimental_protocol.py) · 234 L<br />[`preregistration.py`](src/preregistration.py) · 579 L |
-| **Refute** | An adversarial pass asks why the result is wrong across ten named failure modes — confound, leakage, `metric_cherry_picking`, `effect_within_noise`, six more; a round can close as `converged`, `refine_design`, `new_hypothesis` or `abandon` | [`validity_review.py`](src/validity_review.py) · 510 L<br />[`research_rounds.py`](src/research_rounds.py) · 411 L |
-| **Critique** | Five seats review independently, cross-examine anonymised, then converge; a blocking objection is turned into a refusal in code against the panel's own chair, and a different model family audits the approval as a veto | [`review_panel.py`](src/review_panel.py) · 1277 L<br />[`cross_reviewer.py`](src/cross_reviewer.py) · 239 L |
-| **Iterate** | Every valid draft is scored against a rubric read off disk; the champion is kept and a losing polish round is reverted before anyone reads it; a draft that loses on the weighted total but is non-dominated on the criterion vector is kept anyway | [`rubric.py`](src/rubric.py) · 936 L<br />[`evolution.py`](src/evolution.py) · 727 L<br />[`pareto.py`](src/pareto.py) · 212 L |
-| **Learn** | Each finished run records its route and measured fitness; a fitness comparison is keyed on the set of stages the run actually measured, so a run cannot score well by stopping early | [`archive.py`](src/archive.py) · 974 L<br />[`decisions.py`](src/decisions.py) · 269 L |
-| **Deliberate** | A stage that hits a genuine crux stops, names the question, and pulls in theorist / empiricist / critic / pragmatist plus an expert brief, then continues with an answer that names its own falsifier; budgeted, and measured against what the agent already believed | [`deliberation.py`](src/deliberation.py) · 751 L |
-| **Localise** | A reviewer quotes the passage it objects to instead of refusing the whole stage; the revision is told to change only those spans and is diffed against them, so "preserve the correct parts" is measured rather than hoped for | [`stage_comments.py`](src/stage_comments.py) · 375 L |
+| **Propose** | Five proposers work from distinct lenses — mechanism, contrarian, adjacent field, null/artifact, regime — blind to each other; two statements whose Jaccard overlap reaches 0.5 collapse into one idea | [`ideation_panel.py`](src/ideation_panel.py) |
+| **Test** | Every baseline declares `why_competent` and a `tuning_budget` before it runs; the hypothesis set is frozen and hashed before any result exists, and a later change is legal only as a recorded amendment | [`experimental_protocol.py`](src/experimental_protocol.py)<br />[`preregistration.py`](src/preregistration.py) |
+| **Refute** | An adversarial pass asks why the result is wrong across ten named failure modes — confound, leakage, `metric_cherry_picking`, `effect_within_noise`, six more; a round can close as `converged`, `refine_design`, `new_hypothesis` or `abandon` | [`validity_review.py`](src/validity_review.py)<br />[`research_rounds.py`](src/research_rounds.py) |
+| **Critique** | Five seats review independently, cross-examine anonymised, then converge; a blocking objection is turned into a refusal in code against the panel's own chair, and a different model family audits the approval as a veto | [`review_panel.py`](src/review_panel.py)<br />[`cross_reviewer.py`](src/cross_reviewer.py) |
+| **Iterate** | Every valid draft is scored against a rubric read off disk; the champion is kept and a losing polish round is reverted before anyone reads it; a draft that loses on the weighted total but is non-dominated on the criterion vector is kept anyway | [`rubric.py`](src/rubric.py)<br />[`evolution.py`](src/evolution.py)<br />[`pareto.py`](src/pareto.py) |
+| **Learn** | Each finished run records its route and measured fitness; a fitness comparison is keyed on the set of stages the run actually measured, so a run cannot score well by stopping early | [`archive.py`](src/archive.py)<br />[`decisions.py`](src/decisions.py) |
+| **Deliberate** | A stage that hits a genuine crux stops, names the question, and pulls in theorist / empiricist / critic / pragmatist plus an expert brief, then continues with an answer that names its own falsifier; budgeted, and measured against what the agent already believed | [`deliberation.py`](src/deliberation.py) |
+| **Localise** | A reviewer quotes the passage it objects to instead of refusing the whole stage; the revision is told to change only those spans and is diffed against them, so "preserve the correct parts" is measured rather than hoped for | [`stage_comments.py`](src/stage_comments.py) |
 
 **What a default run (`--rigor standard`) actually uses.** **Test**, **Refute**, **Iterate** and
 **Learn** are on: the validity chain is unconditional at every rigor level including `fast`,
@@ -130,9 +130,9 @@ naming them.
 | Required stage-summary headings | `REQUIRED_STAGE_HEADINGS` | 7 |
 | Rubric criteria (weighted, backend-free) | `CRITERIA`, [src/rubric.py](src/rubric.py) | 8 |
 | Flags on `main.py` / `rcb_agent.py` | `parse_args` | 61 / 37 |
-| Python modules / lines / tests | the tree | 150 / 62 k / 1820 |
+| Python modules / lines / tests | the tree | 150 / 62 k / 1826 |
 
-`python -m unittest discover -s tests -p "test_*.py"` runs **1820 tests in ~70 s** across 83 test
+`python -m unittest discover -s tests -p "test_*.py"` runs **1826 tests in ~69 s** across 83 test
 modules, with no third-party dependency.
 
 ## Quick start
@@ -262,7 +262,7 @@ flowchart LR
     S6 -->|validity_chain| S7[07 Writing]
     S7 -->|report_exists| S8[08 Dissemination]
     S8 --> Z([finish])
-    S6 -.->|round abandoned| Z
+    S6 ==>|round abandoned| Z
 
     S2 -.->|the gap it rests on is not a gap| S1
     S3 -.->|a hypothesis cannot be brought to a decision| S2
@@ -701,44 +701,44 @@ flowchart LR
     M --> X[execution<br/>operator · operator_codex · web_search · backend_health]
 ```
 
-| Module | Lines | What it owns |
-| --- | ---: | --- |
-| [src/manager.py](src/manager.py) | 3772 | Walks the stage graph until it reaches finish or nothing is open — plus the router call, the evolution controller, the freeze/amend seam, the validity review, the round close, the obligation ledger, the cross-review veto, the crux settlement and the inbound-channel record |
-| [src/utils.py](src/utils.py) | 2386 | Stage metadata, run paths, prompt assembly, markdown validation, the artifact gates and the validity-chain wiring |
-| [src/operator.py](src/operator.py) | 1630 | The Claude CLI adapter: stage session state, live streaming, resume fallback, MCP config, skill pack install |
-| [src/review_panel.py](src/review_panel.py) | 1277 | The deliberating panel; a blocking objection is enforced in code against its own chair |
-| [main.py](main.py) | 1194 | CLI entry: 61 flags, start, resume, `--redo-stage`, `--rollback-stage`, the archive record and the reports that print and exit |
-| [src/report_plan.py](src/report_plan.py) | 1103 | Figures and headline numbers committed at Stage 03, stamped outside the workspace, enforced at 03, 06 and 07 |
-| [src/rcb.py](src/rcb.py) | 1037 | The ResearchClawBench adapter core: workspace layout, goal construction, report synthesis, figure publication, export |
-| [src/stage_graph.py](src/stage_graph.py) | 1000 | Stages as nodes: six guarded forward edges, thirteen backward edges, a conditional terminal, a per-stage visit budget |
-| [src/archive.py](src/archive.py) | 974 | Cross-run routes and edge payoffs keyed on a comparability basis; variant proposal, exploration and promotion |
-| [src/rubric.py](src/rubric.py) | 936 | The rigour score over a draft and the artifacts it names. Never calls a backend |
-| [src/web_search.py](src/web_search.py) | 904 | Gemini-backed search, readiness assessment, MCP config construction |
-| [src/deliberation.py](src/deliberation.py) | 751 | The crux panel: four voices, each arguing against itself, resolved into an answer that names its own falsifier |
-| [src/ideation_panel.py](src/ideation_panel.py) | 735 | Divergent Stage 02 proposers across five lenses, deduplicated into a candidate pool |
-| [src/evolution.py](src/evolution.py) | 727 | The champion ratchet: budgeted polish rounds, reverted when they do not improve, rejected on verdict drift |
-| [src/writing_manifest.py](src/writing_manifest.py) | 698 | The Stage 07 inventory plus the AutoR-owned triage artifact for each output format |
-| [src/approval_agent.py](src/approval_agent.py) | 686 | The solo approval gate, its six-choice vocabulary and its unreadable-verdict fallback |
-| [src/preregistration.py](src/preregistration.py) | 579 | Freeze, amend, adjudicate, trace |
-| [src/information_flow.py](src/information_flow.py) | 553 | Sixteen typed information channels, each with declared readers and a written rationale |
-| [src/router.py](src/router.py) | 536 | The agent's choice among admissible moves; an off-menu choice is refused and logged |
-| [src/validity_review.py](src/validity_review.py) | 510 | The adversarial pass after Stages 05 and 06, and the response gate that follows it |
-| [src/research_rounds.py](src/research_rounds.py) | 411 | Stages 03-06 as a repeatable round, bounded by `--max-rounds` |
-| [src/trials.py](src/trials.py) | 384 | Paired A/B trials over archived runs, with an exact sign-flip p-value and its attainable floor |
-| [src/stage_comments.py](src/stage_comments.py) | 375 | Anchored review comments and the collateral-change diff |
-| [src/effort.py](src/effort.py) | 349 | Routine vs deliberative tiering, and the concentration of the strong model |
-| [src/scorecard.py](src/scorecard.py) | 319 | Reads all five self-measurement ledgers and says which features earned their cost |
-| [src/obligations.py](src/obligations.py) | 306 | What a later stage still owes; only a reviewer can discharge it |
-| [src/decisions.py](src/decisions.py) | 269 | "Was offered the edge and declined" — the control arm the archive's payoffs are computed against |
-| [src/cross_reviewer.py](src/cross_reviewer.py) | 239 | A second opinion from a different model family. Veto only, never an override |
-| [src/experimental_protocol.py](src/experimental_protocol.py) | 234 | Declared baselines, seeds and dispersion, fixed before the result exists |
-| [src/deliverables.py](src/deliverables.py) | 221 | Did the run answer what the task statement actually demanded? |
-| [src/pareto.py](src/pareto.py) | 212 | Non-dominated drafts kept beside the champion, and the pair worth merging |
-| [src/review_policy.py](src/review_policy.py) | 212 | Standing review rules learned from this run's own corrections |
-| [src/inference.py](src/inference.py) | 167 | Exact permutation tests and attainable-p floors; derives the archive's `min_observations` rather than asserting it |
-| [src/rigor.py](src/rigor.py) | 122 | The one dial: which optional machinery a level turns on |
-| [src/backend_health.py](src/backend_health.py) | 106 | Distinguishes "the backend is down" from "the research failed" |
-| [src/prompt_fragments.py](src/prompt_fragments.py) | 104 | Shared prompt blocks generated from the validators' own constants |
+| Module | What it owns |
+| --- | --- |
+| [src/manager.py](src/manager.py) | Walks the stage graph until it reaches finish or nothing is open — plus the router call, the evolution controller, the freeze/amend seam, the validity review, the round close, the obligation ledger, the cross-review veto, the crux settlement and the inbound-channel record |
+| [src/utils.py](src/utils.py) | Stage metadata, run paths, prompt assembly, markdown validation, the artifact gates and the validity-chain wiring |
+| [src/operator.py](src/operator.py) | The Claude CLI adapter: stage session state, live streaming, resume fallback, MCP config, skill pack install |
+| [src/review_panel.py](src/review_panel.py) | The deliberating panel; a blocking objection is enforced in code against its own chair |
+| [main.py](main.py) | CLI entry: 61 flags, start, resume, `--redo-stage`, `--rollback-stage`, the archive record and the reports that print and exit |
+| [src/report_plan.py](src/report_plan.py) | Figures and headline numbers committed at Stage 03, stamped outside the workspace, enforced at 03, 06 and 07 |
+| [src/rcb.py](src/rcb.py) | The ResearchClawBench adapter core: workspace layout, goal construction, report synthesis, figure publication, export |
+| [src/stage_graph.py](src/stage_graph.py) | Stages as nodes: six guarded forward edges, thirteen backward edges, a conditional terminal, a per-stage visit budget |
+| [src/archive.py](src/archive.py) | Cross-run routes and edge payoffs keyed on a comparability basis; variant proposal, exploration and promotion |
+| [src/rubric.py](src/rubric.py) | The rigour score over a draft and the artifacts it names. Never calls a backend |
+| [src/web_search.py](src/web_search.py) | Gemini-backed search, readiness assessment, MCP config construction |
+| [src/deliberation.py](src/deliberation.py) | The crux panel: four voices, each arguing against itself, resolved into an answer that names its own falsifier |
+| [src/ideation_panel.py](src/ideation_panel.py) | Divergent Stage 02 proposers across five lenses, deduplicated into a candidate pool |
+| [src/evolution.py](src/evolution.py) | The champion ratchet: budgeted polish rounds, reverted when they do not improve, rejected on verdict drift |
+| [src/writing_manifest.py](src/writing_manifest.py) | The Stage 07 inventory plus the AutoR-owned triage artifact for each output format |
+| [src/approval_agent.py](src/approval_agent.py) | The solo approval gate, its six-choice vocabulary and its unreadable-verdict fallback |
+| [src/preregistration.py](src/preregistration.py) | Freeze, amend, adjudicate, trace |
+| [src/information_flow.py](src/information_flow.py) | Sixteen typed information channels, each with declared readers and a written rationale |
+| [src/router.py](src/router.py) | The agent's choice among admissible moves; an off-menu choice is refused and logged |
+| [src/validity_review.py](src/validity_review.py) | The adversarial pass after Stages 05 and 06, and the response gate that follows it |
+| [src/research_rounds.py](src/research_rounds.py) | Stages 03-06 as a repeatable round, bounded by `--max-rounds` |
+| [src/trials.py](src/trials.py) | Paired A/B trials over archived runs, with an exact sign-flip p-value and its attainable floor |
+| [src/stage_comments.py](src/stage_comments.py) | Anchored review comments and the collateral-change diff |
+| [src/effort.py](src/effort.py) | Routine vs deliberative tiering, and the concentration of the strong model |
+| [src/scorecard.py](src/scorecard.py) | Reads all five self-measurement ledgers and says which features earned their cost |
+| [src/obligations.py](src/obligations.py) | What a later stage still owes; only a reviewer can discharge it |
+| [src/decisions.py](src/decisions.py) | "Was offered the edge and declined" — the control arm the archive's payoffs are computed against |
+| [src/cross_reviewer.py](src/cross_reviewer.py) | A second opinion from a different model family. Veto only, never an override |
+| [src/experimental_protocol.py](src/experimental_protocol.py) | Declared baselines, seeds and dispersion, fixed before the result exists |
+| [src/deliverables.py](src/deliverables.py) | Did the run answer what the task statement actually demanded? |
+| [src/pareto.py](src/pareto.py) | Non-dominated drafts kept beside the champion, and the pair worth merging |
+| [src/review_policy.py](src/review_policy.py) | Standing review rules learned from this run's own corrections |
+| [src/inference.py](src/inference.py) | Exact permutation tests and attainable-p floors; derives the archive's `min_observations` rather than asserting it |
+| [src/rigor.py](src/rigor.py) | The one dial: which optional machinery a level turns on |
+| [src/backend_health.py](src/backend_health.py) | Distinguishes "the backend is down" from "the research failed" |
+| [src/prompt_fragments.py](src/prompt_fragments.py) | Shared prompt blocks generated from the validators' own constants |
 
 Supporting modules: [operator_codex.py](src/operator_codex.py) and
 [operator_protocol.py](src/operator_protocol.py), [intake.py](src/intake.py),
@@ -938,7 +938,7 @@ cross-model reviewer) need `google-genai`:
 ```bash
 git clone https://github.com/tangxiangru/AutoR.git
 cd AutoR
-python -m unittest discover -s tests -p "test_*.py"    # 1820 tests, ~70s, no dependencies
+python -m unittest discover -s tests -p "test_*.py"    # 1826 tests, ~69s, no dependencies
 ```
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request, and

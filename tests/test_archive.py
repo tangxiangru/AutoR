@@ -134,10 +134,12 @@ class ArchiveTests(unittest.TestCase):
         """The Goodhart hole this closes, measured on real scores.
 
         A stage's score is a weighted mean over the criteria that apply to it, and
-        later stages face strictly more of them. On a real completed run, mean
-        fitness over stages 01-02 is 0.986 against 0.822 over all eight. Pool those
-        and "stop early" is worth eight times what a promotion needs — so the
-        archive would find it, and promote whatever topology halts soonest.
+        later stages face no fewer of them — 01 and 02 face the same set, and so do
+        05 through 08, but the count rises twice on the way. On a scripted
+        `--fake-operator` run, mean fitness over stages 01-02 is 0.973 against 0.817
+        over all eight. Pool those and "stop early" is worth nearly eight times what
+        a promotion needs — so the archive would find it, and promote whatever
+        topology halts soonest.
         """
         short = RunRecord(
             run_id="short", variant_id="baseline", rubric_version=RUBRIC_VERSION,
@@ -372,7 +374,11 @@ class ArchiveTests(unittest.TestCase):
         three a side could never have licensed a claim at any threshold anyone would
         use, whatever the effect size.
         """
-        self.assertGreaterEqual(DEFAULT_MIN_OBSERVATIONS, 6)
+        # Equality, not a floor. `minimum_arms_for(0.05, family=f)` is 6 for every
+        # family from 7 to 23 and becomes 7 at 24, so the graph is three edges away
+        # from silently needing a seventh observation a side. A `>= 6` assertion
+        # would not notice that happening.
+        self.assertEqual(DEFAULT_MIN_OBSERVATIONS, 6)
         self.assertGreater(unpaired_floor(3, 3), 0.05)
 
         self.archive._save_variants([BASELINE_VARIANT, Variant("challenger", "adaptive")])

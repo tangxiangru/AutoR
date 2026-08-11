@@ -8,12 +8,15 @@ from here on".
 
 Three things follow from writing the dependency down instead of approximating it.
 
-**The prompt stops carrying what a stage does not read.** Measured on a real run
-before this change, the Stage 02 hypothesis context and the frozen
-preregistration were both injected from Stage 05 onward — the same H1, twice,
-one of them labelled editable. That is not only 148 wasted words; it puts a
-mutable copy of the hypotheses next to the frozen one at exactly the stages
-where the freeze is the point.
+**The prompt stops carrying what a stage does not read.** Before this change the
+Stage 02 hypothesis context and the frozen preregistration were both injected
+from Stage 05 onward — the same H1, twice, one of them labelled editable. The
+wasted words were the smaller half of it: it put a mutable copy of the
+hypotheses next to the frozen one at exactly the stages where the freeze is the
+point. What survives as a checkable statement is the topology, not the word
+count — ``hypotheses.consumed_by`` now stops at ``04_implementation`` and no
+longer intersects ``preregistration.consumed_by``, asserted in
+``tests/test_information_flow.py``.
 
 **Attribution becomes possible.** ``src.archive`` learns which *moves* pay.
 A move carries a payload; until the payload has a name, "this edge helped"
@@ -21,7 +24,7 @@ cannot become "this information helped".
 
 **The graph is inspectable.** ``dependency_edges()`` returns the producer →
 consumer pairs, so the information topology can be printed, tested, and diffed
-rather than reconstructed by reading thirteen ``if`` statements.
+rather than reconstructed by reading sixteen ``if`` statements.
 
 A channel is deliberately allowed to have no producer (``produced_by=None``):
 run configuration, the researcher profile and the deliverable contract come

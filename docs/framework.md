@@ -127,7 +127,7 @@ same credulity it is built to remove.
 ### 2.6 No runtime dependency outside the standard library
 
 AutoR's runtime imports nothing that is not in the Python standard library. 150 modules, ~62 k lines,
-1820 tests running in ~70 s with no install step. The MCP web-search server
+1826 tests running in ~69 s with no install step. The MCP web-search server
 ([`mcp_web_search.py`](../src/mcp_web_search.py)) is a stdlib JSON-RPC 2.0 implementation over stdio
 rather than an SDK. `google-genai` is needed only by three optional paths (`--web-search gemini`,
 `--cross-review`, `--research-diagram`), and each degrades to a recorded *unavailable* rather than a
