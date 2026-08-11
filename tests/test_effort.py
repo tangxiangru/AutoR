@@ -449,24 +449,41 @@ class ConcentrationIntegrationTests(unittest.TestCase):
         manager.effort_plan = EffortPlan(enabled=enabled)
         return manager, paths
 
+    def test_a_routine_stage_is_still_measured(self) -> None:
+        """Tiering withholds the rounds, not the score.
+
+        One gate used to do both, and since `--rigor standard` turns tiering on by
+        default a default run silently stopped scoring Stages 04, 05 and 08 — no
+        ledger row, no champion, no entry in `evolution/summary.json`. Measured: 5 of
+        8 stages scored on an otherwise ordinary run.
+
+        Two things followed. The archive's fitness became a mean over five stages,
+        and `comparability_basis` keys on the measured set, so the change was
+        invisible rather than wrong. And the champion ratchet stopped protecting
+        exactly the stages a cheap tier is most likely to damage.
+        """
+        manager, _paths = self._manager_and_paths()
+        self.assertFalse(manager._evolution_polishes(STAGE_04))
+        self.assertTrue(manager._evolution_measures(STAGE_04))
+
     def test_a_routine_stage_is_denied_the_polish_rounds(self) -> None:
         manager, _paths = self._manager_and_paths()
         # A polish round is a full stage execution — the most expensive thing the loop does.
-        self.assertFalse(manager._evolution_applies(STAGE_04))
-        self.assertTrue(manager._evolution_applies(STAGE_03))
+        self.assertFalse(manager._evolution_polishes(STAGE_04))
+        self.assertTrue(manager._evolution_polishes(STAGE_03))
 
     def test_tiering_off_leaves_polish_on_every_stage(self) -> None:
         manager, _paths = self._manager_and_paths(enabled=False)
-        self.assertTrue(manager._evolution_applies(STAGE_04))
-        self.assertTrue(manager._evolution_applies(STAGE_03))
+        self.assertTrue(manager._evolution_polishes(STAGE_04))
+        self.assertTrue(manager._evolution_polishes(STAGE_03))
 
     def test_a_promoted_stage_regains_its_polish_rounds(self) -> None:
         manager, _paths = self._manager_and_paths()
-        self.assertFalse(manager._evolution_applies(STAGE_04))
+        self.assertFalse(manager._evolution_polishes(STAGE_04))
         for _ in range(PROMOTE_AFTER_FAILURES):
             manager.effort_plan.note_failure(STAGE_04)
         # Promotion is not just a label: the resources follow it.
-        self.assertTrue(manager._evolution_applies(STAGE_04))
+        self.assertTrue(manager._evolution_polishes(STAGE_04))
 
     def test_a_routine_stage_runs_on_the_cheaper_operator(self) -> None:
         manager, _paths = self._manager_and_paths()

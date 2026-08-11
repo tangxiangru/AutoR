@@ -377,7 +377,11 @@ class PromptRenderingTest(PreregistrationTestCase):
         self.assertIn("may not edit", rendered)
         self.assertIn("record it as refuted", rendered)
         # Theoretical propositions and paper claims are not adjudicated here.
-        self.assertNotIn("T1", rendered)
+        # `**T1**`, not `T1`. The bare substring also matches the `T` separator in the
+        # frozen-at timestamp — `2026-08-11T10:25:09` contains `T1` — so this assertion
+        # was red between 10:00 and 19:59 and green the rest of the day. The renderer
+        # emits identifiers as `- **T1**: ...`, so match what it actually writes.
+        self.assertNotIn("**T1**", rendered)
 
 
 if __name__ == "__main__":

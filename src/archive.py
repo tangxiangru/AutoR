@@ -71,8 +71,11 @@ ARCHIVE_VERSION = "1"
 #:
 #: Derived, not chosen. An exact two-sided permutation test over arms of size *a*
 #: and *b* has ``C(a+b, a)`` labellings, so no result can go below ``2/C(a+b,a)``:
-#: three a side bottoms out at 0.10, and against the eighteen edges of the adaptive
-#: graph the corrected threshold is ``0.05/18 = 0.0028``, which needs six.
+#: three a side bottoms out at 0.10, and against a family the size of the adaptive
+#: graph's edge set the corrected threshold needs six. The family is computed rather
+#: than written down: the graph has grown from eighteen edges to twenty-two since
+#: this line was first written, and a hard-coded divisor would have under-corrected
+#: silently from the moment an edge was added.
 #:
 #: The previous value was three, with a docstring saying "three is not enough to be
 #: sure and is enough to stop acting on a single lucky run" — a sentence about
@@ -101,13 +104,13 @@ def comparability_basis(
 ) -> str:
     """The key two runs must share before their fitness may be compared at all.
 
-    A stage's score is a weighted mean over the criteria that apply to it, and later
-    stages face strictly more of them: Stage 02 is scored on five criteria worth 11,
+    A stage's score is a weighted mean over the criteria that apply to it, and the
+    late stages face more of them: Stage 02 is scored on five criteria worth 11,
     Stage 06 on eight worth 18, including `numeric_fidelity`, which is the hardest.
     So the *set of stages a run reached* is a free parameter of the objective. On a
-    real completed run the difference is not subtle — mean fitness over stages 01-02
-    is 0.986 against 0.822 over all eight, a gap eight times the margin a promotion
-    needs.
+    scripted `--fake-operator` run the difference is not subtle — mean fitness over
+    stages 01-02 is 0.973 against 0.817 over all eight, a gap nearly eight times the
+    margin a promotion needs.
 
     Left alone, that makes "stop early" the cheapest available improvement, and the
     archive would find it: a topology variant whose runs halt at Stage 03 would be

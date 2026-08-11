@@ -59,7 +59,7 @@ Nodes are stages. Edges are the moves allowed between them.
 | Topology | Edges | Behaviour |
 | --- | --- | --- |
 | `linear` (default) | one advance edge out of each node | identical to the sequence AutoR has always run |
-| `adaptive` | the advance edges plus ten backward moves | the run can return to an earlier stage when a later one shows it has to |
+| `adaptive` | the advance edges, the abandonment terminal, and thirteen backward moves | the run can return to an earlier stage when a later one shows it has to |
 
 The backward edges exist for named research conditions, not as an error path:
 
@@ -318,12 +318,20 @@ the numbers that justified it are in its note.
 
 **What a priority actually reaches, stated honestly.** It orders the move table the
 routing agent is shown, and at present that is the whole of it. It does *not* change
-what a run does when nobody is steering: `default_move` filters to forward edges
-before ranking and every node has exactly one, so no assignment of priorities
-changes the walk. Measured over 50 random assignments across all 8 nodes: 0/400
-default moves move, 195/400 menu orderings do. Both halves are pinned by tests —
-the second because a test that only asserted "no difference" would stay green if
-the mechanism were deleted entirely.
+what a run does when nobody is steering.
+
+`default_move` ranks only forward edges, and at most one of them is ever live at a
+node: seven of the eight have a single forward edge, and Stage 06 has two — the
+advance into writing and the abandonment terminal — of which the terminal is shut
+unless a round concluded `abandon`, and preempts everything else when it is open.
+So a priority never decides between two available forward moves.
+
+Measured over 50 random priority assignments across all 8 nodes: **0/400** default
+moves change. That half is exact and holds at every seed tried. The menu ordering
+does change — around 250 of 400 — but the figure is seed-dependent and no single
+integer is a stable statement of it, so the test asserts only that it is non-zero.
+Both halves are pinned, the second because a test asserting "no difference" alone
+would stay green if the mechanism were deleted entirely.
 
 So the archive's influence today is advisory: it changes what the agent sees first,
 not what happens if the agent is not asked. That is a smaller claim than "the
@@ -333,22 +341,32 @@ the estimator underneath is worth acting on.
 
 ### The composition of a run is not allowed to be the improvement
 
-A stage's score is a weighted mean over the criteria that apply to it, and later
-stages face strictly more of them — Stage 02 is scored on five criteria worth 11,
-Stage 06 on eight worth 18, including `numeric_fidelity`, the hardest. So the *set
-of stages a run reached* is a free parameter of the objective.
+A stage's score is a weighted mean over the criteria that apply to it, and the late
+stages face more of them — Stage 02 is scored on five criteria worth 11, Stage 06 on
+eight worth 18, including `numeric_fidelity`, the hardest. (Not *strictly* more at
+every step: 01 and 02 face the same set, and so do 05 through 08. The count is
+non-decreasing and it rises twice.) So the *set of stages a run reached* is a free
+parameter of the objective.
 
-On a real completed run the gap is not subtle:
+On a scripted `--fake-operator` run — the only composition that can be re-derived on
+demand, and one whose scores measure the script rather than any research — the gap
+is not subtle:
 
 | Run reached | Mean fitness |
 | --- | --- |
-| stages 01-02 | 0.986 |
-| stages 01-04 | 0.913 |
-| all eight | 0.822 |
+| stages 01-02 | 0.973 |
+| stages 01-04 | 0.904 |
+| all eight | 0.817 |
 
-Pool those and **"stop early" is worth eight times what a promotion needs**. The
-archive would have found it, and promoted whichever topology halted soonest — a
-system whose measured self-improvement consists of producing less.
+Pool those and **"stop early" is worth nearly eight times what a promotion needs**
+(0.156 against a `min_gain` of 0.02). The archive would have found it, and promoted
+whichever topology halted soonest — a system whose measured self-improvement
+consists of producing less.
+
+Re-derive with `--fake-operator --full-auto` and read `evolution/summary.json`. The
+figures moved slightly from the ones first published here, entirely in `grounding`;
+the rubric-v2 change that excluded AutoR's own bookkeeping from `artifact_breadth`
+moved none of them on this fixture.
 
 The fix is a *comparability basis*: the rubric version plus the exact set of stages
 measured. Two runs may only be contrasted within a basis, per-basis contrasts are
@@ -375,8 +393,11 @@ Three further refusals hold this together:
 - **Below `min_observations` on each side, nothing is acted on — and that bound is
   now derived.** An exact two-sided permutation test over arms of *a* and *b* has
   `C(a+b,a)` labellings, so no result can go below `2/C(a+b,a)`. Three a side bottoms
-  out at `p = 0.10`; against the adaptive graph's edge family the corrected threshold
-  needs six. `minimum_arms_for` computes it. The previous value was three, with a
+  out at `p = 0.10`; against a family the size of the adaptive graph's edge set the
+  corrected threshold needs six. `minimum_arms_for` computes it, and the family is
+  the number of contrasts the archive actually holds rather than a written-down
+  constant — the graph has gone from eighteen edges to twenty-two, and a fixed
+  divisor would have under-corrected from the first edge added. The previous value was three, with a
   docstring about intent, which meant the archive was licensing topology changes at a
   sample size where the arithmetic forbids the claim.
 - **A p-value is never reported without the floor its sample size could attain.**
@@ -407,10 +428,12 @@ generating the observations that would overturn it.
 
 Nothing, until `--archive-steer`. And then only this: **show the agent the numbers.**
 
-The learned value reached nothing before. Measured over 50 random priority
-assignments across all 8 nodes: 0/400 `default_move` answers change, 207/400 menu
-orderings do — `default_move` filters to forward edges and every node has exactly
-one, so a learned priority could only ever reorder rows in a table.
+The learned value reached nothing before: over 50 random priority assignments
+across all 8 nodes, **0/400** `default_move` answers change. At most one forward
+edge is ever live at a node, so a learned priority could only reorder rows in a
+table — which it does, at a seed-dependent rate around 250/400. The measurement and
+its explanation are the same one given [above](#4-the-cross-run-archive); this
+section is what was done about it.
 
 Wiring the statistic into `default_move` was the obvious fix and three independent
 reviews refused it, for the same reason: it would put an unrandomised,
@@ -506,6 +529,41 @@ The rubric score, which is a proxy for rigour and not a measure of insight. A
 capability can raise it without making the research better, and can make the
 research better without raising it. The decomposition and the shape counts are there
 so a reader can argue with the number instead of accepting it.
+
+---
+
+## What has and has not been measured
+
+The mechanisms above are argued for from first principles and defended by unit
+tests. That is not the same as evidence that they improve a research output, and
+this section exists so a reader can tell the two apart.
+
+**Measured, and re-derivable on demand.** Everything in this document with a number
+attached: the criterion weights per stage, the composition gap, the 0/400 reach of a
+learned priority, the permutation floors. All of these come from running the code —
+mostly with `--fake-operator`, which measures the harness rather than any research —
+and every one can be re-derived from the commands named beside it.
+
+**Not measured.** Whether any of this makes research better.
+
+- **The cross-run archive has zero real runs.** Every number it can produce today
+  comes from synthetic records in the test suite. `--archive-report` on a fresh
+  install prints an empty table, and that is the honest state: the estimator, the
+  believability gate and the promotion rule are all implemented and none of them has
+  ever been fed a real observation.
+- **The paired-trial mechanism has never completed a trial.** Six pairs were
+  attempted on 2026-08-11 — the same goal twice, `--evolve-rounds 0` against `2`,
+  strictly one run at a time with backoff. The result was 46 attempts and **zero
+  recorded runs**, every one failing on Vertex quota (`RESOURCE_EXHAUSTED` for
+  `anthropic-claude-sonnet-4-5`, 218 errors). A rate-limited run auto-skips its
+  stages, and a skipped stage is never scored, so nothing reached the archive. The
+  blocker is infrastructure, not the mechanism — but the mechanism is unproven on
+  real data either way.
+
+So when this document says a capability *is* better, it is describing an argument.
+When it says a capability *measures* better, it means the rubric, on a scripted run.
+Nothing here yet says a capability produced better research, and the paired trial is
+the thing that would.
 
 ---
 

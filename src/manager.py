@@ -941,15 +941,38 @@ class ResearchManager:
         except Exception as exc:  # noqa: BLE001 - measurement must not derail the stage
             append_log_entry(paths.logs, f"{stage.slug} anchored_revision_failed", str(exc))
 
-    def _evolution_applies(self, stage: StageSpec) -> bool:
+    def _evolution_measures(self, stage: StageSpec) -> bool:
+        """Whether this stage is scored and ratcheted at all.
+
+        Free — the rubric reads the run off disk and never calls a backend — so the
+        only reason to withhold it is a caller who asked for the old behaviour.
+
+        Separate from :meth:`_evolution_polishes`, and it was not. One gate did
+        both, and since `--rigor standard` turns effort tiering on by default, a
+        default run silently stopped scoring its three routine stages: 04, 05 and 08
+        produced no ledger row, no champion and no entry in `evolution/summary.json`.
+        Two things followed that nobody asked for. The archive's fitness became a
+        mean over five stages rather than eight — and `comparability_basis` is keyed
+        on the measured set, so the change was invisible rather than wrong. And the
+        champion ratchet stopped protecting exactly the stages a cheap tier is most
+        likely to damage: a directed revision to a routine stage could make it worse
+        with nothing comparing the two, which is the one thing the ratchet exists to
+        prevent.
+
+        Withholding the *rounds* from routine stages is the intent and is what the
+        old docstring described. Withholding the measurement was a side effect.
+        """
+        assert self.evolution is not None
+        return self.evolution.config.applies_to(stage)
+
+    def _evolution_polishes(self, stage: StageSpec) -> bool:
         """Whether this stage may spend polish rounds.
 
         A polish round is a full stage execution — the most expensive thing the loop does. A
         stage whose decisions are already made has nothing to polish toward, so withholding
         the rounds there is what turns tiering from a label into a reallocation.
         """
-        assert self.evolution is not None
-        if not self.evolution.config.applies_to(stage):
+        if not self._evolution_measures(stage):
             return False
         if self.effort_plan.enabled and not self.concentration.polish_routine:
             return not self.effort_plan.is_routine(stage)
@@ -2302,7 +2325,7 @@ class ResearchManager:
                 continue
 
             # The draft is valid. Measure it, and decide whether it may stand.
-            if self.evolution is not None and self._evolution_applies(stage):
+            if self.evolution is not None and self._evolution_measures(stage):
                 self.concentration.note_round(self.effort_plan.tier_for(stage))
                 outcome = self.evolution.consider(
                     paths=paths,
@@ -2321,7 +2344,9 @@ class ResearchManager:
                     f"[{outcome.score.total:.3f}]",
                     level="success" if outcome.improved else "info",
                 )
-                if self.evolution.should_continue(paths, stage):
+                # Measuring happened above regardless; the *rounds* are what a
+                # routine tier withholds.
+                if self._evolution_polishes(stage) and self.evolution.should_continue(paths, stage):
                     directive = self.evolution.next_directive(paths, stage)
                     if directive:
                         self.evolution.begin_round(paths, stage)
