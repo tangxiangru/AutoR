@@ -612,6 +612,58 @@ def format_resolution_for_prompt(resolutions: list[Resolution]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+#: How alike two crux questions must read before the second is treated as a repeat.
+#: Calibrated on the questions from a live run rather than guessed:
+#:
+#:     verbatim re-escalation across attempts   1.00   <- the observed failure
+#:     paraphrase of the same question          0.34
+#:     narrowed follow-up that builds on the    0.21
+#:       answer, i.e. a genuinely new crux
+#:     a different crux from the same stage     0.06
+#:
+#: 0.6 sits well above the paraphrase, which is deliberate. Suppressing a deliberation
+#: the agent actually needed costs correctness; paying four calls to re-argue a paraphrase
+#: costs four calls. The threshold is set to fail in the cheap direction.
+REPEAT_THRESHOLD = 0.6
+
+
+def read_ledger(paths: RunPaths) -> list[dict[str, Any]]:
+    """Every crux this run has already put to a panel. Empty when there is no ledger yet."""
+    path = paths.reviews_dir / LEDGER_FILENAME
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(read_text(path))
+    except (OSError, json.JSONDecodeError):
+        return []
+    entries = payload.get("deliberations") if isinstance(payload, dict) else None
+    return [entry for entry in entries if isinstance(entry, dict)] if isinstance(entries, list) else []
+
+
+def settled_answer(entries: list[dict[str, Any]], request: CruxRequest) -> dict[str, Any] | None:
+    """An earlier deliberation of the same question that actually produced an answer.
+
+    A stage that fails its gate is sent back, regenerates its escalation from the same state,
+    and asks the identical question again. Re-running the panel on a question it has already
+    settled spends the budget re-deriving an answer already on disk, and the ledger then counts
+    it as a second crux — inflating the very number that is supposed to say how much thinking
+    the run needed.
+
+    Returns None when the question is new, or when the earlier attempt produced nothing: a
+    panel that could not be reached last time may be reachable now, and that retry is fair.
+    """
+    from .ideation_panel import similarity
+
+    for entry in reversed(entries):
+        prior = entry.get("request")
+        if not isinstance(prior, dict) or not str(entry.get("answer") or "").strip():
+            continue
+        question = str(prior.get("question") or "")
+        if question and similarity(question, request.question) >= REPEAT_THRESHOLD:
+            return entry
+    return None
+
+
 def record_resolution(paths: RunPaths, stage: StageSpec, resolution: Resolution) -> dict[str, Any]:
     """Persist the crux, every position, and whether escalating changed anything."""
     path = paths.reviews_dir / LEDGER_FILENAME

@@ -114,6 +114,37 @@ panel asked it writes essays.
 
 Every position from every voice is kept, including the ones the resolution rejected.
 
+## A crux asked twice is one crux
+
+The same live run put the **identical** question to the panel on two consecutive attempts of
+one stage — byte-for-byte the same string, four voice calls each, and `cruxes_raised: 2`.
+
+The cause is structural, not a model quirk. A stage that fails its gate is sent back with the
+state it already had, regenerates its escalation from that state, and asks the same thing
+again. With the default `--max-deliberations 3` the budget is gone after three attempts of a
+single stage, and a genuinely new crux in Stage 04 is then refused.
+
+So before deliberating, the ledger is checked for the same question:
+
+- **Already answered** → the stored answer is handed straight back. No panel, no budget, no
+  second entry in the ledger. Re-asking a settled question is the stage failing to notice it
+  has the answer, not the run needing more thinking.
+- **Asked before but never answered** → the panel is called again. A panel that could not be
+  reached last time may be reachable now, and one outage should not permanently silence a crux.
+
+`REPEAT_THRESHOLD` is 0.6, calibrated against real questions rather than guessed:
+
+| Pair | Similarity |
+|:---|---:|
+| verbatim re-escalation across attempts *(the observed failure)* | 1.00 |
+| paraphrase of the same question | 0.34 |
+| narrowed follow-up that builds on the answer — a **new** crux | 0.21 |
+| a different crux from the same stage | 0.06 |
+
+0.6 sits well above the paraphrase, deliberately. Suppressing a deliberation the agent actually
+needed costs correctness; re-arguing a paraphrase costs four calls. **The threshold is set to
+fail in the cheap direction**, which means a heavy paraphrase will still be re-argued.
+
 ## When no voice answers
 
 A panel that could not be convened and a panel that convened and added nothing are different
