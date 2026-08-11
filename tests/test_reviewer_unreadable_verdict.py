@@ -9,12 +9,15 @@ the answer -- and unattended those deserve different outcomes.
 
 from __future__ import annotations
 
+import io
+import json
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from src.approval_agent import UNREADABLE_REASON, AutomatedReviewer, ReviewDecision
+from src.approval_agent import DECISION_TO_CHOICE, UNSUPPORTED_REASON, UNREADABLE_REASON, AutomatedReviewer, ReviewDecision
+from src.terminal_ui import TerminalUI
 from src.utils import STAGES, build_run_paths, ensure_run_layout
 
 GOOD = '{"decision": "approve", "reason": "Artifacts check out."}'
@@ -138,17 +141,32 @@ class ReAskFailureTest(_Harness):
         self.assertEqual(decision.choice, "4")
         self.assertEqual(calls, ["review", "review_verdict"])
 
-    def test_a_nonzero_first_call_still_aborts_without_a_re_ask(self) -> None:
-        """A backend that failed to run is a different thing from one that answered
-        unreadably, and must not be re-asked into a false decision."""
-        reviewer = self._reviewer(unattended=True)
-        calls: list[str] = []
+    def test_a_crashed_backend_is_never_re_asked(self) -> None:
+        """A process that died is not one attempt away from a usable verdict.
 
-        def run_prompt(*, paths, stage, attempt_no, prompt, label):
-            calls.append(label)
-            return (2, "", "backend exploded")
+        The re-ask exists for a reviewer that answered unreadably. Re-asking a backend that
+        failed to run risks turning a transport failure into a fabricated decision, so the
+        no-re-ask rule holds whether or not anyone is watching.
+        """
+        for unattended in (True, False):
+            reviewer = self._reviewer(unattended=unattended)
+            calls: list[str] = []
 
-        with patch.object(reviewer, "run_prompt", side_effect=run_prompt), \
+            def run_prompt(**kwargs):
+                calls.append(kwargs.get("label"))
+                return (2, "", "boom")
+
+            with patch.object(reviewer, "run_prompt", side_effect=run_prompt), \
+                 patch.object(reviewer, "_build_review_prompt", return_value="p"):
+                reviewer.review_stage(
+                    paths=self.paths, stage=self.stage, attempt_no=1,
+                    stage_markdown="# Stage 01", suggestions=["a", "b", "c"],
+                )
+            self.assertEqual(calls, ["review"], unattended)
+
+    def test_a_crashed_backend_still_aborts_when_a_human_is_watching(self) -> None:
+        reviewer = self._reviewer(unattended=False)
+        with patch.object(reviewer, "run_prompt", return_value=(2, "", "boom")), \
              patch.object(reviewer, "_build_review_prompt", return_value="p"):
             decision = reviewer.review_stage(
                 paths=self.paths, stage=self.stage, attempt_no=1,
@@ -156,7 +174,35 @@ class ReAskFailureTest(_Harness):
             )
         self.assertEqual(decision.decision_token, "abort")
         self.assertIn("exit code 2", decision.reason)
-        self.assertEqual(calls, ["review"])
+
+    def test_a_crashed_backend_sends_the_stage_back_when_nobody_is(self) -> None:
+        """Unattended, aborting here forfeits the task for a reason unrelated to the work.
+
+        Information_001 lost a run holding four approved stages to `exit code -1` -- a
+        signal kill, with nothing wrong with the research. Sending the stage back is bounded
+        by its own attempt budget; aborting discards everything already earned.
+        """
+        reviewer = self._reviewer(unattended=True)
+        with patch.object(reviewer, "run_prompt", return_value=(-1, "", "killed")), \
+             patch.object(reviewer, "_build_review_prompt", return_value="p"):
+            decision = reviewer.review_stage(
+                paths=self.paths, stage=self.stage, attempt_no=1,
+                stage_markdown="# Stage 01", suggestions=["a", "b", "c"],
+            )
+        self.assertEqual(decision.choice, "4")
+        self.assertNotEqual(decision.decision_token, "abort")
+        self.assertIn("-1", decision.reason)
+        self.assertTrue(decision.feedback.strip())
+
+    def test_a_crashed_backend_never_becomes_an_approval(self) -> None:
+        reviewer = self._reviewer(unattended=True)
+        with patch.object(reviewer, "run_prompt", return_value=(1, "", "boom")), \
+             patch.object(reviewer, "_build_review_prompt", return_value="p"):
+            decision = reviewer.review_stage(
+                paths=self.paths, stage=self.stage, attempt_no=1,
+                stage_markdown="# Stage 01", suggestions=["a", "b", "c"],
+            )
+        self.assertNotEqual(decision.choice, "5")
 
 
 class RcbAgentIsUnattendedTest(unittest.TestCase):
@@ -166,3 +212,50 @@ class RcbAgentIsUnattendedTest(unittest.TestCase):
         text = source.read_text()
         block = text[text.index("reviewer = AutomatedReviewer("):]
         self.assertIn("unattended=True", block[: block.index(")\n")])
+
+
+class DecisionVocabularyTest(unittest.TestCase):
+    """The words a reviewer actually uses when it means "send this back".
+
+    Three of five benchmark runs died because the reviewer answered `"revise"` and the map
+    did not contain it, so an ordinary request for changes was read as an unsupported token
+    and ended the run at Stage 01 or 02.
+    """
+
+    def _reviewer(self) -> AutomatedReviewer:
+        return AutomatedReviewer(
+            "claude", model="opus", fake_mode=True,
+            ui=TerminalUI(output_stream=io.StringIO(), interactive=False), unattended=True,
+        )
+
+    def test_revise_is_a_request_for_changes_not_an_unsupported_token(self) -> None:
+        decision = self._reviewer()._parse_decision(
+            json.dumps({"decision": "revise", "reason": "r", "feedback": "fix the power analysis"})
+        )
+        self.assertEqual(decision.choice, "4")
+        self.assertIn("power analysis", decision.feedback)
+
+    def test_the_other_natural_synonyms_are_accepted(self) -> None:
+        for token in ("refine", "revision", "request_changes", "changes_requested",
+                      "revise_with_feedback", "REVISE", "Request Changes"):
+            decision = self._reviewer()._parse_decision(
+                json.dumps({"decision": token, "reason": "r", "feedback": "f"})
+            )
+            self.assertEqual(decision.choice, "4", token)
+
+    def test_autor_own_fallback_token_round_trips(self) -> None:
+        """The unreadable-verdict fallback emits `revise`; the map has to accept its own word."""
+        self.assertIn("revise", DECISION_TO_CHOICE)
+
+    def test_reject_stays_out_because_it_reads_both_ways(self) -> None:
+        """"Reject" means both "send back" and "stop"; guessing either way is worse."""
+        self.assertNotIn("reject", DECISION_TO_CHOICE)
+
+    def test_approve_and_abort_are_untouched(self) -> None:
+        for token, choice in (("approve", "5"), ("abort", "6")):
+            decision = self._reviewer()._parse_decision(json.dumps({"decision": token, "reason": "r"}))
+            self.assertEqual(decision.choice, choice, token)
+
+    def test_a_genuinely_unknown_token_is_still_treated_as_unanswered(self) -> None:
+        decision = self._reviewer()._parse_decision(json.dumps({"decision": "banana", "reason": "r"}))
+        self.assertIn(UNSUPPORTED_REASON, decision.reason)

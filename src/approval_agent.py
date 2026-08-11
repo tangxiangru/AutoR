@@ -42,12 +42,26 @@ DECISION_TO_CHOICE = {
     "use_suggestion_2": "2",
     "use_suggestion_3": "3",
     "refine_with_custom_feedback": "4",
+    # A reviewer asked to choose between "custom_feedback" and "abort" writes "revise". Three
+    # of five benchmark runs died on exactly that: the word was not in this map, so an ordinary
+    # request for changes was read as an unsupported token and ended the run. AutoR's own
+    # unreadable-verdict fallback emits `decision_token="revise"`, so the vocabulary did not
+    # even agree with itself. Only unambiguous synonyms are added -- "reject" is deliberately
+    # absent, because it reads as both "send back" and "stop".
+    "revise": "4",
+    "refine": "4",
+    "revision": "4",
+    "request_changes": "4",
+    "changes_requested": "4",
+    "revise_with_feedback": "4",
 }
 
 
 #: Prefix that marks "the reviewer answered but we could not read it", as distinct from
 #: "the reviewer refused". The two are told apart by `AutomatedReviewer._is_unreadable`.
 UNREADABLE_REASON = "Automated reviewer did not return valid JSON."
+UNSUPPORTED_REASON = "Automated reviewer returned an unsupported decision token."
+CRASHED_REASON = "Automated reviewer failed to run."
 
 
 def _try_load_json(text: str) -> dict[str, Any] | None:
@@ -172,12 +186,34 @@ class AutomatedReviewer:
         )
 
         if exit_code != 0:
+            # A crashed backend is not a refusal to approve. Attended, aborting is right --
+            # a human is there. Unattended it forfeits the task: Information_001 lost a run
+            # holding four approved stages to `exit code -1`, a signal kill with nothing
+            # wrong with the research. The backend is deliberately *not* re-asked, because a
+            # process that died is not one attempt away from a usable verdict; the stage is
+            # sent back instead, bounded by its own attempt budget.
+            if not self.unattended:
+                return ReviewDecision(
+                    choice="6",
+                    decision_token="abort",
+                    reason=(
+                        f"Automated reviewer failed with exit code {exit_code}. "
+                        "AutoR stopped instead of approving blindly."
+                    ),
+                    raw_response=stdout_text or stderr_text,
+                )
             return ReviewDecision(
-                choice="6",
-                decision_token="abort",
+                choice="4",
+                decision_token="revise",
                 reason=(
-                    f"Automated reviewer failed with exit code {exit_code}. "
-                    "AutoR stopped instead of approving blindly."
+                    f"{CRASHED_REASON} It exited {exit_code}. Unattended, so the stage was "
+                    "sent back for another pass rather than approved or aborted."
+                ),
+                feedback=(
+                    "The automated reviewer could not be run, so this stage was not "
+                    "approved. Re-examine the draft against the stage contract and the "
+                    "artifacts it claims, strengthen whatever is weakest, and restate the "
+                    "summary."
                 ),
                 raw_response=stdout_text or stderr_text,
             )
@@ -239,7 +275,13 @@ class AutomatedReviewer:
 
     @staticmethod
     def _is_unreadable(decision: ReviewDecision) -> bool:
-        return decision.decision_token == "abort" and decision.reason.startswith(UNREADABLE_REASON)
+        """Whether the reviewer failed to answer, as distinct from answering "abort".
+
+        Matched on the reason, not the token: an unsupported token keeps whatever word the
+        model wrote, so a token check misses it -- and it is still a verdict nobody can act
+        on. Both kinds get the re-ask and, unattended, the send-back.
+        """
+        return decision.reason.startswith((UNREADABLE_REASON, UNSUPPORTED_REASON))
 
     def _unreadable_verdict(self, raw_response: str) -> ReviewDecision:
         """What to do when the reviewer's answer cannot be read, twice.
@@ -487,7 +529,7 @@ class AutomatedReviewer:
             return ReviewDecision(
                 choice="6",
                 decision_token=token or "abort",
-                reason="Automated reviewer returned an unsupported decision token.",
+                reason=UNSUPPORTED_REASON,
                 raw_response=raw_response,
             )
 
