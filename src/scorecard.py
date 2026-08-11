@@ -13,7 +13,8 @@ made exactly this the point of its design: what settled the question was one com
 So this reads every ledger a run produced and answers the only question that matters when the
 run is over — **which of these should I have turned on?**
 
-Three verdicts, and the distinction between the last two is the whole point:
+Five verdicts. Three of them describe a feature that ran, and the distinction between the
+last two of those is the whole point:
 
 ``keep``
     Enabled, measured, and the measurement says it changed an outcome.
@@ -22,6 +23,11 @@ Three verdicts, and the distinction between the last two is the whole point:
 ``unproven``
     Enabled, but the measurement could not run — no baseline to compare against, or the run
     ended before the comparison was possible. **Not the same as "it worked."**
+
+``unused``
+    Never switched on. Reported as not enabled, and it appears in no section.
+``unreadable``
+    The ledger exists but cannot be parsed. Reported as unreadable, never as a null.
 
 A feature that was never switched on is reported as unused rather than as a failure, and a
 ledger that cannot be read is reported as unreadable rather than as an absence of effect.

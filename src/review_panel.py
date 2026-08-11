@@ -264,8 +264,10 @@ DEFAULT_PANEL: tuple[PanelRole, ...] = (
 #: a document, and `paper-writing` / `venue-checklist` are bound to no seat at all. It is out
 #: of :data:`DEFAULT_PANEL` because nothing filters the roster by stage yet, so seating it
 #: would buy one extra model call at all nine gates for a mandate that exists at two. Seating
-#: it by default is a one-line change here plus the two roster counts in
-#: ``tests/test_review_panel.py`` and the seat table in ``docs/review-panel.md``.
+#: it by default is not the one-line change it looks like: measured by making it, 18 of the 47
+#: tests in ``tests/test_review_panel.py`` fail, because their scripted reviewers supply exactly
+#: five responses and the sixth seat gets "No scripted response left". The roster count there and
+#: the seat table in ``docs/review-panel.md`` move with it.
 OPTIONAL_ROLES: tuple[PanelRole, ...] = (
     PanelRole(
         key="reader",

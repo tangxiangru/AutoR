@@ -27,13 +27,19 @@ sentence as the reason.
 
 ---
 
-## Three verdicts, and the distinction that matters
+No feature has yet been measured on a real backend run — every verdict in the examples below
+comes from a scripted `--fake-operator` run. See
+[what has and has not been measured](self-improvement.md#what-has-and-has-not-been-measured).
+
+## Five verdicts, and the distinction that matters
 
 | Verdict | Meaning |
 | --- | --- |
 | `keep` | Enabled, measured, and the measurement says it changed an outcome. |
 | `drop` | Enabled, measured, and it changed nothing. |
 | `unproven` | Enabled, but the measurement could not run. |
+| `unused` | Never enabled. Reported as not enabled, and it appears in no section. |
+| `unreadable` | The ledger exists but cannot be parsed. Never reported as a null. |
 
 **`unproven` is not a pass.** A feature lands here when there was no baseline to compare
 against — the ideation panel whose Stage 02 was never approved, the crux panel that was

@@ -815,9 +815,13 @@ def record_into_archive(
             # has taken has no payoff in either direction. That closes the loop the
             # archive exists for: the graph's 13 backward edges are never taken, so
             # they never become believable, so nothing ever proposes taking them.
-            # Measured on the shipped archive: 583 recorded runs, every one of them
-            # the plain forward line, 0 believable edges — and 0 at any N under a
-            # forward-only policy, not merely a large N.
+            #
+            # It is 0 believable edges at any N, not merely at a large one, and that
+            # is a property of the shipped code rather than of one archive file:
+            # `tools/archive_sample_complexity.py` drives the real graph and the real
+            # `edge_payoffs` under a forward-only policy and reports 0 believable
+            # edges with P(>=1) = 0.00 at N = 5, 10, 25, 50, 100, 200, 500 and 1000.
+            # Re-run it; do not take a run count on trust.
             #
             # `propose_exploration` is the written entry into that blind spot and
             # had no caller. Reaching it only when the evidence-driven proposer

@@ -190,7 +190,7 @@ approval. See [Stage Contract](stage-contract.md#2-the-artifact-gate).
 | `--panel-models ROLE=MODEL...` | — | Assign a model per seat, as `role=model` or `role=backend:model` (`pi=opus skeptic=codex:default`). Heterogeneity is the lever with the best evidence behind it. |
 | `--persona PATH` | — | Markdown description of the researcher the panel stands in for, injected into every seat so they hold one consistent bar. |
 | `--cross-review {auto,gemini,off}` | `auto` | Independent second opinion on each approval, from a different model family. It can veto an approval it cannot defend and can never override a refusal, so it only makes the gate stricter. `auto` enables it when a Gemini backend is configured. Only meaningful with an agent approval gate. |
-| `--cross-review-model MODEL` | `gemini-3.1-pro-preview` | Model for the cross-model reviewer (`DEFAULT_CROSS_REVIEW_MODEL`, `src/cross_reviewer.py:45`). |
+| `--cross-review-model MODEL` | `gemini-3.1-pro-preview` | Model for the cross-model reviewer (`DEFAULT_CROSS_REVIEW_MODEL`, `src/cross_reviewer.py`). |
 
 A blocking objection from any member cannot be approved over — the chair's approval is
 converted to a refinement in code. Each run also writes
@@ -302,11 +302,11 @@ mechanism and the reasoning behind each refusal.
 | `--archive PATH` | `~/.autor/archive` | Where the cross-run archive lives. Each finished run records its route and measured fitness, and each edge is compared against runs that reached the same node and did not take it. Recording only. |
 | `--no-archive` | off | Do not record this run in the archive. |
 | `--archive-steer` / `--no-archive-steer` | **off** | Let the archive choose the topology this run uses, rather than only recording what it did. A run silently using a different topology from the one asked for is not a surprise a research tool gets to spring on anyone; turn this on once `--archive-report` shows the archive has something to say. A learned prior only reorders which move is preferred — it can never open a guarded edge. Preserved on resume. |
-| `--archive-report` | off | Print what the archive has learned, and exit. |
+| `--archive-report` | off | Print what the archive has learned, and exit. On a fresh install this is an empty table, and that is the honest state rather than a bug: no real run has ever been recorded into one. See [what has and has not been measured](self-improvement.md#what-has-and-has-not-been-measured). |
 | `--trial ID` | — | Tag this run as one arm of a paired trial. Two runs of the **same goal** sharing a `--trial` ID, with the same `--capability` and different `--arm` labels, become a pair; the statistic is the within-pair difference, which cancels goal difficulty. Requires `--capability` and `--arm` — a partial tag is refused, because a run tagged with only some of them can never be paired. |
 | `--capability NAME` | — | What the trial is testing, e.g. `effort_tiers`. Runs pair only within one capability. |
 | `--arm LABEL` | — | Which side of the pair, e.g. `off` / `on`. `off`, `control`, `baseline` and `0` are recognised as the control when the report has to guess. |
-| `--trial-report` | off | Print what the paired trials show, and exit: mean within-pair difference, an exact two-sided sign-flip p, the smallest p the sample size could have produced, and the per-criterion decomposition. See [Recursive Self-Improvement](self-improvement.md#5-paired-trials--does-any-of-this-help). |
+| `--trial-report` | off | Print what the paired trials show, and exit: mean within-pair difference, an exact two-sided sign-flip p, the smallest p the sample size could have produced, and the per-criterion decomposition. See [Recursive Self-Improvement](self-improvement.md#5-paired-trials--does-any-of-this-help). No trial has ever completed: the last attempt, on 2026-08-11, recorded zero runs against a quota wall. |
 | `--max-rounds N` | `1` | How many times Stages 03-06 may run. A round ends when Stage 06 records `converged`, `refine_design`, `new_hypothesis` or `abandon`. The default keeps the single-pass behaviour: the decision is still recorded, so a one-round run says whether it converged or merely stopped, but a round that asks to go back is recorded with `acted_on: false` and the run continues. Raise it to let a refuted hypothesis lead to a second round. |
 
 ### Optional enhancements

@@ -65,8 +65,9 @@ class TestResult:
 
         Both halves are required. Without the second, an archive comparing *n* edges
         reports the best of *n* at an uncorrected threshold, which is the
-        multiple-comparisons mistake in its purest form: with twenty edges and no
-        effect anywhere, the chance that at least one clears 0.05 is about 64%.
+        multiple-comparisons mistake in its purest form: against the twenty-one-member
+        family :data:`~src.archive.DEFAULT_MIN_OBSERVATIONS` is derived over, with no
+        effect anywhere, the chance that at least one clears 0.05 is about 66%.
         """
         corrected = alpha / max(family, 1)
         return self.p_value <= corrected and self.floor <= corrected
