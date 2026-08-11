@@ -23,138 +23,6 @@
 </p>
 
 <p align="center">
-<<<<<<< HEAD
-=======
-  <img src="assets/examples/example_fig6_two_layer.png" alt="AutoR example figure" width="92%" />
-</p>
-
----
-
-> AutoR is not a chat demo, not a generic agent framework, and not a markdown-only research toy.
->
-> It is a structured research harness over a coding agent execution layer:
-> **AI handles execution, humans own the direction, and every run becomes an inspectable research artifact on disk.**
-
-> New users should start with the step-by-step guides:
-> [English Guide](docs/tutorial_en.md) or [中文教程](docs/tutorial_zh.md).
-
-## 📖 Overview
-
-Most autoresearch systems optimize for autonomy.
-
-AutoR takes a different position: research is too important to hand over as a blind end-to-end loop. The goal is not to remove humans from research. The goal is to give them a stronger execution system.
-
-### ✨ At a Glance
-
-| Dimension | AutoR |
-| --- | --- |
-| Execution model | A coding agent as the execution layer, AutoR as the research control loop |
-| Control model | Human approval by default, with an optional strict reviewer-agent gate for unattended runs |
-| Research unit | A reproducible run under `runs/<run_id>/` |
-| Workflow shape | Eight stages as a **directed graph** the run navigates — intake runs before the walk; the linear sequence is one path through it |
-| Improvement | On by default: drafts are measured and ratcheted, so a stage can only get better — and the score is blind to what the run concluded |
-| Quality bar | Artifact-backed outputs, not markdown-only summaries |
-| Recovery | Resume, redo-stage, rollback-stage, stage-local continuation |
-
-### 🔦 Highlights
-
-| Layer | Highlight | What AutoR actually does |
-| --- | --- | --- |
-| Big idea | **Human-centered research execution** | AutoR is not an autonomous scientist. AI handles execution; humans retain approval and direction at every stage boundary. |
-| Big idea | **The stages are a graph, not a list** | Analysis that exposes a design flaw can send the run back to Stage 03 instead of writing up around it. AutoR computes which moves are open by checking artifacts on disk; the agent chooses among those and says why. [Details](docs/self-improvement.md) |
-| Big idea | **Improvement that is measured, not hoped for** | A refinement round is scored against a rigour rubric read off disk. The best-scoring draft is what gets promoted; a round that scores worse is reverted. A stage can only improve. |
-| Big idea | **Self-improvement that cannot p-hack** | The fitness function is blind to what the run concluded — a refuted hypothesis with clean evidence outscores a supported one resting on an assertion — and any round that moves a hypothesis verdict is rejected outright. |
-| Big idea | **The harness learns across runs** | An optional archive compares each graph edge against runs that reached the same node and did not take it, and reorders which move is preferred. It can never open a guarded edge. |
-| Big idea | **Research loop over agent loop** | The system manages stage progression, validation, repair, recovery, and human checkpoints above the lower-level agent execution loop. |
-| Big idea | **Every run is a reproducible research artifact** | Each run leaves behind prompts, logs, approved summaries, code, data, figures, writing sources, and packaged outputs under `runs/<run_id>/`. |
-| Big idea | **Verifiable outputs, not paper-shaped theater** | The workflow is judged by inspectable artifacts and human approval, not by whether a generated document merely looks polished. |
-| Useful feature | **Structured literature organization** | Survey notes, bibliographies, related-work tables, and reading artifacts stay under `workspace/literature/` instead of disappearing into chat history. |
-| Useful feature | **Automated experiment manifests** | Machine-readable experiment and result files make runs inspectable, comparable, and reusable downstream. |
-| Useful feature | **Citation verification and writing checks** | Writing expects citation verification, figure-link checks, and self-review artifacts before Stage 07 is considered complete. |
-| Useful feature | **Artifact indexing across stages** | `artifact_index.json` and related manifests help later stages find data, results, and figures without guessing from filenames. |
-| Useful feature | **Obligations carried forward** | An approving reviewer records what a later stage still owes; the debt is injected into that stage and its review, and only a reviewer can discharge it. |
-| Useful feature | **Cross-model review veto** | When the reviewer approves, a different model family audits that approval and can send the stage back. A veto, never an override, so it can only tighten the gate. |
-| Useful feature | **Self-improving review policy** | Every correction the reviewer demands becomes a standing rule checked on all later stages, recorded in an auditable `review_policy.json` with the stage and attempt that produced it. |
-| Useful feature | **Resume, redo, and rollback controls** | Long research runs can continue in place, retry a stage, or roll downstream state back without starting over. |
-| Useful feature | **Deliberating review panel** | Instead of one reviewer agent at the approval gate, `--review-panel` seats a PI, domain expert, methodologist, reproducibility engineer and adversarial reviewer who review independently, cross-examine, then converge — and a blocking objection cannot be approved over. Each run measures the panel against its own single-pass baseline and reports when it did not earn its cost. |
-| Useful feature | **Divergent ideation panel** | `--ideation-panel` widens Stage 02 with proposers working from distinct lenses - mechanism, contrarian, adjacent field, null/artifact, regime - deduplicated and scored into a candidate pool the stage chooses from. It decides nothing, and reports when the extra proposers added nothing. |
-| Useful feature | **Anchored review comments** | A reviewer can quote the passage it objects to instead of refusing the whole stage. The revision is told to change only those spans, and is then diffed against them — so "preserve the correct parts" is measured rather than hoped for. |
-| Useful feature | **Selective deep thinking** | Most steps are execution. With `--deliberation` a stage that hits a genuine crux can stop, name the question, and pull in a panel of theorist / empiricist / critic / pragmatist plus an expert brief — then carry on with an answer that names its own falsifier. Budgeted, and measured against what the agent already believed. |
-| Useful feature | **Effort tiers** | `--effort-tiers` runs each stage as routine or deliberative rather than treating them alike — a lean prompt and a single reviewer where the decisions are already made, the full apparatus where something is genuinely undecided. Each stage sets the next one's tier, and a routine stage that keeps failing is promoted automatically. Polish rounds and the strong model are then concentrated on the deliberative steps rather than spread evenly. |
-| Useful feature | **One dial** | `--rigor {fast,standard,thorough,max}` decides how much optional machinery a run uses, ordered by what each costs and what evidence there is for it. Individual switches remain as overrides in both directions. |
-| Useful feature | **Run scorecard** | Every optional feature measures itself; at the end of a run `workspace/reviews/scorecard.md` reads all of those ledgers together and says which ones earned their cost and which flags to turn off — keeping "could not be measured" separate from "changed nothing". |
-| Useful feature | **Two output formats** | Stage 07 writes a benchmark-ready markdown report (`report/report.md` + PNG figures) by default, or a venue-aware LaTeX paper package with a compiled PDF via `--output-format latex`. |
-
-In practice, that means AutoR is useful not only because of the high-level framing, but also because it handles real research chores: literature organization, experiment manifests, citation verification, artifact indexing, manuscript packaging, and recoverable long-running workflows.
-
-### ✅ What AutoR Guarantees
-
-- By default, human approval is required before the workflow advances.
-- An optional reviewer agent can simulate that gate for unattended runs, but the human-centered default remains manual review.
-- Approved summaries become the only cross-stage memory.
-- Every run is isolated, resumable, and auditable.
-- Later stages must produce real artifacts, not only prose.
-- A coding agent is the execution layer; AutoR is the research control loop above it.
-
-### 🤔 Why AutoR?
-
-Many systems aim to generate research outputs that *look* ready.
-
-AutoR takes a harder path:
-
-- it requires real experiments
-- it enforces artifact validation
-- it keeps humans in control
-
-So the question is not:
-
-> Does it look ready?
-
-It is:
-
-> Can you verify every part of it?
-
-## 📰 News
-
-Latest mainline updates:
-
-- **2026-08-06**: **Recursive self-improvement is now the default.** The eight stages are a **directed graph** the run navigates: an analysis that exposes a design flaw can send the run back to Stage 03 instead of writing up around it, and the move into Stage 07 stays closed until every hypothesis carries a verdict. The stage that just ran chooses the next move, among the ones AutoR's guards leave open. Every valid draft is scored against a rigour rubric read off disk and held to a champion ratchet, so the draft that gets promoted is the best one the run produced rather than the last one — that half costs nothing, because the rubric never calls a backend. Two improvement rounds per stage are budgeted on top, and a stage the rubric has nothing to say about spends none of them. A round that scores worse is reverted; a round that changes a hypothesis verdict is rejected outright. Each finished run records its route and measured fitness in a cross-run archive, which compares each graph edge against the decisions that were *offered* it and declined. The archive has no real runs in it yet — see [what has and has not been measured](docs/self-improvement.md#what-has-and-has-not-been-measured). Opt out with `--stage-graph linear`, `--routing off`, `--no-evolve`, `--no-archive`. See [Recursive Self-Improvement](docs/self-improvement.md).
-- **2026-06-02**: Added a configurable Codex sandbox mode. Codex-backed runs still default to `workspace-write`, but users who intentionally need remote GPU or SSH execution can now opt into `--codex-sandbox danger-full-access`; the setting is persisted in `run_config.json` and preserved on resume.
-- **2026-05-10**: Refined the terminal-first run experience. Stage 00 now uses a dedicated clarification flow: the first intake pass asks the user questions one by one with selectable options, custom answers, and skip; the revised intake brief then uses a compact refine / approve / abort menu instead of showing the normal suggestion template. The terminal UI also keeps colored frames on wrapped body rows, handles long lines and wide characters more reliably, and the Codex backend now uses the current `--sandbox workspace-write` execution flag instead of the deprecated Codex CLI `--full-auto` flag.
-- **2026-04-20**: Added an optional `--full-auto` approval mode. The execution loop is unchanged, but the manual approval gate can now be replaced by a strict simulated reviewer agent backed by Claude or Codex, with reviewer settings persisted in `run_config.json`.
-- **2026-04-19**: Merged **AutoR Studio** into main: a local browser workspace for the same run-based workflow, with live stage monitoring, human review, restart-safe recovery, paper preview, version history, and a Notebook view. The browser UI shares the same run directories and artifact model as the terminal workflow and is currently Claude-backed.
-- **2026-04-18**: Fixed a stage-summary recovery bug so local normalization now restores the required `Decision Ledger` section and validates draft outputs against the correct `.tmp.md` path. Added stage recovery controls that let operators `/skip` the current stage, `/back <stage>` to an earlier stage, or choose skip / roll back directly after retry exhaustion.
-- **2026-04-15**: Added minimal `--operator codex` support alongside Claude, persisted the selected execution backend in `run_config.json`, and improved terminal rendering for backend JSON streams.
-- **2026-04-13**: Added literature evidence ledgers and citation verification outputs, introduced typed hypothesis manifests, hardened experiment manifest parsing, and added regression coverage for research diagram injection.
-- **2026-04-10**: Added a decision ledger for human approvals and refined the public showcase gallery so research artifacts are presented more clearly.
-- **2026-04-08**: Documented optional `--research-diagram` dependencies and tightened the README positioning around human-centered, artifact-backed research execution.
-
-## 🌟 Showcase
-
-AutoR already has a full example run used throughout the repository: `runs/20260330_101222`.
-
-### 🧪 Example Run Snapshot
-
-| What the run produced | What it demonstrates |
-| --- | --- |
-| [example_paper.pdf](assets/examples/example_paper.pdf) | A compiled manuscript artifact within a broader research package |
-| Executable research code | The run is not just a writing pipeline |
-| Machine-readable datasets and result files | Claims are backed by inspectable experiment outputs |
-| Real figures used in the research package | The run produces publication-style visuals, not placeholders |
-| Review and dissemination materials | The workflow continues past writing into release readiness |
-
-Highlighted outcomes from that run:
-
-- `AGSNv2` reached **36.21 ± 1.08** on Actor.
-- The system produced a full research package with real figures, writing sources, and auditable artifacts.
-- The final run preserved the full human-in-the-loop approval trail.
-
-### 🖥️ Terminal Experience
-
-AutoR is designed for terminal-first execution, but the interaction layer is not limited to raw logs and plain prompts. The current UI supports banner-style startup, colored stage panels, parsed backend event streams, display-width-aware markdown wrapping, keyboard-selectable menus, and a Stage 00 clarification flow suitable for demos and recordings.
-
-<p align="center">
->>>>>>> dd3d62c (Spend effort where the research needs it, not evenly)
   <img src="assets/terminal.png" alt="AutoR terminal UI" width="92%" />
 </p>
 
@@ -195,6 +63,11 @@ and **Learn**, which records on every run but only reaches a routing decision un
 `--cross-review`; **Deliberate** needs `--deliberation`. **Localise** runs whenever a reviewer
 quotes a passage. The `--rigor` dial sets several of these together and defaults to `standard`,
 which turns effort tiering on.
+
+Each of those moves keeps its own ledger, and at the end of a run
+[`scorecard.py`](src/scorecard.py) reads all of them into `workspace/reviews/scorecard.md`: which
+optional machinery earned its cost on this run, which flags to turn off next time, and — kept
+separate on purpose — which ones could not be measured at all.
 
 **AutoR does not run itself.** Manual approval is the default — `approval_mode` is `manual` unless a
 flag opts out ([`main.py`](main.py)) — and `--full-auto`, `--review-panel` and `--approval-mode
@@ -358,12 +231,8 @@ scope. "Make each one refutable" is advice about a gate that now exists.
 | Choose how much optional machinery to run | `python main.py --rigor thorough --goal "..."` |
 | Give the panel a researcher persona to stand in for | `python main.py --review-panel --persona docs/persona-example.md --goal "..."` |
 | Seat the panel across different models | `python main.py --review-panel --panel-models pi=opus skeptic=codex:default --goal "..."` |
-<<<<<<< HEAD
-| Choose the execution backend and model | `python main.py --operator claude --model opus` or `python main.py --operator codex --model default` |
-=======
 | Keep the strong model for the steps that matter | `python main.py --effort-tiers --model opus --routine-model sonnet --goal "..."` |
-| Choose the execution backend | `python main.py --operator claude` or `python main.py --operator codex` |
->>>>>>> dd3d62c (Spend effort where the research needs it, not evenly)
+| Choose the execution backend and model | `python main.py --operator claude --model opus` or `python main.py --operator codex --model default` |
 | Choose the reviewer backend separately | `python main.py --full-auto --review-operator claude --review-model opus` |
 | Allow Codex-backed SSH / remote GPU execution | `python main.py --operator codex --codex-sandbox danger-full-access --goal "Your research goal here"` |
 | Produce a LaTeX paper package instead of a markdown report | `python main.py --output-format latex --goal "..."` |
