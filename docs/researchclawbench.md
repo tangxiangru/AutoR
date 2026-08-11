@@ -989,6 +989,39 @@ judge's sampling range and there are **zero** observations of AutoR's own run-to
 variance. And a refusal removes a pair, not an arm — refusals are not random with
 respect to arm, so a lopsided refusal ledger is itself the result.
 
+### How wide the judge's sampling range actually is
+
+The paragraph above says replicate scoring measures the judge's sampling range without
+saying how wide it is. Measured, on `Astronomy_000`, with `gpt-5.1` and **nothing changed
+between draws** — same workspace, same `report.md`, same five published figures:
+
+| draw | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|:---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `[0]` text, w=0.2 | 45 | 55 | 55 | 55 | 40 | 45 | 45 | 40 |
+| `[1]` image, w=0.3 | 46 | 46 | 52 | 48 | 48 | 55 | 52 | 47 |
+| `[2]` text, w=0.5 | 40 | 50 | 45 | 32 | 55 | 40 | 45 | 55 |
+| **total** | 42.8 | 49.8 | 49.1 | 41.4 | 49.9 | 45.5 | 47.1 | 49.6 |
+
+Mean 46.9, median 48.1, sd 3.4, **spread 8.5**. The variance is worst where it is most
+expensive: item `[2]` carries half the weight and spanned 32 to 55, which is 11.5 points of
+the total on its own.
+
+Three consequences, and the third is the one that bites:
+
+1. A single-draw score on a single task carries roughly **±4 points** of sampling noise.
+2. Any one-task A/B below about eight points is uninterpretable. An earlier before-and-after
+   on this task read 46.0 against 42.8 and looked like a small regression; 46.0 sits at the
+   3/8 percentile of the *unchanged* artifact's own distribution, so it was noise. The 9.6 →
+   46.0 jump from the export repairs is 36 points and survives this comfortably — the point is
+   not that nothing is measurable, it is where the floor sits.
+3. This is judge variance with the artifacts held fixed. AutoR's own run-to-run variance is
+   **additional and still unmeasured**, so the floor for a full A/B is higher than 8.5, not
+   equal to it.
+
+Eight draws of one task is a small sample and the number is a floor rather than an estimate.
+It is enough to say that a one-draw per-arm trial cannot resolve a small effect, which is what
+the `stage_fitness` key's draw count exists to refuse.
+
 ### Dry run
 
 ```bash
