@@ -2753,7 +2753,17 @@ class ResearchManager:
         if decision.feedback:
             log_body.append(f"feedback:\n{decision.feedback}")
         if decision.raw_response:
-            log_body.append("raw_response_excerpt:\n" + truncate_text(decision.raw_response, max_chars=2000))
+            # The tail, not the head. This excerpt is the only durable record of what the
+            # reviewer said, and it is read precisely when the verdict could not be: the
+            # contract puts the verdict in the final message, so keeping the first 2,000
+            # characters records the narration and drops the answer. On Material_002 the
+            # recorded excerpt was 2,002 characters of "I'll inspect the actual artifacts
+            # before judging." and an `ls` listing, containing not one `{`, while the
+            # verdict sat at the other end of the same string.
+            log_body.append(
+                "raw_response_excerpt (tail):\n"
+                + "..." + decision.raw_response.strip()[-2000:].lstrip()
+            )
         append_log_entry(paths.logs, f"{stage.slug} attempt {attempt_no} reviewer_choice", "\n".join(log_body))
         self._record_review_correction(
             paths=paths, stage=stage, attempt_no=attempt_no, decision=decision, suggestions=suggestions
@@ -2911,6 +2921,15 @@ class ResearchManager:
         asked for, so the rule is traceable to the decision that produced it.
         """
         if decision.choice not in {"1", "2", "3", "4"}:
+            return
+
+        # A reviewer that could not be read, or that crashed, did not demand a correction --
+        # unattended, both of those arrive here as choice "4" carrying AutoR's own synthetic
+        # feedback ("The automated reviewer could not be run..."). Recorded as a rule that
+        # text becomes a standing instruction injected into every later review in the run,
+        # so one transport failure permanently teaches the panel a lesson nobody taught it.
+        # Only a reviewer that actually read the stage and asked for something is teaching.
+        if AutomatedReviewer.is_degraded_verdict(decision):
             return
 
         if decision.choice in {"1", "2", "3"}:

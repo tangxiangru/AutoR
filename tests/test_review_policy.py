@@ -200,6 +200,40 @@ class ManagerRecordingTest(PolicyTestBase):
     def test_an_approval_teaches_nothing(self) -> None:
         self.assertEqual(self._record("5", reason="looks good"), [])
 
+    def test_a_verdict_nobody_could_read_teaches_nothing(self) -> None:
+        """Unattended, an unreadable answer arrives here as choice "4" like a real refusal.
+
+        The feedback on it is AutoR's own stand-in text, not something a reviewer asked
+        for. Recorded as a rule it becomes a standing instruction injected into every later
+        review in the run -- one transport failure permanently teaching a lesson nobody
+        taught. Eleven of forty benchmark runs took this path.
+        """
+        from src.approval_agent import UNREADABLE_REASON
+
+        rules = self._record(
+            "4",
+            reason=UNREADABLE_REASON + " AutoR stopped instead of approving blindly.",
+            feedback="The automated reviewer could not be run, so this stage was not approved. "
+                     "Re-examine the draft against the stage contract.",
+        )
+        self.assertEqual(rules, [])
+
+    def test_a_crashed_reviewer_teaches_nothing(self) -> None:
+        from src.approval_agent import CRASHED_REASON
+
+        self.assertEqual(
+            self._record("4", reason=CRASHED_REASON + " It exited -1.", feedback=OTHER), []
+        )
+
+    def test_an_unsupported_token_teaches_nothing(self) -> None:
+        from src.approval_agent import UNSUPPORTED_REASON
+
+        self.assertEqual(self._record("4", reason=UNSUPPORTED_REASON, feedback=OTHER), [])
+
+    def test_a_real_refusal_still_teaches(self) -> None:
+        """The exemption is for degraded verdicts only, not for refusals generally."""
+        self.assertEqual(self._record("4", feedback=OTHER, reason="the ledger is wrong")[0].text, OTHER)
+
     def test_an_abort_teaches_nothing(self) -> None:
         self.assertEqual(self._record("6", reason="blocked"), [])
 

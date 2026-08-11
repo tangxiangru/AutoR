@@ -598,11 +598,16 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
         from src.effort import EffortPlan
 
         manager.effort_plan = EffortPlan(enabled=True)
+        # `unattended=True` like every other reviewer this file builds. Without it the
+        # routine-tier fallback is the one reviewer in an unattended run that still treats a
+        # transport failure as grounds to abort, because attended is the constructor default
+        # and this was the only construction that did not say otherwise.
         manager.solo_reviewer = (
             reviewer if isinstance(reviewer, AutomatedReviewer)
             else AutomatedReviewer(review_backend, model=review_model,
                                    fake_mode=args.fake_operator, ui=ui,
-                                   stage_timeout=args.stage_timeout)
+                                   stage_timeout=args.stage_timeout,
+                                   unattended=True)
         )
 
     pipeline_completed = False

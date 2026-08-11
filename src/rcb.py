@@ -62,6 +62,7 @@ from .utils import (
     read_text,
     resolve_output_format,
     resolve_report_image,
+    stage_summary_files,
     truncate_text,
     write_text,
 )
@@ -688,9 +689,7 @@ def build_fallback_report(
     draws on are full of approval-workflow headings that would otherwise be scored as content.
     """
     approved: list[tuple[str, str]] = []
-    for stage_path in sorted(paths.stages_dir.glob("*.md")) if paths.stages_dir.exists() else []:
-        if stage_path.name.endswith(".tmp.md"):
-            continue
+    for stage_path in stage_summary_files(paths):
         body = _research_body(read_text(stage_path))
         if not body:
             continue

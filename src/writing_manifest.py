@@ -17,6 +17,7 @@ from .utils import (
     read_text,
     resolve_report_image,
     selected_output_format,
+    stage_summary_files,
 )
 
 
@@ -170,12 +171,10 @@ def _scan_dir(directory: Path) -> list[str]:
 
 
 def _collect_stage_summaries(paths: RunPaths) -> dict[str, str]:
-    summaries: dict[str, str] = {}
-    if paths.stages_dir.exists():
-        for stage_file in sorted(paths.stages_dir.glob("*.md")):
-            if not stage_file.name.endswith(".tmp.md"):
-                summaries[stage_file.stem] = str(stage_file.relative_to(paths.run_root))
-    return summaries
+    return {
+        stage_file.stem: str(stage_file.relative_to(paths.run_root))
+        for stage_file in stage_summary_files(paths)
+    }
 
 
 def generate_layout_review(paths: RunPaths) -> dict[str, object]:

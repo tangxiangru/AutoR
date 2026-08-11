@@ -25,6 +25,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
+from .approval_agent import extract_json_payload
 from .terminal_ui import TerminalUI
 from .utils import (
     RunPaths,
@@ -438,19 +439,16 @@ class ValidityReviewer:
 
     @staticmethod
     def _extract_json(raw: str):
-        if not raw:
-            return None
-        text = raw.strip()
-        start = text.find("{")
-        end = text.rfind("}")
-        if start < 0 or end <= start:
-            return None
-        for candidate in (text, text[start : end + 1]):
-            try:
-                return json.loads(candidate)
-            except json.JSONDecodeError:
-                continue
-        return None
+        """The findings object, from a transcript that also contains other JSON.
+
+        This used to be a fourth private copy of the same idea, and the narrowest: it tried
+        the whole string and then ``text[first '{' : last '}']``. On an adversarial review
+        that read a JSON artifact before answering, that slice spans both objects and parses
+        as neither -- and this parser's failure is silent, because :meth:`_parse` returns an
+        empty list either way. The run then records that the validity reviewer attacked the
+        stage and raised nothing, which is the opposite of what happened.
+        """
+        return extract_json_payload(raw, verdict_key="findings")
 
     def _build_prompt(self, *, paths: RunPaths, stage: StageSpec, stage_markdown: str) -> str:
         def excerpt(path, limit: int = 6000) -> str:
