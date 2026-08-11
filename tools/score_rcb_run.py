@@ -259,14 +259,24 @@ def _first_json_object(text: str) -> Any:
 
 def score(workspace: Path, bench: Path, *, judge) -> dict:
     sys.path.insert(0, str(bench))
+
+    # Set before the import, not after. `evaluation/config.py` reads these at import
+    # time, and `evaluation/score.py` does `from .config import JUDGE_MODEL_NAME` --
+    # a module-level copy. Setting them afterwards reaches neither, and every run
+    # died on "Judge API configuration is missing" with the configuration right there.
+    # They are never used: the agent is replaced below.
+    for name in ("JUDGE_API_KEY", "JUDGE_API_BASE"):
+        os.environ.setdefault(name, "unused-local-judge")
+    os.environ.setdefault("JUDGE_MODEL_NAME", judge.model)
+
     import evaluation.config as config
     import evaluation.score as scorer
 
-    # score_workspace refuses to build an agent unless these are present. They
-    # are never used, because the agent is replaced below.
-    for name in ("JUDGE_API_KEY", "JUDGE_API_BASE", "JUDGE_MODEL_NAME"):
-        os.environ.setdefault(name, "unused-local-judge")
+    # Rebind both. `config` is what a future reader will reach for; `scorer` holds the
+    # copy the gate actually tests, and a rebind of one without the other is the bug
+    # this comment exists to stop coming back.
     config.JUDGE_MODEL_NAME = judge.model
+    scorer.JUDGE_MODEL_NAME = judge.model
 
     scorer.LLMAgent = lambda **_: judge  # type: ignore[assignment]
 
@@ -334,7 +344,10 @@ def main() -> int:
         print(f"scoring failed: {result['error']}", file=sys.stderr)
         return 1
 
-    items = result.get("results", [])
+    # `score_workspace` returns this under "items". Reading "results" left the
+    # per-item table empty and printed "items judged: 0" beside a real total --
+    # a scorer reporting that it scored nothing, right after scoring everything.
+    items = result.get("items", [])
     failures = result.get("judge_failures", [])
 
     print(f"judge:     {result['judge_model']}")
