@@ -552,6 +552,53 @@ The channel is Stage 07 only, and deliberately thin:
 - **A run that argued nothing sends nothing.** An empty heading invites the stage to
   fill it, and a discussion section about nothing scores below one that is absent.
 
+## Where AutoR lands
+
+**40 tasks, one attempt each, Claude Opus executing and reviewing, judged by `gpt-5.1`.**
+The three comparison agents were re-scored from their public runs under that same judge, so
+the four rows are commensurable with each other. Measured 2026-08-06, scored 2026-08-11.
+
+| agent | mean | median | max | tasks scoring 0 |
+|:---|---:|---:|---:|---:|
+| Codex CLI | 19.53 | 17.73 | 48.40 | 2 |
+| ResearchHarness (GPT-5.4) | 15.40 | 10.85 | 45.10 | 1 |
+| ARIS Codex | 15.02 | 12.65 | 46.90 | 2 |
+| **AutoR** | **14.16** | 11.50 | 47.70 | **7** |
+
+AutoR is last, below the bare Codex CLI it can be configured to run on top of. Read the
+distribution rather than the mean: its best task (47.70) is competitive in a benchmark
+where only three agent-task pairs have ever crossed 50, and its deficit is entirely at the
+floor. Stratified by what the report physically is:
+
+| stratum, by what the report *is* | n | AutoR mean | the other three, same tasks |
+|:---|---:|---:|---:|
+| 197-byte "incomplete run" stub | 8 | **0.78** | 18.99 |
+| Stage-01/02 dump | 10 | 12.88 | 12.17 |
+| paper-shaped report | 22 | 19.61 | 17.84 |
+
+**The 19.61 is a post-hoc subgroup mean and is not AutoR's number.** Only the 40-task mean
+counts. It is also a subgroup of *legible* runs rather than correct ones: cutting by where
+the walk actually stopped, AutoR's two best scores — Astronomy_003 at 47.70 and Physics_002
+at 45.45 — came from runs that halted at `02_hypothesis_generation`, having never designed
+a study or run an experiment. Five runs of forty reached Stage 05 or later. Those reports
+were assembled by this adapter's synthesizer, not by the pipeline.
+
+Four caveats travel with every number above:
+
+- **Single attempt.** The public leaderboard aggregates the *best* score per (task, agent)
+  pair (`RCB/README.md:280`). 14.16 is one run per task. The two are not comparable in
+  either direction.
+- **Cross-model.** All three comparison agents run GPT-5.4; AutoR ran Claude Opus. The table
+  is therefore not a clean harness comparison, and the same-model baseline the
+  [landscape study](researchclawbench-landscape.md) calls mandatory has not been run.
+- **The judge is part of the result.** `gpt-5.1` is the benchmark's own. On identical
+  artifacts Gemini 2.5 Flash scored 37.0 where Claude Opus scored 20.8, so a number quoted
+  without its judge compares to nothing.
+- **This is the pre-repair batch.** #180 and #181 closed the routes that produced the eight
+  stubs; their effect is unmeasured until a re-run lands.
+  [The framework document's §6](framework.md#6-the-system-measured-against-itself) works
+  through what the eight zeros were made of and what changed.
+
 ## How other agents score
 
 [researchclawbench-landscape.md](researchclawbench-landscape.md) works through the public
