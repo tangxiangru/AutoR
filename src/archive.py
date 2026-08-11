@@ -84,8 +84,9 @@ ARCHIVE_VERSION = "1"
 DEFAULT_MIN_OBSERVATIONS = minimum_arms_for(ALPHA, family=len(REVISIT_EDGES) + len(STAGES))
 
 #: Mean fitness a challenger must beat the incumbent by. Roughly the size of one
-#: criterion moving a quarter of its range on a seven-criterion rubric; below that
-#: the archive would promote noise.
+#: criterion moving a quarter of its range on the eight-criterion rubric: the lightest
+#: criterion carries 1.5 of 18, so a quarter of its range is 0.25 * 1.5/18 = 0.021.
+#: Below that the archive would promote noise.
 DEFAULT_MIN_GAIN = 0.02
 
 #: Weight on an unproven variant when sampling a parent. Pure fitness-proportional
@@ -506,8 +507,9 @@ class Archive:
         # a twice-resumed run three times. Duplicates are free observations: they
         # push `taken_runs` and `skipped_runs` past `min_observations` without any
         # new evidence, which is the one number standing between a coincidence and a
-        # topology change. Measured on the archive this repo's own review left
-        # behind: 415 rows, 327 distinct runs.
+        # topology change. No archive is vendored here, so the ratio is not a fixed
+        # figure to quote — measure your own with
+        # ``wc -l runs.jsonl`` against the count of distinct ``run_id`` values.
         deduped: dict[str, RunRecord] = {}
         for record in records:
             deduped[record.run_id] = record

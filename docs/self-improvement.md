@@ -395,11 +395,22 @@ Three further refusals hold this together:
   `C(a+b,a)` labellings, so no result can go below `2/C(a+b,a)`. Three a side bottoms
   out at `p = 0.10`; against a family the size of the adaptive graph's edge set the
   corrected threshold needs six. `minimum_arms_for` computes it, and the family is
-  the number of contrasts the archive actually holds rather than a written-down
-  constant — the graph has gone from eighteen edges to twenty-two, and a fixed
-  divisor would have under-corrected from the first edge added. The previous value was three, with a
-  docstring about intent, which meant the archive was licensing topology changes at a
-  sample size where the arithmetic forbids the claim.
+  computed rather than written down — the graph has gone from eighteen edges to
+  twenty-two, and a fixed divisor would have under-corrected from the first edge
+  added. The previous value was three, with a docstring about intent, which meant the
+  archive was licensing topology changes at a sample size where the arithmetic forbids
+  the claim.
+
+  Two families, not one, and the difference is deliberate. `min_observations` is
+  derived against the whole declared edge family — `len(REVISIT_EDGES) + len(STAGES)`,
+  twenty-one today — because the sample size has to be fixed before anyone looks. The
+  per-row believability threshold is corrected only for the contrasts the archive
+  actually holds, which on a young archive is a much weaker correction. That is the
+  right shape (you cannot be penalised for comparisons you did not make) but it is not
+  the same divisor, and the two should not be described with one phrase. The margin on
+  the first is thinner than it looks: `minimum_arms_for(0.05, family=f)` is 6 for every
+  `f` from 7 to 23 and becomes 7 at 24, so three more edges would raise the bar with no
+  other change.
 - **A p-value is never reported without the floor its sample size could attain.**
   *Did not show an effect* and *could not have shown one* print identically as "not
   significant" and mean opposite things.
@@ -543,6 +554,38 @@ attached: the criterion weights per stage, the composition gap, the 0/400 reach 
 learned priority, the permutation floors. All of these come from running the code —
 mostly with `--fake-operator`, which measures the harness rather than any research —
 and every one can be re-derived from the commands named beside it.
+
+One of them is worth singling out because it is the strongest negative result here.
+`tools/archive_sample_complexity.py` drives the *real* graph and the *real*
+`edge_payoffs` under a forward-only routing policy and asks how many edges become
+believable. The answer is zero at every sample size it sweeps — N = 5, 10, 25, 50,
+100, 200, 500, 1000, with `P(at least one believable) = 0.00` at each. That is not
+"we have not collected enough runs yet"; it is a property of the estimator and the
+policy together, and it is why `propose_exploration` exists. The instrument had
+itself stopped running at some point — `RunRecord` gained a required field and it
+crashed on its first record — which is the reason a fast construction check now
+guards it.
+
+The same sweep says something less comfortable about the other end. Under a policy
+that *does* explore, clearing the believability gate is not the same as picking the
+right edge. Planting a true effect on two edges and asking what `propose_variant`
+would then propose:
+
+| Runs in the archive | It proposes something | The edge it picks has no real effect |
+| --- | --- | --- |
+| 10 | 0% | — |
+| 25 | 34% | **77%** |
+| 50 | 80% | 7% |
+| 100 | 100% | 0% |
+
+(at `sd_run = 0.0027`, the run-to-run spread of `mean_fitness`; the pattern holds
+across a sweep from 0.0027 to 0.08, and gets worse as the spread grows — at 0.08 the
+picked edge is still a null one 57% of the time at N = 100.) `min_observations = 6`
+is a per-edge false-positive control and it is doing its job; it is not, and was
+never, a guarantee that the *best* of the surviving edges is a real one. The window
+between "the archive starts having opinions" and "the archive is right" is roughly
+25 to 50 runs wide, and it is the direct argument for `--archive-steer` defaulting
+off rather than a matter of taste.
 
 **Not measured.** Whether any of this makes research better.
 

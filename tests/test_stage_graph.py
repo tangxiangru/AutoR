@@ -122,8 +122,10 @@ class WhatEdgePriorityActuallyReachesTests(unittest.TestCase):
     `Variant.edge_priority` is the whole output of the cross-run learner, and the
     honest statement of its reach is narrow: it orders the move table the agent is
     shown, and that is currently all of it. `default_move` filters to forward edges
-    before ranking and every shipped node has exactly one, so no assignment of
-    priorities changes what a run does when nobody is steering.
+    before ranking, and at most one is ever live at a node: seven of the eight have a
+    single forward edge, and 06_analysis's second — the abandonment terminal — is shut
+    unless a round concluded `abandon` and preempts everything else when it is open. So
+    no assignment of priorities changes what a run does when nobody is steering.
 
     Both halves are asserted on purpose. A test that only pinned "no difference"
     would stay green if someone deleted `default_move` entirely; pinning that the

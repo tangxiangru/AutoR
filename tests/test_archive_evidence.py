@@ -1,7 +1,8 @@
 """What the archive is allowed to say inside a routing prompt.
 
 The archive's learned value reached nothing: 0 of 400 measured node-comparisons
-changed `default_move`, because it filters to forward edges and every node has one.
+changed `default_move`, because it filters to forward edges and at most one of them
+is ever live at a node.
 Three independent reviews refused the obvious fix — wiring the statistic into
 `default_move` — on the grounds that it would put an unrandomised, guard-selected,
 n=3 number in charge of what the run does at the moment a guard has just failed.

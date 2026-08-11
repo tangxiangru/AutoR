@@ -66,10 +66,11 @@ CRASHED_REASON = "Automated reviewer failed to run."
 #: The last thing the reviewer reads, and the reason it is last.
 #:
 #: The verdict contract was stated once, near the top, and the prompt then ended with five
-#: thousand characters of log tail. Measured over one benchmark run's 65 recorded review
-#: calls, the primary call emitted no parseable decision in its closing output almost every
-#: time, while the verdict-only re-ask -- which asks for nothing else and asks for it last --
-#: produced one on essentially every attempt. A reviewer that has spent its turn inspecting
+#: thousand characters of log tail. Measured over one ResearchClawBench run's recorded review
+#: calls -- a population that is not vendored here and so cannot be re-derived from this repo --
+#: the primary call emitted no parseable decision in its closing output almost every time, while
+#: the verdict-only re-ask, which asks for nothing else and asks for it last, produced one on
+#: essentially every attempt. A reviewer that has spent its turn inspecting
 #: files ends by narrating what it found, because narration is what the end of its context
 #: asks for.
 #:

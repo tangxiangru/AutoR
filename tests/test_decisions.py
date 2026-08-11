@@ -19,6 +19,9 @@ from src.decisions import (
     format_offered_payoffs,
     offered_payoffs,
 )
+from src.archive import DEFAULT_MIN_OBSERVATIONS
+from src.stage_graph import REVISIT_EDGES
+from src.utils import STAGES
 from src.inference import (
     minimum_arms_for,
     paired_floor,
@@ -173,16 +176,22 @@ class InferenceTests(unittest.TestCase):
         self.assertTrue(result.believable())
 
     def test_the_family_correction_is_applied(self) -> None:
-        """With eighteen edges and no effect anywhere, the chance one clears an
-        uncorrected 0.05 is about 60%. The best of many is not one test."""
+        """Against the family the archive corrects over and no effect anywhere, the
+        chance one clears an uncorrected 0.05 is about 66%. The best of many is not
+        one test."""
         result = unpaired_permutation([0.9] * 6, [0.1] * 6)
         self.assertTrue(result.believable(family=1))
         self.assertFalse(result.believable(family=100))
 
     def test_the_derived_minimum_matches_the_arithmetic(self) -> None:
-        size = minimum_arms_for(0.05, family=18)
-        self.assertLessEqual(unpaired_floor(size, size), 0.05 / 18)
-        self.assertGreater(unpaired_floor(size - 1, size - 1), 0.05 / 18)
+        # The family the archive actually corrects over, computed the same way it is
+        # in `src.archive`. Pinning a literal here would keep passing after the graph
+        # grew, which is the failure this whole module exists to make impossible.
+        family = len(REVISIT_EDGES) + len(STAGES)
+        size = minimum_arms_for(0.05, family=family)
+        self.assertEqual(size, DEFAULT_MIN_OBSERVATIONS)
+        self.assertLessEqual(unpaired_floor(size, size), 0.05 / family)
+        self.assertGreater(unpaired_floor(size - 1, size - 1), 0.05 / family)
 
     def test_an_identical_pair_of_arms_is_not_significant(self) -> None:
         self.assertEqual(unpaired_permutation([0.5] * 4, [0.5] * 4).p_value, 1.0)

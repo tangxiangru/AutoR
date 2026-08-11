@@ -114,11 +114,13 @@ def walk(rng: random.Random, *, revisit_p: float, weighting: str, abandon_p: flo
 def make_record(rng: random.Random, index: int, edges, visited, *, sigma: float = 0.06) -> RunRecord:
     """One archived row. ``sigma`` is the run-to-run spread of a stage score.
 
-    Measured on the only real archive available (568 runs, all fake-operator, so
-    all on scripted content): the spread of ``mean_fitness`` across runs is 0.0027
-    and the spread of stage scores *within* a run is 0.11. The first is far too
-    small to stand in for live runs on different goals and the second is far too
-    large, so :func:`precision_sweep` sweeps the range rather than picking one.
+    No archive is vendored with this repo, so ``sigma`` cannot be read off one. On
+    the author's own archive — every row of it ``--fake-operator``, so all on
+    scripted content — the spread of ``mean_fitness`` across runs was 0.0027 and the
+    spread of stage scores *within* a run 0.11. The first is far too small to stand
+    in for live runs on different goals and the second far too large, so
+    :func:`precision_sweep` sweeps the range instead of picking one. Point this at
+    your own ``~/.autor/archive/runs.jsonl`` to re-derive both.
     """
     lift = sum(TRUE_EFFECT.get(key, 0.0) for key in edges)
     base = 0.75 + lift
@@ -137,6 +139,7 @@ def make_record(rng: random.Random, index: int, edges, visited, *, sigma: float 
         steps=len(visited),
         revisits=sum(v for k, v in edges.items() if KIND.get(k) == "revisit"),
         agent_directed=0,
+        bypassed=0,
         recorded_at="t",
     )
 
@@ -146,7 +149,7 @@ def make_record(rng: random.Random, index: int, edges, visited, *, sigma: float 
 # ---------------------------------------------------------------------------
 
 POLICIES = {
-    "always forward (matches all 513 real runs)": dict(revisit_p=0.00, weighting="uniform"),
+    "always forward (every recorded run so far)": dict(revisit_p=0.00, weighting="uniform"),
     "occasional revisit p=0.05, uniform": dict(revisit_p=0.05, weighting="uniform"),
     "occasional revisit p=0.15, uniform": dict(revisit_p=0.15, weighting="uniform"),
     "agent-chosen p=0.15, prefers cheap": dict(revisit_p=0.15, weighting="local"),
@@ -174,7 +177,7 @@ def main() -> None:
     for label, kwargs in POLICIES.items():
         print(f"--- {label}")
         print(f"{'N':>6} {'believable (median)':>20} {'of which revisit':>17} "
-              f"{'P(>=1)':>8} {'P(all 10 revisit)':>18}")
+              f"{'P(>=1)':>8} {f'P(all {len(REVISITS)} revisit)':>18}")
         for n in SAMPLE_SIZES:
             totals, revisit_totals, any_hit, all_hit = [], [], 0, 0
             for rep in range(REPLICATES):
@@ -220,7 +223,8 @@ def precision_sweep() -> None:
     print(f"policy p=0.30 uniform; true effect only on "
           f"{', '.join(sorted(TRUE_EFFECT))}; min_gain={DEFAULT_MIN_GAIN}")
     print("sd_run is the run-to-run spread of `mean_fitness`, the quantity min_gain is")
-    print("compared against. 0.0027 is the measured value on the real 568-run archive.")
+    print("compared against. 0.0027 is the spread measured on the author's own archive,")
+    print("every row of which is --fake-operator; there is no vendored archive to re-derive it from.")
     print(f"{'sd_run':>7} {'N':>6} {'P(propose)':>11} {'P(picks a null edge)':>21} "
           f"{'P(wrong sign|real)':>19}")
     for sd_run in (0.0027, 0.010, 0.020, 0.040, 0.080):

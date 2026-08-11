@@ -40,7 +40,7 @@ pip install google-genai pyyaml
 ## Tests
 
 ```bash
-# Everything (~10s, 234 tests)
+# Everything (~65s, 1786 tests)
 python -m unittest discover -s tests -p "test_*.py"
 
 # Verbose
@@ -50,7 +50,7 @@ python -m unittest discover -s tests -p "test_*.py" -v
 python -m unittest tests.test_manager_smoke
 
 # One test
-python -m unittest tests.test_manager_smoke.ManagerSmokeTest.test_full_run
+python -m unittest tests.test_manager_smoke.ManagerSmokeTests.test_manager_run_completes_full_eight_stage_smoke
 ```
 
 Tests are stdlib `unittest`. They create temporary run directories, drive the
