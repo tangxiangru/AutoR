@@ -15,8 +15,9 @@ names the symbol that implements it, so it can be checked rather than believed.
 3. [Implementation: the control loop](#3-implementation-the-control-loop)
 4. [The modules, by layer](#4-the-modules-by-layer)
 5. [Novelty](#5-novelty)
-6. [Contribution](#6-contribution)
-7. [What has not been established](#7-what-has-not-been-established)
+6. [The system measured against itself](#6-the-system-measured-against-itself)
+7. [Contribution](#7-contribution)
+8. [What has not been established](#8-what-has-not-been-established)
 
 ---
 
@@ -49,6 +50,36 @@ The design constraint that follows: **every mechanism must be a file on disk and
 refuses.** Not an instruction the model is asked to follow, not a persona, not a self-report. A
 prompt asking a model to be rigorous is a wish. A validator that reads `hypothesis_outcomes.json`,
 resolves each cited evidence path, and returns a non-empty problem list is a gate.
+
+### 1.1 Why the controller has to be a graph
+
+A validator is a function of the state it is called on. That makes the second half of the problem a
+question about *where it is called from*, and this is the half most harnesses do not have a
+vocabulary for.
+
+Almost every autonomous research system in the current literature is a **loop**: plan, act, observe,
+repeat, until a budget runs out or a stopping heuristic fires. The engineering goes into making each
+turn better — better tools, better prompts, better memory, better search inside a step. The loop's
+only control state is which iteration it is on.
+
+Research is not shaped like that. An analysis finds that the experiment answered a different
+question than the one asked. A draft finds that a claim has no result behind it. An unplanned result
+turns out to be worth more than the planned one. Each is a move *backwards*, and a loop cannot
+express one: its response to "Stage 06 shows the design was wrong" is to write up the wrong design
+more carefully.
+
+So the object being controlled is not an iteration counter but a **stage**, and the relation between
+stages is a directed graph the run navigates rather than a sequence it walks
+([`stage_graph.py`](../src/stage_graph.py)). Nodes are stages, edges are the moves allowed between
+them, guards are functions over artifacts on disk, and after each stage the run chooses an edge and
+records why.
+
+The two halves of the problem are the same problem, and §6 is the episode that showed it:
+
+> **A warrant gate is only as good as the set of nodes it is reachable from.** A check that refuses
+> unwarranted claims, placed at a node an unwarranted run never reaches, refuses nothing. Rigour is
+> therefore a property of the topology and not only of the checks — which is the argument for making
+> the controller an explicit graph rather than a loop with conditionals in it.
 
 ---
 
@@ -421,6 +452,38 @@ loop, not an iteration. And the archive, which learns from outcomes, is permitte
 preferences but **never** to open a guarded edge, add an undeclared one, or remove one — the
 component that learns is precisely the one that must not be able to weaken the correctness argument.
 
+**The claim, narrowed until it is defensible.** "Research is not linear" is too coarse to survive
+review, and two neighbouring ideas are established prior art:
+
+- **Branching search inside a stage.** The AI Scientist v2 does tree search over candidate
+  experiments; EvoScientist does idea tree search in its first stage and experiment tree search in
+  its second (arXiv:2603.08127 §3.3–3.4). Neither is linear *within* a stage.
+- **Closed-loop feedback between stages.** NovelSeek is subtitled "Building Closed-Loop System from
+  Hypothesis to Verification"; InternAgent describes itself as a closed-loop multi-agent framework.
+  Feedback from a later step to an earlier one is not new.
+
+What remains uncontested is narrower:
+
+> An explicit, inspectable **inter-stage dependency graph used as the controller** — an object that
+> decides which stage runs next and whether to re-enter a completed one, with the admissible set
+> computed mechanically rather than argued for in a prompt.
+
+The foil is concrete rather than rhetorical. EvoScientist's paper says "the pipeline proceeds in two
+stages" (§3.1), hardcoded 1→2 with a hardcoded s ∈ {1,2,3,4} inside the second; its shipped harness
+implements a six-step workflow that lives in a prompt string, whose only non-linear affordance is a
+checkpoint asking a planner agent to emit a JSON plan update with `stage_modifications` and
+`new_stages` fields. That is replanning in text. There is no graph object, so there is nothing to
+guard, nothing to record, and nothing for a later run to learn from.
+
+The same narrowing applies to the improvement half. EvoScientist's critique axis is cross-run
+memory — "static execution pipelines … accumulated outcomes and failures are rarely distilled into
+reusable experience". That bet is *unmeasured on this benchmark by anyone*, including its strongest
+advocate: its two leaderboard entries (0.0.4 at 15.47, 0.1.1 at 18.76) differ by release, not by
+evolution state — both predate every memory feature it ships, which arrive in v0.1.7 through v0.2.1
+— and ResearchClawBench isolates tasks, so cross-task memory has no channel to express itself
+through by construction. That is the reason AutoR spends its complexity budget on stage control
+rather than on memory, and it is an argument from their evidence rather than from preference.
+
 ### 5.5 How this sits against the systems it is comparable to
 
 Grounded in [the landscape study](researchclawbench-landscape.md), which recomputed the published
@@ -443,7 +506,146 @@ self-justifying, which is the reason §2.5 exists.
 
 ---
 
-## 6. Contribution
+## 6. The system measured against itself
+
+Everything above is design. This section is the one place the design was put on a benchmark it does
+not control, and it did badly. The episode is included in full because it is the strongest evidence
+either way: it is what §1.1's claim about topology was derived from, and it is also the sharpest
+objection to it.
+
+### 6.1 The measurement
+
+[ResearchClawBench](https://github.com/InternScience/ResearchClawBench) hands an agent a workspace of
+raw data and reference papers, lets it work unsupervised, and scores the resulting
+`report/report.md` against the original published paper with a multimodal judge. 40 tasks, 154
+weighted criteria, 0–100 each, where **50 means as good as the paper being reproduced**. Images
+carry 60.6% of total weight. It gives no credit for process, which makes it a hard test of a system
+whose thesis is about process.
+
+40 tasks, one attempt each, Claude Opus executing and reviewing, scored with the benchmark's own
+reference judge `gpt-5.1`. Three comparison agents re-scored from their public runs under the
+identical judge:
+
+| agent | mean | median | max | tasks scoring 0 |
+|:---|---:|---:|---:|---:|
+| Codex CLI | 19.53 | 17.73 | 48.40 | 2 |
+| ResearchHarness (GPT-5.4) | 15.40 | 10.85 | 45.10 | 1 |
+| ARIS Codex | 15.02 | 12.65 | 46.90 | 2 |
+| **AutoR** | **14.16** | 11.50 | 47.70 | **7** |
+
+Last, below the bare Codex CLI it can be configured to run on top of. §2.5 exists because structure
+is not self-justifying; this is that principle applied to the whole system.
+
+### 6.2 What the deficit was made of
+
+| stratum | n | AutoR mean | the other three, same tasks |
+|:---|---:|---:|---:|
+| 197-byte "incomplete run" stub | 8 | **0.78** | 18.99 |
+| Stage-01/02 dump | 10 | 12.88 | — |
+| paper-shaped report | 22 | 19.61 | 17.84 |
+
+Eight runs shipped a 197-byte stub reading `_No completed stage output was produced._`, each
+reporting `exit_code: 0, status: completed`; one spent 6,150 seconds doing it. The tasks are not
+hard — the other three agents average 18.99 on those same eight.
+
+**The 19.61 is a post-hoc subgroup mean and is not AutoR's number.** It locates the defect and
+nothing more. Only the 40-task mean counts, and quoting the subgroup as a result would be exactly
+the move §2.4 and §5.2 exist to prevent the system from making about itself.
+
+### 6.3 Four defects, all of them topological
+
+**The graph had no terminal edge.** Thirteen backward edges, six guarded forward ones — and every
+way a stage could fail *terminally* was `return False`: the auto-skip budget running out, and an
+abort at the approval gate. A `return False` is not an edge; it is the absence of one, and the
+runtime expresses that as process exit. On eight of forty runs the only reachable terminal state was
+`sys.exit`, and a run holding 18 KB of survey and five rendered figures published 197 bytes. What
+this document calls a graph was, on a fifth of the benchmark, a linear pipeline with a retry loop
+and two trapdoors.
+
+**The router had never read the research question.** `user_input.txt` is excerpted by four callers,
+each taking a *prefix*. Measured over all 40 shipped tasks:
+
+| reader | budget | characters of the research question it saw |
+|:---|---:|:---|
+| the router that chooses the next move | 2,500 | **0** |
+| the deliberation panel | 3,000 | **0** |
+| the adversarial validity reviewer | 3,000 | **0** |
+| the report synthesizer | 8,000 | 331 of ~5,000 — median 6.9% |
+
+The benchmark adapter had grown a grading contract in front of the task, and nothing noticed,
+because what a prefix reader sees is decided by what goes first and no test looked.
+
+**The check that should have caught it was reading AutoR's own prose.** `deliverables.py` compares
+the deliverable against what the task asked for by finding sentences that ask for something. Given
+the wrapped goal it found **857 demands across the 40 tasks where the tasks contain 337** — 520
+phantoms, 61%. The first requirement enumerated to the stage was `Benchmark Run: ResearchClawBench`.
+It is also gated at `stage.number >= 7`, which puts it topologically downstream of the failure it
+exists to catch.
+
+**The improvement loop was running open-loop.** This is the one that bears on §2.4. The rubric's
+eight criteria cost nothing and are read off disk — and **zero of the benchmark's 154 checklist
+items measures any of them**. Two runs of one task:
+
+| internal rubric | benchmark score |
+| --- | ---: |
+| 0.998 – 1.000 | 9.6 |
+| 0.983 – 1.000 | 46.0 |
+
+Roughly 17% of every run's wall clock went to hill-climbing a metric already at ceiling on the first
+draft. Improving a quantity uncorrelated with the objective is not self-improvement; it is a fixed
+point advertised as a gradient. §2.4's commitment — score with something the loop cannot influence —
+is satisfied, and this is its price: a measure the loop cannot influence is also a measure that can
+fail to point anywhere.
+
+### 6.4 The worst case, in full
+
+`Chemistry_003` scored **0.0** with a 27,826-byte report and six rendered figures. The report is
+good. It opens:
+
+> This run was terminated after its first stage. **No machine-learning interatomic potential was
+> trained, and no model-accuracy number is reported anywhere below.**
+
+and delivers a rigorous audit of the input data, finding three real defects in the supplied
+datasets — including two files that are bit-identical where the task requires them to differ. Its
+Section 6 enumerates every criterion it did not meet. Every honesty mechanism in this document fired
+exactly as designed. The rubric scored it 1.000. The judge scored it zero, correctly, because the
+task asked about latent-charge recovery and force MAE and the report does not attempt them.
+
+Stated in its strongest form against the thesis: a graph that can route backwards but cannot route
+*toward its deliverable under a budget* has not earned the word. Stated for it: "the node holding
+the quality control is unreachable from the failure mode it targets" is a sentence about topology,
+and a system without an explicit topology cannot say it, let alone repair it.
+
+### 6.5 What changed, and the rule it produced
+
+Landed as [#180](https://github.com/tangxiangru/AutoR/pull/180) and
+[#181](https://github.com/tangxiangru/AutoR/pull/181):
+
+| defect | change |
+|:---|:---|
+| no terminal edge | `_route_to_deliverable` makes the writing node reachable from any node under one predicate — *the budget for doing more research is spent and the deliverable node has not been visited*. The node still runs its own gates; when it too exhausts, the run aborts as before. |
+| the question was last | the goal emits the task second, and `goal_excerpt` returns the fenced task and truncates from the tail |
+| phantom demands | `task_statement()` unwraps the goal at all four `deliverables` call sites |
+| five routes to the stub | synthesis judged on the file not the exit code; the fallback re-reads before overwriting; `stages/<slug>.tmp.md` as last-resort recovery; the skip-rescue passes the arguments the real gate passes; `exit_code` reads content, not `.exists()` |
+
+The terminal edge bypasses the validity-chain guard, and it is the only guard bypass in AutoR. The
+justification generalises into the design rule this episode produced, which belongs beside the six
+in §2:
+
+> **A gate whose repair an unattended run cannot perform must degrade to a disclosure requirement,
+> not a refusal.** A guard is a repair instruction. The validity chain's repair is *go back and
+> adjudicate the hypotheses* — a rollback costing more budget than the run has. A refusal whose only
+> repair is unaffordable is not a gate; it is an exit under another name. The discriminating test is
+> whether the repair is in-stage; if it is a rollback, the gate is a trapdoor. What the run owes
+> instead is disclosure: every stage the route stepped over is named in the report.
+
+**The effect of these changes is not yet measured.** A 40-task re-run at the repaired HEAD is in
+flight. Until it lands, §6.5 is a description of code, not a result, and no claim in this document
+rests on it.
+
+---
+
+## 7. Contribution
 
 What a reader can take from this system, in descending order of how transferable it is.
 
@@ -475,7 +677,7 @@ What a reader can take from this system, in descending order of how transferable
 6. **A statistically literate archive.** Paired trials with an exact sign-flip p-value, the
    attainable-p floor printed beside it, an explicit `underpowered` label below six pairs, and a
    sample-complexity tool that says how many runs an edge needs before it is believable. This is
-   apparatus, not evidence — see §7.
+   apparatus, not evidence — see §8.
 
 7. **A full-fidelity research run as an inspectable artifact.** Every prompt of every attempt, every
    reviewer verdict, every panel seat's dissent that lost, every routing refusal, every losing draft,
@@ -490,7 +692,7 @@ What a reader can take from this system, in descending order of how transferable
 
 ---
 
-## 7. What has not been established
+## 8. What has not been established
 
 Stated as plainly as the rest, because a system built to refuse unwarranted claims should not make
 any.
@@ -503,10 +705,22 @@ any.
 - **The archive has not learned anything yet.** It records every run, and it proposes variants, but
   the shipped archive holds no paired trials and the sample-complexity tool exists precisely because
   the observation counts are not there yet.
-- **The benchmark number is one task of forty.** 46.0 on `Astronomy_000` under the reference judge
-  is a real measurement of a real run, and it is not comparable to a 40-task leaderboard mean. The
-  landscape study's first conclusion also stands: model choice dominates harness choice, and any
-  result must be quoted against the same-model bare-harness baseline.
+- **The benchmark number is 14.16, and it is last.** §6 is the full account. Three things travel
+  with it and none can be dropped: it is **single-attempt** where the public leaderboard aggregates
+  the *best* score per (task, agent) pair, so the two are not comparable in either direction; it is
+  a `gpt-5.1` number, and judge choice is worth roughly sixteen points; and it is the **pre-repair**
+  batch, so the effect of #180 and #181 is unmeasured. The landscape study's first conclusion also
+  stands: model choice dominates harness choice, and any result must be quoted against the
+  same-model bare-harness baseline.
+- **No mechanism in §6.5 has been measured.** The re-run is in flight. Until it lands, the correct
+  reading of this document is that a system with a stated topology found four topological defects in
+  itself and repaired them, and that the repair is unevaluated.
+- **The rubric may not point at anything.** §6.3 is a two-point observation — internal rubric
+  0.998–1.000 scoring 9.6, and 0.983–1.000 scoring 46.0 — against a benchmark none of whose 154
+  criteria measures any of the eight. That is enough to refuse the claim that the ratchet improves a
+  benchmark score. It is not enough to quantify the relationship, and it does not establish that the
+  rubric is measuring nothing: rigour and rubric-coverage are different objectives, and §2.4 chose
+  the first deliberately. What it does establish is that the second is not a corollary of the first.
 - **The frozen preregistration is not checked against itself.** `validate_preregistration` compares
   the *manifest's* digest to the recorded `source_digest`; it never recomputes the digest of the
   frozen file. Editing `preregistration.json` in place passes. The honest claim is that a manifest
@@ -517,8 +731,12 @@ any.
   only.
 - **A crashed adversarial reviewer is indistinguishable from a clean result.** `reviewer_failed:
   true` is written and nothing reads it.
-- **The chain is bypassable in unattended mode.** A stage that burns its five attempts against the
-  gate is auto-skipped, up to three per run.
+- **The chain is bypassable in unattended mode, and now deliberately so.** A stage that burns its
+  attempts against the gate is auto-skipped, up to three per run; past that the terminal edge routes
+  to the writing stage *around* the validity guard (§6.5). The bypass used to be an accident of the
+  retry budget and is now a stated rule with a disclosure obligation attached, which is an
+  improvement in honesty rather than in strictness. Whether the disclosure is enough is exactly the
+  kind of thing a reviewer should push on.
 
 Each of these is also a specific next thing to build, named at the code that would have to change.
 The list is maintained in the README's [Limits](../README.md#limits) section and is meant to shrink.
