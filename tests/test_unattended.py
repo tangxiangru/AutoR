@@ -9,7 +9,14 @@ import main as autor_main
 from src.manager import ResearchManager
 from src.manifest import load_run_manifest, mark_stage_skipped_manifest
 from src.terminal_ui import TerminalUI, UnattendedInputError
-from src.utils import STAGES, build_run_paths, ensure_run_layout, read_text, write_text
+from src.utils import (
+    STAGES,
+    WRITING_STAGE,
+    build_run_paths,
+    ensure_run_layout,
+    read_text,
+    write_text,
+)
 
 
 class AlwaysTTY(io.StringIO):
@@ -122,7 +129,15 @@ class UnattendedExhaustionTest(unittest.TestCase):
         self.assertTrue(self.paths.stage_file(stage).exists())
         self.assertIn("unattended_auto_skip", read_text(self.paths.logs))
 
-    def test_auto_skip_budget_is_enforced(self) -> None:
+    def test_the_spent_budget_routes_to_the_writing_stage_instead_of_exiting(self) -> None:
+        """Out of budget is a move, not an exit.
+
+        This used to `return False`, which the walk turns into process exit. Eight of
+        forty benchmark runs took that path and published a 197-byte report over the work
+        they were holding. The budget bounds how many stages may be *skipped and the
+        research continued*; once it is spent the only move left is to go and write up
+        what the run has.
+        """
         manager = self._manager(unattended=True, max_auto_skips=2)
 
         for stage in STAGES[:2]:
@@ -132,12 +147,48 @@ class UnattendedExhaustionTest(unittest.TestCase):
                 )
             )
 
-        self.assertFalse(
+        self.assertTrue(
             manager._handle_stage_exhaustion(
                 paths=self.paths, stage=STAGES[2], attempt_no=5, last_validation_errors=[]
             )
         )
-        self.assertEqual(len(manager.auto_skipped_stages), 2)
+        self.assertEqual(manager._jump_target_stage, WRITING_STAGE)
+        self.assertIn("routed_to_deliverable", read_text(self.paths.logs))
+        self.assertNotIn("unattended_abort", read_text(self.paths.logs))
+
+    def test_every_stage_the_route_stepped_over_is_named_as_not_completed(self) -> None:
+        """A bypassed stage is one the report has to disclose, not one it may omit."""
+        manager = self._manager(unattended=True, max_auto_skips=1)
+        manager._handle_stage_exhaustion(
+            paths=self.paths, stage=STAGES[0], attempt_no=5, last_validation_errors=[]
+        )
+        manager._handle_stage_exhaustion(
+            paths=self.paths, stage=STAGES[1], attempt_no=5, last_validation_errors=[]
+        )
+
+        # 03, 04, 05 and 06 were never entered; 02 failed. All five are missing from the
+        # report, and the report says so.
+        self.assertEqual(
+            manager.auto_skipped_stages,
+            [
+                "01_literature_survey",
+                "03_study_design",
+                "04_implementation",
+                "05_experimentation",
+                "06_analysis",
+                "02_hypothesis_generation",
+            ],
+        )
+
+    def test_the_writing_stage_itself_running_out_still_aborts(self) -> None:
+        """There is nowhere left to route to, so the old behaviour is the right one."""
+        manager = self._manager(unattended=True, max_auto_skips=0)
+
+        self.assertFalse(
+            manager._handle_stage_exhaustion(
+                paths=self.paths, stage=WRITING_STAGE, attempt_no=5, last_validation_errors=[]
+            )
+        )
         self.assertIn("unattended_abort", read_text(self.paths.logs))
 
     def test_the_skip_summary_says_it_was_skipped(self) -> None:

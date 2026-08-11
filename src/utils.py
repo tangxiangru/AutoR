@@ -146,6 +146,11 @@ STAGES: list[StageSpec] = [
     StageSpec(8, "08_dissemination", "Dissemination"),
 ]
 
+#: The node that produces the deliverable. Stage 08 comes after it and makes posters and
+#: release notes, so it is where a run *ends*, not where its output is written — the
+#: distinction matters to anything deciding where to route a run that is out of budget.
+WRITING_STAGE = STAGES[6]
+
 REQUIRED_STAGE_HEADINGS = [
     "Objective",
     "What I Did",
