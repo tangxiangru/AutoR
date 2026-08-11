@@ -269,9 +269,24 @@ class Resolution:
             "dissent": self.dissent,
             "voice_calls": self.voice_calls,
             "distinct_answers": self.distinct_answers,
+            "unreachable": self.unreachable,
             "changed_the_answer": self.changed_the_answer,
             "verdict": self.verdict(),
         }
+
+    @property
+    def unreachable(self) -> int:
+        """Voices whose backend never answered.
+
+        Kept separate from "the voice answered and said nothing useful". A panel that could
+        not be convened and a panel that convened and added nothing are different outcomes,
+        and reporting them with one sentence hides an outage behind a research finding.
+        """
+        return sum(1 for position in self.positions if position.failed)
+
+    @property
+    def all_voices_unreachable(self) -> bool:
+        return bool(self.positions) and self.unreachable == len(self.positions)
 
     @property
     def distinct_answers(self) -> int:
@@ -286,8 +301,21 @@ class Resolution:
 
     def verdict(self) -> str:
         """Whether stopping to think was worth the calls it cost."""
+        if self.all_voices_unreachable:
+            return (
+                f"No voice could be reached ({self.unreachable} of {len(self.positions)} "
+                "failed); the panel never sat. The stage keeps its own answer, and this crux "
+                "went un-deliberated rather than being settled."
+            )
         if not self.answer:
-            return "The deliberation produced no answer; the stage keeps its own."
+            unreachable = (
+                f" {self.unreachable} of {len(self.positions)} voice(s) could not be reached."
+                if self.unreachable
+                else ""
+            )
+            return (
+                "The deliberation produced no answer; the stage keeps its own." + unreachable
+            )
         if self.changed_the_answer is False:
             return (
                 f"The panel reached the same answer the agent already had, at {self.voice_calls} "
@@ -610,22 +638,47 @@ def record_resolution(paths: RunPaths, stage: StageSpec, resolution: Resolution)
     return ledger
 
 
+def _entry_was_never_deliberated(entry: dict[str, Any]) -> bool:
+    """True when every voice on this crux failed, so no panel actually sat."""
+    positions = entry.get("positions")
+    if not isinstance(positions, list) or not positions:
+        return False
+    return all(isinstance(p, dict) and p.get("failed") is True for p in positions)
+
+
 def _summary(entries: list[dict[str, Any]]) -> dict[str, Any]:
     calls = sum(int(entry.get("voice_calls") or 0) for entry in entries)
     changed = sum(1 for entry in entries if entry.get("changed_the_answer") is True)
     unchanged = sum(1 for entry in entries if entry.get("changed_the_answer") is False)
+    never_sat = sum(1 for entry in entries if _entry_was_never_deliberated(entry))
     return {
         "cruxes_raised": len(entries),
         "changed_the_agents_answer": changed,
         "confirmed_the_agents_answer": unchanged,
+        "never_deliberated": never_sat,
         "voice_calls": calls,
-        "verdict": _summary_verdict(len(entries), changed, unchanged, calls),
+        "verdict": _summary_verdict(len(entries), changed, unchanged, calls, never_sat),
     }
 
 
-def _summary_verdict(total: int, changed: int, unchanged: int, calls: int) -> str:
+def _summary_verdict(
+    total: int, changed: int, unchanged: int, calls: int, never_sat: int = 0
+) -> str:
     if total == 0:
         return "No cruxes were raised."
+    if never_sat == total:
+        return (
+            f"{total} crux(es) escalated at {calls} calls, and not one panel could be "
+            "convened — every voice's backend failed. This says nothing about whether "
+            "deliberation helps; it was never tried. Check the backend before reading "
+            "any deliberation result from this run."
+        )
+    if never_sat:
+        return (
+            f"{total} crux(es) escalated at {calls} calls, of which {never_sat} never "
+            "reached a panel because every voice's backend failed. The remaining "
+            f"{total - never_sat} are the only ones this run can speak to."
+        )
     if unchanged and not changed:
         return (
             f"{total} crux(es) escalated at {calls} calls, and the panel confirmed the agent's "
