@@ -28,6 +28,8 @@ from src.utils import (
     STAGES,
     build_run_paths,
     ensure_run_layout,
+    extract_fenced_task,
+    goal_excerpt,
     read_text,
     validate_stage_artifacts,
     validate_stage_markdown,
@@ -68,6 +70,40 @@ class BenchmarkGoalTest(unittest.TestCase):
             self.assertIn(f"{workspace}/outputs/", goal)
             self.assertIn("no human", goal.lower())
             self.assertIn("read-only", goal.lower())
+
+    def test_a_prefix_reader_sees_the_task_and_not_only_the_contract(self) -> None:
+        """The question survives every budget the goal is excerpted at.
+
+        Four readers take a prefix of ``user_input.txt`` — the router at 2,500
+        characters, the deliberation panel and the validity reviewer at 3,000, the
+        report synthesizer at 8,000. While the task sat *after* the grading contract,
+        and the contract grew past 7,600 characters, the first three saw none of the
+        research question and the fourth saw 331 characters of it. This pins the
+        ordering rather than any one call site, because the next section added to the
+        contract is what would break it again.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp).resolve()
+            question = "Recover the latent charges from energies and forces alone."
+            task = f"## Role\n\nYou are a researcher.\n\n## Research Task\n\n{question}\n" + (
+                "\n<!-- padding -->" * 400
+            )
+            goal = build_benchmark_goal(workspace, task)
+
+            self.assertGreater(len(goal), 8000, "the contract is no longer long enough to test this")
+            for budget in (2500, 3000, 8000):
+                self.assertIn(question, goal_excerpt(goal, budget), f"lost at {budget} chars")
+
+    def test_the_fenced_task_round_trips_out_of_the_goal(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            task = "## Role\n\nAnalyst.\n\n## Research Task\n\nFit the exclusion curve."
+            goal = build_benchmark_goal(Path(tmp).resolve(), task)
+            self.assertEqual(extract_fenced_task(goal), task)
+
+    def test_a_goal_nobody_fenced_is_returned_whole(self) -> None:
+        plain = "Estimate the glacier mass balance trend."
+        self.assertIsNone(extract_fenced_task(plain))
+        self.assertEqual(goal_excerpt(plain, 2500), plain)
 
 
 class ResolveInstructionsTest(unittest.TestCase):

@@ -54,10 +54,13 @@ from .utils import (
     DEFAULT_OUTPUT_FORMAT,
     MAX_REPORT_FIGURES,
     MIN_REPORT_CHARS,
+    TASK_BEGIN_MARKER,
+    TASK_END_MARKER,
     RunPaths,
     StageSpec,
     approved_stage_summaries,
     build_run_paths,
+    extract_fenced_task,
     extract_markdown_image_targets,
     read_text,
     resolve_output_format,
@@ -97,6 +100,7 @@ JUDGE_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".bmp", ".web
 
 #: Run-tree directories never mirrored into the benchmark workspace.
 EXPORT_SKIP_DIRS = frozenset({"__pycache__", ".git", ".ipynb_checkpoints", "node_modules"})
+
 
 
 @dataclass(frozen=True)
@@ -307,6 +311,18 @@ def build_benchmark_goal(
         "unreferenced image under `report/` when it exports, so a plot saved outside "
         "`report/images/` is lost rather than merely unhelpful."
     )
+    # The task goes first, before any of AutoR's own contract prose.
+    #
+    # This document is `user_input.txt`, and four readers excerpt it by taking a
+    # prefix: the router that chooses the next graph move (`src/router.py`, 2,500
+    # chars), the deliberation panel (`src/deliberation.py`, 3,000), the adversarial
+    # validity reviewer (`src/validity_review.py`, 3,000) and the benchmark report
+    # synthesizer (:meth:`ReportSynthesizer.build_prompt`, 8,000). While the task sat
+    # last, the contract in front of it had grown past every one of those caps, so on
+    # a benchmark run the router, the panel and the reviewer saw *zero* characters of
+    # the research question and the synthesizer saw 331 of roughly 5,000. A prefix
+    # reader is not a bug to be fixed one call site at a time; what a prefix reader
+    # sees is decided here, by what this function puts first.
     return "\n\n".join(
         [
             "# Benchmark Run: ResearchClawBench",
@@ -315,6 +331,8 @@ def build_benchmark_goal(
                 "any point: no one will answer a question, approve a plan, or grant a permission. "
                 "Make the best judgement you can from the data and keep going."
             ),
+            "## Research Task",
+            f"{TASK_BEGIN_MARKER}\n{instructions.strip()}\n{TASK_END_MARKER}",
             "## Benchmark Workspace Contract",
             (
                 f"The benchmark workspace is `{resolved}`. It is separate from the AutoR run tree "
@@ -369,8 +387,6 @@ def build_benchmark_goal(
             "## How This Report Is Scored",
             scoring_block,
             reference_block,
-            "## Research Task",
-            instructions.strip(),
         ]
     )
 
@@ -938,6 +954,23 @@ class ReportSynthesizer:
             return None
         return read_text(report_path)
 
+    @staticmethod
+    def _task_block(paths: RunPaths) -> str:
+        """The research question, whole, however long the rest of the goal has grown.
+
+        A prefix of the goal is not a substitute. The synthesizer is the one call that
+        decides what the scored artifact is *about*, and it used to receive
+        ``truncate_text(goal, 8000)`` — which, once the grading contract in front of the
+        task crossed 7,600 characters, was 331 characters of the question and the rest
+        of AutoR's own prose. Tail-truncate instead of head-truncating: a task that
+        overruns loses its closing notes, not its subject.
+        """
+        goal = read_text(paths.user_input)
+        task = extract_fenced_task(goal)
+        if task is None:
+            return truncate_text(goal, max_chars=8000)
+        return truncate_text(task, max_chars=12000)
+
     def build_prompt(self, *, paths: RunPaths, workspace: Path, figures: list[str]) -> str:
         resolved_report = (workspace / "report" / "report.md").resolve()
         figure_lines = (
@@ -975,8 +1008,11 @@ class ReportSynthesizer:
             f"- artifact index: `{paths.artifact_index.resolve()}`\n"
             f"- LaTeX paper package: `{paths.writing_dir.resolve()}`\n"
             f"- benchmark workspace: `{workspace.resolve()}`\n\n"
-            "## Original Task\n\n"
-            f"{truncate_text(read_text(paths.user_input), max_chars=8000)}\n\n"
+            "## The Task This Report Must Answer\n\n"
+            "Every requirement below is scored. A requirement the report does not mention "
+            "scores zero, so answer them item by item and in their own words — a complete "
+            "answer to a nearby question is worth less than a partial answer to this one.\n\n"
+            f"{self._task_block(paths)}\n\n"
             "## Approved Memory\n\n"
             f"{truncate_text(read_text(paths.memory), max_chars=16000)}\n"
         )

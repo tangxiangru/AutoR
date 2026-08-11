@@ -31,6 +31,7 @@ from .utils import (
     RunPaths,
     StageSpec,
     append_jsonl,
+    goal_excerpt,
     read_text,
     truncate_text,
     write_text,
@@ -454,6 +455,12 @@ class ValidityReviewer:
         def excerpt(path, limit: int = 6000) -> str:
             return truncate_text(read_text(path), max_chars=limit) if path.exists() else "(absent)"
 
+        def goal(limit: int = 3000) -> str:
+            # Not `excerpt`: that takes a prefix, and a goal can carry the question
+            # behind however much preamble the caller prepended to it.
+            path = paths.user_input
+            return goal_excerpt(read_text(path), max_chars=limit) if path.exists() else "(absent)"
+
         return (
             "# Adversarial Validity Review\n\n"
             f"You are reviewing {stage.stage_title} of an automated research run.\n\n"
@@ -493,7 +500,7 @@ class ValidityReviewer:
             '"what_would_settle_it": "..."}]}\n'
             "```\n\n"
             "# Original Goal\n\n"
-            f"{excerpt(paths.user_input, 3000)}\n\n"
+            f"{goal(3000)}\n\n"
             "# Preregistered Hypotheses\n\n"
             f"{excerpt(paths.preregistration)}\n\n"
             "# Experimental Protocol\n\n"
