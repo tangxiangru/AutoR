@@ -187,7 +187,28 @@ class StageRouter:
                 offered=offered, blocked=blocked_kinds,
             )
 
-        should_ask = self.mode == "agent" or (self.mode == "auto" and len(live) > 1)
+        # `auto` means "ask where the answer can differ". `len(live) > 1` was the wrong
+        # way to say that, and it skipped the one decision this graph exists to put to
+        # an agent.
+        #
+        # A blocked edge is not in `live`. So at a node whose forward guard is unmet and
+        # whose backward edge is open — Stage 02, 03 and 04 on any run that has not yet
+        # produced design artifacts, runnable code or results — `live` holds exactly the
+        # repair move, `len(live) == 1`, and the router is skipped. `default_move` then
+        # advances forward anyway as a `last_resort`, with the precondition still unmet,
+        # and the agent is never told that the edge which would satisfy it was open.
+        #
+        # Measured over the 50 archived ResearchClawBench routes: 133 visits, one
+        # revisit, and 41 of 50 runs halting at or before Stage 03 — the stages where
+        # this is the shape of every node.
+        #
+        # "Push on with the precondition unmet, or go back and satisfy it" is a research
+        # judgement, it is the reason the thirteen backward edges exist, and it is
+        # exactly what the module docstring promises an agent gets shown. Ask for it.
+        a_repair_is_open = default.last_resort and bool(live)
+        should_ask = self.mode == "agent" or (
+            self.mode == "auto" and (len(live) > 1 or a_repair_is_open)
+        )
         if not should_ask or self.operator is None or self.fake_mode:
             return RoutingDecision(
                 default.target,
@@ -443,6 +464,21 @@ def _default_reason(default: Move, moves: list[Move]) -> str:
     observation.
     """
     if default.last_resort:
+        # Two different events, and recording them as one put a false claim on the
+        # route. `default_move` never goes backward by design, so it last-resorts
+        # forward whether or not a backward edge was open — and at Stages 02-04 one
+        # usually is. The archive learns from these reasons; "nowhere left to go back
+        # to" written over a live repair edge is a mislabelled observation about the
+        # topology, in the direction that makes the topology look inert.
+        open_moves = [move.target for move in moves if move.admissible]
+        if open_moves:
+            return (
+                "No forward move is open, so the run advances with the precondition unmet: "
+                f"{default.guard.reason}. It was not sent back to "
+                f"{', '.join(f'`{target}`' for target in open_moves)}, which "
+                f"{'was' if len(open_moves) == 1 else 'were'} open — the default never goes "
+                "backward, and nothing chose one."
+            )
         return (
             f"No move out of this stage is open and there is nowhere left to go back to, so the "
             f"run advances with the precondition unmet: {default.guard.reason}"
