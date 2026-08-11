@@ -9,9 +9,15 @@ comparison at three-a-side could attain even in principle.
 It can attain 0.10. An exact two-sided permutation test over ``a`` and ``b``
 observations has ``C(a+b, a)`` distinct labellings, of which two are the extremes,
 so no result can go below ``2 / C(a+b, a)``. Three against three bottoms out at
-0.10; against a family of eighteen edges, ``0.05 / 18 = 0.0028`` needs six a side.
-The archive was licensing topology changes at a sample size where the arithmetic
-forbids the claim.
+0.10; against a family the size of the adaptive graph's edge set, the corrected
+threshold needs six a side. The archive was licensing topology changes at a sample
+size where the arithmetic forbids the claim.
+
+The family is not a constant and the docstrings here no longer name one. `Archive`
+corrects against the number of contrasts it actually has in hand, which grows as the
+graph does — the adaptive topology went from eighteen edges to twenty-two while this
+module was being written, and a hard-coded eighteen would have quietly under-
+corrected from then on.
 
 The distinction this module exists to keep visible is between **did not show an
 effect** and **could not have shown one**. They print identically as "not
@@ -57,10 +63,10 @@ class TestResult:
     def believable(self, *, alpha: float = ALPHA, family: int = 1) -> bool:
         """Significant *and* attainably so, at a threshold corrected for the family.
 
-        Both halves are required. Without the second, an archive comparing eighteen
-        edges reports the best of eighteen at an uncorrected threshold, which is the
-        multiple-comparisons mistake in its purest form: with eighteen edges and no
-        effect anywhere, the chance that at least one clears 0.05 is about 60%.
+        Both halves are required. Without the second, an archive comparing *n* edges
+        reports the best of *n* at an uncorrected threshold, which is the
+        multiple-comparisons mistake in its purest form: with twenty edges and no
+        effect anywhere, the chance that at least one clears 0.05 is about 64%.
         """
         corrected = alpha / max(family, 1)
         return self.p_value <= corrected and self.floor <= corrected
@@ -98,7 +104,8 @@ def minimum_arms_for(alpha: float, *, family: int = 1) -> int:
 
     The number to quote when refusing to act. "Not enough runs" invites the reading
     that some unspecified amount more would do; "six a side is the arithmetic floor
-    for eighteen edges at 0.05" is actionable.
+    for a family this size at 0.05" is actionable — so pass the family you are
+    actually correcting against rather than a number from a docstring.
     """
     corrected = alpha / max(family, 1)
     for size in range(1, 40):
