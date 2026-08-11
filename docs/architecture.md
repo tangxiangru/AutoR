@@ -33,13 +33,20 @@ what triggers the preregistration freeze; a refused stage propagates neither.
 **Two different kinds of check, deliberately separated.**
 `validate_stage_artifacts` ([`src/utils.py`](../src/utils.py)) runs
 artifact gates — this file exists, is parseable, is fresh, cross-references
-correctly — and then runs seven validity-chain validators that ask whether a
-claim is warranted: `validate_preregistration`,
+correctly — and then runs the validity-chain validators that ask whether a
+*claim* is warranted: `validate_preregistration`,
 `validate_experimental_protocol`, `validate_hypothesis_outcomes`,
 `validate_outcome_statistics`, `validate_claim_provenance`,
-`validate_validity_response`, `validate_round_decision`. The code labels the
-split itself at `src/utils.py`. A run can fail because a claim is
-unwarranted, not only because a file is absent.
+`validate_validity_response` and `validate_round_decision`, plus the three
+report-plan validators (`validate_report_plan`, `validate_report_plan_sources`,
+`validate_report_plan_coverage`) and the task-deliverables gate
+(`validate_deliverables_coverage`). Counting the two Stage 07 format branches,
+seventeen `validate_*` functions are reachable from it; the full table, with the
+condition each one refuses on, is in the
+[README](../README.md#the-stage-contract-and-what-gets-validated). The code
+labels the split itself: *"the scientific-validity chain, distinct from the
+artifact gates around it"*. A run can fail because a claim is unwarranted, not
+only because a file is absent.
 
 **Nothing that measures may also approve.** The rubric scores, the evolution
 controller reverts, the adversarial reviewer objects, the archive reorders
@@ -56,7 +63,11 @@ the agent learned in it.
 
 ```
 ┌───────────────────────────────────────────────────────────────────┐
-│  Interfaces    main.py (terminal)            studio.py (browser)  │
+│  Interfaces    main.py (terminal)  studio.py (browser)            │
+│                rcb_agent.py (benchmark adapter)                   │
+├───────────────────────────────────────────────────────────────────┤
+│  Policy        rigor · effort                                     │
+│                which optional machinery this run uses at all      │
 ├───────────────────────────────────────────────────────────────────┤
 │  Walk          ResearchManager · stage_graph · router             │
 │                which moves are admissible · which one is taken    │
@@ -64,13 +75,18 @@ the agent learned in it.
 │  Gates         utils.validate_stage_markdown / _stage_artifacts   │
 │                artifact gates ┊ preregistration ·                 │
 │                               ┊ experimental_protocol ·           │
+│                               ┊ report_plan · deliverables ·      │
 │                               ┊ validity_review · research_rounds │
 ├───────────────────────────────────────────────────────────────────┤
-│  Improvement   rubric → evolution → pareto → archive              │
+│  Improvement   rubric → evolution → pareto                        │
 │                measures a draft; cannot approve one               │
 ├───────────────────────────────────────────────────────────────────┤
 │  Review        approval_agent · review_panel · cross_reviewer     │
+│                validity_review · deliberation · stage_comments    │
 │                review_policy · obligations                        │
+├───────────────────────────────────────────────────────────────────┤
+│  Self-measure  scorecard · archive · decisions · trials·inference │
+│                did any of the above earn its cost?                │
 ├───────────────────────────────────────────────────────────────────┤
 │  Contract      utils · manifest · information_flow ·              │
 │                prompt_fragments · artifact_index ·                │
@@ -78,6 +94,7 @@ the agent learned in it.
 │                hypothesis_manifest · writing_manifest             │
 ├───────────────────────────────────────────────────────────────────┤
 │  Execution     OperatorProtocol → ClaudeOperator · CodexOperator  │
+│                web_search · mcp_web_search · backend_health       │
 ├───────────────────────────────────────────────────────────────────┤
 │  Backend CLI   claude                        codex                │
 └───────────────────────────────────────────────────────────────────┘
@@ -93,9 +110,16 @@ layers writes a prompt; and the improvement layer never approves.
 
 ## Module map
 
-Line counts are the shape of the system: `manager.py` (2955) and `utils.py`
-(2214) are the two largest files in the repo, and after them the four largest
-counted below are the panel, the rubric, the archive and the graph.
+150 modules, roughly 62 k lines. `manager.py` and `utils.py` are the two
+largest by a wide margin, and after them come `operator.py`, `review_panel.py`,
+`main.py`, `report_plan.py`, `rcb.py` and `stage_graph.py`. Line counts are
+deliberately not listed here: every one of them was stale within a merge of
+being written, and `wc -l src/*.py | sort -rn` re-derives the ordering in a
+second.
+
+For the design argument behind this layering — why a gate reads the filesystem
+rather than the transcript, and why the improvement layer is forbidden from
+touching a verdict — see **[framework.md](framework.md)**.
 
 ### Entry points
 
@@ -103,6 +127,16 @@ counted below are the panel, the rubric, the archive and the graph.
 | --- | --- |
 | [`main.py`](../main.py) | CLI parsing, backend and reviewer construction, archive wiring, new-run vs resume dispatch. Contains no workflow logic. |
 | [`studio.py`](../studio.py) | Three-line shim over `src/backend/studio_http.main`. |
+| [`rcb_agent.py`](../rcb_agent.py) | The ResearchClawBench adapter entry point: its own unattended defaults, `BENCHMARK_MIN_REPORT_FIGURES = 3`, and the only production caller of `resolve_cross_reviewer`. |
+| [`tools/score_rcb_run.py`](../tools/score_rcb_run.py) | Scores a finished benchmark run. `--judge reference` (the default) is gpt-5.1, which is what ResearchClawBench itself scores with; `--judge vertex` is the Anthropic fallback. |
+| [`tools/archive_sample_complexity.py`](../tools/archive_sample_complexity.py) | Prints how many runs the archive needs before an edge becomes believable, then exits. |
+
+### Policy
+
+| Module | Responsibility |
+| --- | --- |
+| [`src/rigor.py`](../src/rigor.py) | The one dial. `LEVELS = (fast, standard, thorough, max)`, `DEFAULT_LEVEL = standard`, and `_LEVEL_FEATURES` mapping each level to the optional features it enables — `effort_tiers`, `deliberation`, `ideation_panel`, `review_panel`. `resolve()` writes the decision onto the parsed args before anything reads them; an explicit `--flag`/`--no-flag` always wins, which is why those switches use `BooleanOptionalAction` with `default=None`. |
+| [`src/effort.py`](../src/effort.py) | `EffortPlan`, `TierDecision`, `Concentration`. Each stage runs as `routine` or `deliberative`; `DEFAULT_TIERS` marks 04, 05 and 08 routine. A routine stage gets a lean prompt, `manager.solo_reviewer` instead of the panel, and no polish rounds. Each stage declares the next one's tier; a routine stage that fails twice is promoted. Both directions of mis-spending are recorded in `workspace/reviews/effort.json`. |
 
 ### The walk
 
@@ -122,12 +156,14 @@ counted below are the panel, the rubric, the archive and the graph.
 | [`src/preregistration.py`](../src/preregistration.py) | Freezes and hashes the hypothesis set before results exist, adjudicates every frozen hypothesis at Stage 06 against a named result artifact, and traces every manuscript claim back to a supported hypothesis at Stage 07. A post-freeze change is legal only as an `amend_preregistration` amendment carrying the previous digest. |
 | [`src/experimental_protocol.py`](../src/experimental_protocol.py) | Declares the primary metric, the seed count and each baseline's `why_competent` and `tuning_budget` before the experiments run. `MIN_SEEDS_FOR_A_VERDICT = 2` refuses a supported/refuted verdict resting on one run unless the run says why one run settles it. |
 | [`src/validity_review.py`](../src/validity_review.py) | The adversarial pass after Stages 05 and 06 (`REVIEWED_STAGE_NUMBERS`). Asks why the result is wrong across ten named failure modes rather than whether the stage is complete, and requires the next stage to answer every finding. Has no authority to approve or reject. |
-| [`src/manifest.py`](../src/manifest.py) | | `run_manifest.json`: stage lifecycle, status transitions, rollback and stale marking, memory rebuild from approved entries. |
-| [`src/artifact_index.py`](../src/artifact_index.py) | | Scans `data/`, `results/`, `figures/`; infers or reads declared schemas; writes `artifact_index.json`. |
-| [`src/experiment_manifest.py`](../src/experiment_manifest.py) | | Builds and validates `results/experiment_manifest.json` as a view over the artifact index. |
-| [`src/evidence_ledger.py`](../src/evidence_ledger.py) | | Validates the Stage 01 `sources.json`/`claims.json` pair and the Stage 07 `citation_verification.json`. |
-| [`src/hypothesis_manifest.py`](../src/hypothesis_manifest.py) | | Parses Stage 02's typed `T*`/`H*`/`C*` identifiers into `hypothesis_manifest.json` — the input the `has_hypotheses` guard reads. |
-| [`src/writing_manifest.py`](../src/writing_manifest.py) | | Stage 07 support: writing manifest, figure/result scanning, layout review generation and validation. |
+| [`src/manifest.py`](../src/manifest.py) | `run_manifest.json`: stage lifecycle, status transitions, rollback and stale marking, memory rebuild from approved entries. |
+| [`src/artifact_index.py`](../src/artifact_index.py) | Scans `data/`, `results/`, `figures/`; infers or reads declared schemas; writes `artifact_index.json`. |
+| [`src/experiment_manifest.py`](../src/experiment_manifest.py) | Builds and validates `results/experiment_manifest.json` as a view over the artifact index. |
+| [`src/evidence_ledger.py`](../src/evidence_ledger.py) | Validates the Stage 01 `sources.json`/`claims.json` pair and the Stage 07 `citation_verification.json`. |
+| [`src/hypothesis_manifest.py`](../src/hypothesis_manifest.py) | Parses Stage 02's typed `T*`/`H*`/`C*` identifiers into `hypothesis_manifest.json` — the input the `has_hypotheses` guard reads. |
+| [`src/writing_manifest.py`](../src/writing_manifest.py) | Stage 07 support: writing manifest, figure/result scanning, layout review generation and validation. |
+| [`src/report_plan.py`](../src/report_plan.py) | The report contract. `PlannedFigure`, `HeadlineNumber`, `TaskOutput`, `ReportPlan`. The run commits at Stage 03 to which figures the report will carry and which claim each supports; `stamp_report_plan` writes `declared_at` and a digest to `runs/<id>/report_plan_stamp.json` — outside `workspace/`, so the agent cannot backdate its own declaration. Three validators hang off it: shape at Stage 03, every `source_artifact` resolving to a non-empty file at 06, and every non-dropped slot published *and* referenced at 07 in markdown mode. |
+| [`src/deliverables.py`](../src/deliverables.py) | The task-deliverables contract — the only gate that asks whether the run answered *what it was asked*. `demanding_sentences()` parses the user's own task statement for a fixed list of demand verbs; `validate_deliverables_coverage` requires every `task_quote` to be a verbatim span of `user_input.txt`, every addressed entry to name a `where` that appears in `report.md`, and every demanding sentence to be covered by content-word overlap. `format_deliverables_for_prompt` injects a `# What the Task Asks For` block into every stage prompt. |
 
 ### Improvement
 
@@ -138,16 +174,31 @@ counted below are the panel, the rubric, the archive and the graph.
 | [`src/pareto.py`](../src/pareto.py) | Keeps drafts that are non-dominated on the criterion vector even when they lose on the weighted total (`frontier`). `complementary_pair` names the two whose merge has the most headroom — the only place two drafts are combined rather than ranked. |
 | [`src/archive.py`](../src/archive.py) | Cross-run record under `~/.autor/archive`. `record_run` stores route, edges and per-stage fitness; `edge_payoffs` compares runs that took an edge against runs that reached the same node and did not; `propose_variant` reorders priorities and can never open, add or remove a guard. Promotion requires a win within every `comparability_basis`, so halting early cannot raise mean fitness. |
 
+### Self-measurement
+
+Every optional mechanism in AutoR runs its own control arm and writes a ledger; this layer reads
+them. See [framework.md](framework.md#53-machinery-that-reports-on-itself-in-the-unflattering-direction)
+for the argument.
+
+| Module | Responsibility |
+| --- | --- |
+| [`src/scorecard.py`](../src/scorecard.py) | `FEATURES` maps five ledgers — `panel_effect.json`, `idea_pool.json`, `comment_ledger.json`, `deliberations.json`, `effort.json` — to assessor functions. `write_scorecard` runs from `ResearchManager._report_optional_machinery` at the end of every run and writes `workspace/reviews/scorecard.md`, keeping "could not be measured" strictly apart from "changed nothing". |
+| [`src/decisions.py`](../src/decisions.py) | `Decision`, `decisions_from`, `offered_payoffs`, `believable_evidence`. Replaces the run-level control arm ("reached the node and did not take the edge") with the decision-level one ("was *offered* the edge and declined"), and feeds the archive's numbers into the routing prompt. |
+| [`src/trials.py`](../src/trials.py) | Paired A/B trials over archived runs tagged with `--trial`/`--capability`/`--arm`. `collect_pairs` excludes fake-provenance and stale-rubric arms; `sign_flip_p` is an exact two-sided paired permutation test; `min_attainable_p` prints the floor beside it; `MIN_PAIRS_FOR_SIGNIFICANCE` labels anything smaller `underpowered`. Reachable only from `main.py --trial-report`, and **no trial has been run**. |
+| [`src/inference.py`](../src/inference.py) | `unpaired_floor`, `paired_floor`, `minimum_arms_for`, `unpaired_permutation`. Derives `DEFAULT_MIN_OBSERVATIONS` in `archive.py` from the size of the edge family rather than asserting a threshold. |
+
 ### Review
 
 | Module | Responsibility |
 | --- | --- |
-| [`src/approval_agent.py`](../src/approval_agent.py) | | `AutomatedReviewer` — the strict reviewer agent that stands in for the human gate under `--full-auto`. Returns a `ReviewDecision`, and renders the standing rules and open obligations into its own prompt. |
+| [`src/approval_agent.py`](../src/approval_agent.py) | `AutomatedReviewer` — the strict reviewer agent that stands in for the human gate under `--full-auto`. Returns a `ReviewDecision`, and renders the standing rules and open obligations into its own prompt. |
 | [`src/review_panel.py`](../src/review_panel.py) | Five seats. Round 1 is independent; a cross-examination round runs only if that round was not unanimous, up to `--panel-rounds` (default 2); then the chair synthesizes one decision. The Adversarial Reviewer's exposure is `"none"`; peers are anonymised in round 2; abstention is a first-class verdict; an unreachable member breaks unanimity rather than counting as agreement (`_is_unanimous`); `_enforce_blocking_objections` converts a chair's approval into a refusal in code. `record_panel_effect` accumulates the chair's round-1 solo verdict as the panel's own control arm. |
 | [`src/cross_reviewer.py`](../src/cross_reviewer.py) | A second opinion from a different model family, applied only to approvals. A veto, never an override; an auditor that errors or returns unparseable output is recorded `unavailable`, never as agreement. |
 | [`src/review_policy.py`](../src/review_policy.py) | Corrections the reviewer demanded become standing rules in `runs/<id>/review_policy.json` (`policy_path`) and are rendered into every later review prompt. Per-run: nothing carries a rule into the next run. |
 | [`src/obligations.py`](../src/obligations.py) | What an approving reviewer says a later stage still owes. Written to `runs/<id>/obligations.json`, injected into that stage's prompt *and* its review, discharged only by a reviewer (`discharge_obligations`), with deferrals counted rather than silent (`note_deferrals`). |
 | [`src/ideation_panel.py`](../src/ideation_panel.py) | Stage 02 divergence: five proposer lenses, Jaccard deduplication, scoring into a candidate pool the stage chooses from. Decides nothing. `measure_adoption` marks afterwards which pooled candidates the approved stage actually built on. |
+| [`src/deliberation.py`](../src/deliberation.py) | The crux panel — not a reviewer of a stage. The executing agent writes a question to `workspace/notes/deliberation_request.json`; four voices (theorist, empiricist, critic, pragmatist) each commit to an answer and then argue against themselves; a resolver produces an answer that must name its own falsifier. Budgeted by `--max-deliberations`; a crux similar to one already answered reuses the stored answer instead of re-arguing it. |
+| [`src/stage_comments.py`](../src/stage_comments.py) | Anchored comments. A comment must quote at least `MIN_QUOTE_CHARS` findable in the draft; an unfindable quote is recorded `unanchored` and dropped. The revision is told to change only those spans, and the next draft is diffed to count anchored against collateral line changes into `workspace/reviews/comment_ledger.json`. |
 
 ### Context and inputs
 
@@ -155,11 +206,11 @@ counted below are the panel, the rubric, the archive and the graph.
 | --- | --- |
 | [`src/information_flow.py`](../src/information_flow.py) | Sixteen typed channels (`CHANNELS`). Each declares `produced_by`, a `consumed_by` set of real stage slugs, and a rationale for every narrowing. `render_inbound()` composes a stage's context per consumer; `dependency_edges()` prints the producer→consumer topology. |
 | [`src/prompt_fragments.py`](../src/prompt_fragments.py) | The rules every stage prompt shares, held once. `compose_stage_template` orders them: the stage's own instructions, then the output-format rules that constrain them, then `RUN_SAFETY`. |
-| [`src/intake.py`](../src/intake.py) | | Stage 00: clarification-question parsing, resource classification and ingestion, `intake_context.json`. Runs before the graph walk begins. |
-| [`src/bootstrap.py`](../src/bootstrap.py) | | `--paper-corpus`: scans your prior papers (PDF/LaTeX/BibTeX) into a researcher profile, citation neighborhood, and style profile. |
-| [`src/project_bootstrap.py`](../src/project_bootstrap.py) | | `--project-root`: scans an existing repository, assesses per-stage completion, recommends a re-entry stage. |
-| [`src/prompts/`](../src/prompts) | | One markdown template per stage, plus intake and bootstrap templates. Editing these changes agent behaviour with no code change. |
-| [`src/skills/`](../src/skills) | | Agent skills, installed into each run's `.claude/skills/` by [`src/run_skills.py`](../src/run_skills.py). Pull-based counterpart to the templates: loaded only when the model judges one relevant. The install path is load-bearing — the operator runs with `cwd=run_root`, so skills left in the AutoR checkout are never discovered. |
+| [`src/intake.py`](../src/intake.py) | Stage 00: clarification-question parsing, resource classification and ingestion, `intake_context.json`. Runs before the graph walk begins. |
+| [`src/bootstrap.py`](../src/bootstrap.py) | `--paper-corpus`: scans your prior papers (PDF/LaTeX/BibTeX) into a researcher profile, citation neighborhood, and style profile. |
+| [`src/project_bootstrap.py`](../src/project_bootstrap.py) | `--project-root`: scans an existing repository, assesses per-stage completion, recommends a re-entry stage. |
+| [`src/prompts/`](../src/prompts) | One markdown template per stage, plus intake and bootstrap templates. Editing these changes agent behaviour with no code change. |
+| [`src/skills/`](../src/skills) | Agent skills, installed into each run's `.claude/skills/` by [`src/run_skills.py`](../src/run_skills.py). Pull-based counterpart to the templates: loaded only when the model judges one relevant. The install path is load-bearing — the operator runs with `cwd=run_root`, so skills left in the AutoR checkout are never discovered. |
 
 ### Execution
 
@@ -168,6 +219,9 @@ counted below are the panel, the rubric, the archive and the graph.
 | [`src/operator_protocol.py`](../src/operator_protocol.py) | `OperatorProtocol` — the interface the manager depends on. Implement this to add a backend. |
 | [`src/operator.py`](../src/operator.py) | `ClaudeOperator` — session management, prompt-file invocation, live `stream-json` parsing, resume-failure detection and fallback, the repair pass, per-attempt state records. Also the shared base for other CLI backends. |
 | [`src/operator_codex.py`](../src/operator_codex.py) | `CodexOperator` — subclass of `ClaudeOperator` overriding invocation. Runs `codex exec --json`, applies the sandbox mode, and works through a stable temp-directory symlink to the run root. |
+| [`src/web_search.py`](../src/web_search.py) | Gemini-backed search for deployments where the coding agent's own `WebSearch` tool is disabled. `SearchReadiness`/`assess_search_readiness()` report a hard blocker (no key, no SDK) *before* the run starts rather than at Stage 01, and `build_mcp_config()` writes the config the CLI is handed. |
+| [`src/mcp_web_search.py`](../src/mcp_web_search.py) | A stdlib JSON-RPC 2.0 MCP server over stdio exposing one tool, `mcp__autor-search__web_search`, so the capability sits where the disabled built-in used to: in the tool list, and in the trace as a named call. A notification (absent `id`) is answered with silence, as the spec requires. |
+| [`src/backend_health.py`](../src/backend_health.py) | `classify`, `describe`, `BackendUnavailable`. Raised out of the stage loop and turned into a `run.backend_unavailable` manifest state, so "the model was unreachable" never reads as "the research failed". |
 
 ### Output
 
@@ -175,8 +229,7 @@ counted below are the panel, the rubric, the archive and the graph.
 | --- | --- |
 | [`src/platform/foundry.py`](../src/platform/foundry.py) | Post-approval packaging: paper package and release package. |
 | [`src/diagram_gen.py`](../src/diagram_gen.py) | Optional Gemini method-diagram generation, injected into `report.md` or `method.tex` depending on the run's output format. |
-| [`src/web_search.py`](../src/web_search.py) | `build_genai_client` and the Gemini backend shared by `--web-search gemini`, `--research-diagram` and the cross-model reviewer. The only place `google-genai` is imported for reviews. |
-| [`src/mcp_web_search.py`](../src/mcp_web_search.py) | An MCP server exposing Gemini search as a real `web_search` tool, so the capability sits where the disabled built-in used to: in the tool list, and in the trace as a named call. Stdlib JSON-RPC over stdio. |
+| [`src/rcb.py`](../src/rcb.py) | The ResearchClawBench export contract: `ensure_workspace_layout`, `build_benchmark_goal`, `collect_reference_resources`, `ReportSynthesizer`, `build_fallback_report`, and `export_run`, which mirrors `code/` and `results/` into the benchmark workspace, picks the report from four ranked sources, and publishes at most `MAX_REPORT_FIGURES` figures into `report/images/`. |
 
 ### Studio
 

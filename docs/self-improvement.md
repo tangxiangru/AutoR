@@ -58,8 +58,8 @@ Nodes are stages. Edges are the moves allowed between them.
 
 | Topology | Edges | Behaviour |
 | --- | --- | --- |
-| `linear` (default) | one advance edge out of each node | identical to the sequence AutoR has always run |
-| `adaptive` | the advance edges, the abandonment terminal, and thirteen backward moves | the run can return to an earlier stage when a later one shows it has to |
+| `linear` | the eight advance edges, unguarded, plus the abandonment terminal — nine in all | identical to the sequence AutoR has always run |
+| `adaptive` **(default)** | the eight advance edges with six guards, the abandonment terminal, and thirteen backward moves — twenty-two in all | the run can return to an earlier stage when a later one shows it has to |
 
 The backward edges exist for named research conditions, not as an error path:
 
