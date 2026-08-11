@@ -776,6 +776,16 @@ spread of 16.2; on another, Opus scored 52.6 where gpt-5.1 scored 46.0, a spread
 carrying the wrong judge is not a smaller number, it is an incomparable one. Quote the judge with
 every total.
 
+**Fixing the judge does not fix the number.** Eight draws of `gpt-5.1` over one identical artifact
+set — same workspace, same report, same five figures, nothing changed between draws — scored
+41.4, 42.8, 45.5, 47.1, 49.1, 49.6, 49.8 and 49.9: a spread of **8.5 points** around a mean of 46.9,
+sd 3.4. The variance is worst where it costs most, on the heaviest checklist item: that one is
+weighted 0.5 and spanned 32 to 55 across the eight, 11.5 points of the total by itself. So a
+single-draw score on a single task carries roughly ±4 points of pure sampling noise, and **any
+one-task A/B comparison below about eight points is uninterpretable** — including a
+before-and-after on the same task, which is the shape a harness change most tempts you into. Average
+draws, or compare across tasks, or say nothing.
+
 ### Where AutoR lands, on all forty tasks
 
 One attempt per task, Claude Opus executing and reviewing, judged by `gpt-5.1`. The three
