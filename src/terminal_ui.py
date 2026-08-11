@@ -511,8 +511,18 @@ class TerminalUI:
         session_id = str(payload.get("session_id") or "unknown")
         title = "Claude Finished" if not is_error else "Claude Failed"
         color = self.FG_GREEN if not is_error else self.FG_RED
+        # The two fields come from different places and can disagree: a stream cut
+        # mid-response arrives as `is_error: true` with `subtype: "success"`,
+        # because the CLI did finish emitting. Rendering them independently
+        # produced the panel "Claude Failed / Status: success", which is the worst
+        # possible thing to read when reconstructing an unattended run hours later
+        # — it says both that the call failed and that it did not. Say which field
+        # is which instead of picking one.
+        status = subtype or ("error" if is_error else "success")
+        if is_error and subtype and subtype != "error":
+            status = f"{subtype} (the backend still flagged this call as failed)"
         body = [
-            f"Status     : {subtype or ('error' if is_error else 'success')}",
+            f"Status     : {status}",
             f"Turns      : {turns}",
             f"Duration   : {duration_ms / 1000:.1f}s",
             f"Session ID : {session_id}",
