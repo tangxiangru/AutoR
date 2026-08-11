@@ -14,6 +14,9 @@ than swallowed, and a total is refused while any call failed.
 from __future__ import annotations
 
 import importlib.util
+import json
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -125,6 +128,227 @@ class JudgeIsPartOfTheResultTest(unittest.TestCase):
         text = TOOL.read_text(encoding="utf-8")
         self.assertIn("37.0", text)
         self.assertIn("20.8", text)
+
+
+class RefusalRuleTest(unittest.TestCase):
+    """A zero has to be distinguishable from a failure to score, at every count.
+
+    The guard that existed covered a judge that failed. It did not cover a judge that
+    was never asked: an empty or short checklist gives ``total_score: 0``,
+    ``judge_failures: []`` and exit 0 — the same 19.5-against-37.0 shape, one clause
+    short of the guard already here.
+    """
+
+    def setUp(self) -> None:
+        self.tool = _load()
+
+    def full(self, **overrides) -> dict:
+        base = {
+            "items": [{"score": 40}, {"score": 50}],
+            "checklist_items_expected": 2,
+            "judge_failures": [],
+            "total_score": 44.0,
+        }
+        base.update(overrides)
+        return base
+
+    def test_a_fully_judged_run_is_not_refused(self) -> None:
+        self.assertEqual(self.tool.refusal_reasons(self.full()), [])
+
+    def test_an_empty_checklist_is_refused(self) -> None:
+        reasons = self.tool.refusal_reasons(
+            self.full(items=[], checklist_items_expected=0, total_score=0)
+        )
+        self.assertEqual(len(reasons), 1)
+        self.assertIn("zero over nothing", reasons[0])
+
+    def test_a_short_item_vector_is_refused(self) -> None:
+        """Nothing anywhere cross-checked `items` against the checklist on disk."""
+        reasons = self.tool.refusal_reasons(self.full(checklist_items_expected=5))
+        self.assertEqual(len(reasons), 1)
+        self.assertIn("checklist of 5", reasons[0])
+
+    def test_a_judge_failure_is_still_refused(self) -> None:
+        reasons = self.tool.refusal_reasons(self.full(judge_failures=["timeout"]))
+        self.assertIn("timeout", reasons[0])
+
+    def test_the_refusal_is_raised_by_score_and_not_only_printed_by_main(self) -> None:
+        """A guarantee that lives in `main` is a printing policy, not a property.
+
+        Anything doing `from score_rcb_run import score` used to get back a dict whose
+        `total_score` already had the failed calls folded in as zeros, with no exception
+        and no flag.
+        """
+        body = TOOL.read_text(encoding="utf-8")
+        self.assertIn("raise ScoringRefused", body)
+        self.assertIn("refusal_reasons(result)", body)
+
+
+class SelfDescriptionTest(unittest.TestCase):
+    """Three keys without which an `--out` file cannot be read a week later."""
+
+    def test_the_output_records_which_images_the_judge_was_shown(self) -> None:
+        """60.6% of the benchmark's weight is image criteria and every one of them sees
+        the same first five of one list — and `IMAGE_EXTENSIONS` is a `set`, so which
+        five changes between interpreters. Nothing recorded them."""
+        body = TOOL.read_text(encoding="utf-8")
+        self.assertIn('result["images_shown"]', body)
+        self.assertIn("_find_generated_images", body)
+
+    def test_the_output_records_how_many_images_there_were_to_choose_from(self) -> None:
+        """Five of five and five of twelve are not the same evidence.
+
+        The judge sees the first five of one list against every image criterion, so an
+        arm that emitted twelve figures was scored on an arbitrary five of them. Without
+        the denominator the score file cannot say which of those two things happened, and
+        the paired trial attributes the whole image stratum to figure quality.
+        """
+        body = TOOL.read_text(encoding="utf-8")
+        self.assertIn('result["images_available"]', body)
+
+    def test_the_output_records_the_benchmark_revision(self) -> None:
+        """Item identity is a property of the checkout; the output records only task_id."""
+        self.assertIn('result["bench_revision"]', TOOL.read_text(encoding="utf-8"))
+
+    def test_the_output_records_what_the_item_count_should_have_been(self) -> None:
+        self.assertIn('result["checklist_items_expected"]', TOOL.read_text(encoding="utf-8"))
+
+
+class AgainstTheRealScorerTest(unittest.TestCase):
+    """The wiring, driven through ResearchClawBench's own `score_workspace`.
+
+    Skipped without a benchmark checkout, which is why every rule above is also held by
+    a test that needs neither. What this adds is that the rule is actually *reached*:
+    the refusal, the self-description and the exit code all sit on the far side of an
+    import that the unit tests do not perform.
+    """
+
+    def setUp(self) -> None:
+        import shutil
+
+        bench_source = Path("/home/robtang_google_com/RCB")
+        if not (bench_source / "evaluation" / "score.py").exists():
+            self.skipTest("no ResearchClawBench checkout")
+        try:
+            import structai  # noqa: F401
+        except ImportError:
+            self.skipTest("structai is not installed")
+
+        self.tool = _load()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        # A copy, because `PROJECT_ROOT` is derived from the package's own location, so
+        # copying `evaluation/` gives the real scorer over a task tree we control.
+        self.bench = self.root / "bench"
+        self.bench.mkdir()
+        shutil.copytree(bench_source / "evaluation", self.bench / "evaluation")
+        for stale in ("evaluation", "evaluation.score", "evaluation.config", "evaluation.utils"):
+            sys.modules.pop(stale, None)
+        self.addCleanup(
+            lambda: [sys.modules.pop(name, None) for name in list(sys.modules)
+                     if name.startswith("evaluation")]
+        )
+        self.addCleanup(lambda: sys.path.remove(str(self.bench))
+                        if str(self.bench) in sys.path else None)
+
+    def _workspace(self, task: str, checklist: list) -> Path:
+        study = self.bench / "tasks" / task / "target_study"
+        study.mkdir(parents=True)
+        (study / "checklist.json").write_text(json.dumps(checklist), encoding="utf-8")
+        workspace = self.root / f"{task}_20260101_000000"
+        (workspace / "report").mkdir(parents=True)
+        (workspace / "report" / "report.md").write_text("# report\n\nbody\n", encoding="utf-8")
+        (workspace / "_meta.json").write_text(
+            json.dumps({"run_id": workspace.name, "task_id": task}), encoding="utf-8"
+        )
+        return workspace
+
+    class _Judge:
+        model = "stub-judge"
+
+        def __init__(self) -> None:
+            self.calls = 0
+            self.failures: list[str] = []
+
+        def __call__(self, prompt, image_paths=None, return_example=None, max_try=2, **_):
+            self.calls += 1
+            return {"score": 40, "reasoning": "stub"}
+
+    def test_an_empty_checklist_exits_one_and_writes_no_result_file(self) -> None:
+        """Before this it exited 0, printed `TOTAL: 0.0`, and wrote the file."""
+        workspace = self._workspace("Empty_000", [])
+        out = self.root / "out.json"
+        argv = [
+            "score_rcb_run.py", "--workspace", str(workspace), "--bench", str(self.bench),
+            "--judge", "vertex", "--project-id", "x", "--out", str(out),
+        ]
+        self.tool.VertexJudge = lambda **_: self._Judge()
+        old = sys.argv
+        sys.argv = argv
+        try:
+            code = self.tool.main()
+        finally:
+            sys.argv = old
+        self.assertEqual(code, 1)
+        self.assertFalse(out.exists(), "a refused total was still written to disk")
+
+    def test_a_fully_judged_run_scores_and_describes_itself(self) -> None:
+        workspace = self._workspace(
+            "Full_000",
+            [
+                {"content": "a", "type": "text", "weight": 0.6},
+                {"content": "b", "type": "text", "weight": 0.4},
+            ],
+        )
+        result = self.tool.score(workspace, self.bench, judge=self._Judge())
+        self.assertEqual(result["total_score"], 40)
+        self.assertEqual(result["checklist_items_expected"], 2)
+        self.assertIn("images_shown", result)
+        self.assertIn("bench_revision", result)
+
+    def test_the_result_is_written_into_a_directory_that_does_not_exist_yet(self) -> None:
+        """`--out` is handed in by the paired-trial driver, and nothing creates its parent.
+
+        `tools/rcb_trial.py::score_path` builds `<state_dir>/scores/<...>.json` and passes
+        it straight through; the directory only ever appeared by accident of the dry
+        run's fake judge, which writes through a helper that creates it. So every test
+        was green while the real judge path could not write a single result: the scorer
+        judged every item, printed the total, and died on `FileNotFoundError` — which the
+        driver reads as "scoring failed", retries `replicates` x 2 times per run, and
+        finally publishes `pairs: 0` with no diagnosis after four days of opus runs.
+        """
+        workspace = self._workspace("Full_001", [{"content": "a", "type": "text", "weight": 1.0}])
+        out = self.root / "state" / "scores" / "Full_001.abc1234.a1.final.r0.json"
+        self.assertFalse(out.parent.exists())
+        self.tool.VertexJudge = lambda **_: self._Judge()
+        old = sys.argv
+        sys.argv = [
+            "score_rcb_run.py", "--workspace", str(workspace), "--bench", str(self.bench),
+            "--judge", "vertex", "--project-id", "x", "--out", str(out),
+        ]
+        try:
+            code = self.tool.main()
+        finally:
+            sys.argv = old
+        self.assertEqual(code, 0)
+        self.assertTrue(out.exists(), "the judge's whole bill, and nowhere to put it")
+        self.assertEqual(json.loads(out.read_text(encoding="utf-8"))["total_score"], 40)
+        # Replaced, never truncated: a kill during the write leaves a file that
+        # `final_pass` skips forever because it exists and that the report cannot parse.
+        self.assertEqual(list(out.parent.glob("*.tmp*")), [])
+
+    def test_score_raises_rather_than_returning_a_poisoned_total(self) -> None:
+        """The programmatic hole. `main` refused; `score` handed back the zero."""
+        workspace = self._workspace("Short_000", [{"content": "a", "type": "text", "weight": 1.0}])
+        judge = self._Judge()
+        judge.failures.append("deliberate")
+
+        with self.assertRaises(self.tool.ScoringRefused) as caught:
+            self.tool.score(workspace, self.bench, judge=judge)
+        # The result is carried on the exception, so a caller can still show the table.
+        self.assertIn("total_score", caught.exception.result)
+        self.assertIn("deliberate", caught.exception.reasons[0])
 
 
 if __name__ == "__main__":

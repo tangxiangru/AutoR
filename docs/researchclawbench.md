@@ -507,6 +507,27 @@ The classification is a model's reading of a rubric, not ground truth — a crit
 near the boundary could go either way, and the judge re-decides on every run. Treat the
 split as an order of magnitude: **roughly two-thirds capped, roughly one-third open.**
 
+**That 32.7% is a ceiling, and it has been read as an estimate.** Two corrections, both
+of which cut it:
+
+* **It counts every boundary criterion as Mode B.** A criterion that wants a number
+  *and* an inference drawn from it — Physics_001, Neuroscience_000/001, Chemistry_003 —
+  can be scored either way. The firm Mode B floor is **10.1%**; 30.4% is firm plus
+  every boundary case resolved generously. The honest statement is a range, not a
+  point.
+* **Most of it is behind image criteria, which never see the argument.** 20.4pp of the
+  32.7% is in the image row of the table above, and an image criterion is shown only
+  `report_text[:10000]` (`evaluation/score.py`), while the Discussion is at the end of
+  the report by construction — the goal contract puts it there. So Mode B weight that
+  *prose in the Discussion can actually reach* is **8.2%–14.8%**, not a third.
+
+This matters because `src/settled_reasoning.py` quotes the 32.7% in its docstring as
+the justification for the channel existing. The channel is still worth having at
+8–15%; it is not worth having on the strength of a number that is two to four times
+its addressable surface. Nineteen of the forty tasks carry zero Mode-B *text* weight,
+and nine of those have no text criteria at all — on those nine the Discussion cannot be
+read by any criterion, whatever it says.
+
 Three consequences that invert the usual instinct, and which AutoR now passes to the
 run in its goal contract:
 
@@ -632,3 +653,141 @@ python3 /abs/path/to/AutoR/rcb_agent.py --fake-operator --no-synthesis --max-aut
 
 This exercises the whole path — unattended pipeline, auto-skip recovery, export — without
 spending tokens. Expect exit code 0 and a `report/report.md` assembled by the fallback.
+
+---
+
+## Measuring a change against the benchmark score
+
+AutoR's own rubric cannot answer "did this PR make the research better" — it is AutoR
+grading its own drafts, and a change that makes it like its own work more is not the
+claim. `src/trials.py` already does the paired statistics honestly; what it lacked was
+an outcome measure that came from outside. `src/rcb_trial.py` supplies one, as a
+*producer* of the two dicts `trials.Pair` reads, so every refusal in that module keeps
+working untouched:
+
+* `stage_fitness` — exactly one key, `"<task_id>|<env_digest>"`, holding the 0–100
+  total. One key because `Pair._mean_over` is unweighted while the benchmark total is
+  weighted, and a mean over one element is that element. The environment digest is in
+  the key so that a pair whose arms differed in judge, `model`, `review_model`,
+  checklist bytes, resolved web-search level, `INSTRUCTIONS.md`, benchmark revision or
+  *the number of judge draws its total averages* is excluded by the composition refusal
+  that already exists, with no new gate to get wrong. `rcb_trial.py report` additionally
+  names *which* field differed; that is diagnostics, and a test holds it in step with
+  the digest field by field — and a second test holds that the fields are actually read
+  off the run, because seven blank strings are a constant digest and a gate that
+  excludes nothing.
+
+  The draw count is in there because `final_pass` gives each replicate two tries and
+  then moves on writing nothing: an arm silently scored once against an arm scored three
+  times is the ordinary failure, and it is the direction that inflates, since the single
+  draw carries the judge's whole sampling range into the delta while the other arm has
+  averaged its own away. The pair block prints both arms' counts against the planned
+  number, and says **unmeasured** rather than ±0.00 when one arm has a single draw —
+  fewer draws must not produce a smaller stated uncertainty.
+* `criterion_fitness` — one key per checklist item, holding `weight * score`. Every
+  shipped checklist's weights sum to 1.0, so **within one run** the decomposition sums
+  to the scalar and `concentration` becomes literally the share of the movement in one
+  checklist item. The identity is per-run; adding raw per-pair contributions across
+  *n* pairs gives *n* times the total, and the trial table reports means on both sides
+  rather than sums.
+
+No record is ever written to disk. `RunRecord.usable` requires AutoR's rubric version,
+which a benchmark row cannot honestly carry; the containment is that no `Archive` is
+constructible from either file, and a test says so.
+
+### The plan file
+
+One `--plan PATH` in place of ten flags (`configs/rcb_trial_175.json` is the shipped
+one). Fields: `capability`, `bench`, `tasks`, `control`/`treatment` (each
+`{label, worktree, sha}`), `judge_kind`, `judge_model`, `agent_model`, `review_model`,
+`state_dir`, `arm_order_mode`, `deadline`, `stall_seconds`, `replicates`, `operator`,
+`fake_quality`. It is sha256-frozen before the first launch and stamped into every
+state file: an apparatus that can be re-planned while it runs is an apparatus that can
+be stopped when the sign looks good, and the report says `INTERIM — k of N planned
+pairs` whenever it was.
+
+`control_arm` and `treatment_arm` are always explicit, so `_infer_arms` never runs.
+Its lexicographic fallback happens to give the right direction for `621566b` against
+`47f3fbf` only because ASCII digits sort below letters; two SHAs both starting with a
+letter would invert the sign silently.
+
+### The ten admission clauses
+
+A run becomes a measurement only after all ten pass, and a failure refuses the **pair**
+— refusing one arm turns it into "no treatment arm" and hides the cause. Each is here
+because of something observed on a real workspace:
+
+| Clause | The observation |
+| --- | --- |
+| `status_completed` | The scorer never reads `_meta.status`; a workspace mid-run scored its 12 KB working draft. |
+| `pipeline_completed` | A second witness: one workspace has `status: completed` and `pipeline_completed: false`. |
+| `report_from_agent` | A quota death still exports a fallback report worth about 7.5 points and records `completed`. |
+| `single_run_root` | Nothing stops a second invocation in one workspace; the exporter picks the lexicographically last root, which is the failed retry. |
+| `no_images_under_outputs` | Thirteen PNGs under `outputs/` took all five judge image slots: one image item 48 → 0, total 46.0 → 9.6. |
+| `single_report_md` | With `report.md` missing the scorer reads whatever an unsorted glob yields first, and records nothing about which file it read. |
+| `backend_reached` | `run.backend_unavailable` is the only machine-readable trace of a quota death; `last_error` stays null. |
+| `no_quota_in_logs` | `classify_backend` runs only when neither attempt wrote a stage file, so a mid-stage 429 reports itself complete. |
+| `revision_matches_arm` | `RunRecord` has no revision field and `run_config.json` records no SHA; the arm label is the only carrier. |
+| `every_item_judged` | A judge failure is scored 0: one run's honest total was 37.0 and the number on screen was 19.5. |
+
+The report prints a refused-run count **per clause, including zeros**, above the total.
+A clause that has stopped firing because an internal artifact was renamed looks exactly
+like a clause never violated, and the gate does not fail loudly when that happens — it
+stops refusing.
+
+### What no clause can bound: which five images
+
+`no_images_under_outputs` bounds where the judge's images come from. It cannot bound how
+many there were: the scorer shows the first five of one `rglob` list against *every*
+image criterion, and image criteria are 60.6% of the benchmark's weight. Four figures all
+shown and twelve figures of which an arbitrary five were shown are different evidence,
+and the score file was already recording which images went in — the trial simply threw
+it away, so two arms shown different figures produced an identical `env_digest` and the
+whole delta was attributed to the code change. It is not a gate, because how many figures
+a run produced is an *effect* of the change under test rather than a confound to hold
+fixed. Both counts are printed per arm, and a pair whose arms were shown different
+evidence is told so where its image stratum is read.
+
+### The refusals the gate never sees
+
+Most deaths never reach a clause. `final_pass` scores only runs classified `ok`, and an
+arm with no score file produces no evidence at all, so a run killed by quota, by the
+stall watchdog, by a backend outage, by a fallback report, by an incomplete pipeline or
+by the scorer's own refusal was rendered as "no `<arm>` arm" — the same sentence as an
+arm that was never launched — while the paragraph underneath told the reader to judge
+the difference on the per-arm death counts. Those deaths now enter the same ledger as
+`driver:quota`, `driver:stalled`, `driver:fallback`, `driver:unscored` and so on, they
+are named in the exclusion line for the pair, and the per-arm counts are printed even
+when both are zero, because that is the reading where the reader most needs them.
+
+This also fixes what a zero in the clause table means. Four of the ten clauses
+(`status_completed`, `report_from_agent`, `backend_reached`, `no_quota_in_logs`) are
+implied by `classification == "ok"`, which is the only classification `final_pass` will
+score, so they cannot fire on the driver's path at all: a quota death arrives as a
+`driver:` row and never as `no_quota_in_logs`. The caveat under the table says so.
+
+Two things the ledger deliberately does not do: it does not count a run in flight as a
+death, and it counts each `(task, arm)` once however many ways it died — a doubled
+per-arm count is a lie in the direction that looks like a finding.
+
+### What it cannot show
+
+Both changes in PR #175 are in one commit, so the trial cannot attribute an effect to
+one of them; the task choice makes an argument (Astronomy_000 is (a)-only at 0.00 Mode-B
+weight, Energy_002 is (b)-dominant with its image criteria floored, Energy_001 carries
+both) and an argument is not an attribution. At three pairs the exact p cannot go below
+0.25 at any effect size. Each (task, arm) runs once, so replicate scoring measures the
+judge's sampling range and there are **zero** observations of AutoR's own run-to-run
+variance. And a refusal removes a pair, not an arm — refusals are not random with
+respect to arm, so a lopsided refusal ledger is itself the result.
+
+### Dry run
+
+```bash
+python3 -m unittest tests.test_rcb_trial_driver
+```
+
+`operator: "fake"` and `judge_kind: "fake"` in the plan fabricate workspaces and scores
+while keeping the real lock, real `start_new_session` children, real atomic state, the
+real stall watchdog, the real gate and the real report. It runs a whole trial in about
+twenty seconds instead of four days.

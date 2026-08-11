@@ -18,6 +18,7 @@ from src.trials import (
     collect_pairs,
     format_all_trials,
     format_trial_report,
+    min_attainable_concentration,
     min_attainable_p,
     sign_flip_p,
 )
@@ -282,6 +283,76 @@ class ReportTests(unittest.TestCase):
         printed even when they were inferred."""
         records = [run("g1", "off", stages=flat(0.5)), run("g1", "on", stages=flat(0.7))]
         self.assertIn("`on` against `off`", format_all_trials(records))
+
+
+class RenderingContractTests(unittest.TestCase):
+    """The parts of the report a second outcome measure leans on.
+
+    Every one of these was unpinned before an external benchmark was fed through this
+    module, and every one renders something false when it is wrong rather than raising.
+    """
+
+    def collect(self, records, **kwargs):
+        return collect_pairs(
+            records, capability="effort_tiers", control_arm="off", treatment_arm="on", **kwargs
+        )
+
+    def test_the_default_unit_is_rubric_points(self) -> None:
+        """The default has to keep every existing report byte-identical."""
+        result = self.collect(paired(3, 0.5, 0.6))
+        self.assertIn("+0.1000** rubric points", format_trial_report(result))
+
+    def test_the_unit_is_whatever_the_caller_declared(self) -> None:
+        """An external benchmark's 0-100 total printed as "rubric points" is a lie
+        about the instrument in the one place a reader takes the number from."""
+        result = self.collect(paired(3, 0.5, 0.6))
+        rendered = format_trial_report(result, unit="RCB points (0-100 total scale)")
+        self.assertIn("+0.1000** RCB points (0-100 total scale)", rendered)
+        self.assertNotIn("rubric points", rendered)
+
+    def test_the_decomposition_table_says_how_many_pairs_each_row_is_over(self) -> None:
+        """A criterion seen in one pair of three renders exactly like a mean over three.
+
+        With AutoR's own rubric every key is in every pair and nobody missed the
+        denominator. Hand the same table a per-goal key set — a benchmark checklist is
+        written per task — and every row is a single observation under a header that
+        says "mean difference".
+        """
+        records = paired(3, 0.5, 0.6)
+        # One criterion only the first pair measured.
+        records[0] = run("g0", "off", stages=flat(0.5), criteria={"shared": 0.5, "rare": 0.1})
+        records[1] = run("g0", "on", stages=flat(0.6), criteria={"shared": 0.6, "rare": 0.9})
+        for index in (2, 4):
+            records[index] = run(f"g{index // 2}", "off", stages=flat(0.5), criteria={"shared": 0.5})
+            records[index + 1] = run(f"g{index // 2}", "on", stages=flat(0.6), criteria={"shared": 0.6})
+
+        result = self.collect(records)
+        self.assertEqual(result.criterion_support(), {"shared": 3, "rare": 1})
+
+        rendered = format_trial_report(result)
+        self.assertIn("| Criterion | Mean difference | pairs |", rendered)
+        self.assertIn("| `rare` | +0.8000 | 1 |", rendered)
+        self.assertIn("| `shared` | +0.1000 | 3 |", rendered)
+
+    def test_the_concentration_floor_is_printed_beside_the_concentration(self) -> None:
+        """Same discipline as the p and its floor, for the same reason.
+
+        0.6 was calibrated against eight rubric criteria, where an even spread reads
+        0.125. Over two keys an even spread already reads 0.50 and the warning fires on
+        a 1.5:1 split, so the denominator has to be visible.
+        """
+        self.assertAlmostEqual(min_attainable_concentration(8), 0.125)
+        self.assertAlmostEqual(min_attainable_concentration(2), 0.5)
+        self.assertEqual(min_attainable_concentration(0), 0.0)
+
+        result = self.collect(
+            paired(
+                3, 0.5, 0.6,
+                control_extra={"criteria": {"a": 0.5, "b": 0.5}},
+                treatment_extra={"criteria": {"a": 0.9, "b": 0.5}},
+            )
+        )
+        self.assertIn("floor at 2 criteria: 50%", format_trial_report(result))
 
 
 class TagTests(unittest.TestCase):
