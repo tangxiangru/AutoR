@@ -320,7 +320,10 @@ class StageRouter:
                 f"Routing backend exited {exit_code}.",
             )
             return None
-        return extract_json_payload(stdout_text)
+        # `target` is what identifies a routing move, the way `decision` identifies a review
+        # verdict: the backend is an agent whose stdout is a transcript, and the object it
+        # merely quoted from a file must not outrank the one it chose.
+        return extract_json_payload(stdout_text, verdict_key="target")
 
     def _archive_evidence(self, source: str, targets: list[str]) -> str:
         """What the archive can show about the moves on this menu, or nothing.

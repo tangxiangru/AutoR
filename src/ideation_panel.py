@@ -447,7 +447,9 @@ class IdeationPanel:
             if exit_code != 0:
                 pool.unreachable.append(lens.key)
                 continue
-            payload = member._extract_json_payload(stdout_text)  # noqa: SLF001
+            payload = member._extract_json_payload(  # noqa: SLF001
+                stdout_text, verdict_key="hypotheses"
+            )
             if not isinstance(payload, dict):
                 pool.unreachable.append(lens.key)
                 continue
@@ -504,7 +506,7 @@ class IdeationPanel:
         )
         if exit_code != 0:
             return
-        payload = scorer._extract_json_payload(stdout_text)  # noqa: SLF001
+        payload = scorer._extract_json_payload(stdout_text, verdict_key="scores")  # noqa: SLF001
         if not isinstance(payload, dict) or not isinstance(payload.get("scores"), list):
             return
 

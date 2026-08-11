@@ -100,17 +100,75 @@ def _try_load_json(text: str) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
-def extract_json_payload(raw_response: str) -> dict[str, Any] | None:
+#: How far back from the end of a transcript to look for the verdict object, and how many
+#: candidate objects to try. The verdict is the backend's *final* message, so a bounded tail
+#: is enough, and the bound is what keeps a multi-megabyte transcript full of braces from
+#: turning the search into a quadratic scan.
+_VERDICT_SCAN_CHARS = 262_144
+_VERDICT_SCAN_CANDIDATES = 400
+
+
+def _last_object_with_key(text: str, key: str) -> dict[str, Any] | None:
+    """The last JSON object in ``text`` that carries ``key``, ignoring everything else.
+
+    A reviewing backend is an agent, not a formatter. It narrates ("I'll inspect the actual
+    artifacts before judging."), runs tools, and prints their output -- which routinely
+    includes JSON files it read -- before emitting the verdict as its final message. Every
+    other branch here assumes the response *is* the object, or contains exactly one: the
+    greedy ``(\\{.*\\})`` spans from the first brace anywhere in the transcript to the last
+    and yields something unparseable, and the fence branch happily returns the first fenced
+    block even when that is a data file rather than the verdict.
+
+    ``raw_decode`` is what makes this robust: it parses from a given offset and ignores
+    whatever follows, so a candidate is tested without needing to know where it ends, and
+    unbalanced quotes earlier in the transcript cannot desynchronise the search. Scanning
+    from the end means the verdict is found before any JSON the backend merely quoted.
+
+    This is not a loosening of the refusal. An answer with no object carrying ``key`` still
+    returns None and is still refused; the point is that a verdict which was right there in
+    the output stops being read as no verdict at all. In the 40-task ResearchClawBench run
+    that misread ended 12 of the runs, one of them discarding a draft that had passed both
+    gates with a perfect rubric score.
+    """
+    window_start = max(0, len(text) - _VERDICT_SCAN_CHARS)
+    positions = [m.start() + window_start for m in re.finditer(r"\{", text[window_start:])]
+    decoder = json.JSONDecoder()
+    for start in reversed(positions[-_VERDICT_SCAN_CANDIDATES:]):
+        try:
+            payload, _end = decoder.raw_decode(text, start)
+        except ValueError:
+            continue
+        if isinstance(payload, dict) and key in payload:
+            return payload
+    return None
+
+
+def extract_json_payload(raw_response: str, *, verdict_key: str | None = None) -> dict[str, Any] | None:
     """Recover a JSON object from whatever a backend actually printed.
 
     Shared with :mod:`src.router`, which asks a backend for a decision on the same
     terms. Two copies of this would drift on the day one backend starts wrapping
     its output differently, and the copy that was not updated would silently fall
     back to its refusal path instead of reading a decision that was right there.
+
+    ``verdict_key`` is the field that identifies the caller's object -- ``decision`` for a
+    review, ``target`` for a routing move. The two callers want different objects out of the
+    same transcript, so neither can be found by shape alone.
+
+    When it is given the search is *only* for an object carrying it, with no fall-through.
+    Falling through would hand the caller whatever other object the transcript happened to
+    contain -- a data file the backend quoted -- and the caller reads its own fields off
+    what it is given: ``feedback``, ``carry_forward`` and ``discharged`` would come from
+    that file, and the run would be refused for an unsupported decision token rather than
+    for the unreadable answer it actually got. An object that is not the verdict is not a
+    better answer than no verdict.
     """
     candidate = raw_response.strip()
     if not candidate:
         return None
+
+    if verdict_key:
+        return _last_object_with_key(candidate, verdict_key)
 
     direct = _try_load_json(candidate)
     if direct is not None:
@@ -543,7 +601,7 @@ class AutomatedReviewer:
         return truncate_text(text, max_chars=max_chars)
 
     def _parse_decision(self, raw_response: str, markdown: str = "") -> ReviewDecision:
-        payload = self._extract_json_payload(raw_response)
+        payload = self._extract_json_payload(raw_response, verdict_key="decision")
         if payload is None:
             return ReviewDecision(
                 choice="6",
@@ -585,8 +643,13 @@ class AutomatedReviewer:
             comments=comments,
         )
 
-    def _extract_json_payload(self, raw_response: str) -> dict[str, Any] | None:
-        return extract_json_payload(raw_response)
+    def _extract_json_payload(
+        self, raw_response: str, *, verdict_key: str | None = None
+    ) -> dict[str, Any] | None:
+        # No default key: this seam is also how src.ideation_panel reads proposal and scoring
+        # payloads off the same backend, and those objects carry `hypotheses` and `scores`
+        # rather than `decision`. Each caller names the field that identifies its own object.
+        return extract_json_payload(raw_response, verdict_key=verdict_key)
 
     def _try_load_json(self, text: str) -> dict[str, Any] | None:
         return _try_load_json(text)
