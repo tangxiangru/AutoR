@@ -257,6 +257,94 @@ def _first_json_object(text: str) -> Any:
     return None
 
 
+class ScoringRefused(ValueError):
+    """A total that is not a measurement, raised rather than returned.
+
+    The judge-failure refusal used to live only in ``main``. Anything that did
+    ``from score_rcb_run import score`` got back a dict whose ``total_score``
+    already had the failed calls folded in as zeros, with no exception and no
+    flag — a guarantee that held only at the printing layer. The result is
+    carried on the exception so the caller can still show the per-item table.
+    """
+
+    def __init__(self, message: str, result: dict, reasons: list[str]) -> None:
+        super().__init__(message)
+        self.result = result
+        self.reasons = reasons
+
+
+def refusal_reasons(result: dict) -> list[str]:
+    """Every way this total is a number rather than a measurement.
+
+    Pure, and separate from :func:`score`, so the rule is testable without a benchmark
+    checkout — the wiring gets an integration test, but the rule gets one everywhere.
+
+    The judge-failure clause is the original one. The two item-count clauses are the
+    same failure one step earlier: an empty or short checklist yields ``total_score:
+    0``, ``judge_failures: []``, exit 0 and a written ``--out`` file — a fully formed
+    zero indistinguishable from a report that missed every criterion, which is exactly
+    the shape of the 19.5-against-37.0 incident this file exists for.
+    """
+    reasons: list[str] = []
+    failures = result.get("judge_failures") or []
+    items = result.get("items") or []
+    expected = result.get("checklist_items_expected", 0)
+    if failures:
+        reasons.append(
+            f"{len(failures)} judge call(s) failed: " + "; ".join(str(item) for item in failures)
+        )
+    if not items:
+        reasons.append("zero items were scored, so the total is a zero over nothing")
+    elif expected and len(items) != expected:
+        reasons.append(
+            f"{len(items)} items scored against a checklist of {expected}; the missing "
+            "ones are absent from the total rather than visible in it"
+        )
+    return reasons
+
+
+def _self_description(bench: Path, workspace: Path, result: dict, scorer) -> None:
+    """Three keys that make the output stand on its own.
+
+    ``images_shown`` because 60.6% of the benchmark's weight is image criteria and
+    every one of them is shown the *same* first five of one list that sweeps
+    ``outputs/`` before ``report/`` — and ``IMAGE_EXTENSIONS`` is a ``set``, so which
+    five those are changes between interpreters. Nothing anywhere recorded them.
+    ``checklist_items_expected`` because an item count is only a fact next to what it
+    was supposed to be. ``bench_revision`` because item identity is a property of the
+    benchmark checkout and the output records only ``task_id``.
+    """
+    try:
+        images = scorer._find_generated_images(workspace)
+        result["images_shown"] = [str(path) for path in images[:5]]
+        # Beside the five, how many there were to choose from. Five of five and five of
+        # twelve are the same line in the score file otherwise, and they are not the same
+        # evidence: the two arms of a pair that produced different numbers of figures were
+        # judged on different figures across 60.6% of the benchmark's weight.
+        result["images_available"] = len(images)
+    except Exception:  # noqa: BLE001 - a missing helper must not lose a scored run
+        result["images_shown"] = []
+        result["images_available"] = 0
+
+    expected = 0
+    task_id = str(result.get("task_id") or "")
+    if task_id:
+        checklist = bench / "tasks" / task_id / "target_study" / "checklist.json"
+        try:
+            expected = len(json.loads(checklist.read_text(encoding="utf-8")))
+        except (OSError, json.JSONDecodeError):
+            expected = 0
+    result["checklist_items_expected"] = expected
+
+    import subprocess
+
+    revision = subprocess.run(
+        ["git", "-C", str(bench), "rev-parse", "HEAD"],
+        capture_output=True, text=True, check=False,
+    )
+    result["bench_revision"] = revision.stdout.strip() if revision.returncode == 0 else ""
+
+
 def score(workspace: Path, bench: Path, *, judge) -> dict:
     sys.path.insert(0, str(bench))
 
@@ -291,7 +379,36 @@ def score(workspace: Path, bench: Path, *, judge) -> dict:
     result["judge_model"] = judge.model
     result["judge_calls"] = judge.calls
     result["judge_failures"] = judge.failures
+    if "error" in result:
+        return result
+
+    _self_description(bench, workspace, result, scorer)
+
+    reasons = refusal_reasons(result)
+    if reasons:
+        raise ScoringRefused("this total is not a measurement", result, reasons)
     return result
+
+
+def write_result(out: Path, result: dict) -> None:
+    """Create the directory, then replace rather than truncate.
+
+    Both halves are paid for. The ``mkdir``: nothing else creates ``<state_dir>/scores/``
+    — the paired-trial driver builds the path and hands it over as ``--out`` — so with a
+    bare ``write_text`` the real judge path could not write a single result. Every test
+    was green because the dry run's fake judge writes through a helper that does create
+    the directory, and the failure needed a whole trial of real runs to surface: the
+    scorer judged every item, printed the total, and died on ``FileNotFoundError``, which
+    the driver reads as "scoring failed" and silently retries for four days.
+
+    The ``os.replace``: a kill during a plain ``write_text`` leaves a truncated JSON file
+    that ``final_pass`` will skip forever because it exists, and that the report cannot
+    parse. Re-running is then not a repair.
+    """
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_name(out.name + f".tmp.{os.getpid()}")
+    tmp.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    os.replace(tmp, out)
 
 
 def main() -> int:
@@ -339,7 +456,11 @@ def main() -> int:
             model=args.model or FALLBACK_JUDGE_MODEL, project_id=args.project_id
         )
 
-    result = score(args.workspace, args.bench, judge=judge)
+    refused: ScoringRefused | None = None
+    try:
+        result = score(args.workspace, args.bench, judge=judge)
+    except ScoringRefused as exc:
+        refused, result = exc, exc.result
     if "error" in result:
         print(f"scoring failed: {result['error']}", file=sys.stderr)
         return 1
@@ -348,7 +469,6 @@ def main() -> int:
     # per-item table empty and printed "items judged: 0" beside a real total --
     # a scorer reporting that it scored nothing, right after scoring everything.
     items = result.get("items", [])
-    failures = result.get("judge_failures", [])
 
     print(f"judge:     {result['judge_model']}")
     print(f"workspace: {args.workspace}")
@@ -360,11 +480,12 @@ def main() -> int:
         )
 
     # The check that matters. A judge failure reads as a zero, so a total quoted
-    # without this is not a measurement of the run.
-    if failures:
+    # without this is not a measurement of the run. It is decided in `score` now, so
+    # a programmatic caller cannot get the number without it; this only prints it.
+    if refused is not None:
         print()
-        print(f"REFUSING TO QUOTE A TOTAL: {len(failures)} judge call(s) failed.")
-        for reason in failures:
+        print(f"REFUSING TO QUOTE A TOTAL: {len(refused.reasons)} reason(s).")
+        for reason in refused.reasons:
             print(f"  - {reason}")
         print("Every one of those is recorded as score 0 and is indistinguishable")
         print("from a criterion the report genuinely missed. Fix and re-run.")
@@ -375,7 +496,7 @@ def main() -> int:
     print(f"items judged: {len(items)}   judge calls: {result.get('judge_calls', 0)}")
 
     if args.out:
-        args.out.write_text(json.dumps(result, indent=2), encoding="utf-8")
+        write_result(args.out, result)
         print(f"written: {args.out}")
     return 0
 

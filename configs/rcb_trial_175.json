@@ -1,0 +1,24 @@
+{
+  "capability": "pr175_scale_and_settled_reasoning",
+  "bench": "/home/robtang_google_com/RCB",
+  "tasks": ["Energy_001", "Astronomy_000", "Energy_002"],
+  "control": {
+    "label": "621566b",
+    "worktree": "/home/robtang_google_com/AutoR-control",
+    "sha": "621566b"
+  },
+  "treatment": {
+    "label": "47f3fbf",
+    "worktree": "/home/robtang_google_com/AutoR-treatment",
+    "sha": "47f3fbf"
+  },
+  "judge_kind": "reference",
+  "judge_model": "gpt-5.1",
+  "agent_model": "opus",
+  "review_model": "opus",
+  "state_dir": "/rmeng_data/robtang/rcb-trial-175",
+  "arm_order_mode": "control_first",
+  "deadline": 0.0,
+  "replicates": 3,
+  "operator": "autor"
+}

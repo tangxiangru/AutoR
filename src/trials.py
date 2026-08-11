@@ -44,6 +44,16 @@ the reading that the capability was tested and found wanting. The floor is print
 next to the p-value so the difference between *did not show an effect* and *could
 not have shown one* stays visible.
 
+**A known crack, recorded here because it is invisible where it lives.** Above
+``MAX_EXACT_PAIRS`` the enumeration truncates ``usable[:18]`` while
+:attr:`TrialResult.floor` still divides by the untruncated *n*. At n = 19 the printed
+p is computed from eighteen pairs and the floor printed beside it is ``2 / 2**19`` —
+lower than that p can reach, which breaks the third refusal above at exactly the
+point it matters. Unreachable at the sample sizes anyone has run (a paired
+ResearchClawBench trial is three to six pairs), and deliberately left alone; the next
+reader extending a trial to forty tasks walks straight into it and should fix the
+floor, or sample the sign assignments, in a change of its own.
+
 What this measures is the rubric score, and the rubric is a proxy for rigour rather
 than a measure of insight. A capability can raise it without making the research
 better, and can make the research better without raising it. The decomposition and
@@ -80,6 +90,22 @@ def min_attainable_p(pairs: int) -> float:
     if pairs <= 0:
         return 1.0
     return min(1.0, 2.0 / (2**pairs))
+
+
+def min_attainable_concentration(criteria: int) -> float:
+    """The smallest concentration a decomposition over ``criteria`` keys can show.
+
+    The same discipline as :func:`min_attainable_p`, for the same reason. The
+    Goodhart threshold below is 0.6, and 0.6 was calibrated against AutoR's eight
+    rubric criteria, where a perfectly even spread reads 0.125. Hand the same
+    property a two-key decomposition and an even spread already reads 0.50, so
+    "60% of the movement is in one criterion" stops meaning anything — it fires on
+    a 1.5:1 split. Printing the floor beside the observed value is what keeps a
+    reader from believing a warning whose denominator changed underneath it.
+    """
+    if criteria <= 0:
+        return 0.0
+    return 1.0 / criteria
 
 
 def sign_flip_p(differences: Sequence[float]) -> float:
@@ -237,6 +263,24 @@ class TrialResult:
             for key, values in sorted(totals.items(), key=lambda item: -abs(sum(item[1])))
         }
 
+    def criterion_support(self) -> dict[str, int]:
+        """How many pairs each criterion's mean was taken over.
+
+        The denominator in :meth:`criterion_differences` is per key and has never
+        been printed. With AutoR's own rubric every key is present in every pair, so
+        the denominator is always *n* and nobody missed it. Hand the same table an
+        outcome measure whose keys are per-goal — a ResearchClawBench checklist is
+        written per task — and every key has a denominator of 1, while the column
+        header still says "mean difference". A single observation and a mean over
+        three pairs then render identically, which is the whole of the difference
+        between an anecdote and a measurement.
+        """
+        counts: dict[str, int] = {}
+        for pair in self.pairs:
+            for key in pair.criterion_differences():
+                counts[key] = counts.get(key, 0) + 1
+        return counts
+
     @property
     def concentration(self) -> float:
         """Share of the total movement sitting in the single largest criterion.
@@ -302,13 +346,23 @@ def declared_trials(records: Iterable[RunRecord]) -> dict[str, set[str]]:
     return found
 
 
-def format_trial_report(result: TrialResult) -> str:
+def format_trial_report(result: TrialResult, *, unit: str = "rubric points") -> str:
+    """Render a trial. ``unit`` names what the mean difference is measured in.
+
+    A rendering concern, so it lives here and not on :class:`TrialResult`, which is a
+    record about the statistics. The default keeps every existing caller byte-identical.
+    It exists because the arithmetic in this module is scale-free — ``sign_flip_p`` is
+    invariant to it, ``concentration`` is a ratio — and the only thing that was not was
+    the literal string on the mean-difference line. Handed a ResearchClawBench total in
+    0–100 points, that line printed "+24.6000 rubric points", which is a lie about the
+    instrument in the one place a reader takes the number from.
+    """
     lines = [
         f"## `{result.capability}`  —  `{result.treatment_arm}` against `{result.control_arm}`",
         "",
         f"- pairs: **{result.n}**"
         + (f" ({len(result.excluded)} excluded)" if result.excluded else ""),
-        f"- mean difference: **{result.mean_difference:+.4f}** rubric points",
+        f"- mean difference: **{result.mean_difference:+.4f}** {unit}",
         f"- won {result.wins}, lost {result.losses}, tied {result.ties}",
     ]
     if result.n:
@@ -330,13 +384,19 @@ def format_trial_report(result: TrialResult) -> str:
 
     deltas = result.criterion_differences()
     if deltas:
+        support = result.criterion_support()
+        floor = min_attainable_concentration(len(deltas))
         lines += [
             "",
-            "| Criterion | Mean difference |",
-            "| --- | --- |",
-            *[f"| `{key}` | {value:+.4f} |" for key, value in deltas.items()],
+            "| Criterion | Mean difference | pairs |",
+            "| --- | --- | --- |",
+            *[
+                f"| `{key}` | {value:+.4f} | {support.get(key, 0)} |"
+                for key, value in deltas.items()
+            ],
             "",
-            f"Concentration: **{result.concentration:.0%}** of the movement is in one criterion.",
+            f"Concentration: **{result.concentration:.0%}** of the movement is in one criterion "
+            f"(floor at {len(deltas)} criteria: {floor:.0%}).",
         ]
         if result.concentration >= 0.6 and result.n:
             lines.append(
