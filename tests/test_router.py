@@ -363,6 +363,42 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(len(operator.prompts), 1)
         self.assertTrue(decision.agent_directed)
 
+    def test_the_requested_final_stage_asks_instead_of_halting(self) -> None:
+        """`--final-stage 07_writing` is the ResearchClawBench default.
+
+        The advance past the requested final stage used to be recorded as a *pruned*
+        move, which left the node with no live forward move at all: `default_move`
+        returned None, `choose` took its "nothing is open" halt, and the live backward
+        edges at Stage 07 were discarded with nobody asked. So every benchmark run
+        ended by throwing away the decision worth most at that node — whether the
+        write-up carries a claim the analysis does not support.
+        """
+        stage_07 = next(stage for stage in STAGES if stage.number == 7)
+        operator = FakeRoutingOperator(json.dumps({"target": FINISH, "reason": "Everything asked for is written."}))
+        decision = StageRouter(operator, mode="auto").choose(
+            paths=self.paths,
+            stage=stage_07,
+            graph=self.graph,
+            state=GraphState(),
+            final_stage=stage_07,
+        )
+        self.assertEqual(len(operator.prompts), 1)
+        self.assertEqual(decision.target, FINISH)
+        self.assertIn(FINISH, decision.offered)
+        self.assertGreater(len(decision.offered), 1, msg="the backward edges were discarded again")
+
+    def test_the_final_stage_default_is_still_finish_and_never_backward(self) -> None:
+        """The property the pruning was introduced for, kept."""
+        stage_07 = next(stage for stage in STAGES if stage.number == 7)
+        decision = StageRouter(None, mode="off").choose(
+            paths=self.paths,
+            stage=stage_07,
+            graph=self.graph,
+            state=GraphState(),
+            final_stage=stage_07,
+        )
+        self.assertEqual(decision.target, FINISH)
+
     def test_a_node_with_one_edge_and_no_repair_is_still_not_asked(self) -> None:
         """The saving that makes `auto` a safe default has to survive the change."""
         stage_01 = next(stage for stage in STAGES if stage.number == 1)

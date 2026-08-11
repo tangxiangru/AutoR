@@ -345,6 +345,53 @@ class StageRouter:
         # `target` is what identifies a routing move, the way `decision` identifies a review
         # verdict: the backend is an agent whose stdout is a transcript, and the object it
         # merely quoted from a file must not outrank the one it chose.
+        payload = extract_json_payload(stdout_text, verdict_key="target")
+        if payload is not None:
+            return payload
+
+        # Every failure of the ask degrades *forward*: `choose` falls through to
+        # `_refuse`, which takes the default, and the default is a forward move by
+        # construction. So a dropped brace is scored as "advance" — a routing decision
+        # lost to formatting, indistinguishable in the archive from one the agent made.
+        # The reviewer gate has re-asked for years; this had one attempt.
+        append_log_entry(
+            paths.logs,
+            f"{stage.slug} route_unparsed",
+            "No object carrying `target` in the routing response; re-asking once.\n"
+            f"tail: {stdout_text[-2000:]}",
+        )
+        return self._reask(paths=paths, stage=stage, previous=stdout_text)
+
+    def _reask(self, *, paths: RunPaths, stage: StageSpec, previous: str) -> dict[str, Any] | None:
+        """One more attempt, asking only for the object."""
+        prompt_path = paths.prompt_cache_dir / f"{stage.slug}_route.retry.prompt.md"
+        write_text(
+            prompt_path,
+            "# Routing answer, second attempt\n\n"
+            "Your previous answer could not be parsed. Return the routing object and "
+            "nothing else — no explanation, no code fence, no text after it.\n\n"
+            '{"target":"<stage slug>","reason":"<one or two sentences>"}\n\n'
+            "## What you replied\n\n"
+            f"{previous[-4000:]}\n",
+        )
+        try:
+            command, cwd, stdin_text = self.operator._prepare_invocation(  # noqa: SLF001
+                prompt_path, str(uuid.uuid4()), paths=paths, resume=False
+            )
+            exit_code, stdout_text, _stderr, _observed, _meta = self.operator._run_streaming_command(  # noqa: SLF001
+                command=command,
+                cwd=cwd,
+                stage=stage,
+                attempt_no=0,
+                paths=paths,
+                mode="route_retry",
+                stdin_text=stdin_text,
+            )
+        except Exception as exc:  # noqa: BLE001 - a routing failure must not end the run
+            append_log_entry(paths.logs, f"{stage.slug} route_error", str(exc))
+            return None
+        if exit_code != 0:
+            return None
         return extract_json_payload(stdout_text, verdict_key="target")
 
     def _archive_evidence(self, source: str, targets: list[str]) -> str:
@@ -429,6 +476,12 @@ class StageRouter:
         if evidence:
             sections += ["", evidence]
 
+        # Only offer `finish` where a finish edge exists. Inviting it everywhere cost a
+        # real decision: at Stage 07 the agent answered `finish`, 07 has no finish edge,
+        # the router refused an off-menu target and fell through to the default — which
+        # at 07 happens to be backward. That fallback is the single `revisit` recorded in
+        # the whole 133-visit archive, and it was not a routing decision at all.
+        can_finish = any(move.edge.kind == "finish" for move in moves)
         sections += [
             "",
             "## Original goal",
@@ -441,16 +494,21 @@ class StageRouter:
             "",
             "## Answer",
             "",
-            "Return JSON only, with no prose outside the object:",
+            "Return JSON only, with no prose outside the object. Emit it as your final "
+            "message and emit nothing after it.",
             "",
-            '{"target":"<stage slug or finish>","reason":"<one or two sentences>"}',
+            f'{{"target":"{"<stage slug or finish>" if can_finish else "<stage slug>"}",'
+            '"reason":"<one or two sentences>"}',
             "",
             "- `target` must be one of the available moves above, spelled exactly as shown.",
             "- `reason` must say what in *this stage's results* makes that the right move. "
             "\"Continue the workflow\" is not a reason; \"H2 is inconclusive because only one "
             "seed was run\" is.",
-            "- Choose `finish` only if the run has produced what it set out to produce.",
         ]
+        if can_finish:
+            sections.append(
+                "- Choose `finish` only if the run has produced what it set out to produce."
+            )
         return "\n".join(sections)
 
 
@@ -533,6 +591,7 @@ def routing_summary(paths: RunPaths) -> dict[str, Any]:
     agent_directed = 0
     revisits = 0
     bypassed = 0
+    refused = 0
     for visit in payload.get("path", []):
         if not isinstance(visit, dict):
             continue
@@ -544,14 +603,30 @@ def routing_summary(paths: RunPaths) -> dict[str, Any]:
         if visit.get("bypassed"):
             bypassed += 1
             continue
-        decisions.append(
-            {
-                "source": source,
-                "chose": target,
-                "offered": [str(item) for item in visit.get("offered", []) if str(item)],
-                "agent_directed": bool(visit.get("agent_directed")),
-            }
-        )
+        # A refused route is a real traversal and not a real decision, and the two
+        # halves go to different places.
+        #
+        # The edge *was* taken, with its guards evaluated and the graph's own default
+        # chosen, so it stays in `edges` — unlike a bypass, where no guard was
+        # evaluated at all. What did not happen is a choice: the router was asked, an
+        # answer came back, and it was lost as unreadable or off-menu. Recorded in
+        # `decisions`, that reads to `src.decisions` as "an alternative was offered and
+        # declined", which is the one thing it was built to keep out. In the archived
+        # corpus 23 of the 27 visits where anything was on offer were refusals, so the
+        # estimator's picture of every forward edge was built almost entirely out of
+        # answers nobody read.
+        was_refused = bool(visit.get("refusal"))
+        if was_refused:
+            refused += 1
+        if not was_refused:
+            decisions.append(
+                {
+                    "source": source,
+                    "chose": target,
+                    "offered": [str(item) for item in visit.get("offered", []) if str(item)],
+                    "agent_directed": bool(visit.get("agent_directed")),
+                }
+            )
         edges[f"{source}->{target}"] = edges.get(f"{source}->{target}", 0) + 1
         if visit.get("agent_directed"):
             agent_directed += 1
@@ -562,6 +637,7 @@ def routing_summary(paths: RunPaths) -> dict[str, Any]:
         "agent_directed": agent_directed,
         "revisits": revisits,
         "bypassed": bypassed,
+        "refused": refused,
         "route": payload.get("route", ""),
     }
 

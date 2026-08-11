@@ -778,6 +778,7 @@ class ResearchManager:
             score_total=score.total if score is not None else None,
             offered=decision.offered,
             blocked=decision.blocked,
+            refusal=decision.refusal,
         )
         if decision.agent_directed or decision.refusal:
             self.ui.show_status(format_decision(decision), level="info")
