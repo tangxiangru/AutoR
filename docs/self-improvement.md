@@ -589,24 +589,87 @@ off rather than a matter of taste.
 
 **Not measured.** Whether any of this makes research better.
 
-- **The cross-run archive has zero real runs.** Every number it can produce today
-  comes from synthetic records in the test suite. `--archive-report` on a fresh
-  install prints an empty table, and that is the honest state: the estimator, the
-  believability gate and the promotion rule are all implemented and none of them has
-  ever been fed a real observation.
-- **The paired-trial mechanism has never completed a trial.** Six pairs were
-  attempted on 2026-08-11 — the same goal twice, `--evolve-rounds 0` against `2`,
-  strictly one run at a time with backoff. The result was 46 attempts and **zero
-  recorded runs**, every one failing on Vertex quota (`RESOURCE_EXHAUSTED` for
-  `anthropic-claude-sonnet-4-5`, 218 errors). A rate-limited run auto-skips its
-  stages, and a skipped stage is never scored, so nothing reached the archive. The
-  blocker is infrastructure, not the mechanism — but the mechanism is unproven on
-  real data either way.
+- **The cross-run archive holds one real run.** As of 2026-08-11 there is exactly
+  one record with `provenance: live` in it, written by the smoke run described below.
+  Every *statistic* it can produce still comes from synthetic records: one
+  observation is not a contrast, `--archive-report` still prints an empty payoff
+  table, and the estimator, the believability gate and the promotion rule remain
+  untested against real data.
+- **The paired-trial mechanism has still never completed a trial**, but the reason
+  changed twice on 2026-08-11 and the second reason is the interesting one.
+
+  The first attempt — six pairs, `--evolve-rounds 0` against `2`, strictly one run at
+  a time — produced 46 attempts and zero recorded runs, all refused by Vertex quota
+  (`RESOURCE_EXHAUSTED` for `anthropic-claude-sonnet-4-5`, 218 errors). **That
+  blocker is gone.** The quota pools are per base model and AutoR defaults into the
+  exhausted one; `--model opus --review-model opus` moves the operator *and* the
+  reviewer, and a two-hour run through Stage 04 then recorded **zero**
+  `RESOURCE_EXHAUSTED`. `--model` alone is not enough — the reviewer and every panel
+  read `--review-model` independently and would die on the old pool while the stages
+  sailed on.
+
+  The second reason is a design fault in the trial, not in the infrastructure, and it
+  is why the twelve queued runs were cancelled rather than launched. See
+  [what may not be trialled](#what-may-not-be-trialled).
+
+**Measured on a real backend for the first time (2026-08-11).** One `--model opus`
+run, the goal a retrieval-augmented-generation leakage question, taken to Stage 04:
+
+| Stage | First measured draft | After the ratchet |
+| --- | --- | --- |
+| 01_literature_survey | **1.0000** | — (nothing to improve) |
+| 02_hypothesis_generation | **1.0000** | — |
+| 03_study_design | 0.9231 | 1.0000 (+0.0769, one round) |
+| 04_implementation | 0.9296 | 1.0000 (+0.0702, one round) |
+
+Two things follow, and both change how a number in this document should be read.
+
+**The rubric has no resolution at Stages 01 and 02 against a competent backend.**
+Every criterion scored exactly 1.0 — 8/8 referenced paths resolving, 4/4 decision
+ledger buckets distinct, 0 forward-looking phrases in 1,611 words — and the
+improvement ledger records `rounds_spent: 0`, because the controller found no
+headroom to spend. The composition figure quoted above for stages 01–02, 0.973, is a
+property of the `--fake-operator` *script*, not of the rubric: a real run scores
+1.000 there. This makes the early-stopping hole `comparability_basis` exists to close
+worse than the table implies. Stopping early is not worth "nearly eight times what a
+promotion needs"; on a real run it buys a perfect score.
+
+**A trial cut at `--final-stage 02` therefore cannot resolve anything.** Both arms
+would score 1.0, every within-pair difference would be 0, and the report would say
+"no effect" when it means "no instrument". Resolution starts at Stage 03, where
+`artifact_breadth` enters, and the first two stages cost about 35 minutes each on
+opus before reaching it.
 
 So when this document says a capability *is* better, it is describing an argument.
-When it says a capability *measures* better, it means the rubric, on a scripted run.
-Nothing here yet says a capability produced better research, and the paired trial is
-the thing that would.
+When it says a capability *measures* better, it means the rubric, and now on one real
+run rather than only a scripted one. Nothing here yet says a capability produced
+better research, and the paired trial is the thing that would.
+
+### What may not be trialled
+
+The capability queued for the first trial was the champion ratchet itself,
+`--evolve-rounds 0` against `2`, scored on the rubric. That trial is circular, and
+`src/trials.py` now refuses to report it.
+
+`EvolutionController.consider` promotes a polish round when `delta >= min_gain` and
+reverts it otherwise. The kept draft is `argmax` over drafts on `score.total` — which
+is precisely the number the trial report prints. So the treatment arm is the maximum
+of several draws from the distribution the control arm draws from once, and it cannot
+lose: a generator of random drafts would produce the same positive mean difference.
+The table above shows it happening, twice, at +0.0769 and +0.0702.
+
+This is a stronger objection than the Goodhart one. There the worry is that a
+capability raises the proxy without improving the work. Here the capability does not
+have to touch the work at all — the arithmetic settles it before the first token is
+generated.
+
+The test is whether the run **reads the rubric in order to decide what to keep**.
+`--effort-tiers`, the review panel, deliberation, the ideation panel and the stage
+graph do not; they change what gets written and the rubric scores it at arm's length.
+Those are trialable against a rubric outcome. The ratchet and the Pareto frontier are
+not, and are listed in `SELECTS_ON_THE_OUTCOME`. To trial them, the outcome has to be
+something the ratchet cannot see: a held-out judge, a benchmark score, or a human
+reading the draft.
 
 ---
 
