@@ -609,6 +609,41 @@ def _research_body(stage_markdown: str) -> str:
     return "\n".join(kept).strip()
 
 
+def unapproved_stage_bodies(paths: RunPaths) -> list[tuple[str, str]]:
+    """Recover the research an aborted run did but never got approved.
+
+    A run that clears no stage still leaves the work behind: the per-stage evolution
+    directory keeps the champion each stage converged on, and the raw attempts under
+    ``candidates/`` keep the rest. None of it is approved, so none of it reaches
+    ``stages/`` -- and the report was assembled from ``stages/`` alone, which is why eight
+    of forty benchmark runs shipped a 197-byte report while holding tens of kilobytes of
+    survey and five rendered figures on disk. Unapproved work is worth less than approved
+    work; it is not worth less than nothing, and the caller labels it as unapproved.
+
+    Champions are preferred over candidates because the champion *is* the best attempt the
+    ratchet found. A candidate is read only when a stage has no champion, and only its
+    single newest attempt, so a stage that failed six times contributes one section rather
+    than six near-duplicates of the same rejected draft.
+    """
+    if not paths.evolution_dir.exists():
+        return []
+
+    recovered: list[tuple[str, str]] = []
+    for stage_dir in sorted(p for p in paths.evolution_dir.iterdir() if p.is_dir()):
+        source = stage_dir / "champion.md"
+        if not source.exists():
+            candidates = sorted((stage_dir / "candidates").glob("attempt_*.md"))
+            if not candidates:
+                continue
+            source = candidates[-1]
+        body = _research_body(read_text(source))
+        if not body:
+            continue
+        title = _STAGE_SECTION_TITLES.get(stage_dir.name, stage_dir.name.replace("_", " ").title())
+        recovered.append((f"{title} (unapproved draft)", body))
+    return recovered
+
+
 def build_fallback_report(
     *,
     paths: RunPaths,
@@ -623,13 +658,35 @@ def build_fallback_report(
     also deliberately shaped like a research report rather than a run log — the stage files it
     draws on are full of approval-workflow headings that would otherwise be scored as content.
     """
+    approved: list[tuple[str, str]] = []
+    for stage_path in sorted(paths.stages_dir.glob("*.md")) if paths.stages_dir.exists() else []:
+        if stage_path.name.endswith(".tmp.md"):
+            continue
+        body = _research_body(read_text(stage_path))
+        if not body:
+            continue
+        title = _STAGE_SECTION_TITLES.get(stage_path.stem, stage_path.stem.replace("_", " ").title())
+        approved.append((title, body))
+
+    # Unapproved drafts are a strictly worse source, so they are only read when there is no
+    # approved stage at all -- never mixed in beside one.
+    recovered = [] if approved else unapproved_stage_bodies(paths)
+
     sections: list[str] = ["# Research Report", ""]
 
     if not pipeline_completed:
+        provenance = (
+            "This report was assembled from the stages that were completed."
+            if approved
+            else "No stage was approved, so the sections below are the best draft each stage "
+            "reached before the run stopped: they did not pass review, and every claim in "
+            "them is unverified."
+            if recovered
+            else "No stage produced output before the run stopped."
+        )
         sections.extend(
             [
-                "> **Incomplete run.** The research pipeline did not finish every stage. This report "
-                "was assembled from the stages that were completed.",
+                f"> **Incomplete run.** The research pipeline did not finish every stage. {provenance}",
                 "",
             ]
         )
@@ -641,18 +698,10 @@ def build_fallback_report(
             ]
         )
 
-    wrote_any = False
-    for stage_path in sorted(paths.stages_dir.glob("*.md")) if paths.stages_dir.exists() else []:
-        if stage_path.name.endswith(".tmp.md"):
-            continue
-        body = _research_body(read_text(stage_path))
-        if not body:
-            continue
-        title = _STAGE_SECTION_TITLES.get(stage_path.stem, stage_path.stem.replace("_", " ").title())
+    for title, body in approved or recovered:
         sections.extend([f"## {title}", "", body, ""])
-        wrote_any = True
 
-    if not wrote_any:
+    if not approved and not recovered:
         summaries = approved_stage_summaries(read_text(paths.memory)) if paths.memory.exists() else "None yet."
         sections.extend([summaries if summaries != "None yet." else "_No completed stage output was produced._", ""])
 
@@ -786,10 +835,21 @@ class ReportSynthesizer:
 
     Uses the same private invocation seam as :class:`src.approval_agent.AutomatedReviewer`,
     so it works with either operator backend without widening ``OperatorProtocol``.
+
+    The call is retried, because losing it is expensive and the runs that lose it are not a
+    random sample. Across forty benchmark runs a synthesized report scored 19.52 and the
+    deterministic fallback 7.50, so one unlucky operator invocation costs about twelve
+    points -- and synthesis runs at the end of a run that has just aborted, which is
+    exactly when the operator is most likely to fail. A single attempt made the worst
+    moment in the run decide the whole deliverable.
     """
 
-    def __init__(self, operator: Any) -> None:
+    #: Attempts at the synthesis call before giving up and letting the fallback stand.
+    MAX_ATTEMPTS = 3
+
+    def __init__(self, operator: Any, max_attempts: int = MAX_ATTEMPTS) -> None:
         self.operator = operator
+        self.max_attempts = max(1, int(max_attempts))
 
     def supported(self) -> bool:
         return all(
@@ -798,6 +858,26 @@ class ReportSynthesizer:
         )
 
     def __call__(self, *, paths: RunPaths, workspace: Path, figures: list[str]) -> str | None:
+        """Return the synthesized report, retrying a failed or thin attempt.
+
+        A thin answer is retried like a failed one: `export_run` discards anything under
+        ``MIN_REPORT_CHARS`` anyway, so returning it early just spends the remaining
+        attempts on nothing.
+        """
+        for attempt in range(1, self.max_attempts + 1):
+            report = self._attempt(paths=paths, workspace=workspace, figures=figures, attempt=attempt)
+            if report is not None and len(report.strip()) >= MIN_REPORT_CHARS:
+                return report
+        return None
+
+    def _attempt(
+        self,
+        *,
+        paths: RunPaths,
+        workspace: Path,
+        figures: list[str],
+        attempt: int = 1,
+    ) -> str | None:
         if not self.supported():
             return None
 
@@ -818,7 +898,7 @@ class ReportSynthesizer:
                 command=command,
                 cwd=cwd,
                 stage=REPORT_STAGE,
-                attempt_no=1,
+                attempt_no=attempt,
                 paths=paths,
                 mode="benchmark_report",
                 stdin_text=stdin_text,
