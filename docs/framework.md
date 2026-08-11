@@ -145,12 +145,39 @@ assertion. `src/evolution.py` keeps the champion and reverts a round that scores
 that, `verdict_digest()` hashes the `(id, verdict)` set, and any AutoR-initiated polish round that
 moves it is rejected outright with a `verdict_drift` ledger row.
 
+**"Cannot influence" was too strong, and an adversarial read of this section found where.** The
+criteria are individually sound and the *composition* was not. `quantification` counts numbers in
+Key Results; `numeric_fidelity` checks each against an artifact the draft did not write. Scored
+independently and summed, a draft quoting six invented metrics collected the first and merely
+failed to collect the second:
+
+| Key Results says | quantification (w 2) | numeric_fidelity (w 3) | weighted, of 5 |
+| --- | ---: | ---: | ---: |
+| "the method works better" | 0.00 | 0.00 | 0.0 |
+| six numbers, nothing to check them against | 1.00 | 0.00 | **2.0** |
+| six numbers, all traceable | 1.00 | 1.00 | 5.0 |
+
+So inventing numbers was worth two weighted points more than honestly reporting none, on the total
+the champion ratchet promotes by — the automated p-hacking this module's docstring says the design
+exists to prevent, reached by a route the design did not consider. Declining to *reward* a
+fabrication is not the same as declining to *pay* for it. `_cap_quantification_by_fidelity` now caps
+the first criterion at the second wherever both apply, which makes the middle row 0.0; the cap is
+recorded in `observed` so a stage can still tell which half to fix, and Stage 04 is exempt because
+fidelity does not apply before there are results. `RUBRIC_VERSION` is `3`, so no score from before
+the change is ranked against one after it.
+
+1,842 tests passed before the fix and none of them failed after it: the hole was in a composition
+nothing asserted over. The four tests added with it are mutation-checked — they fail when the cap is
+removed.
+
 *Cost:* the rubric can only measure what is mechanically checkable, so it is blind to whether the
 idea is any good.
 *Why anyway:* a self-improvement loop scored by a model develops a taste for whatever that model
 likes. Removing the incentive (verdict-blindness) and then removing the possibility (drift
 rejection) is belt and braces, on purpose: the failure it prevents — a loop that improves its
-*answer* rather than its *work* — is the one that would be hardest to detect after the fact.
+*answer* rather than its *work* — is the one that would be hardest to detect after the fact. The
+episode above is the honest qualifier on that: the guarantee is only as good as the arithmetic that
+combines the criteria, and it took an adversarial read rather than a test to find it.
 
 ### 2.5 Every optional mechanism carries its own control arm
 

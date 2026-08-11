@@ -39,7 +39,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -67,7 +67,12 @@ from .utils import (
 #: a v2 score are not two measurements of one thing, and every consumer refuses to
 #: rank across the change rather than quietly treating the correction as a run
 #: having got worse.
-RUBRIC_VERSION = "2"
+#: ``3`` caps ``quantification`` at ``numeric_fidelity`` where both apply, so a draft
+#: cannot be paid for numbers no artifact supports — see
+#: :func:`_cap_quantification_by_fidelity`. Every stage draft scored before the cap
+#: over-credits any Key Results section carrying unverifiable numbers, which is why
+#: this is a version bump and not a patch.
+RUBRIC_VERSION = "3"
 
 #: The keys the rubric refuses to read out of an adjudication artifact.
 #:
@@ -865,6 +870,53 @@ def _evidence_resolves(paths: RunPaths, reference: str) -> bool:
 # ----------------------------------------------------------------------------
 
 
+def _cap_quantification_by_fidelity(scores: list[CriterionScore]) -> list[CriterionScore]:
+    """A finding is not quantified by a number that checks out against nothing.
+
+    The two criteria measure different things and both are worth keeping visible:
+    ``quantification`` asks whether Key Results carries numbers at all,
+    ``numeric_fidelity`` asks whether those numbers appear in an artifact the draft
+    did not write. Scored independently and then summed, the pair **pays for
+    fabrication**, which is the exact opposite of what this module is for:
+
+    ======================================  =============  ================  ==============
+    Key Results says                        quantification  numeric_fidelity  weighted, of 5
+    ======================================  =============  ================  ==============
+    "the method works better"                        0.00              0.00             0.0
+    six numbers, no results file to check             1.00              0.00             2.0
+    six numbers, all traceable                        1.00              1.00             5.0
+    ======================================  =============  ================  ==============
+
+    So inventing six numbers was worth **two weighted points more than honestly
+    reporting none**, and the champion ratchet in :mod:`src.evolution` promotes on
+    this total. ``numeric_fidelity``'s docstring already anticipated the draft --
+    "every other gate here passes such a draft ... the prose is quantified" -- and
+    declining to reward it is not the same as declining to pay for it.
+
+    Capping restores the ordering. Where both criteria apply, the share of findings
+    that are *quantified* cannot exceed the share of reported numbers that are
+    *real*, so the middle row becomes 0.0 and fabrication earns nothing. Both scores
+    are still reported separately, with the cap recorded in ``observed``, because a
+    stage told only the capped number cannot tell which half to fix.
+
+    Below Stage 05 ``numeric_fidelity`` does not apply and nothing is capped: Stage
+    04 legitimately reports parameter counts and budgets before any result exists.
+    """
+    fidelity = next((item for item in scores if item.key == "numeric_fidelity"), None)
+    if fidelity is None:
+        return scores
+    return [
+        replace(
+            item,
+            score=fidelity.score,
+            observed=f"{item.observed}; capped at numeric fidelity ({fidelity.score:.2f})",
+        )
+        if item.key == "quantification" and item.score > fidelity.score
+        else item
+        for item in scores
+    ]
+
+
 def score_stage(
     *,
     paths: RunPaths,
@@ -895,6 +947,8 @@ def score_stage(
             scores.append(_score_commitment(markdown))
         elif criterion.key == "reproducibility":
             scores.append(_score_reproducibility(paths, stage))
+
+    scores = _cap_quantification_by_fidelity(scores)
 
     total_weight = sum(item.weight for item in scores) or 1.0
     total = sum(item.score * item.weight for item in scores) / total_weight
