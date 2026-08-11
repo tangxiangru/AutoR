@@ -125,11 +125,14 @@ from .terminal_ui import TerminalUI
 from .platform.foundry import generate_paper_package, generate_release_package
 from .deliberation import (
     CruxPanel,
+    Resolution,
     clear_requests,
     escalation_offer,
     format_resolution_for_prompt,
+    read_ledger,
     read_requests,
     record_resolution,
+    settled_answer,
 )
 from .effort import (
     Concentration,
@@ -1005,7 +1008,34 @@ class ResearchManager:
         clear_requests(paths)
 
         resolutions = []
+        already = read_ledger(paths)
         for request in requests:
+            settled = settled_answer(already, request)
+            if settled is not None:
+                # Hand the stored answer back rather than re-deriving it. The panel is not
+                # called, the budget is not touched, and the ledger is not given a second
+                # crux to count -- re-asking a settled question is the stage failing to
+                # notice it has the answer, not the run needing more deliberation.
+                append_log_entry(
+                    paths.logs,
+                    f"{stage.slug} crux_already_settled",
+                    f"question: {request.question}\nReused the answer from an earlier "
+                    f"attempt; the panel was not reconvened.",
+                )
+                self.ui.show_status(
+                    "This crux was already settled on an earlier attempt; reusing that answer.",
+                    level="info",
+                )
+                resolutions.append(
+                    Resolution(
+                        request=request,
+                        answer=str(settled.get("answer") or ""),
+                        reason=str(settled.get("reason") or ""),
+                        falsifier=str(settled.get("falsifier") or ""),
+                        dissent=str(settled.get("dissent") or ""),
+                    )
+                )
+                continue
             if self.crux_panel.budget_left == 0:
                 append_log_entry(
                     paths.logs,
