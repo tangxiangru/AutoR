@@ -20,3 +20,10 @@ examples/
 agentspace/
 assets/paper_gallery_source/
 project/
+
+# Credentials. The judge key lives outside the tree by default (see
+# tools/score_rcb_run.py DEFAULT_KEY_FILE); this is belt and braces for a copy
+# that lands here by accident.
+api.txt
+*.key
+.env

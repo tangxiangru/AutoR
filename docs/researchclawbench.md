@@ -419,10 +419,27 @@ is not a measurement of the run.
 
 ### The judge is part of the result
 
-The reference judge is `gpt-5.1` (`evaluation/.env.example`). Without that key, Claude
-Opus through `AnthropicVertex` is a drop-in for `structai.LLMAgent` — `score.py` only
-ever calls the agent as `agent(prompt, image_paths=, return_example=, max_try=)` and
-expects a dict.
+The reference judge is `gpt-5.1` (`evaluation/.env.example`), and it is what
+`score_rcb_run.py` uses by default:
+
+```bash
+# Reads the key from ~/api.txt. Never pass a key as an argument — it lands in the
+# shell history and in the process table.
+python3 tools/score_rcb_run.py --workspace <ws> --bench <bench>
+
+# No reference key available:
+python3 tools/score_rcb_run.py --workspace <ws> --bench <bench> --judge vertex
+```
+
+Either judge is a drop-in for `structai.LLMAgent` — `score.py` only ever calls the
+agent as `agent(prompt, image_paths=, return_example=, max_try=)` and expects a dict.
+
+The key is read from a file outside the repository. `DEFAULT_KEY_FILE` is
+`~/api.txt` deliberately: a default inside the tree is one `git add -A` away from a
+leak. Error text is redacted before printing, because an HTTP client's exception can
+carry the request that produced it and this output gets pasted into issues. A test
+scans every tracked file for a key-shaped literal, so a key pasted into a docstring
+or a fixture fails the suite rather than reaching a remote.
 
 On identical artifacts, **Gemini 2.5 Flash scored 37.0 where Claude Opus scored 20.8**.
 A sixteen-point spread is a property of the judge, not of the run, so a number quoted

@@ -129,3 +129,105 @@ class JudgeIsPartOfTheResultTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NoSecretInTheRepositoryTest(unittest.TestCase):
+    """The judge key must never be committable.
+
+    A key pasted into a tool, a docstring or a test fixture is the ordinary way
+    this leaks — the file itself lives outside any repository, so the risk is
+    not the file, it is a copy of its contents ending up in one.
+    """
+
+    def test_the_tool_contains_no_key_shaped_literal(self) -> None:
+        import re
+
+        text = TOOL.read_text(encoding="utf-8")
+        # A long opaque token assigned to something, or an OpenAI-style key.
+        suspicious = re.findall(r"""(?:sk-[A-Za-z0-9_\-]{16,})""", text)
+        self.assertEqual(suspicious, [], "a key-shaped literal is in the tool")
+
+    def test_no_tracked_file_holds_a_key_shaped_literal(self) -> None:
+        import re
+        import subprocess
+
+        listing = subprocess.run(
+            ["git", "ls-files"], cwd=REPO_ROOT, capture_output=True, text=True, check=False
+        )
+        if listing.returncode != 0:  # pragma: no cover - not a git checkout
+            self.skipTest("not a git checkout")
+
+        pattern = re.compile(r"sk-[A-Za-z0-9_\-]{16,}")
+        offenders = []
+        for name in listing.stdout.split():
+            path = REPO_ROOT / name
+            if not path.is_file() or path.stat().st_size > 2_000_000:
+                continue
+            try:
+                body = path.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            if pattern.search(body):
+                offenders.append(name)
+        self.assertEqual(offenders, [], f"key-shaped literal in tracked files: {offenders}")
+
+    def test_the_key_file_default_is_outside_any_repository(self) -> None:
+        """A default inside the tree is one `git add -A` away from a leak."""
+        tool = _load()
+        default = tool.DEFAULT_KEY_FILE.resolve()
+        self.assertFalse(
+            str(default).startswith(str(REPO_ROOT.resolve()) + "/"),
+            f"the default key file {default} sits inside the repository",
+        )
+
+    def test_the_cli_refuses_to_take_a_key_as_an_argument(self) -> None:
+        """A key on the command line lands in shell history and the process table."""
+        text = TOOL.read_text(encoding="utf-8")
+        self.assertNotIn('"--api-key"', text)
+        self.assertNotIn("'--api-key'", text)
+        self.assertIn("--key-file", text)
+
+    def test_errors_are_redacted_before_they_are_printed(self) -> None:
+        tool = _load()
+        # Assembled rather than written out: a literal here would be found by
+        # the repository scan above, which is the point of that scan.
+        fake = "sk-" + ("abcdefghijkl" + "mnopqrstuvwxyz" + "012345")
+        leaked = f"AuthError: request failed with Bearer {fake}"
+        self.assertNotIn("mnopqrstuvwxyz", tool._redact(leaked))
+        self.assertIn("<redacted>", tool._redact(leaked))
+
+
+class ReferenceJudgeTest(unittest.TestCase):
+    """gpt-5.1 is what the benchmark scores with; anything else is not comparable."""
+
+    def setUp(self) -> None:
+        self.tool = _load()
+
+    def test_the_reference_judge_is_the_default(self) -> None:
+        text = TOOL.read_text(encoding="utf-8")
+        self.assertIn('default="reference"', text)
+        self.assertEqual(self.tool.REFERENCE_JUDGE_MODEL, "gpt-5.1")
+
+    def test_a_missing_key_file_says_what_to_do_rather_than_crashing(self) -> None:
+        from pathlib import Path
+
+        with self.assertRaises(SystemExit) as caught:
+            self.tool.read_api_key(Path("/nonexistent/api.txt"))
+        message = str(caught.exception)
+        self.assertIn("--judge vertex", message)
+        self.assertIn("Do not pass a key on the command line", message)
+
+    def test_the_key_reader_tolerates_the_shapes_a_file_arrives_in(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        for raw in ("token-value", "KEY=token-value", '"token-value"', "  token-value\n"):
+            with self.subTest(shape=raw):
+                with tempfile.TemporaryDirectory() as tmp:
+                    path = Path(tmp) / "api.txt"
+                    path.write_text(raw, encoding="utf-8")
+                    self.assertEqual(self.tool.read_api_key(path), "token-value")
+
+    def test_the_endpoint_is_not_treated_as_a_secret(self) -> None:
+        """An endpoint in source is fine; a key is not. Keep them distinguishable."""
+        self.assertTrue(self.tool.REFERENCE_JUDGE_ENDPOINT.startswith("https://"))
