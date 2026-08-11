@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .approval_agent import AutomatedReviewer, ReviewDecision
+from .approval_agent import DECISION_TO_CHOICE, AutomatedReviewer, ReviewDecision
 from .terminal_ui import TerminalUI
 from .utils import RunPaths, StageSpec, append_log_entry, read_text, truncate_text, write_text
 
@@ -713,7 +713,16 @@ class ReviewPanel:
             markdown=stage_markdown,
             label=f"panel_{role.key}_verdict",
         )
-        blocking = bool(payload.get("blocking")) if isinstance(payload, dict) else False
+        # A veto is only as trustworthy as the answer carrying it. `blocking` is read from
+        # the seat's raw payload, so if that payload's own decision is not a word the panel
+        # recognises, its blocking flag is not either -- whatever a re-ask later manages to
+        # recover. Keyed on the payload rather than on the degraded choice: the old guard
+        # (`choice != "6"`) tested a symptom, and stopped holding the moment an unreadable
+        # verdict became something the reviewer re-asks instead of aborting on.
+        blocking = False
+        if isinstance(payload, dict) and payload.get("blocking"):
+            token = member._normalize_decision_token(payload.get("decision"))  # noqa: SLF001
+            blocking = token in DECISION_TO_CHOICE
         concerns: tuple[str, ...] = ()
         if isinstance(payload, dict) and isinstance(payload.get("concerns"), list):
             concerns = tuple(str(item).strip() for item in payload["concerns"] if str(item).strip())
@@ -725,8 +734,8 @@ class ReviewPanel:
             model=member.model,
             choice=decision.choice,
             decision_token=decision.decision_token,
-            # An unparseable answer degrades to abort in `parse_decision`; treat that as a
-            # non-blocking failure rather than letting one bad response veto the run.
+            # Still suppressed on an explicit abort: a seat that voted to stop the run has
+            # said so through `choice`, and does not also need a veto counted against it.
             blocking=blocking and decision.choice != "6",
             reason=decision.reason,
             feedback=decision.feedback,
