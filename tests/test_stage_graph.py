@@ -275,9 +275,16 @@ class AdaptiveTopologyTests(unittest.TestCase):
         moves = self.graph.moves(
             self.paths, "07_writing", GraphState(), final_stage=stage_07
         )
-        pruned = next(move for move in moves if move.target == "08_dissemination")
-        self.assertFalse(pruned.admissible)
-        self.assertEqual(pruned.blocked_kind, "pruned")
+        self.assertNotIn("08_dissemination", [move.target for move in moves])
+        # Reaching the stage the caller asked for is a completion, so the advance past
+        # it is rendered as the finish edge it amounts to rather than as a dead one.
+        # Recorded as a pruned advance the node had no live forward move at all,
+        # `default_move` returned None, and `StageRouter.choose` halted without asking
+        # — discarding the live backward edges at 07, which is the node where "is any
+        # written claim unsupported by the analysis?" gets decided.
+        finish = next(move for move in moves if move.target == FINISH)
+        self.assertTrue(finish.admissible)
+        self.assertEqual(finish.edge.kind, "finish")
 
     def test_final_stage_ends_the_walk_instead_of_sending_it_backwards(self) -> None:
         """The bug that dropping the edge caused, at every final stage.
@@ -295,10 +302,13 @@ class AdaptiveTopologyTests(unittest.TestCase):
         for number in (5, 6, 7):
             final = next(stage for stage in STAGES if stage.number == number)
             with self.subTest(final_stage=final.slug):
-                self.assertIsNone(
-                    self.graph.default_move(
-                        self.paths, final.slug, GraphState(), final_stage=final
-                    ),
+                default = self.graph.default_move(
+                    self.paths, final.slug, GraphState(), final_stage=final
+                )
+                self.assertIsNotNone(default, msg=f"--final-stage {final.slug} halted")
+                self.assertEqual(
+                    default.target,
+                    FINISH,
                     msg=f"--final-stage {final.slug} did not end the walk",
                 )
 

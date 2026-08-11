@@ -324,7 +324,14 @@ class GraphWalkTests(unittest.TestCase):
 
         paths = self.only_run()
         self.assertEqual(load_run_manifest(paths.run_manifest).run_status, "completed")
-        self.assertEqual(load_graph_state(paths).halted_kind, "pruned")
+        # No halt kind at all, which is what this test's name has always said it is.
+        # Reaching the requested final stage now takes a live `finish` edge rather than
+        # leaving the node with no forward move; `halted_kind` describes a walk that
+        # stopped because it could not continue, and this one stopped because it was
+        # done. The distinction the docstring draws is preserved and sharpened.
+        state = load_graph_state(paths)
+        self.assertEqual(state.halted_kind, "")
+        self.assertEqual(state.path[-1].chose, FINISH)
 
     def test_resuming_an_abandoned_run_does_not_relabel_it_completed(self) -> None:
         """A refused resume ran no walk, and `_complete_run` read the walk.

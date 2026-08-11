@@ -497,6 +497,13 @@ class Visit:
     #: and an estimator that counted them as decisions where nothing else was on
     #: offer would be reading an operator's intervention as evidence about an edge.
     bypassed: bool = False
+    #: Why the router's answer was not used, when it was not. A refused route is not a
+    #: routing observation: the run took the default because the answer was lost or
+    #: off-menu, not because anything preferred it. Recorded rather than inferred,
+    #: because `agent_directed=False` alone cannot tell "nobody was asked" from
+    #: "somebody answered and it did not survive" — and in the archived corpus 23 of
+    #: the 27 visits where anything was on offer were the second kind.
+    refusal: str = ""
     #: The research round this visit closed, if it closed one. Zero otherwise.
     #: What makes the abandonment guard a statement about this traversal rather than
     #: about the run's whole history.
@@ -529,6 +536,7 @@ class Visit:
             "offered": list(self.offered),
             "blocked": dict(self.blocked),
             "bypassed": self.bypassed,
+            "refusal": self.refusal,
             "closed_round": self.closed_round,
         }
 
@@ -553,6 +561,7 @@ class Visit:
                 str(k): str(v) for k, v in (payload.get("blocked") or {}).items() if str(k)
             },
             bypassed=bool(payload.get("bypassed")),
+            refusal=str(payload.get("refusal") or ""),
             closed_round=int(payload.get("closed_round") or 0),
         )
 
@@ -582,11 +591,18 @@ class GraphState:
         return sum(1 for visit in self.path if visit.stage == slug)
 
     def revisit_reasons(self, slug: str) -> list[str]:
-        """Why the run entered ``slug`` before, normalised for comparison."""
+        """Why the run went *back* to ``slug`` before, normalised for comparison.
+
+        Backward moves only. The pool exists so `repeats_a_previous_reason` can refuse
+        a revisit that has already been tried, and an *advance* into a stage is not a
+        previous attempt at that repair — it is the run arriving there in the first
+        place. Pooling both put the machine-written forward rationales, which are
+        identical every run, in the way of a first backward move to the same node.
+        """
         return [
             " ".join(visit.reason.lower().split())
             for visit in self.path
-            if visit.chose == slug and visit.reason
+            if visit.chose == slug and visit.reason and visit.kind == "revisit"
         ]
 
     def to_dict(self) -> dict[str, Any]:
@@ -760,6 +776,37 @@ class StageGraph:
             if final_stage is not None and edge.target != FINISH:
                 target_stage = stage_for_slug(edge.target)
                 if target_stage is not None and target_stage.number > final_stage.number:
+                    if edge.kind == "advance":
+                        # Reaching the stage the caller asked for is a *completion*, and
+                        # the graph already has an edge kind for that. Recorded as a
+                        # pruned advance it was neither: with no live forward move
+                        # `default_move` returns None, `StageRouter.choose` takes its
+                        # "nothing is open" halt, and the live backward edges at that
+                        # node are discarded without anyone being asked.
+                        #
+                        # That is not a corner case. `--final-stage 07_writing` is the
+                        # ResearchClawBench default, so every benchmark run ended by
+                        # throwing away the one decision worth most at Stage 07 —
+                        # whether the write-up contains a claim the analysis does not
+                        # support, which is the 07 -> 06 edge.
+                        results.append(
+                            Move(
+                                replace(
+                                    edge,
+                                    target=FINISH,
+                                    kind="finish",
+                                    guard="always",
+                                    rationale=(
+                                        f"`{final_stage.slug}` is the last stage this run was "
+                                        "asked for, and it is done."
+                                    ),
+                                ),
+                                GuardResult(True, "the requested final stage is complete"),
+                                "",
+                                "",
+                            )
+                        )
+                        continue
                     results.append(
                         Move(
                             edge,
@@ -967,6 +1014,7 @@ def leave(
     offered: "Sequence[str]" = (),
     blocked: Mapping[str, str] | None = None,
     bypassed: bool = False,
+    refusal: str = "",
 ) -> None:
     if not state.path:
         return
@@ -981,6 +1029,7 @@ def leave(
     visit.offered = tuple(offered)
     visit.blocked = dict(blocked or {})
     visit.bypassed = bypassed
+    visit.refusal = refusal
     save_graph_state(paths, state)
 
 
