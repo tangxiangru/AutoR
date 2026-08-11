@@ -55,7 +55,124 @@ JUDGE_TIME_LIMIT = 600
 #: Serial. The stock 16 is the trap that actually fires.
 JUDGE_WORKERS = 1
 
-DEFAULT_JUDGE_MODEL = "claude-opus-4-5@20251101"
+#: The judge ResearchClawBench itself scores with (`evaluation/.env.example`).
+#: Use it unless you cannot: judge choice moves the number by about sixteen
+#: points, so a run scored with anything else is not comparable to a published
+#: figure.
+REFERENCE_JUDGE_MODEL = "gpt-5.1"
+
+#: The OpenAI-compatible endpoint the reference judge is served from here. An
+#: endpoint is not a secret; the key that opens it is, and never appears in this
+#: file — see `read_api_key`.
+REFERENCE_JUDGE_ENDPOINT = "https://shi-lab-2-resource.services.ai.azure.com/openai/v1"
+
+#: Fallback when no reference key is available.
+FALLBACK_JUDGE_MODEL = "claude-opus-4-5@20251101"
+
+#: Where the key is read from. Outside any repository on purpose: a default
+#: inside the tree is one `git add -A` away from a leak.
+DEFAULT_KEY_FILE = Path.home() / "api.txt"
+
+
+def read_api_key(path: Path) -> str:
+    """The key, from a file that is never committed.
+
+    Tolerant about shape because the caller should never have to print the file
+    to find out what shape it is: a bare token, `KEY=token`, and a quoted value
+    all read the same. Nothing here echoes the value, and the only confirmation
+    that parsing worked is that a call succeeds.
+    """
+    if not path.is_file():
+        raise SystemExit(
+            f"No judge key at {path}. Put the reference judge's key there, or pass "
+            "--judge vertex to score with Claude instead. Do not pass a key on the "
+            "command line: it lands in the shell history and in the process table."
+        )
+    raw = path.read_text(encoding="utf-8").strip()
+    if "=" in raw and not raw.startswith("sk-"):
+        raw = raw.split("=", 1)[1]
+    return raw.strip().strip("\"'")
+
+
+def _redact(text: str) -> str:
+    """Strip anything key-shaped before it reaches an error message.
+
+    Error text from an HTTP client can carry the request that produced it, and
+    this output gets pasted into issues.
+    """
+    import re
+
+    return re.sub(r"(sk-|Bearer\s+)[A-Za-z0-9_\-\.]{12,}", r"\1<redacted>", text)
+
+
+def _response_text(response: Any) -> str:
+    """Pull the text out of a Responses API result, whatever shape it arrived in."""
+    text = getattr(response, "output_text", None)
+    if isinstance(text, str) and text.strip():
+        return text
+    parts: list[str] = []
+    for item in getattr(response, "output", []) or []:
+        for block in getattr(item, "content", []) or []:
+            value = getattr(block, "text", None)
+            if isinstance(value, str):
+                parts.append(value)
+    return "\n".join(parts)
+
+
+class ReferenceJudge:
+    """The gpt-5.1 judge, through the OpenAI-compatible Responses API.
+
+    Same contract as :class:`VertexJudge`: ``score.py`` only ever calls the
+    agent as ``agent(prompt, image_paths=, return_example=, max_try=)`` and
+    expects a dict back.
+    """
+
+    def __init__(self, *, model: str, endpoint: str, api_key: str) -> None:
+        from openai import OpenAI
+
+        self.model = model
+        self._client = OpenAI(base_url=endpoint, api_key=api_key)
+        self.calls = 0
+        self.failures: list[str] = []
+
+    def __call__(
+        self,
+        prompt: str,
+        image_paths: list[str] | None = None,
+        return_example: dict | None = None,
+        max_try: int = 2,
+        **_: Any,
+    ) -> dict | None:
+        import base64
+        import mimetypes
+
+        content: list[dict[str, Any]] = [{"type": "input_text", "text": prompt}]
+        for path in image_paths or []:
+            data = base64.b64encode(Path(path).read_bytes()).decode("ascii")
+            media_type = mimetypes.guess_type(path)[0] or "image/png"
+            content.append(
+                {"type": "input_image", "image_url": f"data:{media_type};base64,{data}"}
+            )
+
+        last = ""
+        for _attempt in range(max_try):
+            self.calls += 1
+            try:
+                response = self._client.responses.create(
+                    model=self.model, input=[{"role": "user", "content": content}]
+                )
+                text = _response_text(response)
+                parsed = _first_json_object(text)
+                if isinstance(parsed, dict) and "score" in parsed:
+                    return parsed
+                last = f"unparseable body ({len(text)} chars)"
+            except Exception as exc:  # noqa: BLE001 - the reason is what matters
+                last = _redact(f"{type(exc).__name__}: {exc}")
+        self.failures.append(last)
+        return None
+
+
+DEFAULT_JUDGE_MODEL = FALLBACK_JUDGE_MODEL
 
 
 class VertexJudge:
@@ -140,7 +257,7 @@ def _first_json_object(text: str) -> Any:
     return None
 
 
-def score(workspace: Path, bench: Path, *, model: str, project_id: str) -> dict:
+def score(workspace: Path, bench: Path, *, judge) -> dict:
     sys.path.insert(0, str(bench))
     import evaluation.config as config
     import evaluation.score as scorer
@@ -149,9 +266,8 @@ def score(workspace: Path, bench: Path, *, model: str, project_id: str) -> dict:
     # are never used, because the agent is replaced below.
     for name in ("JUDGE_API_KEY", "JUDGE_API_BASE", "JUDGE_MODEL_NAME"):
         os.environ.setdefault(name, "unused-local-judge")
-    config.JUDGE_MODEL_NAME = model
+    config.JUDGE_MODEL_NAME = judge.model
 
-    judge = VertexJudge(model=model, project_id=project_id)
     scorer.LLMAgent = lambda **_: judge  # type: ignore[assignment]
 
     # Serialise. Concurrency is the trap that fires most often, and a benchmark
@@ -162,7 +278,7 @@ def score(workspace: Path, bench: Path, *, model: str, project_id: str) -> dict:
     scorer.multi_thread = serial  # type: ignore[assignment]
 
     result = scorer.score_workspace(workspace)
-    result["judge_model"] = model
+    result["judge_model"] = judge.model
     result["judge_calls"] = judge.calls
     result["judge_failures"] = judge.failures
     return result
@@ -172,18 +288,48 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("--workspace", required=True, type=Path)
     parser.add_argument("--bench", required=True, type=Path)
-    parser.add_argument("--model", default=DEFAULT_JUDGE_MODEL)
+    parser.add_argument(
+        "--judge",
+        choices=("reference", "vertex"),
+        default="reference",
+        help=(
+            "reference = gpt-5.1, what the benchmark itself scores with. "
+            "vertex = Claude on Vertex, for when no reference key is available. "
+            "The choice is worth about sixteen points, so it is reported with the total."
+        ),
+    )
+    parser.add_argument("--model", default=None, help="Override the judge model id.")
+    parser.add_argument(
+        "--key-file",
+        type=Path,
+        default=DEFAULT_KEY_FILE,
+        help=(
+            f"File holding the reference judge's key (default {DEFAULT_KEY_FILE}). "
+            "Never pass the key itself: it would land in the shell history."
+        ),
+    )
+    parser.add_argument("--endpoint", default=REFERENCE_JUDGE_ENDPOINT)
     parser.add_argument(
         "--project-id", default=os.environ.get("ANTHROPIC_VERTEX_PROJECT_ID", "")
     )
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args()
 
-    if not args.project_id:
-        print("Set ANTHROPIC_VERTEX_PROJECT_ID or pass --project-id.", file=sys.stderr)
-        return 2
+    if args.judge == "reference":
+        judge = ReferenceJudge(
+            model=args.model or REFERENCE_JUDGE_MODEL,
+            endpoint=args.endpoint,
+            api_key=read_api_key(args.key_file),
+        )
+    else:
+        if not args.project_id:
+            print("Set ANTHROPIC_VERTEX_PROJECT_ID or pass --project-id.", file=sys.stderr)
+            return 2
+        judge = VertexJudge(
+            model=args.model or FALLBACK_JUDGE_MODEL, project_id=args.project_id
+        )
 
-    result = score(args.workspace, args.bench, model=args.model, project_id=args.project_id)
+    result = score(args.workspace, args.bench, judge=judge)
     if "error" in result:
         print(f"scoring failed: {result['error']}", file=sys.stderr)
         return 1
