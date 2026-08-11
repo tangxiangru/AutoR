@@ -83,6 +83,16 @@ class ReportPlanTestCase(unittest.TestCase):
                     "source_artifact": "results/accuracy_by_length.json",
                 }
             ],
+            # Every plan answers the task description. Tests about figure counts
+            # override `figures`, not this, so the default has to cover slot 1 —
+            # which every default figure set includes.
+            "task_outputs": [
+                {
+                    "stated": "the accuracy comparison the task asks for",
+                    "covered_by": "figure:1",
+                    "why_not": "",
+                }
+            ],
         }
         payload.update(extra)
         write_text(self.paths.report_plan, json.dumps(payload))
@@ -916,3 +926,120 @@ class JudgeVisibleWindowTest(unittest.TestCase):
         from src.report_plan import JUDGE_VISIBLE_PREFIX_CHARS
 
         self.assertEqual(JUDGE_VISIBLE_PREFIX_CHARS, 10_000)
+
+
+class TaskOutputCoverageTest(ReportPlanTestCase):
+    """The task description is the only statement of intent the run may read.
+
+    22 of the 40 ResearchClawBench tasks carry a literal ``Outputs:`` sentence
+    naming the constraints, comparisons and distributions the study should
+    produce. The grading criteria themselves live with the target study, which
+    the run has no access to and must never be shown — but that sentence is the
+    closest legitimate proxy, and nothing was answering it item by item.
+    """
+
+    def test_a_plan_that_answers_every_stated_output_passes(self) -> None:
+        self.write_plan(
+            task_outputs=[
+                {"stated": "parameter constraints from model fitting", "covered_by": "figure:1"},
+                {"stated": "goodness-of-fit comparison", "covered_by": "number:0"},
+            ]
+        )
+        self.assertEqual([p for p in self.problems() if "task output" in p], [])
+
+    def test_a_plan_with_no_task_outputs_is_refused(self) -> None:
+        self.write_plan(task_outputs=[])
+        self.assertTrue(any("no `task_outputs`" in p for p in self.problems()))
+
+    def test_pointing_at_a_slot_that_does_not_exist_is_refused(self) -> None:
+        self.write_plan(task_outputs=[{"stated": "constraints", "covered_by": "figure:9"}])
+        self.assertTrue(any("which this plan does not declare" in p for p in self.problems()))
+
+    def test_pointing_at_a_headline_number_that_does_not_exist_is_refused(self) -> None:
+        self.write_plan(task_outputs=[{"stated": "constraints", "covered_by": "number:7"}])
+        self.assertTrue(any("which this plan does not declare" in p for p in self.problems()))
+
+    def test_prose_is_a_valid_answer(self) -> None:
+        """Not everything the task asks for needs a figure or a headline number."""
+        self.write_plan(task_outputs=[{"stated": "a discussion of limitations", "covered_by": "prose"}])
+        self.assertEqual([p for p in self.problems() if "task output" in p], [])
+
+    def test_not_attempting_something_is_allowed_when_said(self) -> None:
+        self.write_plan(
+            task_outputs=[
+                {
+                    "stated": "posterior distributions of the EDE parameters",
+                    "covered_by": "not_attempted",
+                    "why_not": "the supplied data carries only best-fit values, not chains",
+                }
+            ]
+        )
+        self.assertEqual([p for p in self.problems() if "task output" in p], [])
+
+    def test_not_attempting_something_silently_is_refused(self) -> None:
+        self.write_plan(
+            task_outputs=[{"stated": "posterior distributions", "covered_by": "not_attempted"}]
+        )
+        self.assertTrue(any("without saying why" in p for p in self.problems()))
+
+    def test_an_unknown_coverage_kind_is_refused(self) -> None:
+        self.write_plan(task_outputs=[{"stated": "constraints", "covered_by": "somehow"}])
+        self.assertTrue(any("expected one of" in p for p in self.problems()))
+
+    def test_the_gate_does_not_judge_whether_the_reading_was_right(self) -> None:
+        """Structural only.
+
+        A gate cannot know what the task description said without parsing prose,
+        and one that guessed would refuse correct plans. Whether the agent read
+        the description well is a review question.
+        """
+        self.write_plan(
+            task_outputs=[{"stated": "something the task never asked for", "covered_by": "figure:1"}]
+        )
+        self.assertEqual([p for p in self.problems() if "task output" in p], [])
+
+
+class StampCarriesEveryAuthoredFieldTest(ReportPlanTestCase):
+    """The manager rewrites the file on approval; anything it forgets is lost.
+
+    `task_outputs` and `no_figures_because` were both dropped by the stamp
+    because the three `ReportPlan(...)` reconstructions inside it listed fields
+    by hand. The agent wrote them, the manager silently erased them, and the
+    gate then refused the stage for not having what it had just deleted.
+    """
+
+    def test_stamping_preserves_task_outputs(self) -> None:
+        from src.report_plan import load_report_plan, stamp_report_plan
+
+        self.write_plan(
+            task_outputs=[{"stated": "the comparison", "covered_by": "figure:1"}]
+        )
+        stamp_report_plan(self.paths)
+        self.assertEqual(len(load_report_plan(self.paths).task_outputs), 1)
+
+    def test_stamping_preserves_the_no_figures_reason(self) -> None:
+        from src.report_plan import load_report_plan, stamp_report_plan
+
+        reason = "The result is one scalar limit; the prose states it with its interval."
+        self.write_plan(figures=[], no_figures_because=reason,
+                        task_outputs=[{"stated": "the limit", "covered_by": "number:0"}])
+        stamp_report_plan(self.paths)
+        self.assertEqual(load_report_plan(self.paths).no_figures_because, reason)
+
+    def test_every_dataclass_field_survives_a_stamp(self) -> None:
+        """The general form, so the next field added is covered without a new test."""
+        import dataclasses
+
+        from src.report_plan import ReportPlan, load_report_plan, stamp_report_plan
+
+        self.write_plan(task_outputs=[{"stated": "x", "covered_by": "figure:1"}])
+        before = load_report_plan(self.paths)
+        stamp_report_plan(self.paths)
+        after = load_report_plan(self.paths)
+        # declared_at, digest and amendments are what the stamp is *for*.
+        stamped = {"declared_at", "digest", "amendments"}
+        for f in dataclasses.fields(ReportPlan):
+            if f.name in stamped:
+                continue
+            with self.subTest(field=f.name):
+                self.assertEqual(getattr(after, f.name), getattr(before, f.name))

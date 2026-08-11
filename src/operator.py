@@ -787,6 +787,19 @@ Original stderr:
                             "source_artifact": "results/fake_results.json",
                         }
                     ],
+                    "task_outputs": [
+                        {
+                            "stated": (
+                                "whatever the task description asked for — fake-operator mode "
+                                "does not read it"
+                            ),
+                            "covered_by": "not_attempted",
+                            "why_not": (
+                                "fake-operator mode exercises the workflow and measures "
+                                "nothing, so it answers no deliverable the task named."
+                            ),
+                        }
+                    ],
                 },
             )
 

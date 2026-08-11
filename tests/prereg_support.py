@@ -82,6 +82,7 @@ def write_report_plan(
     source_artifact: str = "results/metrics.json",
     figures=None,
     headline_numbers=None,
+    task_outputs=None,
 ) -> None:
     """One planned figure, one headline number: the smallest plan the gate accepts.
 
@@ -120,6 +121,15 @@ def write_report_plan(
                         "quantity": "held-out accuracy, treatment vs baseline",
                         "unit": "percentage points",
                         "source_artifact": source_artifact,
+                    }
+                ],
+                "task_outputs": task_outputs
+                if task_outputs is not None
+                else [
+                    {
+                        "stated": "the held-out accuracy comparison the task asks for",
+                        "covered_by": "figure:1",
+                        "why_not": "",
                     }
                 ],
             }
