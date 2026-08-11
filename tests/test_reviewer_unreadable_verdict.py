@@ -16,6 +16,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from src.approval_agent import CLOSING_VERDICT_INSTRUCTION, DECISION_TO_CHOICE, UNSUPPORTED_REASON, UNREADABLE_REASON, AutomatedReviewer, ReviewDecision
+from src.terminal_ui import TerminalUI
+from src.utils import STAGES, build_run_paths, ensure_run_layout, write_text
 from src.approval_agent import DECISION_TO_CHOICE, UNSUPPORTED_REASON, UNREADABLE_REASON, AutomatedReviewer, ReviewDecision
 from src.terminal_ui import TerminalUI
 from src.utils import STAGES, build_run_paths, ensure_run_layout
@@ -259,3 +262,62 @@ class DecisionVocabularyTest(unittest.TestCase):
     def test_a_genuinely_unknown_token_is_still_treated_as_unanswered(self) -> None:
         decision = self._reviewer()._parse_decision(json.dumps({"decision": "banana", "reason": "r"}))
         self.assertIn(UNSUPPORTED_REASON, decision.reason)
+
+
+class ClosingVerdictInstructionTest(unittest.TestCase):
+    """The verdict contract has to be the last thing the reviewer reads.
+
+    Over one benchmark run's 65 recorded review calls, the primary call's closing output
+    carried no parseable decision almost every time, while the verdict-only re-ask produced
+    one on essentially every attempt. The difference is position: the contract was stated
+    near the top and the prompt then ended with five thousand characters of log tail.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.paths = build_run_paths(Path(self._tmp.name) / "run")
+        ensure_run_layout(self.paths)
+        write_text(self.paths.user_input, "goal")
+        write_text(self.paths.memory, "# Memory\n")
+        self.reviewer = AutomatedReviewer(
+            "claude", model="opus", fake_mode=True,
+            ui=TerminalUI(output_stream=io.StringIO(), interactive=False),
+        )
+
+    def _prompt(self) -> str:
+        return self.reviewer._build_review_prompt(
+            paths=self.paths, stage=STAGES[0], attempt_no=1,
+            stage_markdown="# Stage 01: Literature Survey", suggestions=["a", "b", "c"],
+        )
+
+    def test_the_prompt_ends_with_the_verdict_contract(self) -> None:
+        self.assertTrue(self._prompt().rstrip().endswith(CLOSING_VERDICT_INSTRUCTION.rstrip()))
+
+    def test_it_comes_after_the_log_excerpt_that_used_to_be_last(self) -> None:
+        prompt = self._prompt()
+        self.assertLess(prompt.index("Recent Log Excerpt"), prompt.index("Your Final Message"))
+
+    def test_it_offers_only_tokens_the_parser_accepts(self) -> None:
+        """The re-ask prompt once offered `revise`, which the parser rejected outright."""
+        import re
+
+        listed = re.findall(r'"decision":"([^"]+)"', CLOSING_VERDICT_INSTRUCTION)
+        self.assertTrue(listed)
+        for token in listed[0].split("|"):
+            self.assertIn(token, DECISION_TO_CHOICE, token)
+
+    def test_it_says_narrative_belongs_inside_the_object(self) -> None:
+        self.assertIn("reason", CLOSING_VERDICT_INSTRUCTION)
+        self.assertIn("nothing else", CLOSING_VERDICT_INSTRUCTION)
+
+    def test_it_warns_that_abort_stops_the_run(self) -> None:
+        """Three benchmark runs ended on a verdict the reviewer did not mean as fatal."""
+        self.assertIn("stops the whole run", CLOSING_VERDICT_INSTRUCTION)
+
+    def test_the_verdict_only_re_ask_also_offers_accepted_tokens(self) -> None:
+        import re
+
+        prompt = self.reviewer._build_verdict_only_prompt(stage=STAGES[0], previous="prose")
+        for token in re.findall(r'"(approve|revise|abort|custom_feedback)"', prompt):
+            self.assertIn(token, DECISION_TO_CHOICE, token)
