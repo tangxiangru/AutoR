@@ -63,6 +63,34 @@ UNREADABLE_REASON = "Automated reviewer did not return valid JSON."
 UNSUPPORTED_REASON = "Automated reviewer returned an unsupported decision token."
 CRASHED_REASON = "Automated reviewer failed to run."
 
+#: The last thing the reviewer reads, and the reason it is last.
+#:
+#: The verdict contract was stated once, near the top, and the prompt then ended with five
+#: thousand characters of log tail. Measured over one benchmark run's 65 recorded review
+#: calls, the primary call emitted no parseable decision in its closing output almost every
+#: time, while the verdict-only re-ask -- which asks for nothing else and asks for it last --
+#: produced one on essentially every attempt. A reviewer that has spent its turn inspecting
+#: files ends by narrating what it found, because narration is what the end of its context
+#: asks for.
+#:
+#: Every recovery costs an extra model call, and a re-ask that also misses costs the stage an
+#: attempt; enough of those exhaust the stage, then the auto-skip budget, then the run. So
+#: this restates the contract as the closing instruction. It adds no rule the fuller spec
+#: above does not already state.
+CLOSING_VERDICT_INSTRUCTION = (
+    "\n\n---\n\n"
+    "# Your Final Message\n\n"
+    "Everything above is material to judge. This is what to do about it.\n\n"
+    "Whatever you inspected and however much you reasoned, **your final message must be a "
+    "single JSON object and nothing else** — no preamble, no summary after it, no code "
+    "fence. Put the narrative inside `reason`, where it is read; outside the object it is "
+    "discarded and the verdict has to be asked for again.\n\n"
+    '{"decision":"approve|suggestion_1|suggestion_2|suggestion_3|custom_feedback|revise|abort",'
+    '"reason":"","feedback":"","carry_forward":[],"discharged":[]}\n\n'
+    "`decision` is required. Use `approve` or `revise`/`custom_feedback` unless the run is "
+    "genuinely blocked; `abort` stops the whole run, not just this stage."
+)
+
 
 def _try_load_json(text: str) -> dict[str, Any] | None:
     try:
@@ -481,6 +509,7 @@ class AutomatedReviewer:
             f"{self._read_excerpt(paths.experiment_manifest, max_chars=6000)}\n\n"
             "# Recent Log Excerpt\n\n"
             f"{self._read_excerpt(paths.logs, max_chars=5000, tail=True)}\n"
+            + CLOSING_VERDICT_INSTRUCTION
         )
 
     def _obligations_block(self, paths: RunPaths, stage: StageSpec) -> str:
