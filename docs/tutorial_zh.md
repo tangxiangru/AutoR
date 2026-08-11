@@ -2,7 +2,9 @@
 
 > 面向第一次使用 AutoR 的用户。
 >
-> 目标不是“把命令跑起来”而已，而是让你尽快掌握：如何安装、如何正确使用、如何在人类审批环节把结果从 toy 拉到真正可用，最后做出高质量的 PDF 研究产物。
+> 目标不是“把命令跑起来”而已，而是让你尽快掌握：如何安装、如何正确使用、如何在人类审批环节把结果从 toy 拉到真正可用，最后做出高质量的研究产物。
+>
+> 本文只讲怎么用。想先看清整体架构和设计取舍，读 [framework.md](framework.md)；想查某个参数的准确语义、默认值和恢复 run 时会不会被保留，读 [cli-reference.md](cli-reference.md)。
 
 ## 1. 先用一句话理解 AutoR
 
@@ -32,9 +34,9 @@ AutoR 不是一个“把论文一键生成出来”的黑盒，也不是一个�
 
 AutoR 当前主线适合做这些事情：
 
-- 从一个研究目标出发，按固定科研流程推进
+- 从一个研究目标出发，在一张八阶段的有向图里推进研究（默认往前走，必要时可以回溯）
 - 在每个阶段调用底层执行器完成真实工作
-- 把 prompt、日志、阶段总结、代码、数据、图、论文源文件、PDF 都落到 `runs/<run_id>/`
+- 把 prompt、日志、阶段总结、代码、数据、图、报告或论文源文件都落到 `runs/<run_id>/`
 - 支持从已有 run 恢复
 - 支持从某个特定 stage 重做
 - 支持把更早的 stage 回滚，然后让后续阶段全部失效重跑
@@ -42,6 +44,7 @@ AutoR 当前主线适合做这些事情：
 - 支持从你过去的论文语料起步
 - 支持按投稿 venue 组织 Stage 07 的写作输出
 - 支持文献整理、citation verification、实验清单、artifact 索引、发布打包
+- 用 `--rigor` 一个参数决定这次 run 开多少可选机制（见 8.2）
 
 底层执行器目前支持：
 
@@ -58,7 +61,38 @@ AutoR 负责的是更上层的 research loop，而不是重新发明一个新的
 - 终端 UI 更适合真实录屏和长 run：输出框正文行会保持彩色边框，长行、长路径和中文宽字符会自动换行，Stage 0 和审批菜单支持上下键选择。
 - Codex backend 已经改用当前 Codex CLI 的 `--sandbox workspace-write` 执行参数，不再触发 Codex CLI 内部旧 `--full-auto` 参数的 deprecated warning。注意这和 AutoR 自己的 `--full-auto` 审批模式不是一回事。
 - 如果你用 Codex 跑远程 SSH / GPU 实验，可以显式设置 `--codex-sandbox danger-full-access`。默认仍然是更安全的 `workspace-write`，不要把 unrestricted 模式当成默认选择。
-- `--full-auto` 仍然是 AutoR 的自动审批模式：它让一个严格 reviewer agent 替代人工等待，但不改变 9 个 stage 的主体流程。
+- `--full-auto` 仍然是 AutoR 的自动审批模式：它让一个严格 reviewer agent 替代人工等待，但不改变八个研究阶段的主体流程。它等价于 `--approval-mode agent` 加 `--unattended`，也就是整个 run 不会再停下来等任何终端输入。
+- 阶段之间的走法现在由一张有向图决定，默认拓扑是 `adaptive`：分析阶段发现设计有问题，可以直接回到 Stage 03，而不是硬着头皮往下写。细节见 8.1。
+- 默认的最终产物是 `workspace/report/report.md`，不是 PDF。要 LaTeX 源文件加可编译 PDF，显式传 `--output-format latex`。
+
+### 2.2 这份教程写成之后新增的开关
+
+如果你之前用过 AutoR，下面这些参数是后来才加的，第一次用也值得知道有它们存在：
+
+| 参数 | 一句话 |
+| --- | --- |
+| `--rigor {fast,standard,thorough,max}` | 一个档位决定开多少可选机制，默认 `standard`。见 8.2 |
+| `--stage-graph {linear,adaptive}` | 阶段拓扑，默认 `adaptive`（带回溯边）。见 8.1 |
+| `--routing {off,auto,agent}` | 谁来选下一条边，默认 `auto` |
+| `--output-format {markdown,md,latex,tex}` | 最终产物形态，默认 `markdown` |
+| `--final-stage 07` | 只跑到某个阶段就停，接受 `07` 或 `07_writing` |
+| `--max-rounds N` | Stage 03~06 作为一个 round 最多重复几次，默认 1 |
+| `--goal-file path.md` | 目标太长时从文件读，和 `--goal` 互斥 |
+| `--unattended` | 只是禁止等待终端输入，**不会替你装上 reviewer**；用尽重试的 stage 会被自动跳过。真要无人值守，配 `--approval-mode agent`，或者直接用 `--full-auto` |
+| `--max-attempts N` | 单个 stage 的尝试上限，默认 5 |
+| `--review-panel` | 用五席评审团替代单个 reviewer；**会让 run 变成无人值守** |
+| `--panel-models pi=opus skeptic=codex:default` | 给评审团每个席位单独指定模型 |
+| `--persona path.md` | 给评审团一份“你在替谁把关”的说明；只对评审团生效 |
+| `--ideation-panel` | Stage 02 多开五个不同视角的提案者，只提供候选，不做决定 |
+| `--deliberation` | 阶段卡在真正的分歧点时，临时拉一个四人小组把它议清楚 |
+| `--effort-tiers` / `--no-effort-tiers` | 把阶段分成 routine / deliberative，默认已开 |
+| `--evolve` / `--no-evolve` | 每份合格草稿都打分并保留最好的一版，默认已开 |
+| `--archive PATH` / `--archive-report` | 跨 run 记录走过哪些边、收益如何；默认只记录不干预 |
+| `--trial ID --capability X --arm on` / `--trial-report` | 成对 A/B 试验及其统计报告；三个参数必须一起给 |
+| `--web-search {auto,gemini,native}` | 执行器怎么搜网页；`gemini` 用于内置搜索被禁用的部署 |
+| `--cross-review {auto,gemini,off}` | 换一个模型家族复核批准。**注意：目前只有 `rcb_agent.py` 那条路径真的会装上它，`main.py` 上还没接线** |
+
+这张表是提醒，不是参考手册。每个参数的准确语义、默认值、恢复 run 时是否保留，都在 [cli-reference.md](cli-reference.md) 里。
 
 ---
 
@@ -72,9 +106,11 @@ AutoR 负责的是更上层的 research loop，而不是重新发明一个新的
 | Git | 必需 | 用于获取仓库 |
 | Node.js 18+ | 强烈建议 | `Claude Code` 官方要求 Node 18+；`Codex CLI` 也通过 npm 安装 |
 | Claude Code 或 Codex CLI | 必需 | 真正执行研究任务时需要其中之一 |
-| TeX 环境 | 可选但推荐 | Stage 07 更容易稳定产出可编译 PDF |
+| TeX 环境 | 只有 `--output-format latex` 才需要 | 默认 Stage 07 写的是 `workspace/report/report.md`；要 LaTeX 源文件和可编译 PDF 才需要 TeX |
 | `PyMuPDF` | 可选 | 如果你要用 `--paper-corpus` 读取 PDF 内容，推荐安装 |
-| `google-genai` / `Pillow` / `PyYAML` | 可选 | 只有在使用 `--research-diagram` 时才需要 |
+| `google-genai` | 可选 | 不只是画图用：`--research-diagram`、`--web-search gemini` 和 `--cross-review gemini`（这条目前只在 `rcb_agent.py` 上接线，见 2.2）共用这一个 SDK。没装它时 `--web-search gemini` 会直接报 `Error: --web-search gemini cannot work here: ...` 并以退出码 1 结束 |
+| `Pillow` | 可选 | 只有 `--research-diagram` 需要 |
+| `PyYAML` | 可选 | 只有当你把 Gemini key 写进 `configs/diagram_config.yaml` 时才需要（画图、搜索、cross-review 共用同一个 key 读取逻辑）。缺它只会打一条 warning，然后当成“没有配 key” |
 
 平台建议：
 
@@ -181,7 +217,7 @@ claude
 
 ```text
 请在当前目录安装 AutoR：
-1. clone https://github.com/AutoX-AI-Labs/AutoR.git
+1. clone https://github.com/tangxiangru/AutoR.git
 2. 进入仓库，阅读 README 和 python main.py --help
 3. 如有必要，创建 Python 虚拟环境
 4. 安装当前仓库运行所需的最小依赖
@@ -201,7 +237,7 @@ claude
 如果你更喜欢手动操作，也可以直接：
 
 ```bash
-git clone https://github.com/AutoX-AI-Labs/AutoR.git
+git clone https://github.com/tangxiangru/AutoR.git
 cd AutoR
 python main.py --help
 ```
@@ -218,7 +254,9 @@ pip install google-genai pillow pyyaml
 其中：
 
 - `pymupdf` 用于 `--paper-corpus` 的 PDF 文本提取
-- `google-genai pillow pyyaml` 用于 `--research-diagram`
+- `google-genai` 是 `--research-diagram`、`--web-search gemini` 和 `--cross-review gemini` 共用的 SDK，不是画图专属
+- `pillow` 只有 `--research-diagram` 需要
+- `pyyaml` 只在你把 Gemini key 放进 `configs/diagram_config.yaml` 时才需要；改用环境变量 `GOOGLE_API_KEY` / `GEMINI_API_KEY` 就不需要它
 
 ---
 
@@ -389,7 +427,7 @@ python main.py \
 
 这个选项会给 Codex 后端不受 sandbox 限制的本地和远程执行能力。只在你信任当前任务、确认 SSH 命令安全、并且确实需要远程执行时使用。
 
-补充两条很有用的默认行为：
+补充几条很有用的默认行为：
 
 - 新建 run 时，如果你不写 `--operator`，默认使用 `claude`
 - 新建 run 时，如果你不写 `--model`，Claude 默认是 `sonnet`，Codex 默认是 `default`
@@ -417,10 +455,16 @@ python main.py \
   --goal "..."
 ```
 
-这里要明确两点：
+这里要明确四点：
 
 - `--full-auto` **不会改变主体科研流程**，只是把原来等待人工审批的地方，替换成一个严格的 reviewer agent
 - 真正重要、要出高质量成果的研究，仍然推荐默认的人类审批模式；`--full-auto` 更适合夜间 unattended run、批量 dry run、流程压测或长任务巡航
+- **能把 agent 放到审批位置上的参数有 3 个，不是一个**：`--approval-mode agent`、`--full-auto`、`--review-panel`。这三个都会把 `approval_mode` 置成 `agent`，于是 `create_reviewer` 真的造出一个 reviewer 顶替你，run 也随之变成无人值守。其中 `--review-panel` 最容易被误会——它看起来像“评审更严”，实际效果是把人换成了五个 agent。再加一层：`--rigor max` 隐含 `--review-panel`，所以**只写一个 `--rigor max` 也会把一次交互式运行悄悄变成无人值守运行**
+- **`--unattended` 不在这 3 个里面，它是另一件事。** 它只回答“这次 run 允不允许停下来等终端输入”，并不安排任何人来替你答。单独给 `--unattended` 时 `approval_mode` 仍然是 `manual`（启动横幅照旧打印 `Approval mode: manual human gate.`），第一个 stage 结束后审批菜单照样弹出来，然后因为没人可问而报 `Error: AutoR is running unattended and cannot answer an interactive prompt`，退出码 1。要跑通就写 `--full-auto`，或者补齐成 `--unattended --approval-mode agent`
+
+“把人移开”和“让 agent 顶上”是两句不同的话：`--unattended` 只做前者，剩下三个两件都做。
+
+无人值守（`approval_mode` 已经是 `agent`，或显式给了 `--unattended`）模式下还有一个副作用要知道：某个 stage 用尽重试预算之后不会中止整个 run，而是被自动跳过，上限由 `--max-auto-skips` 控制（默认 3）。人工模式下同样的情况会弹出恢复菜单让你选。
 
 ### 7.2 推荐同时指定投稿 venue
 
@@ -613,9 +657,8 @@ Local execution is only for smoke tests.
 
 ## 8. AutoR 会怎么运行
 
-典型流程是：
+正式的研究阶段一共 **八个**：
 
-0. `00_intake`（可选）
 1. `01_literature_survey`
 2. `02_hypothesis_generation`
 3. `03_study_design`
@@ -625,7 +668,9 @@ Local execution is only for smoke tests.
 7. `07_writing`
 8. `08_dissemination`
 
-也就是说，实际是 **1 个 intake + 8 个正式研究阶段 = 9 个 stage**。
+`00_intake` 排在它们前面，但它不是这八个阶段之一，也不是图上的节点：它是正式研究开始前的一次对齐，可以用 `--skip-intake` 跳过。
+
+这八个阶段**不是一条固定顺序的流水线**，而是一张有向图上的节点。默认情况下运行会一路往前走，走出来的路径看上去和流水线一样；但当某个阶段发现更早的工作出了问题时，它可以回到更早的节点。怎么走、谁来选、什么时候不许走，见 8.1。
 
 | Stage | 这一阶段做什么 | 你应该重点检查什么 |
 | --- | --- | --- |
@@ -636,7 +681,7 @@ Local execution is only for smoke tests.
 | `04_implementation` | 写真实代码、配置、数据准备脚本和 sanity check。 | 不要 approve 只有 skeleton 的实现；要看到可运行脚本、命令、配置和日志。 |
 | `05_experimentation` | 按设计运行实验并保存机器可读结果。 | 区分 smoke test 和正式实验；要有 baseline、重复运行、结果文件和失败记录。 |
 | `06_analysis` | 分析结果、画图、做误差分析和机制解释。 | 不要只复述最好指标；要看图表、失败案例、消融解释和结论边界。 |
-| `07_writing` | 生成 venue-aware 的论文源文件、Bib、可编译 PDF 和引用校验。 | 检查每个核心 claim 是否能追溯到实验、图表或文献，不要只看 PDF 是否漂亮。 |
+| `07_writing` | 默认生成 `workspace/report/report.md` 和它引用的图；`--output-format latex` 则生成 venue-aware 的论文源文件、Bib 和可编译 PDF。两种模式都做引用校验。 | 检查每个核心 claim 是否能追溯到实验、图表或文献，不要只看排版是否漂亮。 |
 | `08_dissemination` | 补齐 review、release、readiness、复现和对外交付材料。 | 确认这个 run 能被别人检查、复现、展示，而不是只停在论文。 |
 
 每个 stage 的逻辑都一样：
@@ -645,7 +690,12 @@ Local execution is only for smoke tests.
 2. 底层执行器开始做事
 3. 结果实时显示在终端里
 4. stage 结束后生成结构化 stage summary
-5. 你决定是 refine 还是 approve
+5. AutoR 先做机器校验：stage summary 必须有 7 个规定小节，该落盘的结构化文件必须真的存在、能解析、引用的路径能解析到真实文件。不合格会先尝试修复，再重跑，上限由 `--max-attempts` 控制（默认 5）
+6. 校验通过的草稿会被 rubric 打分，必要时再打磨一两轮，只保留分数最高的那一版（`--no-evolve` 可关掉）
+7. 你决定是 refine 还是 approve
+8. 你批准之后，AutoR 才评估图上每条边能不能走，并决定下一个阶段是哪个（见 8.1）
+
+第 5 步值得单独强调：**这层校验读的是磁盘上的文件，不是 agent 的自述。** 它不看 agent 说自己做了什么，只看 `workspace/` 里到底有什么。所以“阶段总结写得很漂亮但没有文件”这种情况过不了机器校验，根本轮不到你审。
 
 从 `01_literature_survey` 到 `08_dissemination`，审批菜单固定有 6 个动作：
 
@@ -680,25 +730,81 @@ Local execution is only for smoke tests.
 
 这意味着：
 
-- 默认仍然是顺序推进
+- 默认仍然是往前走
 - 但如果你确认当前 stage 先不做、或者需要回到更早阶段重来，不用硬退出整个 run
 
 注意：
 
 - `/back` 是回到更早阶段，不是跳到更晚阶段
+- `/back` 走的是人的通道，不经过 8.1 里那套 guard 和 agent 选边的逻辑：你要求回去就回去
 - 如果当前 stage 已经连续失败到超过重试上限，AutoR 也会弹出恢复菜单，让你直接选择“跳过当前阶段”或“回到更早阶段”
 
 还有一个很值得注意的细节：
 
 每个 stage summary 里不只有结果说明，还会包含一个 `Decision Ledger`。
 
-你可以把它理解为“当前 run 的阶段性决策账本”，里面通常会沉淀：
+你可以把它理解为“当前 run 的阶段性决策账本”，它是 7 个必填小节之一，而且必须同时写出四块内容，缺一块这个 stage 就通不过校验：
 
-- 哪些关键判断已经锁定
-- 还有哪些开放问题
-- 当前阶段为什么这样取舍
+- `Open Questions`：还有哪些开放问题
+- `Locked Decisions`：哪些关键判断已经锁定
+- `Assumptions`：当前阶段建立在哪些假定上
+- `Rejected Alternatives`：哪些方案被否掉了，为什么
 
 这些信息会随着 handoff 一起影响后续阶段，所以它不是装饰性文字，而是研究方向保持稳定的重要机制。
+
+### 8.1 阶段之间怎么走：一张有向图，不是一条流水线
+
+`--stage-graph` 决定拓扑，默认是 `adaptive`：
+
+- 八条前向边（`01→02`…`08→finish`），其中**六条带 guard**——通往 `03`、`04`、`05`、`06`、`07`、`08` 的那六条
+- **十三条回溯边**，例如 `06_analysis → 03_study_design`（分析暴露了设计缺陷）、`07_writing → 05_experimentation`（写作时发现少了一个结果）、`02 → 01`（写假设时发现所谓的空白其实文献里有人做过）
+- 一条条件终止边：一个 round 如果在 Stage 06 判定“这个问题用现有资源答不了”，可以直接结束，而不是硬写一篇论文
+- 合计 22 条边
+
+`--stage-graph linear` 则是 9 条边：同样的八条前向边加那条终止边，回溯边全部去掉，前向边上也不再挂 guard——也就是严格的 01 到 08。前向边不设 guard 是有意的：那里每个节点只有一条边可走，guard 唯一能做的事就是把 run 停住，而它要停的那个条件本来就已经是阶段校验错误，报错信息还更清楚。
+
+三件事值得记住：
+
+**第一，guard 读的是磁盘，不是 agent 的说法。** 通往 `05_experimentation` 的边要求 `workspace/code/` 里真的有可执行文件；通往 `07_writing` 的边要求预注册存在、每条实证假设都有裁定、并且 `workspace/figures/` 里真的有图。条件不满足时，这条边仍然会列在给 agent 看的菜单里，但可用性一栏写的是 `**no** — 原因`，agent 选它会被 refuse 掉。
+
+但要说清楚 guard 到底管到哪一步：**它是路由偏好，不是正确性闸门。** 当一个节点的前向边被 guard 关掉、又没有别人来选边时，`default_move` 仍然会把这条前向边当作 last resort 走下去。实测：把一个已完成 run 的 `workspace/notes/preregistration.json` 删掉之后，`06_analysis` 的 `07_writing` 这条边报 `admissible=False`（“the hypotheses were never frozen”），而 `default_move` 返回的还是 `07_writing`。也就是说，只要 agent 没有主动挑一条回溯边（`--routing off`、没接 backend、或者 agent 的选择被 refuse 掉时都是如此），一个完全不满足 Stage 07 前置条件的 run 照样会进 Stage 07——真正在那里把它拦下来的是这个阶段自己的产物校验（`validate_stage_artifacts`），不是这条边。这样设计是有意的：guard 挡死会让 run 在回溯边之间来回弹到预算耗尽、最后什么都不交，而阶段校验至少会带着证据老老实实报错。
+
+所以 guard 能保证的是“agent 不能主动挑一条自己没资格走的边”，不是“run 绝不会走到那个节点”。
+
+**第二，回溯边不是自动走的，也不是随便走的。** 一条回溯边要成立，先要 guard 允许，再要 agent 明确说出为什么要回去，而且**理由不能和这条路径上已经用过的理由重复**——同一个抱怨走第二遍是死循环，不是迭代。agent 亲自选的边（以及被拒掉的选择）会打印在终端上，所有走过的边都会记进 `evolution/stage_graph.json`。
+
+**第三，默认永远是往前。** 拒绝一次选边、选边失败、或者没人盯着的 run，结果都是继续走前向边，而不是卡住。所以你在实际使用中看到的多数 run，路径就是一条直线。
+
+`--routing` 决定谁来选边：默认 `auto`，只在同一个节点有多条可走的边时才去问 backend；`agent` 是每个节点都问；`off` 永远走图的默认边。
+
+要强调的是：**这一切都发生在你批准这个 stage 之后。** 阶段边界仍然由人把关（除非你用了 8.2 里那些会把人换掉的开关），agent 能决定的只是“下一步去哪个节点”，不是“这个 stage 算不算过”。
+
+### 8.2 `--rigor`：一个参数决定这次 run 开多少可选机制
+
+AutoR 有四个可选机制，过去要分别记四个开关。现在它们收进一个档位参数：
+
+| `--rigor` | effort tiers | crux deliberation | ideation panel | review panel |
+| --- | :---: | :---: | :---: | :---: |
+| `fast` | – | – | – | – |
+| `standard`（默认） | **开** | – | – | – |
+| `thorough` | **开** | **开** | **开** | – |
+| `max` | **开** | **开** | **开** | **开** |
+
+四个机制各自是什么：
+
+- **effort tiers**：把阶段分成 routine 和 deliberative 两档。routine 的阶段拿精简 prompt、单个 reviewer、不提供升级选项。默认判定里 `04_implementation`、`05_experimentation`、`08_dissemination` 是 routine，其余是 deliberative；一个 routine 阶段反复失败会被自动提升。**它是四个里唯一让 run 变便宜的**，所以默认就开着。
+- **crux deliberation**：阶段真的卡在一个分歧点上时，临时拉一个四人小组（theorist / empiricist / critic / pragmatist）把它议清楚。有预算上限，默认一个 run 最多 3 次。
+- **ideation panel**：Stage 02 多开五个不同视角的提案者，去重打分后交给这个阶段挑。它只提供候选，不做决定。
+- **review panel**：五席评审团替代单个 reviewer——先独立评，再匿名交叉质询，最后由主席汇总；有阻断性反对意见时，代码层面不允许主席批准通过。
+
+两条一定要知道的后果：
+
+- **`--rigor max` 会让这次 run 变成无人值守。** 因为它隐含 `--review-panel`，而 `--review-panel` 意味着审批交给 agent。看起来最严的档位，恰恰是把人拿掉的那一档。要人工审批就不要用 `max`。
+- **单独的开关永远压过档位。** `--rigor thorough --no-ideation-panel` 就是字面意思。反过来，`--rigor fast --review-panel` 也成立。
+
+科学有效性那条链——预注册、决策规则、假设裁定、claim 溯源——**不在这个拨盘上**，任何档位（包括 `fast`）都无条件执行。
+
+更细的说明见 [rigor.md](rigor.md)、[effort-tiers.md](effort-tiers.md)、[deliberation.md](deliberation.md)、[ideation-panel.md](ideation-panel.md)、[review-panel.md](review-panel.md)。
 
 ---
 
@@ -725,7 +831,7 @@ Local execution is only for smoke tests.
 - 只写了文字总结，没有真实数据文件
 - 只做了 smoke test，没有做正式实验
 - 只画了图，没有机器可读结果
-- 只写了 PDF，但 claim 没有真实证据支撑
+- 只写了报告，但 claim 没有真实证据支撑
 - 只引用了几篇常见论文，没有真正做 survey
 - 只给出“计划怎么做”，没有真正把文件写出来
 
@@ -835,8 +941,34 @@ AutoR 的强项不是“第一轮就完美”，而是：
 | 从某个 stage 回滚 | `python main.py --resume-run latest --rollback-stage 03` |
 | 扫描已有项目并推荐切入 stage | `python main.py --goal "..." --project-root /path/to/project` |
 | 从你的过往论文语料构建研究者画像 | `python main.py --goal "..." --paper-corpus /path/to/papers` |
-| 生成研究方法图并插入论文 | `python main.py --goal "..." --research-diagram` |
+| 生成研究方法图并插入成品 | `python main.py --goal "..." --research-diagram` |
 | 调大单个 stage 超时上限 | `python main.py --goal "..." --stage-timeout 28800` |
+| 目标太长，从文件读 | `python main.py --goal-file goal.md` |
+| 要 LaTeX 源文件和可编译 PDF | `python main.py --goal "..." --output-format latex` |
+| 只跑到写作阶段就停 | `python main.py --goal "..." --final-stage 07` |
+| 让一个 reviewer agent 代替人工审批 | `python main.py --full-auto --goal "..."` |
+| 执行 agent 和 reviewer 分开 | `python main.py --operator codex --full-auto --review-operator claude --review-model opus --goal "..."` |
+| 调多可选机制的档位 | `python main.py --rigor thorough --goal "..."` |
+| 只加 Stage 02 提案面板 | `python main.py --ideation-panel --goal "..."` |
+| 只加 crux 小组 | `python main.py --deliberation --goal "..."` |
+| 关掉分档，所有阶段都走全套 | `python main.py --no-effort-tiers --goal "..."` |
+| 五席评审团（会让 run 变成无人值守） | `python main.py --review-panel --goal "..."` |
+| 给评审团分配模型 | `python main.py --review-panel --panel-models pi=opus skeptic=codex:default --goal "..."` |
+| 给评审团一份人设 | `python main.py --review-panel --persona persona.md --goal "..."` |
+| 退回严格的 01→08 顺序 | `python main.py --stage-graph linear --goal "..."` |
+| 每个节点都让 agent 选下一步 | `python main.py --routing agent --goal "..."` |
+| 永远走默认边，不问 agent | `python main.py --routing off --goal "..."` |
+| 允许 Stage 03~06 多跑几轮 | `python main.py --max-rounds 2 --goal "..."` |
+| 放宽单个 stage 的尝试次数 | `python main.py --max-attempts 8 --goal "..."` |
+| 无人值守（不等任何终端输入） | `python main.py --unattended --approval-mode agent --goal "..."`（光给 `--unattended` 会在第一个审批菜单处报错退出，见 7.1） |
+| 内置 WebSearch 被禁用时改走 Gemini | `python main.py --web-search gemini --goal "..."`（先 `pip install google-genai` 并配好 key，否则启动就被拒绝） |
+| 关掉打分与择优 | `python main.py --no-evolve --goal "..."` |
+| 看跨 run 归档学到了什么 | `python main.py --archive-report` |
+| 不把这次 run 写进归档 | `python main.py --no-archive --goal "..."` |
+| 把这次 run 标成成对试验的一侧 | `python main.py --trial t1 --capability review_panel --arm on --goal "..."` |
+| 看成对试验的统计结果 | `python main.py --trial-report` |
+
+`--archive-report` 和 `--trial-report` 打印完就退出，不会启动 run。新装的环境里它们是空表——那是当前的真实状态，不是 bug。
 
 ### 12.1 `--redo-stage` 和 `--rollback-stage` 的区别
 
@@ -958,8 +1090,8 @@ python main.py --runs-dir /mnt/large-disk/autor-runs --goal "..."
 - 没有真实实验
 - 没有真实数据文件
 - 没有 figure
-- 没有 PDF
-- PDF 只是形式完成，没有证据支撑
+- 没有最终报告（默认是 `workspace/report/report.md`，latex 模式下是 PDF）
+- 报告只是形式完成，没有证据支撑
 - 只是“计划下一步做什么”
 
 你放水一次，后面往往要多补三次。
@@ -1062,7 +1194,7 @@ python main.py --goal "..." --stage-timeout 28800
 
 ### 技巧 12：`--research-diagram` 是增强项，不是必需项
 
-如果你想在 Stage 07 后自动生成一个方法图并插入论文，可以开启：
+如果你想在 Stage 07 后自动生成一个方法图并插进成品（markdown 模式插进 `report.md`，latex 模式插进 `method.tex`），可以开启：
 
 ```bash
 python main.py --goal "..." --research-diagram
@@ -1094,7 +1226,7 @@ pip install google-genai pillow pyyaml
 
 这些文件非常有用：
 
-- `run_manifest.json`：看每个 stage 当前是 pending、running、approved、stale 还是 dirty
+- `run_manifest.json`：看每个 stage 的 `status` 字段（停在审批菜单前等你处理时，它是 `human_review`），以及 `dirty` 和 `stale` 两个独立的布尔标志——这两个是标志位，不是 `status` 的取值。`status` 到底会写成哪些值，以 `src/manifest.py` 里 `StageManifestEntry` 和那一组 `mark_stage_*_manifest` 函数为准
 - `prompt_cache/`：看这个 stage 当时到底拿到了什么 prompt
 - `operator_state/`：看 session、attempt 和记忆恢复状态
 - `handoff/`：看前面阶段给后面阶段传了什么压缩交接信息
@@ -1188,17 +1320,20 @@ pip install google-genai pillow pyyaml
 - 任何已有 baseline 结果
 - 你的实验想法笔记
 
-### 第三步：开局就指定 venue
+### 第三步：开局就指定 venue，并且明确要 LaTeX
 
-例如：
+**默认的最终产物是 Markdown 报告，不是 PDF。** 要 PDF 就必须显式写 `--output-format latex`：
 
 ```bash
 python main.py \
   --operator claude \
   --model sonnet \
   --venue neurips_2025 \
+  --output-format latex \
   --goal "..."
 ```
+
+`--output-format` 在恢复 run 时会保留，所以开局定下来比中途改省事。
 
 ### 第四步：在 Stage 03~06 非常严格
 
@@ -1215,13 +1350,22 @@ python main.py \
 
 不要被“已经有 PDF”这件事骗过去。
 
-好的 Stage 07 至少应当同时具备：
+在 `--output-format latex` 下，好的 Stage 07 至少应当同时具备：
 
 - LaTeX 源文件
 - Bib
 - 编译成功的 PDF
 - citation verification 输出
 - 关键 claim 对应的实验和图表
+
+在默认的 markdown 模式下，对应的是：
+
+- `workspace/report/report.md`，而且它至少引用了一张图，每个图片引用都用 `report.md` 的相对路径（推荐 `images/xxx.png`）解析到 `workspace/report/` 下真实存在的文件
+- 每个结论都带数字，而不是只有形容词
+- citation verification 输出
+- 关键 claim 对应的实验和图表
+
+还有一层机器保证值得知道：从 Stage 07 起，`workspace/artifacts/claim_provenance.json` 里的每条 claim 要么是挂在某条 `supported` 预注册假设上的 `confirmatory`，要么被显式标成 `exploratory`，而且都要引到真实存在的文件。做不到，这个阶段过不了校验。
 
 ### 第六步：如果前面某一步不对，果断 redo 或 rollback
 
@@ -1261,17 +1405,22 @@ runs/<run_id>/
 | `runs/<run_id>/workspace/data/` | 数据 |
 | `runs/<run_id>/workspace/results/` | 机器可读结果 |
 | `runs/<run_id>/workspace/results/experiment_manifest.json` | 标准化实验清单，后续分析和写作都会用到 |
+| `runs/<run_id>/workspace/results/hypothesis_outcomes.json` | Stage 06 对每条冻结假设的裁定，以及裁定所引的证据文件 |
 | `runs/<run_id>/workspace/figures/` | 图 |
-| `runs/<run_id>/workspace/writing/` | 论文源文件 |
+| `runs/<run_id>/workspace/report/report.md` | **默认模式下的最终报告** |
+| `runs/<run_id>/workspace/report/images/` | 报告引用的图片 |
+| `runs/<run_id>/workspace/writing/` | 论文源文件（`--output-format latex`） |
 | `runs/<run_id>/workspace/artifacts/` | PDF 和打包产物 |
 | `runs/<run_id>/workspace/artifacts/citation_verification.json` | 写作阶段的引用与 claim 覆盖校验结果 |
 | `runs/<run_id>/workspace/notes/hypothesis_manifest.json` | 假设阶段提炼出的结构化假设清单 |
+| `runs/<run_id>/workspace/notes/preregistration.json` | Stage 04 批准时冻结下来的预注册，之后不再被覆盖 |
 | `runs/<run_id>/workspace/reviews/` | review / release 材料 |
+| `runs/<run_id>/evolution/` | 每一版候选草稿、它们的分数、冠军版本和改进账本；**在 `workspace/` 之外**，导出成果时不会被一起带走 |
 
-如果你想找最终 PDF，优先看：
+如果你想找最终产物：
 
-- `workspace/artifacts/`
-- `workspace/writing/`
+- 默认（markdown）模式：`workspace/report/report.md`
+- `--output-format latex`：`workspace/artifacts/` 和 `workspace/writing/`
 
 ---
 
@@ -1330,6 +1479,15 @@ AutoR 当前支持 `claude` 和 `codex`。恢复 run 时默认会保留之前的
 2. 再跑一次 smoke test
 3. 再开一个带 `--resources` 的真实 run
 4. 最后再去看 `runs/<run_id>/` 里的真实产物结构
+
+想继续往深处走：
+
+- [framework.md](framework.md)：这个系统在赌什么、六条设计承诺、控制回路怎么跑、以及作者自己列出的“还没有被证明的部分”
+- [cli-reference.md](cli-reference.md)：每个参数的默认值、恢复 run 时是否保留、退出码
+- [architecture.md](architecture.md)：模块地图
+- [stage-contract.md](stage-contract.md)：一个 stage 必须写出什么才算合格
+- [run-artifacts.md](run-artifacts.md)：`runs/<run_id>/` 里每个文件的含义
+- [troubleshooting.md](troubleshooting.md)：跑不通的时候先看这里
 
 ---
 

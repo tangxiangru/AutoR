@@ -2,7 +2,7 @@
 
 > This guide is for first-time AutoR users.
 >
-> The goal is not just to make the command run. The goal is to help you understand how to install AutoR, how to use it correctly, how to supervise each stage so outputs do not stay toy-level, and how to get to a strong final PDF as quickly as possible.
+> The goal is not just to make the command run. The goal is to help you understand how to install AutoR, how to use it correctly, how to supervise each stage so outputs do not stay toy-level, and how to get to a strong final deliverable — a markdown report by default, or a compiled PDF with `--output-format latex` — as quickly as possible.
 
 ## 1. AutoR in One Sentence
 
@@ -26,6 +26,8 @@ So when you use AutoR, the highest-leverage thing is not pressing Enter once. It
 
 If you use that loop well, AutoR becomes much stronger.
 
+> **Want the design instead of the steps?** This guide is the operating manual. [framework.md](framework.md) is the argument: why every gate is a function that reads the filesystem rather than the transcript, why the improvement loop is scored by something it cannot influence, and — stated just as plainly — what has *not* been established. Read it if you want to know why AutoR is shaped the way it is; you do not need it to run your first project.
+
 ---
 
 ## 2. What AutoR Can Do
@@ -33,15 +35,17 @@ If you use that loop well, AutoR becomes much stronger.
 The current mainline is built for these workflows:
 
 - start from a concrete research goal
-- move through a fixed multi-stage research pipeline
+- walk eight research stages that are **nodes in a directed graph**, not steps in a fixed list: the default move is always forward, but a stage that exposes an earlier mistake can send the run back
 - call a real execution backend at every stage
-- write prompts, logs, stage summaries, code, data, figures, writing sources, and PDFs to `runs/<run_id>/`
+- write prompts, logs, stage summaries, code, data, figures, writing sources, reports, and PDFs to `runs/<run_id>/`
 - resume an existing run
 - redo from a specific stage
 - roll back to an earlier stage and invalidate downstream work
+- stop early at a chosen stage (`--final-stage`)
 - start from an existing project repository
 - start from your own prior paper corpus
-- organize Stage 07 writing around a target venue profile
+- produce either a markdown report (the default) or a venue-aware LaTeX package with a compiled PDF (`--output-format latex`)
+- choose how much optional machinery a run uses with one dial (`--rigor`)
 - support literature organization, citation verification, experiment manifests, artifact indexing, and packaging
 
 The current execution backends are:
@@ -59,7 +63,10 @@ Several recent mainline changes matter for real use:
 - The terminal UI is better suited for real runs and recordings: panel body rows keep colored borders, long lines, long paths, and wide characters wrap inside the frame, and Stage 0 plus approval menus support keyboard navigation.
 - The Codex backend now uses the current Codex CLI `--sandbox workspace-write` execution flag, so it should not emit the deprecated Codex CLI `--full-auto` warning. This is separate from AutoR's own `--full-auto` approval mode.
 - If a Codex-backed run needs remote SSH / GPU execution, you can explicitly use `--codex-sandbox danger-full-access`. The default remains the safer `workspace-write`; do not use unrestricted mode by default.
-- AutoR's `--full-auto` still means automated approval: a strict reviewer agent replaces the waiting human gate, while the 9-stage research workflow itself stays unchanged.
+- AutoR's `--full-auto` still means automated approval: a strict reviewer agent replaces the waiting human gate, while the eight-stage research workflow itself stays unchanged. Note that `--full-auto` is a shortcut for `--approval-mode agent` **plus** `--unattended`, so it also stops the run from ever blocking on terminal input, and a stage that burns its whole retry budget is auto-skipped rather than aborting the run (up to `--max-auto-skips`, default 3).
+- The stages are a **graph**, not a list. `--stage-graph` defaults to `adaptive`, where an analysis that exposes a design flaw can route back to Stage 03 instead of writing up around it. `--stage-graph linear` gives the strict 01-through-08 sequence, except that a round which concludes the question cannot be answered still finishes at Stage 06. See [8.1](#81-the-shape-of-the-walk) and [8.2](#82-when-a-late-finding-sends-the-run-back).
+- The optional machinery is behind one dial. `--rigor` picks a level (`fast`, `standard`, `thorough`, `max`) instead of asking you to know four separate switches; `standard` is the default. See [6.5](#65-one-dial-you-should-meet-early---rigor).
+- Stage 07's default deliverable is a markdown report at `workspace/report/report.md` with embedded figures. The submission-style LaTeX package and compiled PDF are still there, behind `--output-format latex`.
 
 ---
 
@@ -73,9 +80,11 @@ Recommended environment:
 | Git | Required | Needed to clone the repository |
 | Node.js 18+ | Strongly recommended | Claude Code officially requires Node 18+, and Codex CLI is also installed via npm |
 | Claude Code or Codex CLI | Required for real runs | You need at least one execution backend |
-| TeX toolchain | Optional but recommended | Helps Stage 07 produce stable compilable PDFs |
+| TeX toolchain | Optional | Only needed for `--output-format latex`, where Stage 07 compiles a PDF |
 | `PyMuPDF` | Optional | Recommended if you use `--paper-corpus` and want PDF text extraction |
-| `google-genai` / `Pillow` / `PyYAML` | Optional | Only needed for `--research-diagram` |
+| `google-genai` / `Pillow` / `PyYAML` | Optional | Needed for `--research-diagram`; `google-genai` is also what `--web-search gemini` and `--cross-review` use |
+
+AutoR's own runtime imports nothing outside the Python standard library, so there is no install step and no requirements file to fight with. Everything in the *Optional* rows above degrades to a recorded "unavailable" rather than a crash.
 
 Platform notes:
 
@@ -184,7 +193,7 @@ Then give it something like this:
 
 ```text
 Please install AutoR in the current directory:
-1. clone https://github.com/AutoX-AI-Labs/AutoR.git
+1. clone https://github.com/tangxiangru/AutoR.git
 2. enter the repo and read the README plus python main.py --help
 3. create a Python virtual environment if needed
 4. install the minimum dependencies required to run the current repo
@@ -204,7 +213,7 @@ Why this is useful:
 If you prefer to do it manually:
 
 ```bash
-git clone https://github.com/AutoX-AI-Labs/AutoR.git
+git clone https://github.com/tangxiangru/AutoR.git
 cd AutoR
 python main.py --help
 ```
@@ -318,6 +327,8 @@ Its purpose is only to check:
 
 Do not mistake a smoke test for a real research run.
 
+One thing a smoke test cannot show you: with `--fake-operator` there is no backend to ask which move to take, so the router always takes the graph's default edge. A fake run therefore walks straight through 01 to 08 and never demonstrates a backward move.
+
 ### 6.4 Optional: Use AutoR Studio in the Browser
 
 If you prefer approving stages, reading the paper, and watching progress from a browser, you can use **AutoR Studio** instead of staying in the terminal the whole time.
@@ -361,6 +372,48 @@ Good rule of thumb:
 - use `python main.py` when you want the most direct, scriptable, backend-flexible workflow
 - use `python studio.py` when you want a more visual approval, review, and demo experience
 
+One more Studio limitation worth knowing before you pick an interface: Studio exposes no stage-graph or routing switches. It drives the same `ResearchManager` the terminal does, so graph routing and backward moves are available there too — but every Studio run gets the defaults (the adaptive graph, `--routing auto`), and there is no browser equivalent of `--stage-graph linear --routing off`.
+
+### 6.5 One Dial You Should Meet Early: `--rigor`
+
+AutoR has a set of optional mechanisms — cheaper prompts for settled stages, a crux panel, an ideation panel, a five-seat review panel. You do not have to learn four switches to use them. One flag picks a level:
+
+| `--rigor` | effort tiers | crux deliberation | ideation panel | review panel |
+| --- | :---: | :---: | :---: | :---: |
+| `fast` | – | – | – | – |
+| `standard` *(the default)* | **on** | – | – | – |
+| `thorough` | **on** | **on** | **on** | – |
+| `max` | **on** | **on** | **on** | **on** |
+
+Each level adds to the one above it, and the table is `_LEVEL_FEATURES` in [../src/rigor.py](../src/rigor.py), which is the single source of truth for it — `python main.py --help` prints the same rows.
+
+What each one is:
+
+- **effort tiers** (`--effort-tiers`) — runs each stage as *routine* or *deliberative* instead of treating them alike. By default `04_implementation`, `05_experimentation` and `08_dissemination` start routine: a leaner prompt, one reviewer, no polish rounds. A routine stage that keeps failing its gate is promoted automatically. This is the only one of the four that makes a run **cheaper**, which is why it is on at the default level.
+- **crux deliberation** (`--deliberation`) — lets a stage stop and pull in a four-voice panel when it hits a genuine crux. Budgeted: `--max-deliberations` defaults to 3.
+- **ideation panel** (`--ideation-panel`) — widens Stage 02 with five proposers working from distinct lenses. It proposes; it decides nothing.
+- **review panel** (`--review-panel`) — replaces the single reviewer with five role-differentiated seats (PI, domain expert, methodologist, reproducibility engineer, adversarial reviewer) that review blind, cross-examine, then have a chair synthesize one decision. `--panel-roles` can reseat it, including an optional sixth `reader` seat.
+
+An explicit switch always beats the level, in both directions:
+
+```bash
+python main.py --rigor thorough --no-ideation-panel --goal "..."
+python main.py --rigor fast --deliberation --goal "..."
+```
+
+**The warning that matters most on this page:**
+
+> `--rigor max` implies `--review-panel`, and `--review-panel` **removes the human from the approval gate**. The panel *is* an approval gate, so there is nobody left to answer a terminal prompt: `resolve_unattended` in [../main.py](../main.py) returns true for `--review-panel` exactly as it does for `--unattended` and `--full-auto`, and `--rigor` is resolved *before* it. A plain `python main.py --rigor max --goal "..."` is therefore an unattended, agent-gated run — the flag that reads like *more review* is the flag that takes away *your* review.
+
+If you want the extra machinery but intend to approve the stages yourself, ask for it without the panel:
+
+```bash
+python main.py --rigor thorough --goal "..."          # deliberation + ideation, human still at the gate
+python main.py --rigor max --no-review-panel --goal "..."   # same effect, stated the other way round
+```
+
+For a new user, `standard` (that is, passing nothing) is the right starting point. Details, and how the levels read back in the run log: [rigor.md](rigor.md).
+
 ---
 
 ## 7. Step Four: Use Explicit Flags When You Need Fixed Configuration
@@ -384,6 +437,8 @@ python main.py \
   --model default \
   --goal "Study whether retrieval-augmented chain-of-thought improves factual QA under a fixed token budget, and produce a submission-style PDF."
 ```
+
+One thing those goals do **not** do: asking for a PDF in the goal text does not produce one. The deliverable is chosen by `--output-format`, which defaults to `markdown`. Add `--output-format latex` if you want the LaTeX package and the compiled PDF.
 
 If your Codex-backed run needs to submit remote GPU jobs through SSH, for example after you have manually verified `ssh gpu-server "hostname && nvidia-smi"`, explicitly relax the Codex sandbox:
 
@@ -424,12 +479,32 @@ python main.py \
   --goal "..."
 ```
 
-Two boundaries matter here:
+Three boundaries matter here:
 
-- `--full-auto` does **not** change the main research pipeline; it only swaps the manual approval gate for a strict reviewer agent
+- `--full-auto` does **not** change the stage graph; it swaps the manual approval gate for a strict reviewer agent
+- it *does* change what happens when a stage fails. `--full-auto` is a shortcut for `--approval-mode agent` plus `--unattended`, and an unattended stage that exhausts `--max-attempts` (default 5) is auto-skipped instead of stopping the run, up to `--max-auto-skips` (default 3). A skipped stage is recorded as skipped, not as approved, but the run keeps going without it
 - for serious research work, the default human-reviewed mode is still the recommended path; `--full-auto` is more useful for unattended sweeps, overnight dry runs, or pipeline pressure tests
 
-### 7.2 Choose the Venue Early
+Three flags put an agent in the approval seat: `--approval-mode agent`, `--full-auto`, and `--review-panel` (including the `--review-panel` that `--rigor max` turns on for you). Each sets `approval_mode` to `agent` and, through `resolve_unattended`, also marks the run unattended.
+
+`--unattended` on its own is the fourth input to `resolve_unattended` but is *not* one of those three. It only says nobody is at the terminal; `approval_mode` stays `manual`, so no reviewer agent is installed and the first approval menu has nobody to answer it — the terminal UI raises `UnattendedInputError` instead of the gate being decided. Removing the human and installing an agent are different things, and only the three flags above do both. If you meant to review the stages yourself, pass none of the four.
+
+### 7.2 A Few More Flags Worth Knowing on a First Real Run
+
+You do not need the full flag list to start, but these come up almost immediately. Every flag, its default, and what is preserved on resume: **[cli-reference.md](cli-reference.md)**.
+
+| Flag | Default | Why a first-time user wants it |
+| --- | --- | --- |
+| `--goal-file PATH` | — | Read the goal from a file instead of `--goal`. A serious goal is usually several paragraphs, and shell quoting stops being fun quickly. Mutually exclusive with `--goal`. |
+| `--output-format {markdown,latex}` | `markdown` | `markdown` writes `workspace/report/report.md` with figures under `workspace/report/images/`. `latex` produces the submission-style package instead: `main.tex`, `sections/*.tex`, a bibliography, and a compiled PDF. Preserved when resuming. |
+| `--final-stage STAGE` | run everything | Stop after this stage instead of running the whole workflow, e.g. `--final-stage 07_writing` when you want the report but not the dissemination package. |
+| `--max-attempts N` | `5` | Attempts per stage before AutoR escalates (or, unattended, auto-skips). Each retry re-runs the stage with the previous attempt's validation errors attached. Raise it for a stubborn stage. |
+| `--stage-timeout SECONDS` | `14400` (4 hours) | Wall-clock ceiling for one stage attempt. Raise it before a heavy Stage 05, not after it times out. |
+| `--web-search {auto,gemini,native}` | `auto` | How the agent searches. `gemini` routes searches through the Gemini API, which is what you need where the backend's own web search is disabled (Claude Code on Vertex AI, for example). `native` leaves the backend's own tool in charge. `auto` uses Gemini when a key is available and falls back to native. |
+| `--fake-operator` | off | A dry run with no backend and no tokens. See [6.3](#63-optional-run-a-smoke-test-first). |
+| `--resume-run ID`, `--redo-stage STAGE`, `--rollback-stage STAGE` | — | Continue, re-run, or invalidate. See [12.1](#121---redo-stage-vs---rollback-stage). |
+
+### 7.3 Choose the Venue Early
 
 If you already know the target writing style, set the venue from the beginning:
 
@@ -451,7 +526,7 @@ python main.py \
   --goal "..."
 ```
 
-Common venue profiles include:
+The registry ships 12 venue keys today:
 
 - `neurips_2025`
 - `neurips_2026`
@@ -466,15 +541,16 @@ Common venue profiles include:
 - `nature_communications`
 - `jmlr`
 
-See the full list in [../templates/registry.yaml](../templates/registry.yaml).
+The authoritative list is [../templates/registry.yaml](../templates/registry.yaml). `resolve_venue_key` accepts a registry key, the display name (`ICLR 2026`), or the style-package name (`iclr2026_conference`), with the comparison ignoring case, spaces, and every other non-alphanumeric character. A value it cannot match to any of those three is **not** quietly replaced by the default: it raises `Unknown venue: <value>`, and because the resolution happens while the CLI is still assembling the run configuration, the process prints `Error: Unknown venue: <value>`, exits 1, and never creates a run directory. (`python main.py --fake-operator --goal x --venue neurips2027` does exactly that.) The silent fallback belongs to `resolve_output_format`, which does return the default for an unrecognized value — not to the venue.
 
 Notes:
 
 - if you do not specify `--venue`, the default is `neurips_2025`
-- AutoR uses the venue profile to shape Stage 07 writing and packaging
+- the venue profile matters most in `--output-format latex`, where Stage 07 is told the venue's type, page limit, citation style, and preferred style package, and the stage gate refuses a `main.tex` it cannot match to the configured venue
+- in the default `markdown` mode the venue key is still recorded in `run_config.json` and shown to the writing stage, but a markdown report has no style package or page budget to hit, so the effect is much smaller
 - this does not mean the repo vendors the complete official submission system for that venue
 
-### 7.3 Strongly Prefer Starting with Resources
+### 7.4 Strongly Prefer Starting with Resources
 
 If you already have papers, BibTeX, data, code, or notes, do not start from a blank slate if you can avoid it.
 
@@ -504,7 +580,9 @@ One more practical detail:
 
 So if you already have a small code repo, a data folder, or a bundle of reading materials, you can ingest the whole thing instead of splitting it manually.
 
-### 7.4 If You Need to Teach AutoR a Specific "Skill"
+With one caveat worth knowing: a directory is classified as a whole, not file by file. A directory containing `.py` or `.ipynb` files is ingested as code into `workspace/code/`; any other directory lands in `workspace/artifacts/`. Individual files are classified by suffix, so PDFs and `.bib` files passed *individually* go to `workspace/literature/`, where the survey stage expects them. If the literature location matters to you, pass the papers as files.
+
+### 7.5 If You Need to Teach AutoR a Specific "Skill"
 
 In real usage, this happens often:
 
@@ -532,7 +610,7 @@ In other words, what you should give AutoR is not a vague instruction. It is a c
 - templates
 - successful cases
 
-### 7.5 When to Provide Those Skill Resources
+### 7.6 When to Provide Those Skill Resources
 
 There are three especially practical ways to do it:
 
@@ -552,7 +630,7 @@ lab_playbooks/
 
 Then include the relevant directory in each run.
 
-### 7.6 Resources Alone Are Not Enough: Put Hard Constraints in the Goal
+### 7.7 Resources Alone Are Not Enough: Put Hard Constraints in the Goal
 
 If some rules are mandatory, do not rely on AutoR to infer them implicitly.
 
@@ -573,7 +651,7 @@ This works well because it explicitly defines:
 - what must not happen
 - what acceptable artifacts look like
 
-### 7.7 Where to Check Whether AutoR Actually Learned It
+### 7.8 Where to Check Whether AutoR Actually Learned It
 
 This kind of skill is best enforced at a few specific stages:
 
@@ -592,7 +670,7 @@ Using `rjob` as an example, by Stage 04 or 05 you should ideally see:
 
 If those are missing, approval is usually premature.
 
-### 7.8 A Practical Refinement Prompt for This Case
+### 7.9 A Practical Refinement Prompt for This Case
 
 If AutoR failed to follow the cluster workflow you gave it, you can use feedback like this:
 
@@ -603,7 +681,7 @@ Create reusable submission scripts and save the submit command, job config, job 
 Local execution is only for smoke tests.
 ```
 
-### 7.9 What Usually Does Not Work
+### 7.10 What Usually Does Not Work
 
 These approaches are usually too weak:
 
@@ -620,9 +698,10 @@ The short version is:
 
 ## 8. How AutoR Runs
 
-The typical pipeline is:
+### 8.1 The Shape of the Walk
 
-0. `00_intake` (optional)
+There are **eight** research stages (`STAGES` in [../src/utils.py](../src/utils.py)):
+
 1. `01_literature_survey`
 2. `02_hypothesis_generation`
 3. `03_study_design`
@@ -632,11 +711,15 @@ The typical pipeline is:
 7. `07_writing`
 8. `08_dissemination`
 
-In practice, that is **1 intake stage + 8 formal research stages = 9 stages**.
+`00_intake` is **not** one of them. It runs once before the walk starts, and it is skipped by `--skip-intake` — and also whenever stdin is not a terminal, because there would be nobody to answer its questions.
+
+Those eight stages are nodes in a directed graph, not entries in a list. The default topology (`--stage-graph adaptive`) has 22 edges: eight that advance, of which six carry a guard; thirteen that go backward; and one conditional terminal that lets a round which concluded the question cannot be answered finish from Stage 06 instead of writing up anyway. `--stage-graph linear` drops the thirteen backward edges and the six forward guards, leaving nine edges: the eight unguarded forward edges (01 → 02 → … → 08, then `08_dissemination → finish`) and — still guarded — that same conditional terminal out of Stage 06. Keeping it is deliberate, and it is load-bearing: `_preempted_by_a_conclusion` makes a live conditional terminal the *only* admissible move at its node, so a linear run whose round records that the question cannot be answered also stops at Stage 06 rather than writing up. `linear` is a strict sequence of *stages*, not a promise that the run will keep going after it has said it cannot.
+
+The forward path is still the normal path, and it is the one this guide walks. What the graph buys you is [8.2](#82-when-a-late-finding-sends-the-run-back).
 
 | Stage | What it does | What you should check |
 | --- | --- | --- |
-| `00_intake` | Aligns the goal, resources, constraints, evaluation direction, and target writing style before formal research begins. | Answer the clarification questions, add hard constraints, and confirm the problem is narrow enough to execute. |
+| `00_intake` *(before the walk)* | Aligns the goal, resources, constraints, evaluation direction, and target writing style before formal research begins. | Answer the clarification questions, add hard constraints, and confirm the problem is narrow enough to execute. |
 | `01_literature_survey` | Organizes related work, task background, benchmarks, baselines, and the real research gap. | Do not accept shallow paper lists; look for structured literature files, comparisons, and evidence ledgers. |
 | `02_hypothesis_generation` | Converts the direction into testable hypotheses and provisional paper claims. | Make sure it converges to a falsifiable main line instead of continuing to brainstorm. |
 | `03_study_design` | Turns the hypothesis into an executable experimental design. | Check datasets, metrics, baselines, ablations, budgets, seeds, failure criteria, and data artifacts. |
@@ -645,6 +728,32 @@ In practice, that is **1 intake stage + 8 formal research stages = 9 stages**.
 | `06_analysis` | Interprets results, creates figures, analyzes failures, and explains mechanisms. | Do not accept metric narration only; require plots, failure cases, ablation interpretation, and boundaries. |
 | `07_writing` | Produces the final deliverable: a markdown report with embedded figures by default, or venue-aware LaTeX sources and a compiled PDF with `--output-format latex`. | Verify that every major claim is backed by experiments, figures, or literature. |
 | `08_dissemination` | Builds review, release, readiness, reproduction, and presentation materials. | Confirm the run can be inspected, reproduced, and shown to others, not just read as a paper. |
+
+### 8.2 When a Late Finding Sends the Run Back
+
+The expensive failure in an automated research run is not a stage that fails loudly. It is a run that reaches Stage 06, discovers the design cannot answer the question, and writes it up anyway because there was nowhere else to go.
+
+So the graph has thirteen backward edges (`REVISIT_EDGES` in [../src/stage_graph.py](../src/stage_graph.py)). Three of them, as examples:
+
+- **06 → 03.** The analysis exposed a design flaw the results cannot repair — a confound, a leak, or a comparison that was never fair. Going back to the study design is cheaper than writing around it.
+- **07 → 06.** Writing it up showed a claim has no analysis behind it, or a figure does not show what the text says it shows. This edge is open only once results exist.
+- **05 → 04.** The experiment could not run, or it ran and produced something the implementation is clearly responsible for.
+
+There are ten more, including 02 → 01 (stating the hypotheses showed the "gap" is not a gap), 06 → 02 (the evidence refutes the hypotheses and points somewhere specific), and 07 → 01 (the finding relates to work the survey missed).
+
+How a move actually gets chosen, and where you sit in it:
+
+1. **AutoR decides which moves are legal**, by evaluating each edge's guard against the files on disk — not against anything the agent claims. The move into Stage 07, for example, stays closed until every preregistered empirical hypothesis has a verdict and at least one figure exists.
+2. **The backend picks among the legal moves and has to state a reason.** With `--routing auto` (the default) it is only asked where more than one move is live, which on a linear graph is never. With `--routing off` it is never asked at all and the walk takes the default edge — with one exception that is not a routing decision: a closed research round's own choice of where to resume (which `--max-rounds 2` or more makes possible) is honoured under every routing mode, provided the edge it names is legal at that stage. An off-menu pick, or one with no stated reason, is refused and replaced by the forward edge.
+3. **The default is always forward.** A refusal, a routing failure, or a run nobody is steering all come out as the plain 01-through-08 pipeline rather than as a stall. A backward move only happens as a deliberate, justified choice, and a revisit whose justification repeats a reason already on the path is refused as a loop.
+4. **You still approve every stage.** The routing decision is made *after* your approval and does not replace it: what the graph chooses is which stage runs next, not whether the finished one was good enough. Every stage the run enters — including one it re-enters — goes through the same approval menu.
+5. **A backward move invalidates the work downstream of it.** AutoR prints a preview of what is about to go stale and marks those stages in `run_manifest.json`, so a later stage cannot quietly keep describing work the revisit is replacing.
+
+Two bounds keep this from becoming an infinite loop: `--graph-max-visits` (default 3) caps how many times one stage may be entered, and `--graph-max-steps` (default 20) caps the whole walk.
+
+If you want none of this, `--stage-graph linear --routing off` gives the strict sequence back — with one exception that neither flag turns off. The conditional terminal out of Stage 06 is present on both topologies, and a live conditional terminal preempts every other move at its node, so a round that ends in abandonment finishes at Stage 06 under `--routing off` as well. Refusing to write up a question the run has just said it cannot settle is a correctness property, not a routing preference.
+
+### 8.3 The Stage Loop and the Approval Menu
 
 The shape of every stage is similar:
 
@@ -687,13 +796,14 @@ when you choose `4` and enter custom feedback, you can also enter control comman
 
 That means:
 
-- the default workflow is still sequential
-- but if you intentionally want to bypass the current stage for now, or return to an earlier stage and rebuild from there, you do not have to abandon the whole run
+- the run's own backward moves ([8.2](#82-when-a-late-finding-sends-the-run-back)) are chosen by AutoR and the backend, from the moves the guards leave open; `/back` is the same capability with your hand on the wheel, and it is not filtered by those guards
+- so if you want to bypass the current stage for now, or return to an earlier stage and rebuild from there, you do not have to abandon the whole run
 
 Notes:
 
 - `/back` is for earlier stages, not for jumping forward
-- if the current stage exhausts the retry limit, AutoR now also shows a recovery menu so you can directly choose to skip the stage or roll back to an earlier one
+- `/back` invalidates the same way a graph revisit does: the target stage becomes pending and everything after it is marked stale
+- if the current stage exhausts the retry limit, AutoR shows a recovery menu so you can directly choose to skip the stage, roll back to an earlier one, or abort
 
 There is also one important detail many users miss:
 
@@ -808,6 +918,10 @@ Approve only when all three are true:
 
 That is very different from "looks good enough."
 
+**One approval is not like the others.** Approving `04_implementation` freezes the hypothesis set: AutoR copies the typed hypotheses into `workspace/notes/preregistration.json`, hashes them, and never overwrites that file. From Stage 05 onward every empirical hypothesis is adjudicated against the frozen set, and changing it later has to arrive as a recorded amendment rather than a quiet edit. Read the hypotheses before you press `5` on Stage 04, not after.
+
+Approving `03_study_design` has a smaller version of the same property: the report plan — which figures the write-up will carry, and which claim each supports — is stamped outside `workspace/` at that moment.
+
 ### 11.4 When to Use `6`
 
 Abort when:
@@ -826,14 +940,23 @@ Do not force a bad run forward.
 | --- | --- |
 | Simplest interactive start | `python main.py` |
 | Start a new run | `python main.py --goal "your research goal"` |
+| Read a long goal from a file | `python main.py --goal-file goal.md` |
 | Use Claude as the backend | `python main.py --operator claude --model sonnet --goal "..."` |
 | Use Codex as the backend | `python main.py --operator codex --model default --goal "..."` |
 | Allow Codex-backed SSH / remote GPU execution | `python main.py --operator codex --codex-sandbox danger-full-access --goal "..."` |
 | Set a target venue | `python main.py --venue neurips_2025 --goal "..."` |
+| Produce a LaTeX package and PDF instead of a markdown report | `python main.py --output-format latex --goal "..."` |
+| Stop once the report is written | `python main.py --final-stage 07_writing --goal "..."` |
 | Start with resources | `python main.py --goal "..." --resources paper.pdf refs.bib data.csv notes.md` |
 | Store runs on another disk | `python main.py --runs-dir /path/to/runs --goal "..."` |
 | Skip intake | `python main.py --skip-intake --goal "..."` |
 | Run a smoke test | `python main.py --fake-operator --goal "Smoke test"` |
+| Turn up the optional machinery, human still at the gate | `python main.py --rigor thorough --goal "..."` |
+| Turn all of it off | `python main.py --rigor fast --goal "..."` |
+| Hand the gate to a reviewer agent | `python main.py --full-auto --goal "..."` |
+| Take the strict 01-through-08 sequence (an abandoned round still finishes at 06) | `python main.py --stage-graph linear --routing off --goal "..."` |
+| Let Stages 03-06 run more than once | `python main.py --max-rounds 2 --goal "..."` |
+| Search the web where the backend's own search is disabled | `python main.py --web-search gemini --goal "..."` |
 | Resume the latest run | `python main.py --resume-run latest` |
 | Resume a specific run | `python main.py --resume-run 20260415_120000` |
 | Redo from a stage | `python main.py --resume-run latest --redo-stage 05` |
@@ -842,6 +965,10 @@ Do not force a bad run forward.
 | Build a researcher profile from prior papers | `python main.py --goal "..." --paper-corpus /path/to/papers` |
 | Generate and insert a method diagram | `python main.py --goal "..." --research-diagram` |
 | Increase per-stage timeout | `python main.py --goal "..." --stage-timeout 28800` |
+| Give a stubborn stage more retries | `python main.py --goal "..." --max-attempts 10` |
+| See what the cross-run archive has learned, then exit | `python main.py --archive-report` |
+
+This is the short list, not the whole surface: `main.py` has 61 flags. For every one of them, its default, and what survives a resume, see **[cli-reference.md](cli-reference.md)**.
 
 ### 12.1 `--redo-stage` vs `--rollback-stage`
 
@@ -896,6 +1023,8 @@ python main.py --resume-run latest --redo-stage 03
 python main.py --resume-run latest --redo-stage 3
 python main.py --resume-run latest --redo-stage 03_study_design
 ```
+
+The same three forms work for `--rollback-stage`, `--final-stage`, and the `/back` control command.
 
 This matters when you resume runs frequently.
 
@@ -963,7 +1092,7 @@ Do not approve if the first pass is missing any of these:
 - real experiments
 - real data files
 - figures
-- PDFs
+- the written deliverable itself (`report.md`, or the PDF in `latex` mode)
 - evidence behind the claims
 - actual files instead of future plans
 
@@ -993,11 +1122,9 @@ Be especially strict about:
 - whether the code actually runs
 - whether the results are really written to disk
 
-### Trick 6: Set `--venue` Early
+### Trick 6: Set `--venue` and `--output-format` Early
 
-If you already know whether you want a conference-style or journal-style draft, set it from the beginning.
-
-That makes Stage 07 more stable.
+If you already know whether you want a conference-style or journal-style draft, set the venue from the beginning. That makes Stage 07 more stable — and if you want the LaTeX package and a compiled PDF rather than the default markdown report, pass `--output-format latex` in the same command. Both are recorded in the run and preserved when you resume, so setting them at the start is cheaper than switching at Stage 07.
 
 ### Trick 6.5: Most New Users Should Not Rush to `--skip-intake`
 
@@ -1067,7 +1194,7 @@ python main.py --goal "..." --stage-timeout 28800
 
 ### Trick 12: `--research-diagram` Is an Enhancement, Not a Requirement
 
-If you want AutoR to generate a method illustration after Stage 07 and insert it into the paper:
+If you want AutoR to generate a method illustration after Stage 07 and insert it into the deliverable — `report.md` in markdown mode, `method.tex` in latex mode:
 
 ```bash
 python main.py --goal "..." --research-diagram
@@ -1120,17 +1247,21 @@ The following files are easy to ignore, but they matter a lot:
 - `workspace/literature/sources.json`
 - `workspace/literature/claims.json`
 - `workspace/notes/hypothesis_manifest.json`
+- `workspace/notes/preregistration.json`
 - `workspace/results/experiment_manifest.json`
+- `workspace/results/hypothesis_outcomes.json`
 - `workspace/artifacts/citation_verification.json`
 
 Roughly speaking:
 
 - `sources.json` / `claims.json`: structured evidence ledgers for literature claims
 - `hypothesis_manifest.json`: typed hypotheses distilled in Stage 02
+- `preregistration.json`: the hypothesis set as it was frozen when you approved Stage 04, before any result existed. It is written once and never overwritten; a later change has to arrive as a recorded amendment
 - `experiment_manifest.json`: a machine-readable experiment bundle for analysis and writing
+- `hypothesis_outcomes.json`: one verdict per preregistered *empirical* hypothesis, each `supported` or `refuted` one citing an evidence file that has to exist. Theoretical propositions and paper claims are frozen alongside them but are not adjudicated here, and a verdict written for one is rejected. This is also what closes or opens the move into Stage 07
 - `citation_verification.json`: structured claim-to-citation coverage checks in Stage 07
 
-If these files are missing, empty, or obviously inconsistent with the PDF, the run is usually not yet solid.
+If these files are missing, empty, or obviously inconsistent with the report, the run is usually not yet solid.
 
 ---
 
@@ -1203,14 +1334,15 @@ Ideally include at least:
 - any existing baseline results
 - your experiment notes
 
-### Step 3: Set the Venue from the Beginning
+### Step 3: Ask for the PDF, and Set the Venue
 
-For example:
+A PDF is not the default deliverable. `--output-format` defaults to `markdown`, which writes a standalone report instead. If you want the submission-style package, say so at the start — the setting is recorded in the run and preserved when you resume:
 
 ```bash
 python main.py \
   --operator claude \
   --model sonnet \
+  --output-format latex \
   --venue neurips_2025 \
   --goal "..."
 ```
@@ -1230,13 +1362,15 @@ Keep asking:
 
 Do not let a compiled PDF fool you.
 
-A strong Stage 07 should include at least:
+In `latex` mode, a strong Stage 07 should include at least:
 
 - LaTeX sources
 - bibliography
 - a compilable PDF
 - citation verification output
 - experiments and figures behind the main claims
+
+In the default `markdown` mode the shape is different but the bar is not: `workspace/report/report.md`, the figures it references actually present under `workspace/report/images/`, citation verification output, and a number behind every claim.
 
 ### Step 6: If Something Earlier Is Wrong, Redo or Roll Back
 
@@ -1262,7 +1396,8 @@ The most useful paths are:
 | --- | --- |
 | `runs/<run_id>/user_input.txt` | your original research goal |
 | `runs/<run_id>/memory.md` | approved cross-stage memory |
-| `runs/<run_id>/run_config.json` | backend, model, venue, and other core run config |
+| `runs/<run_id>/intake_context.json` | the approved intake brief, its resources, and the clarification Q&A |
+| `runs/<run_id>/run_config.json` | backend, model, venue, output format, stage graph, and other core run config |
 | `runs/<run_id>/run_manifest.json` | machine-readable stage lifecycle state |
 | `runs/<run_id>/artifact_index.json` | run-wide structured index for data, results, and figures |
 | `runs/<run_id>/stages/` | the official stage summaries |
@@ -1276,17 +1411,23 @@ The most useful paths are:
 | `runs/<run_id>/workspace/data/` | data |
 | `runs/<run_id>/workspace/results/` | machine-readable results |
 | `runs/<run_id>/workspace/results/experiment_manifest.json` | standardized experiment manifest used downstream |
+| `runs/<run_id>/workspace/results/hypothesis_outcomes.json` | one verdict per preregistered *empirical* hypothesis — `supported`, `refuted`, `inconclusive`, or `not_tested` — with every `supported` or `refuted` one citing an evidence file that exists |
 | `runs/<run_id>/workspace/figures/` | figures |
-| `runs/<run_id>/workspace/writing/` | paper source files |
-| `runs/<run_id>/workspace/artifacts/` | PDFs and packaged outputs |
+| `runs/<run_id>/workspace/report/report.md` | the markdown report, which is the default deliverable |
+| `runs/<run_id>/workspace/report/images/` | the figures embedded in that report |
+| `runs/<run_id>/workspace/writing/` | LaTeX paper sources, in `--output-format latex` runs |
+| `runs/<run_id>/workspace/artifacts/` | PDFs, build logs, and packaged outputs |
 | `runs/<run_id>/workspace/artifacts/citation_verification.json` | citation and claim coverage checks from writing |
 | `runs/<run_id>/workspace/notes/hypothesis_manifest.json` | structured hypotheses from Stage 02 |
+| `runs/<run_id>/workspace/notes/preregistration.json` | the hypothesis set frozen at Stage 04 approval |
+| `runs/<run_id>/workspace/notes/research_rounds.json` | how each Stage 03-06 round closed, and why |
+| `runs/<run_id>/evolution/` | rubric scores, losing drafts, routing refusals — the search, kept out of `workspace/` |
 | `runs/<run_id>/workspace/reviews/` | review / release materials |
 
-If you are looking for the final PDF, check these first:
+If you are looking for the final deliverable, check these first:
 
-- `workspace/artifacts/`
-- `workspace/writing/`
+- `workspace/report/` in the default markdown mode
+- `workspace/artifacts/` and `workspace/writing/` in `--output-format latex` runs
 
 ---
 
@@ -1337,7 +1478,19 @@ AutoR supports both `claude` and `codex`. When you resume a run, it preserves th
 
 In practice, if you switch backends, it is usually safest to combine that with a clear re-entry point such as `--redo-stage`.
 
-### 17.7 What Should I Read Next If I Want to Understand the Project Faster?
+### 17.7 Why Did the Run Go Back to an Earlier Stage?
+
+Because the stages are a graph and something later in the run said an earlier one was wrong. See [8.2](#82-when-a-late-finding-sends-the-run-back).
+
+Where to look for the reason:
+
+- the terminal prints the chosen move and its stated reason at the moment it is taken
+- `run_manifest.json` shows which stages were marked stale, and the reason recorded for it
+- `evolution/routing_refusals.jsonl` records a move the backend asked for and did **not** get
+
+If you never want this, run with `--stage-graph linear --routing off`.
+
+### 17.8 What Should I Read Next If I Want to Understand the Project Faster?
 
 A practical order is:
 
@@ -1345,6 +1498,17 @@ A practical order is:
 2. run one smoke test
 3. run one real experiment with `--resources`
 4. inspect the resulting `runs/<run_id>/` structure
+
+Then, depending on what you want:
+
+| You want | Read |
+| --- | --- |
+| Every flag, its default, and what survives a resume | [cli-reference.md](cli-reference.md) |
+| Why the system is built this way, and what has *not* been established | [framework.md](framework.md) |
+| What each stage must produce before it is allowed to advance | [stage-contract.md](stage-contract.md) |
+| What is in a run directory, file by file | [run-artifacts.md](run-artifacts.md) |
+| The `--rigor` levels in detail | [rigor.md](rigor.md) |
+| A stage that keeps failing its gate | [troubleshooting.md](troubleshooting.md) |
 
 ---
 
