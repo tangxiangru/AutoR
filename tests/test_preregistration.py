@@ -372,12 +372,16 @@ class PromptRenderingTest(PreregistrationTestCase):
 
         rendered = format_preregistration_for_prompt(prereg)
 
-        self.assertIn("H1", rendered)
+        self.assertIn("**H1**", rendered)
         self.assertIn("Decision rule:", rendered)
         self.assertIn("may not edit", rendered)
         self.assertIn("record it as refuted", rendered)
-        # Theoretical propositions and paper claims are not adjudicated here.
-        self.assertNotIn("T1", rendered)
+        # Theoretical propositions and paper claims are not adjudicated here. Both ids are
+        # matched as the prompt renders them, `**T1**`, rather than as bare substrings: the
+        # header carries an ISO timestamp, so a bare "T1" also matches the "…-11T10:…" in
+        # every prompt frozen between 10:00 and 19:59, and this test failed for ten hours
+        # of each day rather than when the behaviour it describes broke.
+        self.assertNotIn("**T1**", rendered)
 
 
 if __name__ == "__main__":
