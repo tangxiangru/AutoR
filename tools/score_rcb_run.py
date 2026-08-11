@@ -158,8 +158,18 @@ class ReferenceJudge:
         for _attempt in range(max_try):
             self.calls += 1
             try:
+                # Both budgets are passed here, not just declared above. They were
+                # module constants that only `VertexJudge` read, so the default judge
+                # ran with the client's own defaults: no wall limit on a multimodal
+                # call carrying six images, and no output budget on a reasoning model
+                # that can spend the whole of one thinking and return an empty body.
+                # An empty body is scored 0, which reads as a bad artifact rather than
+                # as a judge that never answered.
                 response = self._client.responses.create(
-                    model=self.model, input=[{"role": "user", "content": content}]
+                    model=self.model,
+                    input=[{"role": "user", "content": content}],
+                    max_output_tokens=JUDGE_MAX_TOKENS,
+                    timeout=JUDGE_TIME_LIMIT,
                 )
                 text = _response_text(response)
                 parsed = _first_json_object(text)

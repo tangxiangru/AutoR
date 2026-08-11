@@ -45,6 +45,33 @@ class TrapDefaultsTest(unittest.TestCase):
     def test_the_time_limit_fits_a_multimodal_call(self) -> None:
         self.assertGreater(self.tool.JUDGE_TIME_LIMIT, 120)
 
+    def test_the_reference_judge_actually_passes_both_budgets(self) -> None:
+        """The two tests above hold the constants, and held nothing else.
+
+        `JUDGE_TIME_LIMIT` was read by no code at all, and `JUDGE_MAX_TOKENS` only by
+        `VertexJudge` -- so on the default `--judge reference` path the call went out
+        with the client's own defaults, and the pair of assertions above stayed green.
+        A test that asserts a constant's value does not know whether anything reads it;
+        this one captures the kwargs the client is actually handed.
+        """
+        sent: dict = {}
+
+        class _Responses:
+            def create(self, **kwargs):
+                sent.update(kwargs)
+                raise RuntimeError("stop after capturing the call")
+
+        judge = self.tool.ReferenceJudge.__new__(self.tool.ReferenceJudge)
+        judge.model = "gpt-5.1"
+        judge.calls = 0
+        judge.failures = []
+        judge._client = type("_C", (), {"responses": _Responses()})()
+
+        judge("score this", max_try=1)
+
+        self.assertEqual(sent.get("max_output_tokens"), self.tool.JUDGE_MAX_TOKENS)
+        self.assertEqual(sent.get("timeout"), self.tool.JUDGE_TIME_LIMIT)
+
     def test_scoring_is_serial(self) -> None:
         """Concurrent multimodal calls were the actual cause of most failures."""
         self.assertEqual(self.tool.JUDGE_WORKERS, 1)

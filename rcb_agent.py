@@ -598,6 +598,24 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
         from src.effort import EffortPlan
 
         manager.effort_plan = EffortPlan(enabled=True)
+        # `--routine-model` was declared here and read nowhere, so the one flag whose whole
+        # job is to keep the strong model for the stages that need it did nothing on the
+        # only path where tiering is unconditionally on. `main.configure_effort` has always
+        # built the routine operator and recorded the model; this file parsed the flag and
+        # dropped it, which is the two-front-ends divergence this repo keeps finding rather
+        # than a missing feature.
+        if args.routine_model:
+            manager.routine_operator = create_operator(
+                # The execution backend, not the reviewer's: this operator runs stages.
+                operator_backend,
+                model=args.routine_model,
+                codex_sandbox=args.codex_sandbox,
+                fake_mode=args.fake_operator,
+                ui=ui,
+                stage_timeout=args.stage_timeout,
+                web_search_mcp=web_search_context is not None,
+            )
+            manager.concentration.routine_model = args.routine_model
         # `unattended=True` like every other reviewer this file builds. Without it the
         # routine-tier fallback is the one reviewer in an unattended run that still treats a
         # transport failure as grounds to abort, because attended is the constructor default
