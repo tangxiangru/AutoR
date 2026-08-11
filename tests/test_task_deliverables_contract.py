@@ -59,6 +59,44 @@ class DemandExtractionTest(unittest.TestCase):
         self.assertFalse(found[0].startswith("-"))
 
 
+class DemandsComeFromTheTaskNotTheWrapperTest(unittest.TestCase):
+    """AutoR's own prose is not a requirement the report owes an answer to.
+
+    A goal is not always only the question: the benchmark adapter builds one carrying a
+    workspace contract, a grading rubric and a figure budget around the task. Read off
+    the whole thing, `demanding_sentences` returned 23 demands for Astronomy_000 against
+    the task's 10 — 857 against 337 across all 40 shipped tasks, so 61% of what every
+    stage was told it owed was AutoR talking to itself. The first phantom demand was
+    literally "Benchmark Run: ResearchClawBench".
+    """
+
+    def _wrapped(self) -> str:
+        from src.rcb import build_benchmark_goal
+
+        with tempfile.TemporaryDirectory() as tmp:
+            return build_benchmark_goal(Path(tmp).resolve(), TASK)
+
+    def test_the_wrapper_contributes_no_demands(self) -> None:
+        from src.utils import task_statement
+
+        goal = self._wrapped()
+        self.assertGreater(len(demanding_sentences(goal)), len(demanding_sentences(TASK)))
+        self.assertEqual(demanding_sentences(task_statement(goal)), demanding_sentences(TASK))
+
+    def test_the_prompt_block_does_not_ask_for_the_benchmark_contract(self) -> None:
+        from src.utils import task_statement
+
+        block = format_deliverables_for_prompt(task_statement(self._wrapped()))
+        self.assertIn("coupling strengths", block)
+        self.assertNotIn("ResearchClawBench", block)
+        self.assertNotIn("Workspace Contract", block)
+
+    def test_a_goal_nobody_wrapped_is_read_whole(self) -> None:
+        from src.utils import task_statement
+
+        self.assertEqual(task_statement(TASK), TASK)
+
+
 class CoverageGateTest(unittest.TestCase):
     def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()

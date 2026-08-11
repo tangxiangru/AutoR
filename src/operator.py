@@ -23,6 +23,7 @@ from .utils import (
     approved_stage_summaries,
     extract_stream_text_fragments,
     read_text,
+    task_statement,
     relative_to_run,
     write_text,
 )
@@ -1005,7 +1006,7 @@ Original stderr:
             # because that is exactly the rule a real run is held to.
             from .deliverables import COVERAGE_FILENAME, demanding_sentences
 
-            _statement = read_text(paths.user_input)
+            _statement = task_statement(read_text(paths.user_input))
             _fake_reason = (
                 "fake-operator mode does not do research; nothing was actually derived."
             )
