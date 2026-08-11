@@ -856,7 +856,7 @@ def resolve_search_context(ui: TerminalUI, *, mode: str, operator: str, codex_sa
 
 
 def configure_effort(manager, args, *, backend_name: str, model: str, ui: TerminalUI, fake_mode: bool,
-                     stage_timeout: int) -> None:
+                     stage_timeout: int, unattended: bool = False) -> None:
     """Turn on effort tiering, and give routine stages a cheap gate to use."""
     manager.rigor_level = getattr(args, "rigor", "")
     if not getattr(args, "effort_tiers", False):
@@ -877,8 +877,12 @@ def configure_effort(manager, args, *, backend_name: str, model: str, ui: Termin
         manager.solo_reviewer = manager.reviewer
     elif manager.reviewer is not None:
         # A panel is seated, so build the plain reviewer a routine stage falls back to.
+        # `unattended` is threaded in for the same reason create_reviewer takes it: attended
+        # is the constructor default, so the one construction that stays silent about it is
+        # the one reviewer in an unattended run that aborts on a transport failure.
         manager.solo_reviewer = AutomatedReviewer(
-            backend_name, model=model, fake_mode=fake_mode, ui=ui, stage_timeout=stage_timeout
+            backend_name, model=model, fake_mode=fake_mode, ui=ui,
+            stage_timeout=stage_timeout, unattended=unattended,
         )
 
 def create_crux_panel(args, *, backend_name: str, model: str, ui: TerminalUI):
@@ -1057,6 +1061,7 @@ def main() -> int:
         configure_effort(
             manager, args, backend_name=review_operator, model=review_model, ui=ui,
             fake_mode=args.fake_operator, stage_timeout=args.stage_timeout,
+            unattended=unattended,
         )
         completed = manager.resume_run(
             run_root,
@@ -1145,6 +1150,7 @@ def main() -> int:
     configure_effort(
         manager, args, backend_name=review_operator, model=review_model, ui=ui,
         fake_mode=args.fake_operator, stage_timeout=args.stage_timeout,
+        unattended=unattended,
     )
 
     goal = resolve_goal(args, unattended=unattended)

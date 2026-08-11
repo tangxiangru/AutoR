@@ -1681,6 +1681,32 @@ def append_approved_stage_summary(memory_path: Path, stage: StageSpec, stage_mar
     write_text(memory_path, build_memory_text(user_goal, retained_entries, intake_summary=intake_summary))
 
 
+#: Names under ``stages/`` that are not a stage's summary. ``.tmp.md`` is the draft under
+#: review; ``.skip_stub.md`` is the audit record kept beside a *rescued* draft, saying the
+#: stage was auto-skipped. Both sit in the same directory as the summary and both end in
+#: ``.md``, so every reader that globs ``*.md`` has to exclude them or ship them as content.
+NON_SUMMARY_STAGE_SUFFIXES = (".tmp.md", ".skip_stub.md")
+
+
+def stage_summary_files(paths: RunPaths) -> list[Path]:
+    """Every stage summary under ``stages/``, and nothing else.
+
+    One function because two readers globbed this directory with different filters and both
+    were wrong the same way. ``.skip_stub.md`` is written only when a stage ran out of
+    attempts *and* its last draft passed both gates: the draft is promoted to the summary
+    and the stub is kept next to it for the audit trail. A reader that takes both gets the
+    stage's real research and, immediately after it, a section reading "This stage was
+    skipped (auto) and its work was never done" -- about the work sitting above it.
+    """
+    if not paths.stages_dir.exists():
+        return []
+    return sorted(
+        path
+        for path in paths.stages_dir.glob("*.md")
+        if not path.name.endswith(NON_SUMMARY_STAGE_SUFFIXES)
+    )
+
+
 def approved_stage_summaries(memory_text: str) -> str:
     marker = "## Approved Stage Summaries"
     if marker not in memory_text:

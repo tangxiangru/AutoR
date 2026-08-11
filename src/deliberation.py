@@ -398,7 +398,13 @@ class CruxPanel:
                 label=f"crux_{voice.key}",
             )
             resolution.voice_calls += 1
-            payload = member._extract_json_payload(stdout_text) if exit_code == 0 else None  # noqa: SLF001
+            # `answer` is what makes an object a position; without it the voice is read off
+            # whatever JSON its transcript quoted and recorded as failed.
+            payload = (  # noqa: SLF001
+                member._extract_json_payload(stdout_text, verdict_key="answer")
+                if exit_code == 0
+                else None
+            )
             if not isinstance(payload, dict) or not str(payload.get("answer") or "").strip():
                 resolution.positions.append(
                     Position(voice=voice.key, title=voice.title, backend=member.backend_name,
@@ -532,7 +538,7 @@ class CruxPanel:
         resolution.voice_calls += 1
         if exit_code != 0:
             return
-        payload = member._extract_json_payload(stdout_text)  # noqa: SLF001
+        payload = member._extract_json_payload(stdout_text, verdict_key="answer")  # noqa: SLF001
         if not isinstance(payload, dict):
             return
         resolution.answer = str(payload.get("answer") or "").strip()

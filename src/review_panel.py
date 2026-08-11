@@ -748,8 +748,12 @@ class ReviewPanel:
         return token in {"abstain", "abstention", "no_comment", "pass"}
 
     def _payload(self, raw_response: str) -> dict[str, Any] | None:
+        # `decision` identifies a seat's verdict, and without naming it the veto is read off
+        # whichever object the seat's transcript happened to contain first -- a data file it
+        # quoted. `blocking`, `concerns` and the abstention token all come from here, so a
+        # miss does not fail loudly: the seat is recorded as having raised nothing.
         member = next(iter(self._members.values()))
-        return member._extract_json_payload(raw_response)  # noqa: SLF001
+        return member._extract_json_payload(raw_response, verdict_key="decision")  # noqa: SLF001
 
     @staticmethod
     def _is_unanimous(verdicts: list[PanelVerdict]) -> bool:

@@ -136,6 +136,40 @@ class FallbackUsesRecoveredWorkTest(unittest.TestCase):
         report = self._build()
         self.assertIn("No completed stage output was produced", report)
 
+    def test_the_skip_stub_sidecar_is_never_a_report_section(self) -> None:
+        """A rescued draft is promoted and the stub is kept beside it for the audit trail.
+
+        Both are `*.md` in `stages/`. A reader that takes both ships the stage's real
+        research and then, immediately below it, "This stage was skipped (auto) and its work
+        was never done" -- about the work directly above. Observed on the live re-runs:
+        Math_001 has 01_literature_survey.md holding a full survey next to
+        01_literature_survey.skip_stub.md saying it never happened.
+        """
+        write_text(self.paths.stages_dir / "01_literature_survey.md", f"# Stage 01\n\nRESCUED {BODY}")
+        write_text(
+            self.paths.stages_dir / "01_literature_survey.skip_stub.md",
+            "# Stage 01: Literature Survey\n\n## Key Results\n\n"
+            "- This stage was skipped (auto) and its work was never done.\n",
+        )
+        report = self._build()
+        self.assertIn("RESCUED", report)
+        self.assertNotIn("its work was never done", report)
+
+    def test_a_lone_skip_stub_does_not_block_champion_recovery(self) -> None:
+        """The sidecar is not a stage summary, so it cannot stand in for one."""
+        write_text(
+            self.paths.stages_dir / "01_literature_survey.skip_stub.md",
+            "# Stage 01\n\n- This stage was skipped (auto).\n",
+        )
+        self._champion("01_literature_survey", f"# Stage 01\n\nDRAFT {BODY}")
+        report = self._build()
+        self.assertIn("DRAFT", report)
+        self.assertIn("No stage was approved", report)
+
+    def test_a_draft_under_review_is_still_excluded(self) -> None:
+        write_text(self.paths.stages_dir / "01_literature_survey.tmp.md", f"# Stage 01\n\nUNDER_REVIEW {BODY}")
+        self.assertNotIn("UNDER_REVIEW", self._build())
+
     def test_figures_are_still_linked_after_a_draft_is_recovered(self) -> None:
         self._champion("01_literature_survey", f"# Stage 01\n\n{BODY}")
         report = self._build(figures=["fig1.png", "fig2.png"])

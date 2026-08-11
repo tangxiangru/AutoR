@@ -107,6 +107,18 @@ def _try_load_json(text: str) -> dict[str, Any] | None:
 _VERDICT_SCAN_CHARS = 262_144
 _VERDICT_SCAN_CANDIDATES = 400
 
+#: How close to the end of the output the object has to *finish* to count as the verdict.
+#: Scanning from the end finds the verdict before anything the backend merely quoted -- but
+#: only while a verdict exists. When none does, the last quoted object is the last object,
+#: and the run tree the reviewer is told to inspect contains `round_decision.json`, whose
+#: top level really does carry a `decision` key. Reading that as a vote is approving
+#: blindly, which is the one thing this gate exists to prevent. The contract asks for the
+#: verdict as the final message with nothing after it, so requiring it to end near the end
+#: costs a compliant reviewer nothing and puts a quoted artifact mid-transcript out of
+#: reach. The slack is generous: a verdict carrying several carry_forward obligations runs
+#: to a few KB, and a sentence after it is tolerated rather than punished.
+_VERDICT_TAIL_CHARS = 16_384
+
 
 def _last_object_with_key(text: str, key: str) -> dict[str, Any] | None:
     """The last JSON object in ``text`` that carries ``key``, ignoring everything else.
@@ -133,12 +145,13 @@ def _last_object_with_key(text: str, key: str) -> dict[str, Any] | None:
     window_start = max(0, len(text) - _VERDICT_SCAN_CHARS)
     positions = [m.start() + window_start for m in re.finditer(r"\{", text[window_start:])]
     decoder = json.JSONDecoder()
+    tail_begins = len(text) - _VERDICT_TAIL_CHARS
     for start in reversed(positions[-_VERDICT_SCAN_CANDIDATES:]):
         try:
-            payload, _end = decoder.raw_decode(text, start)
+            payload, end = decoder.raw_decode(text, start)
         except ValueError:
             continue
-        if isinstance(payload, dict) and key in payload:
+        if isinstance(payload, dict) and key in payload and end >= tail_begins:
             return payload
     return None
 
@@ -358,6 +371,19 @@ class AutomatedReviewer:
         if on_unreadable is not None and self.unattended:
             return on_unreadable(raw_response)
         return self._unreadable_verdict(raw_response)
+
+    @staticmethod
+    def is_degraded_verdict(decision: ReviewDecision) -> bool:
+        """Whether this verdict is AutoR's own stand-in rather than a reviewer's judgement.
+
+        Unattended, an unreadable answer and a crashed backend both become choice "4" so the
+        stage is revised rather than the run abandoned. That is the right outcome and the
+        wrong provenance: the feedback attached is AutoR's, not a reviewer's, and anything
+        downstream that treats a refusal as something the reviewer *asked for* -- the review
+        policy most of all -- has to be able to tell the two apart. Public because the
+        distinction is only useful outside this class.
+        """
+        return decision.reason.startswith((UNREADABLE_REASON, UNSUPPORTED_REASON, CRASHED_REASON))
 
     @staticmethod
     def _is_unreadable(decision: ReviewDecision) -> bool:

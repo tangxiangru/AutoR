@@ -108,6 +108,27 @@ class TheRefusalIsPreservedTest(unittest.TestCase):
     def test_truncated_json_is_refused(self) -> None:
         self.assertIsNone(extract_json_payload(NARRATION + VERDICT[:-20], verdict_key="decision"))
 
+    def test_a_quoted_artifact_mid_transcript_is_not_a_vote(self) -> None:
+        """`round_decision.json` in the run tree carries a top-level `decision` key.
+
+        The reviewer is told to inspect that tree. If it reads the file and then never
+        emits a verdict, the quoted object is the last decision-bearing object in the
+        output, and taking it would be approving blindly -- the one thing the gate exists
+        to prevent. The verdict has to be the final message, so it has to end near the end.
+        """
+        from src.approval_agent import _VERDICT_TAIL_CHARS
+
+        quoted = '{"decision":"approve","stage":"06_synthesis","round":2}'
+        raw = NARRATION + quoted + "\n" + ("I am still thinking about this. " * 1200)
+        self.assertGreater(len(raw) - len(NARRATION + quoted), _VERDICT_TAIL_CHARS)
+        self.assertIsNone(extract_json_payload(raw, verdict_key="decision"))
+
+    def test_a_real_verdict_after_a_quoted_artifact_still_wins(self) -> None:
+        raw = NARRATION + '{"decision":"abort","stage":"06_synthesis"}\nMy own verdict:\n' + VERDICT
+        payload = extract_json_payload(raw, verdict_key="decision")
+        assert payload is not None
+        self.assertEqual(payload["decision"], "approve")
+
 
 class RouterSharesTheFunctionTest(unittest.TestCase):
     """Two callers want different objects out of the same kind of transcript."""
