@@ -137,5 +137,11 @@ as routine, which is the thing tiering exists to avoid.
   pass first time because it was done well.
 - **The declaring stage is guessing about work it has not done.** It knows whether *its own*
   decisions are settled, which is a good proxy and not the same thing.
-- **Tiering is off by default, and off means exactly the previous behaviour** — every stage
+- **Tiering is ON by default**, because `--rigor` defaults to `standard` and `standard` enables
+  `effort_tiers` (`_LEVEL_FEATURES`, `src/rigor.py`). `--rigor fast` or an explicit
+  `--no-effort-tiers` turns it off, and off means exactly the previous behaviour — every stage
   deliberative, nothing gated more cheaply by accident.
+- **A consequence worth knowing under `--rigor max`.** `DEFAULT_TIERS` marks `04_implementation`,
+  `05_experimentation` and `08_dissemination` routine, and a routine stage is reviewed by
+  `manager.solo_reviewer` rather than the seated panel. So `--rigor max` alone does not put the
+  panel at those three gates; `--rigor max --no-effort-tiers` does.

@@ -8,6 +8,7 @@ detail behind it.
 
 | If you want to… | Read |
 | --- | --- |
+| Understand what AutoR is as a system — design, modules, novelty, contribution | **[The Framework](framework.md)** |
 | Install AutoR and run your first project end to end | [English Guide](tutorial_en.md) · [中文教程](tutorial_zh.md) |
 | Look up a command-line flag | [CLI Reference](cli-reference.md) |
 | Run AutoR unattended, or benchmark it on ResearchClawBench | [ResearchClawBench](researchclawbench.md) |
@@ -24,9 +25,17 @@ detail behind it.
 | Use or script the browser UI | [Studio Guide & HTTP API](studio.md) |
 | Understand how the code is organized | [Architecture](architecture.md) |
 | Hack on AutoR, run the tests, add a stage or a venue | [Development](development.md) |
+| Know when the backend, not the research, is what failed | [Backend Health](backend-health.md) |
 | Fix an error you just hit | [Troubleshooting](troubleshooting.md) |
 
 ## The whole documentation set
+
+### Design
+
+- **[framework.md](framework.md)** — the design document. The problem AutoR is
+  built for, the six commitments that determine its architecture, the control
+  loop, every module and what it owns, what is new here, what it contributes,
+  and what has *not* been established.
 
 ### User guides
 
@@ -37,9 +46,9 @@ detail behind it.
 
 ### Reference
 
-- **[cli-reference.md](cli-reference.md)** — every flag on `main.py` and
-  `studio.py`, what each one defaults to, what is persisted on resume, and
-  which flags are mutually exclusive.
+- **[cli-reference.md](cli-reference.md)** — every flag on `main.py`,
+  `rcb_agent.py` and `studio.py`, what each one defaults to, what is persisted
+  on resume, and which flags are mutually exclusive.
 - **[configuration.md](configuration.md)** — `run_config.json`, the venue
   registry, the optional Gemini diagram config, environment variables, and
   which settings survive a resume.
@@ -62,6 +71,27 @@ detail behind it.
 
 ### Internals
 
+- **[self-improvement.md](self-improvement.md)** — the stage graph and its
+  guards, routing, the rigour rubric and the champion ratchet, the cross-run
+  archive and its comparability basis, paired trials — and the constraints that
+  stop a scored loop from optimising toward a nicer answer.
+- **[rigor.md](rigor.md)** — the one dial: which optional machinery each level
+  turns on, and how an explicit flag overrides it.
+- **[effort-tiers.md](effort-tiers.md)** — routine vs deliberative stages, tier
+  promotion, and concentrating the strong model where something is undecided.
+- **[review-panel.md](review-panel.md)** — the five seats, the blind round and
+  the cross-examination, blocking objections, and the solo baseline every panel
+  run measures itself against.
+- **[ideation-panel.md](ideation-panel.md)** — the five proposer lenses, Jaccard
+  deduplication, and the adoption measurement taken after approval.
+- **[deliberation.md](deliberation.md)** — when a stage may stop and escalate a
+  crux, the four voices, and the falsifier the resolution must name.
+- **[stage-comments.md](stage-comments.md)** — anchored review comments and the
+  collateral-change diff.
+- **[scorecard.md](scorecard.md)** — the five self-measurement ledgers and the
+  end-of-run verdict on which flags earned their cost.
+- **[backend-health.md](backend-health.md)** — telling "the model was
+  unreachable" apart from "the research failed".
 - **[architecture.md](architecture.md)** — layers, module map, the stage
   attempt loop, how prompts are assembled, how recovery works, and the
   extension points.
@@ -107,4 +137,6 @@ Outside this directory:
   `03`.
 - Anything described as *validated* is checked in code, and the source of that
   check is named so you can read it yourself.
-| Know when the backend, not the research, is what failed | [Backend Health](backend-health.md) |
+- Symbols are cited by name rather than by `file.py:NNN`. Line anchors drift
+  with every refactor, and an anchor pointing at the wrong line is worse than
+  no anchor; a symbol name can be grepped.

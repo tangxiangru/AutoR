@@ -40,7 +40,7 @@ pip install google-genai pyyaml
 ## Tests
 
 ```bash
-# Everything (~10s, 234 tests)
+# Everything (~70s, 1820 tests across 83 modules, no third-party dependency)
 python -m unittest discover -s tests -p "test_*.py"
 
 # Verbose

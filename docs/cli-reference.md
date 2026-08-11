@@ -214,7 +214,7 @@ description in [Rigor](rigor.md).
 | Flag | Default | Description |
 | --- | --- | --- |
 | `--routine-model MODEL` | - | Model for routine-tier stages, keeping the strong model for the few steps whose output the rest of the run inherits. Requires `--effort-tiers`. |
-| `--effort-tiers` | off | Run each stage as `routine` or `deliberative` instead of treating them alike. Routine gets a lean prompt, a single reviewer, and no escalation offer. Each stage declares what the next needs; a routine stage that fails twice is promoted automatically. |
+| `--effort-tiers` / `--no-effort-tiers` | **on** (from `--rigor standard`, the default) | Run each stage as `routine` or `deliberative` instead of treating them alike. Routine gets a lean prompt, a single reviewer, and no escalation offer. Each stage declares what the next needs; a routine stage that fails twice is promoted automatically. Turn it off with `--no-effort-tiers` or `--rigor fast`. |
 
 Under tiering, polish rounds — the run's most expensive setting — are withheld from routine stages entirely, so the same rounds land only where something is still undecided. Off means exactly the previous behaviour. Both directions of mis-spending are recorded in
 `workspace/reviews/effort.json`. Full description in [Effort Tiers](effort-tiers.md).
