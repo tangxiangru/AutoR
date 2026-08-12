@@ -39,11 +39,20 @@ from typing import Any
 from .approval_agent import (
     CRASHED_REASON,
     DECISION_TO_CHOICE,
+    GOAL_EXCERPT_CHARS,
     AutomatedReviewer,
     ReviewDecision,
 )
 from .terminal_ui import TerminalUI
-from .utils import RunPaths, StageSpec, append_log_entry, read_text, truncate_text, write_text
+from .utils import (
+    RunPaths,
+    StageSpec,
+    append_log_entry,
+    goal_excerpt,
+    read_text,
+    truncate_text,
+    write_text,
+)
 
 
 #: Choices that leave the stage unapproved. Used to decide whether a panel actually converged.
@@ -1129,7 +1138,9 @@ class ReviewPanel:
             f"- experiment manifest: `{paths.experiment_manifest.resolve()}`\n"
             f"- workspace root: `{paths.workspace_root.resolve()}`\n\n"
             "# Original Goal\n\n"
-            f"{excerpt(paths.user_input, 3000)}\n\n"
+            # Same reader, same fix as the solo reviewer: a seat cannot judge whether a
+            # stage did the task on half the task.
+            f"{goal_excerpt(read_text(paths.user_input), max_chars=GOAL_EXCERPT_CHARS)}\n\n"
             "# Approved Memory\n\n"
             f"{excerpt(paths.memory, 10000)}\n\n"
             "# Current Stage Summary\n\n"
