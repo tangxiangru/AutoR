@@ -18,6 +18,7 @@ from .utils import (
     StageSpec,
     append_jsonl,
     extract_stream_text_fragments,
+    goal_excerpt,
     read_text,
     truncate_text,
     write_text,
@@ -62,6 +63,18 @@ DECISION_TO_CHOICE = {
 UNREADABLE_REASON = "Automated reviewer did not return valid JSON."
 UNSUPPORTED_REASON = "Automated reviewer returned an unsupported decision token."
 CRASHED_REASON = "Automated reviewer failed to run."
+
+#: How much of the research task the approval gate is shown.
+#:
+#: The reviewer decides whether a stage did its job, and the only statement of what that
+#: job is comes from here. It used to read the first 3,000 characters of the goal --
+#: head-truncated, and on a benchmark run the goal opens with AutoR's own header and
+#: workspace contract. Measured over the 40 ResearchClawBench tasks, the gate had never
+#: once seen a whole task: 0 of 39 complete, median 50% visible. What falls off the end is
+#: the task's own list of required outputs and data files, so "materially complete for its
+#: current milestone" was judged against half a question. The longest task is 8,540
+#: characters; 10,000 fits every one of them with room for a longer task to arrive.
+GOAL_EXCERPT_CHARS = 10_000
 
 #: The last thing the reviewer reads, and the reason it is last.
 #:
@@ -581,7 +594,12 @@ class AutomatedReviewer:
             f"2. {suggestions[1]}\n"
             f"3. {suggestions[2]}\n\n"
             "# Original Goal\n\n"
-            f"{self._read_excerpt(paths.user_input, max_chars=3000)}\n\n"
+            # `goal_excerpt`, not `_read_excerpt`: it returns the *task* where one is fenced
+            # and truncates from the tail, so an overlong task loses its closing notes rather
+            # than its subject. The router, the deliberation panel and the validity reviewer
+            # were moved onto it; the approval gate -- the one reader whose whole job is
+            # deciding whether the task was done -- was left behind.
+            f"{goal_excerpt(read_text(paths.user_input), max_chars=GOAL_EXCERPT_CHARS)}\n\n"
             "# Approved Memory\n\n"
             f"{self._read_excerpt(paths.memory, max_chars=12000)}\n\n"
             "# Current Stage Summary\n\n"
