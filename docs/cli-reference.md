@@ -19,7 +19,7 @@ it](#how-the-agent-reaches-it)), and `docs/ui-design/generate_progress_docx.py`
 regenerates one design document and needs `python-docx`.
 
 Every flag on those six is named below: `main.py`'s 61, `studio.py`'s 5,
-`tools/web_search.py`'s 4 and `tools/score_rcb_run.py`'s 8 each get their own
+`tools/web_search.py`'s 4 and `tools/score_rcb_run.py`'s 9 each get their own
 table row, and `rcb_agent.py`'s 37 are covered as the six that are its own plus
 the 31 it shares with `main.py`, every one of the 31 spelled out by name.
 `tools/archive_sample_complexity.py` has none.
@@ -699,7 +699,7 @@ to print a total while any call failed.
 ```
 python tools/score_rcb_run.py --workspace PATH --bench PATH
                               [--judge {reference,vertex}] [--model MODEL]
-                              [--key-file PATH] [--endpoint URL]
+                              [--draws N] [--key-file PATH] [--endpoint URL]
                               [--project-id ID] [--out PATH]
 ```
 
@@ -709,6 +709,7 @@ python tools/score_rcb_run.py --workspace PATH --bench PATH
 | `--bench PATH` | **required** | A checkout of ResearchClawBench. It is prepended to `sys.path` so `evaluation.score` can be imported; the scoring logic is the bench's, not this repo's. |
 | `--judge {reference,vertex}` | `reference` | Which judge scores the run. See below — this is the single most consequential flag on the tool. |
 | `--model MODEL` | `gpt-5.1` under `reference` (`REFERENCE_JUDGE_MODEL`), `claude-opus-4-5@20251101` under `vertex` (`FALLBACK_JUDGE_MODEL`) | Override the judge model id. Whatever it resolves to is printed twice — the `judge:` header line and the `TOTAL (judge …)` line — and recorded as `judge_model` in the `--out` JSON. The per-item lines carry no judge. |
+| `--draws N` | `1` | Score the same artifacts N times and report the mean, the per-draw totals and the spread. The judge is stochastic — see below. At `1` the dispersion prints as **unmeasured**, never as `0.0`: a zero there would be a precision claim inferred from the one sample size that cannot support it, and it flatters, because a fabricated `±0.0` makes any delta look real. Costs one full pass per draw; `judge_calls` accumulates. |
 | `--key-file PATH` | `~/api.txt` (`DEFAULT_KEY_FILE`) | File holding the reference judge's key. Outside any repository on purpose: a default inside the tree is one `git add -A` away from a leak. There is deliberately no flag that takes the key itself — it would land in the shell history and in the process table. The file may be a bare token, `KEY=token`, or a quoted value. |
 | `--endpoint URL` | `REFERENCE_JUDGE_ENDPOINT` | The OpenAI-compatible base URL the reference judge is served from. Only read under `--judge reference`. |
 | `--project-id ID` | `$ANTHROPIC_VERTEX_PROJECT_ID`, else empty | Vertex project for `--judge vertex`. Empty and unset exits `2` with `Set ANTHROPIC_VERTEX_PROJECT_ID or pass --project-id.` |
@@ -728,6 +729,29 @@ inside the `TOTAL (judge …)` line so the number cannot be copied out without i
 and stores `judge_model` in the `--out` JSON. (The module docstring claims the
 judge is on *every* line of output; it is not — the per-item rows, the
 `workspace:` line and the `items judged:` line carry none.)
+
+### `--draws` is the other half of the same caution
+
+`--judge` is about *which* judge. `--draws` is about the same judge twice.
+
+Eight draws of `gpt-5.1` over one artifact set held fixed — same workspace, same
+`report.md`, same five figures, nothing changed between draws — scored 41.4, 42.8,
+45.5, 47.1, 49.1, 49.6, 49.8 and 49.9: **spread 8.5**, sd 3.4, around a mean of
+46.9. The variance is worst where it costs most; the item weighted 0.5 spanned 32
+to 55, which is 11.5 points of the total by itself.
+
+So a single-draw total on a single task carries roughly ±4 points of pure sampling
+noise, and **a one-task A/B below about eight points is uninterpretable** — including
+a before-and-after on the same task, which is the shape a harness change most tempts
+you into. One such comparison read 46.0 against 42.8 and looked like a small
+regression; 46.0 sits at the 3/8 percentile of the unchanged artifact's own
+distribution.
+
+The full table is in
+[ResearchClawBench → How wide the judge's sampling range actually is](researchclawbench.md#how-wide-the-judges-sampling-range-actually-is).
+Note that 8.5 holds the artifacts fixed: AutoR's own run-to-run variance is
+additional and still unmeasured, so the floor for a real A/B is higher than that,
+not equal to it.
 `--judge vertex` exists for when no reference key is available;
 its numbers are internally consistent and are **not** comparable to a published
 figure.
