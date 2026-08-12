@@ -482,3 +482,88 @@ class ReferenceJudgeTest(unittest.TestCase):
     def test_the_endpoint_is_not_treated_as_a_secret(self) -> None:
         """An endpoint in source is fine; a key is not. Keep them distinguishable."""
         self.assertTrue(self.tool.REFERENCE_JUDGE_ENDPOINT.startswith("https://"))
+
+
+class DrawAggregationTest(unittest.TestCase):
+    """The judge is stochastic and a one-draw total does not say so.
+
+    Eight draws over one unchanged artifact set -- same workspace, same report, same
+    figures -- spanned 8.5 points (41.4 to 49.9, sd 3.4), and the heaviest checklist
+    item alone spanned 23. That is enough to make a single-task before/after below
+    about eight points meaningless, and I nearly reported one: 46.0 against 42.8, where
+    46.0 sits at the 3/8 percentile of the *unchanged* artifact's own distribution.
+
+    So the tests worth having here are not about the mean. They are about the tool
+    refusing to imply a precision it has not got.
+    """
+
+    def setUp(self) -> None:
+        self.tool = _load()
+
+    @staticmethod
+    def _drawn(total: float, scores: list[float]) -> dict:
+        return {
+            "total_score": total,
+            "judge_model": "gpt-5.1",
+            "judge_calls": len(scores),
+            "judge_failures": [],
+            "items": [{"type": "text", "weight": 0.5, "content": f"c{i}", "score": s}
+                      for i, s in enumerate(scores)],
+        }
+
+    def test_the_mean_is_over_every_draw(self) -> None:
+        merged = self.tool.aggregate_draws(
+            [self._drawn(40.0, [40, 40]), self._drawn(50.0, [60, 40])]
+        )
+        self.assertEqual(merged["total_score"], 45.0)
+        self.assertEqual(merged["total_scores"], [40.0, 50.0])
+        self.assertEqual(merged["draws"], 2)
+        self.assertEqual(merged["items"][0]["score"], 50.0)
+        self.assertEqual(merged["items"][0]["scores"], [40.0, 60.0])
+
+    def test_one_draw_reports_its_dispersion_as_unmeasured_not_as_zero(self) -> None:
+        """The whole point. A zero here reads as "the judge is deterministic".
+
+        It would be inferred from the one sample size that cannot show it, and it is
+        the direction that flatters: a fabricated +/-0.0 makes any delta look
+        significant. `rcb_trial` refuses the same shape one layer up.
+        """
+        merged = self.tool.aggregate_draws([self._drawn(40.0, [40, 40])])
+
+        self.assertIsNone(merged["total_spread"])
+        self.assertIsNone(merged["items"][0]["spread"])
+        self.assertIn("unmeasured", self.tool.format_spread(merged["total_spread"], 1))
+        self.assertNotIn("0.0", self.tool.format_spread(merged["total_spread"], 1))
+
+    def test_the_spread_is_reported_once_there_is_one(self) -> None:
+        merged = self.tool.aggregate_draws(
+            [self._drawn(41.4, [40]), self._drawn(49.9, [60]), self._drawn(45.5, [50])]
+        )
+        self.assertAlmostEqual(merged["total_spread"], 8.5, places=6)
+        self.assertIn("8.5", self.tool.format_spread(merged["total_spread"], 3))
+        self.assertIn("3 draws", self.tool.format_spread(merged["total_spread"], 3))
+
+    def test_judge_calls_accumulate_across_draws(self) -> None:
+        """Cost is per draw, and a reader comparing two totals needs to see that."""
+        merged = self.tool.aggregate_draws(
+            [self._drawn(40.0, [40, 40]), self._drawn(50.0, [60, 40])]
+        )
+        self.assertEqual(merged["judge_calls"], 4)
+
+    def test_the_draw_count_travels_with_the_total(self) -> None:
+        """A total whose sampling is unstated cannot be compared with another one.
+
+        Same argument as the judge model, which this tool already prints for the same
+        reason -- and the two are the same failure at different scales.
+        """
+        text = TOOL.read_text(encoding="utf-8")
+        self.assertIn("TOTAL (judge {result['judge_model']}, {draw_count} draw", text)
+
+    def test_the_default_is_one_draw_so_behaviour_is_unchanged(self) -> None:
+        merged = self.tool.aggregate_draws([self._drawn(42.8, [42.8])])
+        self.assertEqual(merged["draws"], 1)
+        self.assertEqual(merged["total_score"], 42.8)
+
+    def test_aggregating_nothing_raises_rather_than_reporting_zero(self) -> None:
+        with self.assertRaises(ValueError):
+            self.tool.aggregate_draws([])

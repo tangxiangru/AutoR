@@ -421,6 +421,60 @@ def write_result(out: Path, result: dict) -> None:
     os.replace(tmp, out)
 
 
+def aggregate_draws(results: list[dict]) -> dict:
+    """Fold N independent judge passes over the same artifacts into one result.
+
+    Averaging is the easy half. The half that matters is refusing to state an
+    uncertainty a single draw has not earned: with one draw the spread is
+    ``None`` and every printed form says *unmeasured*, never ``0.0``. A zero
+    there would be the most expensive kind of wrong -- it reads as "this judge
+    is deterministic" from the exact evidence that cannot show it, and
+    ``rcb_trial`` already refuses the same shape one layer up ("fewer draws must
+    not produce a smaller stated uncertainty").
+
+    Measured on one artifact set held fixed, eight ``gpt-5.1`` draws spanned 8.5
+    points; see docs/researchclawbench.md. That is why this exists.
+    """
+    if not results:
+        raise ValueError("aggregate_draws needs at least one result")
+
+    merged = dict(results[-1])
+    totals = [float(r.get("total_score", 0.0)) for r in results]
+    merged["draws"] = len(results)
+    merged["total_scores"] = totals
+    merged["total_score"] = sum(totals) / len(totals)
+    merged["judge_calls"] = sum(int(r.get("judge_calls", 0)) for r in results)
+    merged["judge_failures"] = [f for r in results for f in r.get("judge_failures", [])]
+    merged["total_spread"] = (max(totals) - min(totals)) if len(totals) > 1 else None
+
+    # Per item, keyed on position: `score` returns the checklist in a fixed order and
+    # every draw scores the same checklist, so a positional join is exact here. A join
+    # on `content` would look safer and would silently drop an item whose text the
+    # bench revision changed between draws -- but the draws are one process over one
+    # checkout, so that cannot happen, and a dropped item is worse than a wrong one.
+    per_item: list[dict] = []
+    for index, item in enumerate(merged.get("items", [])):
+        scores = [
+            float(r["items"][index].get("score", 0.0))
+            for r in results
+            if index < len(r.get("items", []))
+        ]
+        entry = dict(item)
+        entry["scores"] = scores
+        entry["score"] = sum(scores) / len(scores) if scores else 0.0
+        entry["spread"] = (max(scores) - min(scores)) if len(scores) > 1 else None
+        per_item.append(entry)
+    merged["items"] = per_item
+    return merged
+
+
+def format_spread(spread: float | None, draws: int) -> str:
+    """One phrasing for every place a dispersion is printed, including its absence."""
+    if spread is None:
+        return f"unmeasured ({draws} draw)"
+    return f"spread {spread:.1f} over {draws} draws"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("--workspace", required=True, type=Path)
@@ -449,6 +503,19 @@ def main() -> int:
     parser.add_argument(
         "--project-id", default=os.environ.get("ANTHROPIC_VERTEX_PROJECT_ID", "")
     )
+    parser.add_argument(
+        "--draws",
+        type=int,
+        default=1,
+        metavar="N",
+        help=(
+            "Score the same artifacts N times and report the mean. The judge is "
+            "stochastic: eight draws over one unchanged artifact set spanned 8.5 "
+            "points, so a one-draw total on a single task carries about +/-4 points "
+            "of sampling noise and a one-task A/B below ~8 points is uninterpretable. "
+            "Default 1, which reports its dispersion as unmeasured rather than as zero."
+        ),
+    )
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args()
 
@@ -466,14 +533,29 @@ def main() -> int:
             model=args.model or FALLBACK_JUDGE_MODEL, project_id=args.project_id
         )
 
+    if args.draws < 1:
+        print("--draws must be at least 1.", file=sys.stderr)
+        return 2
+
+    # Every draw is scored, even after one refuses. A refusal is "this total is not a
+    # measurement", and the per-item table from the remaining draws is what tells you
+    # whether the failure was one flaky call or the whole judge -- which is the first
+    # question anyone asks. Refusing early would throw that away to save a minute.
     refused: ScoringRefused | None = None
-    try:
-        result = score(args.workspace, args.bench, judge=judge)
-    except ScoringRefused as exc:
-        refused, result = exc, exc.result
-    if "error" in result:
-        print(f"scoring failed: {result['error']}", file=sys.stderr)
-        return 1
+    draws: list[dict] = []
+    for draw_no in range(1, args.draws + 1):
+        if args.draws > 1:
+            print(f"draw {draw_no}/{args.draws} ...", file=sys.stderr)
+        try:
+            drawn = score(args.workspace, args.bench, judge=judge)
+        except ScoringRefused as exc:
+            refused, drawn = refused or exc, exc.result
+        if "error" in drawn:
+            print(f"scoring failed: {drawn['error']}", file=sys.stderr)
+            return 1
+        draws.append(drawn)
+
+    result = aggregate_draws(draws)
 
     # `score_workspace` returns this under "items". Reading "results" left the
     # per-item table empty and printed "items judged: 0" beside a real total --
@@ -484,9 +566,12 @@ def main() -> int:
     print(f"workspace: {args.workspace}")
     print()
     for item in items:
+        spread = item.get("spread")
+        dispersion = f"  [{format_spread(spread, result['draws'])}]" if result["draws"] > 1 else ""
         print(
             f"  [{item.get('type','?'):>5}] w={item.get('weight',0):<5} "
-            f"score={item.get('score',0):>3}  {str(item.get('content',''))[:70]}"
+            f"score={item.get('score',0):>5.1f}{dispersion}  "
+            f"{str(item.get('content',''))[:70]}"
         )
 
     # The check that matters. A judge failure reads as a zero, so a total quoted
@@ -502,7 +587,21 @@ def main() -> int:
         return 1
 
     print()
-    print(f"TOTAL (judge {result['judge_model']}): {result.get('total_score', 0):.1f}")
+    draw_count = result["draws"]
+    # The draw count rides with the total, always, for the same reason the judge model
+    # does: a number whose sampling is unstated cannot be compared with another one.
+    print(
+        f"TOTAL (judge {result['judge_model']}, {draw_count} draw"
+        f"{'s' if draw_count != 1 else ''}): {result.get('total_score', 0):.1f}"
+    )
+    print(f"  dispersion: {format_spread(result.get('total_spread'), draw_count)}")
+    if draw_count > 1:
+        print("  draws: " + ", ".join(f"{t:.1f}" for t in result.get("total_scores", [])))
+    else:
+        print(
+            "  one draw on one task carries about +/-4 points of judge sampling noise; "
+            "pass --draws to bound it."
+        )
     print(f"items judged: {len(items)}   judge calls: {result.get('judge_calls', 0)}")
 
     if args.out:
