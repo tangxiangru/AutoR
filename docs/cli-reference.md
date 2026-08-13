@@ -237,19 +237,19 @@ approval. See [Stage Contract](stage-contract.md#2-the-artifact-gate).
 | `--panel-rounds N` | `2` | Maximum deliberation rounds. Round 1 is always independent; later rounds run only on disagreement. |
 | `--panel-models ROLE=MODEL...` | — | Assign a model per seat, as `role=model` or `role=backend:model` (`pi=opus skeptic=codex:default`). Heterogeneity is the lever with the best evidence behind it. |
 | `--persona PATH` | — | Markdown description of the researcher the panel stands in for, injected into every seat so they hold one consistent bar. |
-| `--cross-review {auto,gemini,off}` | `auto` | Independent second opinion on each approval, from a different model family. It can veto an approval it cannot defend and can never override a refusal, so it only makes the gate stricter. `auto` enables it when a Gemini backend is configured. **Accepted but inert here** — see below. |
-| `--cross-review-model MODEL` | `gemini-3.1-pro-preview` | Model for the cross-model reviewer (`DEFAULT_CROSS_REVIEW_MODEL`, `src/cross_reviewer.py`). Inert on `main.py` for the same reason. |
+| `--cross-review {auto,gemini,off}` | `auto` | Independent second opinion on each approval, from a different model family. It can veto an approval it cannot defend and can never override a refusal, so it only makes the gate stricter. `auto` enables it when a Gemini backend is configured. Refused behind `--fake-operator` — see below. |
+| `--cross-review-model MODEL` | `gemini-3.1-pro-preview` | Model for the cross-model reviewer (`DEFAULT_CROSS_REVIEW_MODEL`, `src/cross_reviewer.py`). |
 
-> **Both cross-review flags do nothing on `main.py` today.** `main.py` imports
-> `resolve_cross_reviewer` and never calls it; the only production caller is
-> `rcb_agent.py`, which passes the result to `ResearchManager` as
-> `cross_reviewer`. The flags parse and are then **dropped** — nothing in
-> `main.py` reads `args.cross_review` or `args.cross_review_model` after
-> `parse_args`, and neither value is recorded anywhere: `initialize_run_config`
-> has no such key, and `main.py` never dumps its argv. So a resumed or audited
-> run carries no trace that they were passed, which makes the inertness harder
-> to notice than it would be if the values were written down. Tracked in
-> [Framework → What has not been
+> **Two things the cross-review flags still do not do.** They are live on both
+> entry points now — `main.py` seats the reviewer through `create_cross_reviewer`
+> — but neither value is recorded anywhere: `initialize_run_config` has no such
+> key and `main.py` never dumps its argv, so a **resumed run re-decides the mode
+> from whatever credentials are in the environment that day** rather than from
+> what was asked for. And `_collect_review_decision` returns before
+> `_apply_cross_review` whenever no automated reviewer is seated, so **under a
+> manual gate the reviewer is built and nothing consults it**. Behind
+> `--fake-operator` it is refused outright, so the audit is only ever exercised
+> against a stubbed verdict. Tracked in [Framework → What has not been
 > established](framework.md#7-what-has-not-been-established) and in the README's
 > Limits section.
 
@@ -555,12 +555,11 @@ Read the `main.py` tables above for what each one does. Three of them differ in
 kind rather than in default, and the two parsers are mirror images about it —
 each declares a flag the other one honours and it does not:
 
-- **`--cross-review` and `--cross-review-model` are live here and inert on
-  `main.py`.** `rcb_agent.py` is the only production caller of
-  `resolve_cross_reviewer`, and it hands the result to `ResearchManager` as
-  `cross_reviewer`, so the second opinion described in [Review
-  panel](#review-panel) actually runs on this path. Defaults match `main.py`'s:
-  `auto`, and `gemini-3.1-pro-preview` for the model.
+- **`--cross-review` and `--cross-review-model` are live on both entry points.**
+  `rcb_agent.py` and `main.py` both call `resolve_cross_reviewer` and hand the
+  result to `ResearchManager` as `cross_reviewer`, so the second opinion
+  described in [Review panel](#review-panel) runs on either. Defaults are the
+  same: `auto`, and `gemini-3.1-pro-preview` for the model.
 - **`--routine-model` is inert here and live on `main.py`.** It parses, and its
   `--help` text promises a cheaper model for routine-tier stages, but
   `args.routine_model` is read nowhere in `rcb_agent.py`: under `--effort-tiers`

@@ -127,7 +127,7 @@ touching a verdict — see **[framework.md](framework.md)**.
 | --- | --- |
 | [`main.py`](../main.py) | CLI parsing, backend and reviewer construction, archive wiring, new-run vs resume dispatch. Contains no workflow logic. |
 | [`studio.py`](../studio.py) | Three-line shim over `src/backend/studio_http.main`. |
-| [`rcb_agent.py`](../rcb_agent.py) | The ResearchClawBench adapter entry point: its own unattended defaults, `BENCHMARK_MIN_REPORT_FIGURES = 3`, and the only production caller of `resolve_cross_reviewer`. |
+| [`rcb_agent.py`](../rcb_agent.py) | The ResearchClawBench adapter entry point: its own unattended defaults, `BENCHMARK_MIN_REPORT_FIGURES = 3`, and one of the two production callers of `resolve_cross_reviewer`, the other being `main.py` through `create_cross_reviewer`. |
 | [`tools/score_rcb_run.py`](../tools/score_rcb_run.py) | Scores a finished benchmark run. `--judge reference` (the default) is gpt-5.1, which is what ResearchClawBench itself scores with; `--judge vertex` is the Anthropic fallback. |
 | [`tools/archive_sample_complexity.py`](../tools/archive_sample_complexity.py) | Prints how many runs the archive needs before an edge becomes believable, then exits. |
 

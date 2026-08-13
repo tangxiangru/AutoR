@@ -547,9 +547,12 @@ class ValidityReviewer:
         This used to be a fourth private copy of the same idea, and the narrowest: it tried
         the whole string and then ``text[first '{' : last '}']``. On an adversarial review
         that read a JSON artifact before answering, that slice spans both objects and parses
-        as neither -- and this parser's failure is silent, because :meth:`_parse` returns an
-        empty list either way. The run then records that the validity reviewer attacked the
-        stage and raised nothing, which is the opposite of what happened.
+        as neither. Its failure used to be silent, because :meth:`_parse` returned an empty
+        list either way and the run then recorded that the reviewer had attacked the stage and
+        raised nothing. It is no longer silent: :meth:`review` treats a ``None`` payload as
+        ``UNREADABLE``, re-asks once, and discloses a pass that never completed. Returning
+        ``None`` rather than ``{}`` is what keeps that distinguishable from ``{"findings": []}``,
+        which is a clean review the prompt explicitly blesses.
         """
         return extract_json_payload(raw, verdict_key="findings")
 

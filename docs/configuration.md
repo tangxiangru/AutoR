@@ -26,7 +26,7 @@ outside a run directory. See [Filesystem locations](#filesystem-locations).
 | `claude` on `PATH` ([Claude Code](https://docs.claude.com/en/docs/claude-code)) | real runs with `--operator claude`, and all Studio runs |
 | `codex` on `PATH` ([Codex CLI](https://developers.openai.com/codex/cli)) | real runs with `--operator codex` |
 | A LaTeX toolchain (`pdflatex`/`latexmk`) | Stage 07 compiling a PDF — only with `--output-format latex`; the default markdown mode needs no TeX |
-| `pip install google-genai` | the three Gemini-backed optional paths: `--web-search gemini`, `--research-diagram`, and `--cross-review` (which is wired on the `rcb_agent.py` entry point only — `main.py` accepts the flag and never uses it) |
+| `pip install google-genai` | the three Gemini-backed optional paths: `--web-search gemini`, `--research-diagram`, and `--cross-review` (live on both entry points; refused behind `--fake-operator`) |
 | `pip install pyyaml` | reading the API key out of `configs/diagram_config.yaml`; not needed if you set the key in the environment |
 
 **AutoR itself has no third-party Python dependencies.** Every import of one is
@@ -51,8 +51,7 @@ The three do not fail alike, and only one of them is a soft *unavailable*:
   blocker: it is inferred rather than observed, so it warns.)
 - **`--research-diagram` warns and continues.** The call is wrapped; a missing
   package or key prints `Diagram generation failed: ...` and the stage stands.
-- **`--cross-review` records an unavailable verdict** — on the `rcb_agent.py`
-  path, the only one where the flag is wired. `CrossVerdict` keeps
+- **`--cross-review` records an unavailable verdict.** `CrossVerdict` keeps
   `unavailable` distinct from agreement, so a reviewer that could not run is
   not counted as one that approved.
 

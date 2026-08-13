@@ -581,13 +581,17 @@ def routing_summary(paths: RunPaths) -> dict[str, Any]:
     reports a route shorter than the one the run walked.
 
     **`census` is the other half of the walk.** `edges` and `decisions` are about
-    moves the run *made*; every visit also records which edges were live and which
-    were shut and by what (:attr:`src.stage_graph.Visit.blocked`), and this function
-    read neither. So a finished run could say where it went and could not say what
-    it was ever offered — the exploration happened and left no record of its own
-    shape. :func:`src.stage_graph.block_census` sums it per edge. A bypassed visit
-    contributes no offer and no block, for the same reason it contributes no edge:
-    nothing was evaluated.
+    moves the run *made*. `decisions` already carried each visit's `offered` set,
+    and `offered_payoffs` consumes it — so what was missing was narrower than "the
+    exploration left no record": :attr:`src.stage_graph.Visit.blocked` was read by
+    nothing, and there was no per-edge total over the whole walk.
+    :func:`src.stage_graph.block_census` supplies both.
+
+    A visit with no recorded choice set contributes neither an offer nor a block,
+    because nothing was evaluated — an operator's `/back`, a rollback, a round's own
+    jump. A bypass that *did* record a choice set contributes both, because those
+    guard evaluations happened even though the move out was the operator's, and
+    :attr:`BlockCensus.bypassed` counts it separately so neither reading is forced.
     """
     payload = _load_json(paths.evolution_dir / "stage_graph.json")
     if not isinstance(payload, dict):

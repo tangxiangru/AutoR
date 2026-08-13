@@ -945,10 +945,13 @@ its questions one at a time.
 Things the mechanisms above do not close. Each is also the next thing worth building, named at the
 code that would have to change.
 
-- **A crashed adversarial pass is indistinguishable from a clean result.** `_write_review(...,
-  failed=True)` records `reviewer_failed: true` ([src/validity_review.py](src/validity_review.py)) and
-  no production code reads that flag. Zero findings and a reviewer that never returned are the same
-  input to `validate_validity_response`: nothing owed, gate open.
+- **A validity review that did not complete is disclosed, not enforced.** `_write_review(...,
+  completion=...)` now records `completed` / `crashed` / `unreadable`
+  ([src/validity_review.py](src/validity_review.py)), the manager re-asks once and names the stage in
+  the run's closing line — but the gate still opens. `validate_validity_response` is deliberately not
+  the enforcement point, because it feeds Stage 06's retry loop and a Stage 06 agent cannot re-run
+  Stage 05's adversarial pass. So a stage whose reviewer never returned is approved with a banner
+  rather than refused.
 - **Attribution stops at the log.** `_record_inbound_channels` writes which channels reached each
   stage, but `RunRecord` ([src/archive.py](src/archive.py)) has no channel field, so "this edge
   helped" cannot yet become "this information helped".

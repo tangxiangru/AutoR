@@ -90,7 +90,7 @@ AutoR 负责的是更上层的 research loop，而不是重新发明一个新的
 | `--archive PATH` / `--archive-report` | 跨 run 记录走过哪些边、收益如何；默认只记录不干预 |
 | `--trial ID --capability X --arm on` / `--trial-report` | 成对 A/B 试验及其统计报告；三个参数必须一起给 |
 | `--web-search {auto,gemini,native}` | 执行器怎么搜网页；`gemini` 用于内置搜索被禁用的部署 |
-| `--cross-review {auto,gemini,off}` | 换一个模型家族复核批准。**注意：目前只有 `rcb_agent.py` 那条路径真的会装上它，`main.py` 上还没接线** |
+| `--cross-review {auto,gemini,off}` | 换一个模型家族复核批准。**注意：`--fake-operator` 下会被拒绝装载，且这个选择不会随 `--resume-run` 保留** |
 
 这张表是提醒，不是参考手册。每个参数的准确语义、默认值、恢复 run 时是否保留，都在 [cli-reference.md](cli-reference.md) 里。
 
@@ -108,7 +108,7 @@ AutoR 负责的是更上层的 research loop，而不是重新发明一个新的
 | Claude Code 或 Codex CLI | 必需 | 真正执行研究任务时需要其中之一 |
 | TeX 环境 | 只有 `--output-format latex` 才需要 | 默认 Stage 07 写的是 `workspace/report/report.md`；要 LaTeX 源文件和可编译 PDF 才需要 TeX |
 | `PyMuPDF` | 可选 | 如果你要用 `--paper-corpus` 读取 PDF 内容，推荐安装 |
-| `google-genai` | 可选 | 不只是画图用：`--research-diagram`、`--web-search gemini` 和 `--cross-review gemini`（这条目前只在 `rcb_agent.py` 上接线，见 2.2）共用这一个 SDK。没装它时 `--web-search gemini` 会直接报 `Error: --web-search gemini cannot work here: ...` 并以退出码 1 结束 |
+| `google-genai` | 可选 | 不只是画图用：`--research-diagram`、`--web-search gemini` 和 `--cross-review gemini`（两条入口都已接线，见 2.2）共用这一个 SDK。没装它时 `--web-search gemini` 会直接报 `Error: --web-search gemini cannot work here: ...` 并以退出码 1 结束 |
 | `Pillow` | 可选 | 只有 `--research-diagram` 需要 |
 | `PyYAML` | 可选 | 只有当你把 Gemini key 写进 `configs/diagram_config.yaml` 时才需要（画图、搜索、cross-review 共用同一个 key 读取逻辑）。缺它只会打一条 warning，然后当成“没有配 key” |
 
