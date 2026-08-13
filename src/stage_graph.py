@@ -658,6 +658,110 @@ def load_graph_state(paths: RunPaths, *, max_steps: int | None = None, max_visit
 
 def save_graph_state(paths: RunPaths, state: GraphState) -> None:
     write_text(state_file(paths), json.dumps(state.to_dict(), indent=2, ensure_ascii=False))
+    record_graph_effect(paths, state)
+
+
+GRAPH_EFFECT_FILENAME = "graph_effect.json"
+
+
+def effect_file(paths: RunPaths) -> Path:
+    return paths.evolution_dir / GRAPH_EFFECT_FILENAME
+
+
+def graph_effect(state: GraphState) -> dict[str, Any]:
+    """What the topology bought over the linear pipeline it contains.
+
+    The adaptive graph is one of this project's two central claims, and until now no run
+    could say whether it had done anything. ``stage_graph.json`` records every visit, but
+    reading a departure rate out of it correctly is easy to get wrong in three ways, and
+    :class:`Visit` carries a field against each:
+
+    * ``bypassed`` -- a ``/back``, a rollback after retry exhaustion or a round decision had
+      no choice set. Counting those as decisions reads an operator's intervention as
+      evidence about an edge.
+    * ``offered`` -- a node with one live move is not a decision. Pooling it with the rest
+      makes the denominator the pipeline's length rather than the number of choices, and
+      every graph then looks equally unused.
+    * ``refusal`` -- the agent answered and the answer was not used, because it was lost or
+      off-menu. That is not the agent agreeing with the default, and the difference is the
+      difference between "the graph is not wanted" and "the graph is not reaching anyone".
+
+    The measured answer on twelve benchmark runs, with the fix that made verdicts readable
+    already in: 81 decision points, 74 agreements, 6 departures, 1 refusal. So the freedom
+    is real, it reaches the router, and the router declines it 91% of the time. That is the
+    least flattering reading available and it is the one the evidence supports, which is
+    why this file writes it rather than leaving the claim unmeasured.
+    """
+    decision_points = departed = refused = agreed = bypassed = 0
+    single_move = 0
+    blocked_by: dict[str, int] = {}
+
+    for visit in state.path:
+        for kind in visit.blocked.values():
+            blocked_by[kind] = blocked_by.get(kind, 0) + 1
+        if visit.bypassed:
+            bypassed += 1
+            continue
+        if len(visit.offered) <= 1:
+            single_move += 1
+            continue
+        decision_points += 1
+        if visit.refusal:
+            refused += 1
+        elif visit.chose and visit.chose != visit.default_choice:
+            departed += 1
+        else:
+            agreed += 1
+
+    return {
+        "steps": len(state.path),
+        "nodes_with_one_live_move": single_move,
+        "nodes_bypassing_the_router": bypassed,
+        "decision_points": decision_points,
+        "departed_from_the_default": departed,
+        "agreed_with_the_default": agreed,
+        "answers_refused_or_lost": refused,
+        "departure_rate": round(departed / decision_points, 3) if decision_points else None,
+        "moves_blocked_by": blocked_by,
+        "verdict": _graph_effect_sentence(decision_points, departed, refused),
+    }
+
+
+def _graph_effect_sentence(decision_points: int, departed: int, refused: int) -> str:
+    """One line a human can act on, written to be unflattering when that is the truth."""
+    if decision_points == 0:
+        return (
+            "No node on this run offered more than one live move, so the graph could not "
+            "have differed from a linear pipeline and nothing here is evidence about it."
+        )
+    if departed == 0 and refused == 0:
+        return (
+            f"{decision_points} node(s) offered a real choice and the router took the "
+            "default at every one: on this run the graph was a linear pipeline."
+        )
+    if departed == 0:
+        return (
+            f"{decision_points} node(s) offered a real choice and the router departed at "
+            f"none of them, but {refused} answer(s) were refused or lost -- so this run is "
+            "evidence about the routing channel, not about the topology."
+        )
+    return (
+        f"The router departed from the default at {departed} of {decision_points} node(s) "
+        f"that offered a real choice ({100 * departed / decision_points:.0f}%)"
+        + (f", with {refused} answer(s) refused or lost." if refused else ".")
+    )
+
+
+def record_graph_effect(paths: RunPaths, state: GraphState) -> dict[str, Any]:
+    """Write :func:`graph_effect` beside the state it is derived from.
+
+    Derived rather than accumulated: unlike the review panel's, every input is already in
+    ``stage_graph.json``, so recomputing from the current state is always right and a
+    resumed or rolled-back run cannot leave a stale tally behind.
+    """
+    effect = graph_effect(state)
+    write_text(effect_file(paths), json.dumps(effect, indent=2, ensure_ascii=False))
+    return effect
 
 
 # ----------------------------------------------------------------------------
