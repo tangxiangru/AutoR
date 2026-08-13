@@ -72,7 +72,7 @@ from .utils import (
 #: :func:`_cap_quantification_by_fidelity`. Every stage draft scored before the cap
 #: over-credits any Key Results section carrying unverifiable numbers, which is why
 #: this is a version bump and not a patch.
-RUBRIC_VERSION = "3"
+RUBRIC_VERSION = "4"
 
 #: The keys the rubric refuses to read out of an adjudication artifact.
 #:
@@ -727,19 +727,72 @@ def _score_traceability(markdown: str) -> CriterionScore:
     )
 
 
+#: A sentence that describes work rather than surrounding it: it carries a quantity, or
+#: it names a path. Used as the denominator of :func:`_score_commitment` in place of a
+#: word count — see that function for why the word count had to go.
+_WORK_BEARING_PATH = re.compile(r"`[^`]*[/.][^`]*`")
+
+#: Work-bearing sentences per unit of hedge allowance. Calibrated, not chosen: on the
+#: four stage summaries of the first real backend run, ``work / 4`` reproduces the old
+#: ``words / 200`` to within a factor of one (8.05 against 9.50, 16.75 against 15.50,
+#: 15.74 against 14.75), so a genuinely dense report keeps the allowance it had. Stage
+#: 04 comes out twice as generous, which is the right direction: it earned it in short
+#: lines naming files.
+_SENTENCES_PER_ALLOWANCE = 4.0
+
+
+def _work_bearing_sentences(body: str) -> int:
+    """Sentences that say what was done, as opposed to sentences that are present."""
+    return sum(
+        1
+        for sentence in re.split(r"(?<=[.!?])\s+|\n", body)
+        if sentence.strip()
+        and (
+            _QUANTITY_PATTERN.search(sentence)
+            or _NAMED_QUANTITY_PATTERN.search(sentence)
+            or _WORK_BEARING_PATH.search(sentence)
+        )
+    )
+
+
 def _score_commitment(markdown: str) -> CriterionScore:
-    """Density of intention over report, in the sections describing work done."""
+    """Density of intention over report, in the sections describing work done.
+
+    Density over *work*, not over words, and the difference is the whole point.
+
+    The allowance used to be ``words / 200``, which put a length gradient inside a
+    criterion the improvement prompt promises has none — ``src/evolution.py`` tells the
+    agent, every polish round, that "every criterion here is a ratio or a count over
+    artifacts on disk; prose cannot move any of them". Measured before this change, on
+    one hedge held fixed while clean prose was added around it: 149 words scored 0.8000,
+    677 scored 0.9409, 2,789 scored 0.9857. That is +0.0253 on a Stage 01 total against
+    a ``DEFAULT_MIN_GAIN`` of 0.02, so `EvolutionController.consider` recorded a round
+    that added nothing but words as ``promoted``, "New champion". The prohibition was
+    written down and the gradient rewarded breaking it.
+
+    Counting work-bearing sentences instead closes it for prose specifically: padding
+    adds sentences that carry no quantity and name no path, so it moves the numerator
+    and the denominator not at all. Buying allowance now requires writing quantities
+    that were not measured, which is a different move, is what ``quantification`` and
+    ``numeric_fidelity`` are for, and leaves a trace in the report rather than in its
+    length.
+    """
     weight = CRITERIA_BY_KEY["commitment"].weight
     body = "\n".join(
         extract_markdown_section(markdown, heading) or ""
         for heading in ("What I Did", "Key Results")
     )
-    words = max(len(body.split()), 1)
+    words = len(body.split())
+    working = _work_bearing_sentences(body)
     hedges = sum(len(re.findall(pattern, body, flags=re.IGNORECASE)) for pattern in _HEDGE_PATTERNS)
-    # One hedge per 200 words is ordinary scientific caution. Six is a plan.
-    allowance = max(words / 200.0, 1.0)
+    # One hedge per four sentences of described work is ordinary scientific caution.
+    # Six is a plan.
+    allowance = max(working / _SENTENCES_PER_ALLOWANCE, 1.0)
     score = _clamp(1.0 - (hedges / (allowance * 5.0)))
-    observed = f"{hedges} forward-looking phrase(s) across {words} words of What I Did / Key Results"
+    observed = (
+        f"{hedges} forward-looking phrase(s) against {working} sentence(s) carrying a "
+        f"quantity or a path, in {words} words of What I Did / Key Results"
+    )
     shortfall = (
         ""
         if score >= 1.0

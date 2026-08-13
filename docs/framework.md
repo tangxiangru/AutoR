@@ -163,8 +163,10 @@ exists to prevent, reached by a route the design did not consider. Declining to 
 fabrication is not the same as declining to *pay* for it. `_cap_quantification_by_fidelity` now caps
 the first criterion at the second wherever both apply, which makes the middle row 0.0; the cap is
 recorded in `observed` so a stage can still tell which half to fix, and Stage 04 is exempt because
-fidelity does not apply before there are results. `RUBRIC_VERSION` is `3`, so no score from before
-the change is ranked against one after it.
+fidelity does not apply before there are results. `RUBRIC_VERSION` is `4` — it went to 3 when
+that cap landed and to 4 when the length gradient came out of `commitment` — and the archive
+ranks no score from before a bump against one after it, so each bump is a clean break rather
+than a silent drift.
 
 1,842 tests passed before the fix and none of them failed after it: the hole was in a composition
 nothing asserted over. The four tests added with it are mutation-checked — they fail when the cap is
