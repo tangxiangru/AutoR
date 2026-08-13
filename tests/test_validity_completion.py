@@ -224,6 +224,38 @@ class ManagerReAsksOnceTest(CompletionTestCase):
         self.assertIn("validity_review_failed", read_text(self.paths.logs))
 
 
+class TheDisclosureReachesTheEndOfTheRunTest(CompletionTestCase):
+    """The record has to reach a reader, which is the defect this module exists to fix.
+
+    Everything above asserts the *state*: `validity_reviews_not_completed` is populated
+    and `validity_disclosure()` renders. None of it asserts the state is delivered.
+    Measured before this class existed: replacing the call at the end of
+    `_complete_run` with `disclosure = None` left the entire suite — 2,146 tests —
+    green. A record with no reader is the exact shape of the `reviewer_failed` flag
+    this branch is removing, reintroduced one layer up.
+    """
+
+    def test_the_run_banner_names_a_stage_that_was_never_attacked(self) -> None:
+        manager = self.manager(ScriptedOperator((1, "")))
+        manager._run_validity_review(self.paths, STAGE_05, "# Stage 05")  # noqa: SLF001
+        self.assertEqual(manager.validity_reviews_not_completed, {STAGE_05.slug: CRASHED})
+
+        manager._complete_run(self.paths)  # noqa: SLF001
+
+        log = read_text(self.paths.logs)
+        self.assertIn("validity_review_not_completed", log)
+        self.assertIn(STAGE_05.slug, log.split("validity_review_not_completed", 1)[1][:400])
+
+    def test_a_healthy_run_closes_without_the_banner(self) -> None:
+        """Empty when every pass completed, or the line stops meaning anything."""
+        manager = self.manager(ScriptedOperator((0, CLEAN_REVIEW)))
+        manager._run_validity_review(self.paths, STAGE_05, "# Stage 05")  # noqa: SLF001
+
+        manager._complete_run(self.paths)  # noqa: SLF001
+
+        self.assertNotIn("validity_review_not_completed", read_text(self.paths.logs))
+
+
 class ManagerRecordsCompletionTest(CompletionTestCase):
     def test_two_failures_are_recorded_against_the_stage(self) -> None:
         manager = self.manager(ScriptedOperator((1, "")))
