@@ -56,11 +56,7 @@ from .experiment_manifest import write_experiment_manifest
 from .hypothesis_manifest import write_hypothesis_manifest
 from .information_flow import CHANNELS, ChannelContext, render_inbound
 from .prompt_fragments import compose_stage_template
-from .validity_review import (
-    ValidityReviewer,
-    ValidityReviewOutcome,
-    format_findings_for_prompt,
-)
+from .validity_review import ValidityReviewer, ValidityReviewOutcome
 from .research_rounds import (
     ROUND_CLOSING_STAGE_NUMBER,
     RoundIntent,
