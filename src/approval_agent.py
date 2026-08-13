@@ -608,7 +608,7 @@ class AutomatedReviewer:
             f"- experiment manifest: `{paths.experiment_manifest.resolve()}`\n"
             f"- stage draft under review: `{paths.stage_tmp_file(stage).resolve()}`\n"
             f"- approved stage path: `{paths.stage_file(stage).resolve()}`\n\n"
-            + self._standing_rules_block(paths)
+            + self._standing_rules_block(paths, stage)
             + self._obligations_block(paths, stage)
             + "# Suggested Refinements\n\n"
             f"1. {suggestions[0]}\n"
@@ -643,13 +643,18 @@ class AutomatedReviewer:
             return ""
         return "# Inherited Obligations\n\n" + rendered + "\n\n"
 
-    def _standing_rules_block(self, paths: RunPaths) -> str:
+    def _standing_rules_block(self, paths: RunPaths, stage: StageSpec) -> str:
         """Render the rules earlier reviews produced, so this review inherits them.
 
         This is what makes the gate strictly harder as a run proceeds: a correction demanded
         once is checked on every stage after it.
+
+        `stage` is what makes "after it" true. The rules this stage's own retries produced
+        are withheld from its own review: every review that demands anything records a
+        rule, so injecting them here raised the bar by one requirement per attempt and no
+        draft could satisfy the standard it was judged against.
         """
-        rendered = format_policy_for_prompt(load_policy(paths))
+        rendered = format_policy_for_prompt(load_policy(paths), stage=stage)
         if not rendered:
             return ""
         return "# Standing Review Rules (learned earlier in this run)\n\n" + rendered + "\n\n"

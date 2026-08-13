@@ -132,6 +132,45 @@ class PromptRenderingTest(PolicyTestBase):
         rendered = format_policy_for_prompt(load_policy(self.paths))
         self.assertLess(rendered.index("rolled back"), rendered.index("demanded this correction"))
 
+    def test_a_stage_is_not_judged_against_rules_its_own_retries_invented(self) -> None:
+        """The ratchet that made the retry loop non-convergent.
+
+        Every review that demands anything records a rule, and the rules were injected
+        into every later review including the *same* stage's next attempt — under a
+        prompt saying a stage repeating a corrected mistake "must not be approved". So
+        attempt 4 was refused for a requirement invented at attempt 3, and the bar rose
+        by one requirement per attempt.
+
+        Measured on the ResearchClawBench batch: `Information_001` learned 8 rules over
+        Stage 02's 9 attempts and 7 over Stage 03's 9, and both exhausted the budget with
+        `Last validation errors: None recorded`. `Astronomy_003`'s Stage 07 was reviewed
+        against 33 rules of which **14 were its own**; it ran 15 attempts, and the task
+        took 18.4 hours against 6.0 for the run that accumulated 6 rules.
+        """
+        record_correction(self.paths, stage=STAGE_01, attempt_no=3, text=LONG)
+        record_correction(self.paths, stage=STAGE_03, attempt_no=1, text=OTHER)
+        policy = load_policy(self.paths)
+
+        own = format_policy_for_prompt(policy, stage=STAGE_01)
+        self.assertNotIn(LONG, own, msg="Stage 01 was judged against its own retry's rule")
+        self.assertIn(OTHER, own, msg="a rule from another stage must still bind")
+
+    def test_a_stage_whose_only_rules_are_its_own_gets_no_block_at_all(self) -> None:
+        record_correction(self.paths, stage=STAGE_01, attempt_no=2, text=LONG)
+        self.assertEqual(format_policy_for_prompt(load_policy(self.paths), stage=STAGE_01), "")
+
+    def test_cross_stage_accumulation_is_untouched(self) -> None:
+        """The mechanism's actual purpose: a correction demanded once binds later stages."""
+        record_correction(self.paths, stage=STAGE_01, attempt_no=1, text=LONG)
+        rendered = format_policy_for_prompt(load_policy(self.paths), stage=STAGE_03)
+        self.assertIn(LONG, rendered)
+        self.assertIn(STAGE_01.slug, rendered)
+
+    def test_omitting_the_stage_still_renders_everything(self) -> None:
+        """No caller is forced to scope, so the default cannot silently drop a rule."""
+        record_correction(self.paths, stage=STAGE_01, attempt_no=1, text=LONG)
+        self.assertIn(LONG, format_policy_for_prompt(load_policy(self.paths)))
+
     def test_summary_counts_by_source(self) -> None:
         self.assertIn("no standing review rules", policy_summary(ReviewPolicy()))
         record_correction(self.paths, stage=STAGE_01, attempt_no=1, text=LONG)
