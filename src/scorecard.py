@@ -45,7 +45,7 @@ from typing import Any, Callable
 from .deliberation import LEDGER_FILENAME as DELIBERATIONS_FILENAME
 from .effort import LEDGER_FILENAME as EFFORT_FILENAME
 from .ideation_panel import IDEA_POOL_FILENAME
-from .review_panel import PANEL_EFFECT_FILENAME
+from .review_panel import PANEL_DIRNAME, PANEL_EFFECT_FILENAME
 from .stage_comments import COMMENT_LEDGER_FILENAME
 from .utils import RunPaths, read_text, write_text
 
@@ -261,7 +261,7 @@ FEATURES: tuple[dict[str, Any], ...] = (
      "filename": PANEL_EFFECT_FILENAME, "assess": _assess_review_panel,
      # `record_panel_effect` writes beside the per-gate transcripts, one directory down.
      # This is the one that was being looked for a level too high.
-     "locate": lambda p: p.reviews_dir / "panel" / PANEL_EFFECT_FILENAME},
+     "locate": lambda p: p.reviews_dir / PANEL_DIRNAME / PANEL_EFFECT_FILENAME},
     {"key": "ideation_panel", "name": "Ideation panel", "flag": "--ideation-panel",
      "filename": IDEA_POOL_FILENAME, "assess": _assess_ideation,
      "locate": lambda p: p.notes_dir / IDEA_POOL_FILENAME},

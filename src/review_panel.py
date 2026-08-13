@@ -82,6 +82,15 @@ from .utils import (
 #: Choices that leave the stage unapproved. Used to decide whether a panel actually converged.
 _REFINEMENT_CHOICES = {"1", "2", "3", "4"}
 
+#: The subdirectory of ``workspace/reviews/`` that belongs to the panel, and to nothing
+#: else. Named because four modules address it — this one writes the transcripts and the
+#: effect ledger, :mod:`src.scorecard` locates the ledger, :mod:`src.validity_review`
+#: reads the transcripts for the obligations they impose on the next stage, and
+#: :func:`src.rubric._harness_written_records` excludes the whole subtree from Stage 08's
+#: ``reviews`` kind. A literal repeated in four places is one rename away from three of
+#: them being wrong.
+PANEL_DIRNAME = "panel"
+
 
 @dataclass(frozen=True)
 class PanelRole:
@@ -1382,7 +1391,7 @@ class ReviewPanel:
         claim. A panel that reported only its verdict would be less inspectable than the single
         reviewer it replaced.
         """
-        panel_dir = paths.reviews_dir / "panel"
+        panel_dir = paths.reviews_dir / PANEL_DIRNAME
         panel_dir.mkdir(parents=True, exist_ok=True)
         stem = f"{deliberation.stage_slug}_attempt_{deliberation.attempt_no:02d}"
 
@@ -1489,7 +1498,7 @@ def record_panel_effect(paths: RunPaths, deliberation: PanelDeliberation) -> dic
     file exists to let a run say, in its own artifacts, that the panel did not earn its cost.
     It is the least flattering thing the feature writes about itself, which is why it writes it.
     """
-    path = paths.reviews_dir / "panel" / PANEL_EFFECT_FILENAME
+    path = paths.reviews_dir / PANEL_DIRNAME / PANEL_EFFECT_FILENAME
     path.parent.mkdir(parents=True, exist_ok=True)
 
     history: list[dict[str, Any]] = []

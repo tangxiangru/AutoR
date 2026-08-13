@@ -281,7 +281,8 @@ manifest is a view of the index, not an entry in it, and counting the
 preregistration would make a stage that declared its hypotheses look like a
 stage that produced results — measurably: the manifest is rewritten on the way
 *into* every stage from 05 on, so counted as output, a Stage 05 that produced
-literally nothing scored a third of `artifact_breadth` off a file whose own body
+literally nothing scored a third of `artifact_breadth`, as the criterion was
+denominated then, off a file whose own body
 reads `result_artifact_count: 0`. `is_autor_own_record` is the single rule, read
 by both this module and the rubric, so the two cannot drift.
 

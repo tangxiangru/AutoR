@@ -46,6 +46,7 @@ a pinned artifact rather than at moving code.
 
 from __future__ import annotations
 
+import ast
 import re
 import unittest
 from pathlib import Path
@@ -96,6 +97,45 @@ def _channels_that_narrow() -> int:
     """
     return sum(1 for channel in CHANNELS if set(channel.consumed_by) != set(ALL_STAGES))
 
+def _criteria_reaching(stage_number: int) -> int:
+    return sum(1 for criterion in CRITERIA if criterion.min_stage <= stage_number)
+
+
+def _weight_reaching(stage_number: int) -> str:
+    """The weight a stage is graded out of, spelled the way prose spells it.
+
+    ``13.0`` reads as "13" in a sentence and the docs write it that way, so the trailing
+    zero comes off rather than the documents being made to carry it.
+    """
+    total = sum(c.weight for c in CRITERIA if c.min_stage <= stage_number)
+    return f"{total:g}"
+
+
+def _reachable_validators() -> int:
+    """How many distinct ``validate_*`` functions ``validate_stage_artifacts`` calls.
+
+    Three documents quote this number and they had already drifted apart: adding one
+    validator moved `README.md` and `docs/framework.md` to eighteen and left
+    `docs/architecture.md` saying seventeen, so a reader comparing two pages of the same
+    repo got two answers. Counted off the syntax rather than off a hand-list, because
+    the failure being prevented is a validator someone added and did not count.
+    """
+    tree = ast.parse((REPO / "src" / "utils.py").read_text(encoding="utf-8"))
+    gate = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "validate_stage_artifacts"
+    )
+    return len(
+        {
+            node.func.id
+            for node in ast.walk(gate)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id.startswith("validate_")
+        }
+    )
+
 
 #: ``(noun, live value)``. Every spelled-out numeral immediately before *noun* in a
 #: tracked document must equal *value*. The noun is matched case-insensitively and
@@ -113,6 +153,7 @@ COUNTED_NOUNS: tuple[tuple[str, int], ...] = (
     ("edges in the adaptive graph", _adaptive_edges()),
     ("forward edges", _forward_edges() - 1),  # the abandonment terminal aside
     ("guarded forward edges", len(_ADVANCE_GUARDS)),
+    ("`validate_*` functions", _reachable_validators()),
 )
 
 #: Three documents state the channel count and ``docs/framework.md`` states it
@@ -341,6 +382,43 @@ class CountsInProseMatchTheSymbolTests(unittest.TestCase):
     def test_the_criteria_count_is_stated_correctly(self) -> None:
         text = (REPO / "docs/self-improvement.md").read_text(encoding="utf-8")
         self.assertIn(f"{spelled(len(CRITERIA)).capitalize()} criteria", text)
+
+    def test_the_early_and_late_criterion_counts_are_stated_correctly(self) -> None:
+        """One sentence, written twice, about the number the objective turns on.
+
+        `docs/self-improvement.md` and `comparability_basis`'s own docstring both argue
+        that the *set of stages a run reached* is a free parameter of the objective, and
+        both make the argument by contrasting how many criteria Stage 02 faces with how
+        many Stage 06 faces. A `min_stage` change moves those counts and neither copy is
+        near the code that moved: raising `artifact_breadth` to Stage 01 made both read
+        "five criteria worth 11" against a live 6 and 13.0.
+
+        Pinned as a pair, in prose and in a docstring, because the divergence being
+        prevented is the two copies disagreeing as much as either one being stale.
+        """
+        # Every space matches a run of whitespace: the sentence wraps in both copies,
+        # and it wraps at a different word in each.
+        pattern = re.compile(
+            r"\s+".join(
+                r"Stage 02 is scored on (\w+) criteria worth ([\d.]+), "
+                r"Stage 06 on (\w+) worth ([\d.]+)".split(" ")
+            )
+        )
+        for name in ("docs/self-improvement.md", "src/archive.py"):
+            with self.subTest(document=name):
+                match = pattern.search((REPO / name).read_text(encoding="utf-8"))
+                self.assertIsNotNone(match, f"{name} stopped making the comparison")
+                assert match is not None  # for the type checker
+                self.assertEqual(
+                    [match.group(1), match.group(2), match.group(3), match.group(4)],
+                    [
+                        spelled(_criteria_reaching(2)),
+                        _weight_reaching(2),
+                        spelled(_criteria_reaching(6)),
+                        _weight_reaching(6),
+                    ],
+                    f"{name} states criterion counts the rubric no longer has",
+                )
 
     def test_the_stage_count_is_stated_correctly(self) -> None:
         text = (REPO / "README.md").read_text(encoding="utf-8")
