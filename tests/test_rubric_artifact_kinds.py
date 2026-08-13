@@ -6,10 +6,12 @@ exactly one: `08_dissemination.md` names `{{WORKSPACE_WRITING_DIR}}` alongside t
 `artifacts/` and `reviews/` directories nothing was looking at. So a Stage 08 carrying
 its whole release bundle was measured on the one third of it the criterion could see.
 Replayed against `origin/main@fdded57` with only the bundle written inside the stage
-window, that stage scored **0.333** — *"1 artifact kind(s) written during this stage
-(writing); 3 present overall"* — and drop the summary under `writing/` and it scores
+window, that stage scored **0.333**, and dropping the summary under `writing/` scored
 **0.0** with the shortfall *"Every artifact in the run predates this stage's
-execution"*, which is false: the bundle had been written seconds earlier.
+execution"* — which is false: the bundle had been written seconds earlier. Only the two
+scores are quoted, because this module does not import on main, so the exact `observed`
+transcript cannot be re-derived by anyone reading this later and a quoted one would be
+a claim with no instrument behind it.
 
 Stages 01 and 02 escaped the number and not the consequence. `min_stage` was 3, so
 their drafts were ranked on five criteria worth 11.0 while Stage 03's were ranked on
@@ -124,7 +126,13 @@ class WhatTheCriterionCanSeeTests(ArtifactKindTestCase):
         written *before* the window and left stale: they are the run accumulating,
         not this stage working.
         """
-        write_text(self.paths.results_dir / "metrics.json", json.dumps({"accuracy": 0.5, "f1": 0.6}))
+        # Padded past MIN_ARTIFACT_BYTES on purpose. The obvious two-key payload is 28
+        # bytes, so `results` was never visible at any mtime and the "written before the
+        # window and left stale" half of the docstring described an inert line.
+        write_text(
+            self.paths.results_dir / "metrics.json",
+            json.dumps({"accuracy": 0.5, "f1": 0.6, "seeds": [1, 2, 3], "n": 240}),
+        )
         write_text(self.paths.figures_dir / "effect.png", "x" * 200)
         time.sleep(0.05)
         stage = self.start(8)
@@ -336,14 +344,28 @@ class TheHarnessMustNotEarnTheStageItsScoreTests(ArtifactKindTestCase):
         self.assert_the_harness_earned_nothing(stage, "artifacts", before)
 
     def test_the_comment_ledger_is_not_stage_08s_reviews(self) -> None:
-        """`record_comment_round` closes an anchored-revision round before scoring."""
-        from src.stage_comments import COMMENT_LEDGER_FILENAME
+        """`record_comment_round` closes an anchored-revision round before scoring.
+
+        Driven through the shipped writer, like every other case in this class. It used
+        to hand-place the file, which meant renaming what `record_round` emits would have
+        left this green while quietly reopening the hole the class exists to close.
+        """
+        from src.stage_comments import StageComment, record_round
 
         stage = self.start(8)
         before = self.files_of_kind("reviews")
-        write_text(
-            self.paths.reviews_dir / COMMENT_LEDGER_FILENAME,
-            json.dumps({"rounds": [{"stage": stage.slug, "comments": [{"quote": "x" * 40}]}]}),
+        record_round(
+            self.paths,
+            stage,
+            1,
+            [
+                StageComment(
+                    comment_id="C001",
+                    quote="x" * 40,
+                    comment="The readiness checklist does not name the venue." + "y" * 40,
+                    required_change="Name it." + "z" * 40,
+                )
+            ],
         )
         self.assert_the_harness_earned_nothing(stage, "reviews", before)
 
