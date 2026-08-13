@@ -975,10 +975,14 @@ code that would have to change.
   the population that justified the leniency is empty, since the freeze runs before every attempt
   from Stage 05 on and every validation is post-attempt, so the only way to arrive without a stamp
   is to have deleted it.
-- **Standing rules and obligations never reach a panel seat.** Both are injected only into the solo
-  reviewer's prompt. Under `--review-panel`, no seat is shown the accumulated rules and no seat is
-  asked whether an inherited obligation was met — and because neither the seat nor the chair prompt
-  asks for `carry_forward`, a panel run essentially never creates an obligation either.
+- **Standing rules and obligations now reach a panel seat, but not the cross-model auditor.** Every
+  seat and the chair are shown both, through `ReviewPanel._context_block`, and both return formats
+  ask for `carry_forward` and `discharged`, so `--rigor max` no longer runs with fewer live
+  mechanisms than `--rigor standard`. What is still outside is the third reviewer:
+  `format_policy_for_prompt` and `format_for_review_prompt` are imported by
+  [src/approval_agent.py](src/approval_agent.py) and [src/review_panel.py](src/review_panel.py) and
+  by nothing else, so `CrossModelReviewer.build_prompt` audits an approval without being told what
+  this run has already required of it or what it still owes.
 - **The cross-model veto now reaches both front ends, but no test runs it against a real model, it
   does not survive a resume, and it never sees a human approval.** `main.py` seats it through
   `create_cross_reviewer`, which both `ResearchManager` constructions call — and which refuses the
