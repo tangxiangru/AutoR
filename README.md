@@ -130,9 +130,9 @@ naming them.
 | Required stage-summary headings | `REQUIRED_STAGE_HEADINGS` | 7 |
 | Rubric criteria (weighted, backend-free) | `CRITERIA`, [src/rubric.py](src/rubric.py) | 8 |
 | Flags on `main.py` / `rcb_agent.py` | `parse_args` | 61 / 37 |
-| Python modules / lines / tests | the tree | 150 / 62 k / 1826 |
+| Python modules / lines / tests | the tree | 170 / 75 k / 2282 |
 
-`python -m unittest discover -s tests -p "test_*.py"` runs **1826 tests in ~69 s** across 82 test
+`python -m unittest discover -s tests -p "test_*.py"` runs **2282 tests** across 99 test
 modules, with no third-party dependency.
 
 ## Quick start
@@ -1022,7 +1022,7 @@ cross-model reviewer) need `google-genai`:
 ```bash
 git clone https://github.com/tangxiangru/AutoR.git
 cd AutoR
-python -m unittest discover -s tests -p "test_*.py"    # 1826 tests, ~69s, no dependencies
+python -m unittest discover -s tests -p "test_*.py"    # 2282 tests, no dependencies
 ```
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request, and

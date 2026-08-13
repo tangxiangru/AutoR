@@ -65,7 +65,7 @@ which is why the suite still installs nothing.
 ## Tests
 
 ```bash
-# Everything (~70s, 1826 tests across 82 modules, no third-party dependency)
+# Everything (2282 tests across 99 modules, no third-party dependency)
 python -m unittest discover -s tests -p "test_*.py"
 
 # Verbose
@@ -116,6 +116,7 @@ its own docstring, not everything it touches.
 | Studio | `test_studio_service.py`, `test_studio_http.py` |
 | Terminal UI | `test_terminal_ui.py`, `test_result_panel.py` |
 | The docs themselves | `test_doc_counts.py` (see [Documentation gates](#documentation-gates)) |
+| Declared-and-unread gates over the tree | `test_cli_flags_are_read.py` (a flag argparse accepts and no line reads), `test_declared_symbols_are_wired.py` (a public `src/` symbol no production line references) |
 
 Two of these modules are worth knowing about before you write a test that
 duplicates them. `test_prompt_gate_correspondence.py` treats the prompt
@@ -167,11 +168,11 @@ than a separate docs job. You will meet them if you edit a `.md` file.
 symbol.** The scan is deliberately narrow: a fixed list of `(noun, value)` pairs
 in `COUNTED_NOUNS`, matched case-insensitively across line breaks, over the
 three files in `TRACKED_DOCS`. Only word numerals are checked — `NUMBER_WORDS`
-runs from one to twenty-five — so writing the digit is always safe, and is the
-right move when you are unsure. Three further assertions in the same module pin
-the rubric-criteria count in `docs/self-improvement.md`, the stage count in the
-README, and the number of dotted edges the README's mermaid diagram actually
-draws against `len(REVISIT_EDGES)`.
+runs from one to `max(NUMBER_WORDS)` — so writing the digit is always safe, and
+is the right move when you are unsure. Three further assertions in the same
+module pin the rubric-criteria count in `docs/self-improvement.md`, the stage
+count in the README, and the number of dotted edges the README's mermaid
+diagram actually draws against `len(REVISIT_EDGES)`.
 
 To protect a new claim, add a row:
 
@@ -192,9 +193,10 @@ derives it — a literal here is the same rot you are trying to prevent, moved
 one file over. The noun must be the *whole* phrase you want matched, because
 the pattern anchors on a word boundary at each end: `"typed channels"` does not
 also catch a bare `"channels"`. And the live value must stay inside
-`NUMBER_WORDS`; a symbol that grows past twenty-five raises a `KeyError` from
-`spelled()` instead of reporting a mismatch, so extend the table in the same
-commit.
+`NUMBER_WORDS`; a symbol that grows past `max(NUMBER_WORDS)` raises a `KeyError`
+from `spelled()` instead of reporting a mismatch, so extend the table in the
+same commit. `tests/test_declared_symbols_are_wired.py` imports `spelled` to pin
+a count in its own module docstring, so the table's reach is not only the docs.
 
 **No doc may cite a line number in this repo's own source.** Every
 `something.py:123` in a `*.md` file at the repo root or in `docs/` is put to
