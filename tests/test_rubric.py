@@ -299,10 +299,15 @@ class RubricTestCase(unittest.TestCase):
     def test_criteria_that_cannot_apply_are_not_scored_as_failures(self) -> None:
         """Stage 01 has no experiment manifest to produce and must not be graded as
         if it failed to produce one, or the ratchet would prefer late stages for a
-        reason with nothing to do with their quality."""
+        reason with nothing to do with their quality.
+
+        `artifact_breadth` used to be on this list and is not any more: Stage 01 does
+        have artifacts to produce — `workspace/literature/` is the first line of its
+        prompt's filesystem requirements — and the criterion could not see them.
+        """
         score = score_stage(paths=self.paths, stage=STAGE_01, markdown=stage_markdown(STAGE_01))
         self.assertNotIn("numeric_fidelity", score.by_key)
-        self.assertNotIn("artifact_breadth", score.by_key)
+        self.assertNotIn("quantification", score.by_key)
         self.assertIn("grounding", score.by_key)
 
     def test_weakest_orders_by_recoverable_weight_not_raw_score(self) -> None:

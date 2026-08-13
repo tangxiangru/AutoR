@@ -356,7 +356,7 @@ included.
 Every valid stage draft is measured against a rigour rubric read off disk — do the paths it names
 resolve, do the numbers it reports appear in a results file, did it produce artifacts during *this*
 execution, is the decision ledger four different things rather than one sentence four times. Eight
-weighted criteria, `RUBRIC_VERSION = "4"`:
+weighted criteria, `RUBRIC_VERSION = "5"`:
 
 | Criterion | Weight | From | What it measures |
 | --- | ---: | :---: | --- |
@@ -364,7 +364,7 @@ weighted criteria, `RUBRIC_VERSION = "4"`:
 | `numeric_fidelity` | 3.0 | 05 | Reported numbers trace to a results file |
 | `reproducibility` | 3.0 | 01 | The machine-readable validity chain is present and parses |
 | `contract` | 2.0 | 01 | Contract compliance in substance, not just in headings |
-| `artifact_breadth` | 2.0 | 03 | Artifacts produced *this* stage, across the classes the role calls for |
+| `artifact_breadth` | 2.0 | 01 | Artifacts produced *this* stage, in the directories this stage's prompt named |
 | `quantification` | 2.0 | 04 | Findings carrying numbers rather than adjectives |
 | `traceability` | 1.5 | 01 | The decision ledger is four different things, not one sentence four times |
 | `commitment` | 1.5 | 01 | Reports work, not intentions |
@@ -373,6 +373,14 @@ weighted criteria, `RUBRIC_VERSION = "4"`:
 manifest to produce, and grading it as if it failed to produce one would make every early stage look
 worse than every late one — which would make the ratchet prefer late drafts for a reason unconnected
 to quality.
+
+`artifact_breadth` is scored against `STAGE_ARTIFACT_KINDS`, the set of workspace directories *this*
+stage's prompt tells the agent to write — `literature/` at Stage 01, `artifacts/` + `reviews/` +
+`writing/` at Stage 08, and so on. A test refuses any expectation the stage's own prompt never
+asked for, so the criterion cannot drift into demanding work the run was never told to do. AutoR's
+own bookkeeping does not count towards it: neither the `RECORD_ARTIFACTS` the experiment manifest
+already excludes, nor the ideation pool, writing triage and comment ledger that the workflow manager
+writes into those same directories mid-stage.
 
 **Measuring is free and always on.** The rubric reads the run off disk and never calls a backend, so
 the property it buys costs nothing: the draft that gets promoted is the best one the run produced,
@@ -503,6 +511,7 @@ options, concrete file paths under `Files Produced`, and no `[In progress]`, `[P
 | Stage | Required non-toy output |
 | --- | --- |
 | Stage 01 | A cross-referenced evidence ledger: `sources.json` and `claims.json`, where every cited `source_id` resolves |
+| Stage 02+ | A `decision_rule` on every empirical hypothesis in `hypothesis_manifest.json` — held here, at the stage that writes them, rather than at the Stage 05 preregistration gate, where the set is already frozen and the only repair is a rollback |
 | Stage 03+ | Machine-readable data under `workspace/data/`, plus a `report_plan.json` committing to the figures and headline numbers the report will carry |
 | Stage 05+ | Machine-readable results under `workspace/results/`, plus a valid `experiment_manifest.json` |
 | Stage 06+ | Real figure files under `workspace/figures/`, and every planned figure's `source_artifact` resolving to a non-empty file |
@@ -520,11 +529,12 @@ an ordinary run and **3** for a ResearchClawBench run (`BENCHMARK_MIN_REPORT_FIG
 
 **Validity gates.** The same function — `validate_stage_artifacts` ([src/utils.py](src/utils.py)) —
 also runs the validators that ask whether a *claim* is warranted rather than whether output exists.
-Seventeen `validate_*` functions are reachable from it in all:
+Eighteen `validate_*` functions are reachable from it in all:
 
 | Fires at | Validator | Refuses when |
 | --- | --- | --- |
 | 01 | `validate_literature_evidence` | A claim cites a `source_id` that is not in `sources.json` |
+| 02+ | `validate_hypothesis_decision_rules` | An empirical hypothesis in `hypothesis_manifest.json` carries no `decision_rule`, or the manifest does not parse |
 | 03+ | `validate_report_plan` | The plan has no task outputs, non-contiguous slots, a slot with no supported claim, or headline numbers without a quantity, unit and source |
 | 05+ | `validate_preregistration` | Nothing is frozen, an empirical hypothesis has no decision rule, the frozen file disagrees with its own digest or with AutoR's stamped copy, or the manifest changed — or went missing — with no amendment on record |
 | 05+ | `validate_experimental_protocol` | No primary metric, `planned_seeds < 1`, or a baseline missing `why_competent` / `tuning_budget` |

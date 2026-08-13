@@ -193,10 +193,23 @@ exists to prevent, reached by a route the design did not consider. Declining to 
 fabrication is not the same as declining to *pay* for it. `_cap_quantification_by_fidelity` now caps
 the first criterion at the second wherever both apply, which makes the middle row 0.0; the cap is
 recorded in `observed` so a stage can still tell which half to fix, and Stage 04 is exempt because
-fidelity does not apply before there are results. `RUBRIC_VERSION` is `4` — it went to 3 when
-that cap landed and to 4 when the length gradient came out of `commitment` — and the archive
+fidelity does not apply before there are results. `RUBRIC_VERSION` is `5` — it went to 3 when
+that cap landed, to 4 when the length gradient came out of `commitment`, and to 5 when
+`artifact_breadth` learned to read the four workspace directories Stages 01, 02, 07 and 08 are
+told to write and `reproducibility` gained its Stage 02-03 link — and the archive
 ranks no score from before a bump against one after it, so each bump is a clean break rather
 than a silent drift.
+
+**A criterion that cannot see a stage's output is not measuring that stage.** `artifact_breadth`
+read five directories — `data/`, `results/`, `figures/`, `code/`, `writing/` — and Stages 01, 02
+and 08 write to none of them. A Stage 08 that produced its entire release bundle therefore scored
+`0.0` on a criterion worth 2.0 and was handed the shortfall *"every artifact in the run predates
+this stage's execution"*, which was false: the bundle had been written minutes earlier, into
+`artifacts/` and `reviews/`, where nothing was looking. Stages 01 and 02 escaped the number and not
+the consequence — `min_stage` was 3, so their drafts were ranked on seven criteria while every
+later draft was ranked on eight, and the two totals were compared as though they measured the same
+thing. The expectation is now the set of directories the stage's *own prompt* names
+(`STAGE_ARTIFACT_KINDS`), which is also why Stage 03 is not asked for `code/`.
 
 1,842 tests passed before the fix and none of them failed after it: the hole was in a composition
 nothing asserted over. The four tests added with it are mutation-checked — they fail when the cap is
@@ -301,7 +314,7 @@ The control loop, per step:
    conversation. A skill pack is installed into the operator's working directory so the agent can
    *pull* long-form craft guidance instead of being pushed it.
 3. **Validate.** `validate_stage_markdown` checks the seven-heading contract; `validate_stage_artifacts`
-   runs the cumulative artifact gates and the seventeen `validate_*` functions. A failure triggers a
+   runs the cumulative artifact gates and the eighteen `validate_*` functions. A failure triggers a
    repair attempt, then local normalisation, then a full re-run, bounded by `--max-attempts` (5).
 4. **Measure and improve.** Every *valid* draft is scored by the rubric. Up to two polish rounds per
    stage are budgeted, skipped entirely when no criterion has a shortfall worth acting on. Losing
@@ -333,6 +346,7 @@ The chain that runs unconditionally at every rigor level, `fast` included:
 | Point | What happens | Enforced by |
 | --- | --- | --- |
 | Stage 02 | Markdown is parsed into typed `T*`/`H*`/`C*` entries with `decision_rule` | `write_hypothesis_manifest` |
+| Stage 02+ | Every parsed empirical hypothesis carries a non-empty `decision_rule`, and the manifest parses at all | `validate_hypothesis_decision_rules` |
 | Stage 04 approval | The hypothesis set is copied, hashed and frozen; never overwritten | `freeze_preregistration` |
 | Stage 02 re-run | The freeze is re-derived and an amendment row records `previous_digest` | `amend_preregistration` |
 | Stage 05+ | A prereg exists, has an empirical hypothesis, every one has a decision rule, the manifest has not silently changed or vanished | `validate_preregistration` |
@@ -349,6 +363,16 @@ The chain that runs unconditionally at every rigor level, `fast` included:
 Every one of these can be traced from `validate_stage_artifacts` in [`utils.py`](../src/utils.py),
 whose own comment names the split: *"the scientific-validity chain, distinct from the artifact gates
 around it"*.
+
+The second row is new, and the gap it closes was three stages wide. Stage 02 *parsed* a
+`decision_rule` and nothing read it until `validate_preregistration` at Stage 05 — by which point
+Stage 04's approval had frozen the set, so the only repair was a rollback across three stages of
+work. The Stage 03 call site of `validate_report_plan` already carried the argument, written about
+the experimental protocol: *"the Stage 03 prompt asks for it and the gate first fires at Stage 05,
+so a Stage 03 that skipped it is approved and the failure surfaces two stages later, where the only
+repair is a rollback."* The same sentence was true of the decision rule, one stage earlier.
+`derived_from` is deliberately not required with it: the Stage 02 prompt lists that field under
+"when relevant".
 
 ### 3.4 Rounds, not just stages
 
