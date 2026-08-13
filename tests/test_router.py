@@ -539,6 +539,66 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(summary["revisits"], 1)
         self.assertEqual(summary["agent_directed"], 1)
 
+    def test_the_summary_carries_what_was_offered_and_what_blocked_the_rest(self) -> None:
+        """The census, and the hole it fills.
+
+        `edges` and `decisions` are about the moves the run *made*. Every visit also
+        records which edges were live and which were shut and by what, and this
+        function read neither — so a finished run could say where it went and could
+        not say what it was ever offered. The exploration happened and left no
+        record of its own shape.
+        """
+        state = GraphState()
+        enter(self.paths, state, STAGE_06)
+        leave(
+            self.paths, state, chose="05_experimentation", kind="revisit", reason="thin",
+            default_choice="07_writing", agent_directed=True, score_total=0.6,
+            offered=("05_experimentation", "07_writing"),
+            blocked={"finish": "guard", "02_hypothesis_generation": "visits"},
+        )
+
+        census = routing_summary(self.paths)["census"]
+        self.assertEqual(
+            census["blocked"],
+            {
+                "06_analysis->finish": {"guard": 1},
+                "06_analysis->02_hypothesis_generation": {"visits": 1},
+            },
+        )
+        self.assertEqual(
+            census["offered"],
+            {"06_analysis->05_experimentation": 1, "06_analysis->07_writing": 1},
+        )
+        self.assertEqual(census["kinds"], {"guard": 1, "visits": 1})
+        self.assertEqual(census["visits"], 1)
+        self.assertEqual((census["unobserved"], census["bypassed"]), (0, 0))
+
+    def test_a_bypassed_visit_contributes_no_offer_and_no_block(self) -> None:
+        """The same rule that keeps a jump out of `edges`, applied to the census.
+
+        A bypass had no menu. Counted as a visit where nothing was blocked, an
+        operator's intervention would read as evidence that the graph was wide open
+        at that node; counted as one where nothing was offered, as evidence that it
+        was shut. It is neither, and `unobserved` is where it goes.
+        """
+        state = GraphState()
+        enter(self.paths, state, STAGE_06)
+        leave(
+            self.paths, state, chose="03_study_design", kind="revisit",
+            reason="Operator redirected the run.", default_choice="", agent_directed=False,
+            score_total=None, bypassed=True,
+        )
+
+        summary = routing_summary(self.paths)
+        self.assertEqual(summary["census"]["offered"], {})
+        self.assertEqual(summary["census"]["blocked"], {})
+        self.assertEqual(summary["census"]["unobserved"], 1)
+        self.assertEqual(summary["census"]["bypassed"], 1)
+        # Still counted as a visit. A summary that discards a move reports a route
+        # shorter than the one the run walked.
+        self.assertEqual(summary["census"]["visits"], 1)
+        self.assertEqual(summary["edges"], {})
+
     def test_the_terminal_line_says_who_chose(self) -> None:
         self.assertIn("agent", format_decision(RoutingDecision("07_writing", "advance", "r", "07_writing", True)))
         self.assertIn(

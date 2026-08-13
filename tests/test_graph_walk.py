@@ -489,6 +489,82 @@ class GraphWalkTests(unittest.TestCase):
         self.drive_resume(resumed, paths.run_root)
         self.assertEqual(routing_summary(paths)["bypassed"], 0)
 
+    # -- what the walk explored ----------------------------------------------
+
+    def test_the_finished_walk_records_which_edges_it_was_offered(self) -> None:
+        """The census, end to end through the real loop.
+
+        Every visit already recorded the menu it chose from and why the closed
+        edges were closed, and nothing read it once the run was over: the route
+        said where the run went and no artifact said what else was ever available.
+        A walk that offers more edges than it takes is the whole difference between
+        exploring a graph and continuing a list, and it was unreportable.
+        """
+        _operator, manager = self.build()
+        self.assertTrue(self.drive(manager))
+
+        paths = self.only_run()
+        summary = routing_summary(paths)
+        census = summary["census"]
+        self.assertEqual(census["visits"], len(STAGES))
+        declared = {f"{edge.source}->{edge.target}" for edge in StageGraph.adaptive().edges}
+        self.assertEqual((set(census["offered"]) | set(census["blocked"])) - declared, set())
+        self.assertGreater(
+            len(census["offered"]),
+            len(summary["edges"]),
+            msg="a run that was offered no more than it took explored nothing",
+        )
+        # The abandonment terminal, shut by its guard on a run that did not abandon.
+        # The only block on this route, which is what makes it a usable pin.
+        self.assertEqual(census["blocked"], {"06_analysis->finish": {"guard": 1}})
+        self.assertEqual(census["kinds"], {"guard": 1})
+        log = read_text(paths.logs)
+        self.assertIn("route_census", log)
+        self.assertIn("06_analysis->finish", log)
+
+    def test_a_halted_walk_still_records_what_was_on_the_menu(self) -> None:
+        """The branch of `_complete_run` that returns first, and the run where the
+        question matters most: a walk stopped by a budget is exactly the one whose
+        remaining options a reader needs, and it would have been the one exit that
+        reported none of them."""
+        _operator, manager = self.build(graph_max_steps=4)
+        self.assertFalse(self.drive(manager))
+
+        paths = self.only_run()
+        census = routing_summary(paths)["census"]
+        self.assertEqual(census["visits"], 4)
+        self.assertTrue(census["offered"])
+        self.assertIn("route_census", read_text(paths.logs))
+
+    def test_an_operators_jump_is_not_a_node_where_the_graph_was_open(self) -> None:
+        """A bypass arrives with the move already made: no guard was evaluated and
+        nothing was on offer. Counted as a visit at which nothing was blocked, an
+        operator's intervention would enter the census as evidence about the graph —
+        the same error `Visit.offered` exists to keep out of the archive's edge
+        observations, one artifact along."""
+        _operator, manager = self.build(stage_graph=StageGraph.adaptive(), routing_mode="agent")
+        jumped = {"done": False}
+        real_run_stage = manager._run_stage
+
+        def run_stage(paths, stage):
+            approved = real_run_stage(paths, stage)
+            if stage.slug == STAGE_06.slug and not jumped["done"]:
+                jumped["done"] = True
+                manager._jump_target_stage = STAGE_05
+                manager._jump_reason = "Operator sent it back."
+            return approved
+
+        with patch.object(manager, "_run_stage", side_effect=run_stage), patch.object(
+            manager.router, "choose", side_effect=lambda **kw: _advance(kw["stage"])
+        ):
+            self.drive(manager)
+
+        census = routing_summary(self.only_run())["census"]
+        self.assertEqual(census["bypassed"], 1)
+        self.assertGreaterEqual(census["unobserved"], 1)
+        self.assertNotIn("06_analysis->05_experimentation", census["offered"])
+        self.assertNotIn("06_analysis->05_experimentation", census["blocked"])
+
     # -- the checks have to be satisfiable -----------------------------------
 
     def test_every_guard_passes_on_a_completed_run(self) -> None:

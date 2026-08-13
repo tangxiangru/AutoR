@@ -16,14 +16,19 @@ import unittest
 from pathlib import Path
 
 from src.stage_graph import (
+    BLOCK_KINDS,
     DEFAULT_MAX_VISITS,
     FINISH,
     GUARDS,
     Edge,
     GraphState,
+    GuardResult,
+    Move,
     StageGraph,
     Visit,
+    block_census,
     enter,
+    format_block_census,
     format_route,
     leave,
     load_graph_state,
@@ -417,6 +422,206 @@ class AdaptiveTopologyTests(unittest.TestCase):
                     }
                 ),
             )
+
+
+class BlockCensusTests(unittest.TestCase):
+    """What the walk was offered, and what shut the rest.
+
+    The route says where the run went. Every visit also records the menu it chose
+    from and why each closed edge was closed, and until this census existed nothing
+    read that after the run — so a graph-structured run reported exactly what a
+    linear one would. These tests are about the two ways that record can be
+    misread: pooling an edge that was never offered with one that was refused, and
+    pooling an operator's intervention with either.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.paths = build_run_paths(Path(self._tmp.name) / "run")
+        ensure_run_layout(self.paths)
+        write_text(self.paths.user_input, "goal")
+
+    @staticmethod
+    def visit(stage: str, *, offered=(), blocked=None, bypassed: bool = False, chose: str = "") -> Visit:
+        return Visit(
+            stage=stage,
+            entered_at="t",
+            chose=chose,
+            offered=tuple(offered),
+            blocked=dict(blocked or {}),
+            bypassed=bypassed,
+        )
+
+    def test_a_block_is_counted_per_edge_and_per_kind(self) -> None:
+        """The unit is the edge, not the target: the same target reached from two
+        nodes is two different moves, and pooling them makes a guard that shuts one
+        of them look twice as strict as it is."""
+        census = block_census(
+            [
+                self.visit("06_analysis", offered=("05_experimentation",), blocked={"07_writing": "guard"}),
+                self.visit("06_analysis", offered=("05_experimentation",), blocked={"07_writing": "guard"}),
+                self.visit("08_dissemination", blocked={"07_writing": "visits"}),
+            ]
+        )
+        self.assertEqual(
+            census.blocked,
+            {
+                "06_analysis->07_writing": {"guard": 2},
+                "08_dissemination->07_writing": {"visits": 1},
+            },
+        )
+        self.assertEqual(census.offered, {"06_analysis->05_experimentation": 2})
+        self.assertEqual(census.visits, 3)
+
+    def test_the_kind_tally_is_the_sum_of_the_per_edge_columns(self) -> None:
+        """Derived, so the two numbers cannot drift. A separate tally kept beside the
+        per-edge one is a second encoding of one fact, and the one nobody updates is
+        the one that gets quoted."""
+        census = block_census(
+            [
+                self.visit("06_analysis", blocked={"07_writing": "guard"}),
+                self.visit("06_analysis", blocked={"07_writing": "guard"}),
+                self.visit("07_writing", blocked={"08_dissemination": "steps"}),
+            ]
+        )
+        # Three blocks on two edges: the tally counts blocks, not edges.
+        self.assertEqual(census.kinds, {"guard": 2, "steps": 1})
+        self.assertEqual(census.blocks, 3)
+        self.assertEqual(len(census.blocked), 2)
+        self.assertEqual(
+            census.blocks,
+            sum(count for per_kind in census.blocked.values() for count in per_kind.values()),
+        )
+
+    def test_a_visit_with_no_choice_set_is_unobserved_rather_than_unblocked(self) -> None:
+        """The distinction the whole census rests on.
+
+        A bypass — `/back`, a rollback, a research round's own jump — arrives with
+        the move already made: no guard was evaluated and nothing was on offer.
+        Counted as a visit at which nothing was blocked, an operator's intervention
+        would enter the census as evidence that the graph was wide open there.
+        """
+        census = block_census(
+            [
+                self.visit("06_analysis", chose="05_experimentation", bypassed=True),
+                self.visit("05_experimentation", offered=("06_analysis",), blocked={"04_implementation": "visits"}),
+            ]
+        )
+        self.assertEqual(census.unobserved, 1)
+        self.assertEqual(census.bypassed, 1)
+        self.assertEqual(census.offered, {"05_experimentation->06_analysis": 1})
+        self.assertEqual(census.blocked, {"05_experimentation->04_implementation": {"visits": 1}})
+        self.assertNotIn("06_analysis->05_experimentation", census.offered)
+
+    def test_a_bypass_that_did_record_a_choice_set_is_counted_on_both_axes(self) -> None:
+        """Not every bypass is choice-set-less, and the two counters say so.
+
+        A resume that starts somewhere other than where the last visit was heading
+        flags a visit the router had already closed with a full menu. Its guards
+        were evaluated, so its offers and blocks are real observations about the
+        graph; the move out of it was still the operator's. One counter would have
+        to throw away one of those two facts.
+        """
+        census = block_census(
+            [
+                self.visit(
+                    "06_analysis",
+                    chose=FINISH,
+                    offered=("05_experimentation",),
+                    blocked={"07_writing": "guard"},
+                    bypassed=True,
+                )
+            ]
+        )
+        self.assertEqual(census.bypassed, 1)
+        self.assertEqual(census.unobserved, 0)
+        self.assertEqual(census.offered, {"06_analysis->05_experimentation": 1})
+        self.assertEqual(census.blocked, {"06_analysis->07_writing": {"guard": 1}})
+
+    def test_a_visit_from_before_the_choice_set_existed_is_not_read_as_an_open_node(self) -> None:
+        """A `stage_graph.json` written before `offered` and `blocked` existed loads
+        as a visit with neither. It is no observation at all, and the denominator has
+        to say so rather than let an old record read as a run nothing ever blocked."""
+        census = block_census([Visit.from_dict({"stage": "06_analysis", "chose": "07_writing"})])
+        self.assertEqual((census.visits, census.unobserved), (1, 1))
+        self.assertEqual(census.offered, {})
+        self.assertEqual(census.blocked, {})
+
+    def test_a_visit_with_no_stage_has_no_edge_to_attribute_anything_to(self) -> None:
+        """`GraphState.from_dict` takes any mapping, and an entry with no stage would
+        otherwise be counted under the edge key `->07_writing`."""
+        census = block_census([Visit.from_dict({"blocked": {"07_writing": "guard"}})])
+        self.assertEqual(census.blocked, {})
+        self.assertEqual(census.unobserved, 1)
+
+    def test_the_census_of_a_real_walk_names_the_edges_the_graph_offered(self) -> None:
+        """Against the shipped adaptive topology rather than a hand-built path, so
+        the keys are edges that exist."""
+        graph = StageGraph.adaptive()
+        state = GraphState()
+        moves = graph.moves(self.paths, "06_analysis", state)
+        state.path.append(
+            Visit(
+                stage="06_analysis",
+                entered_at="t",
+                offered=tuple(sorted(move.target for move in moves if move.admissible)),
+                blocked={move.target: move.blocked_kind for move in moves if move.blocked_kind},
+            )
+        )
+        census = block_census(state.path)
+        declared = {f"{edge.source}->{edge.target}" for edge in graph.edges}
+        self.assertTrue(set(census.offered) | set(census.blocked))
+        self.assertEqual((set(census.offered) | set(census.blocked)) - declared, set())
+        # Nothing is adjudicated on an empty run, so writing is shut and the reason
+        # is a guard rather than a budget.
+        self.assertEqual(census.blocked.get("06_analysis->07_writing"), {"guard": 1})
+
+    def test_the_rendering_says_what_was_offered_and_what_shut_the_rest(self) -> None:
+        rendered = format_block_census(
+            block_census(
+                [self.visit("06_analysis", offered=("05_experimentation",), blocked={"07_writing": "guard"})]
+            )
+        )
+        self.assertIn("06_analysis->05_experimentation", rendered)
+        self.assertIn("06_analysis->07_writing", rendered)
+        self.assertIn("guard 1", rendered)
+
+    def test_an_empty_walk_says_so_rather_than_rendering_an_empty_census(self) -> None:
+        self.assertIn("No choice set", format_block_census(block_census([])))
+
+    # -- the refusal that keeps the census's arithmetic true -----------------
+
+    def test_a_move_blocked_with_no_kind_is_refused_at_construction(self) -> None:
+        """It would be inadmissible and counted under no heading: the route would
+        show an edge the run could not take and the census would show nothing
+        shutting it."""
+        edge = StageGraph.adaptive().out_edges("06_analysis")[0]
+        with self.assertRaises(ValueError):
+            Move(edge, GuardResult(False, "shut"), "shut", "")
+
+    def test_a_move_given_a_kind_but_no_reason_is_refused_at_construction(self) -> None:
+        """The other direction, and the worse one: `admissible` reads the sentence,
+        so the move would be offered to the agent *and* counted as blocked."""
+        edge = StageGraph.adaptive().out_edges("06_analysis")[0]
+        with self.assertRaises(ValueError):
+            Move(edge, GuardResult(True, "fine"), "", "guard")
+
+    def test_a_move_blocked_by_an_undeclared_kind_is_refused_at_construction(self) -> None:
+        """The same refusal `Edge` makes about its kind. A kind outside
+        `BLOCK_KINDS` would be tallied under a heading no reader can interpret, and
+        `default_move` branches on exactly these names."""
+        edge = StageGraph.adaptive().out_edges("06_analysis")[0]
+        with self.assertRaises(ValueError):
+            Move(edge, GuardResult(False, "shut"), "shut", "budget")
+
+    def test_every_declared_kind_is_accepted(self) -> None:
+        """The control. A refusal that rejects the vocabulary it is guarding would
+        pass all three tests above and break every walk."""
+        edge = StageGraph.adaptive().out_edges("06_analysis")[0]
+        for kind in BLOCK_KINDS:
+            self.assertFalse(Move(edge, GuardResult(False, "shut"), "shut", kind).admissible)
+        self.assertTrue(Move(edge, GuardResult(True, "fine"), "", "").admissible)
 
 
 if __name__ == "__main__":
