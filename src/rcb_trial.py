@@ -1138,7 +1138,42 @@ class TrialPlan:
             raise ValueError("the two arms carry the same label; the difference would be zero")
         if not plan.tasks:
             raise ValueError("a plan with no tasks cannot become a measurement")
+        for side in ("control", "treatment"):
+            _refuse_a_label_that_is_not_the_revision(side, getattr(plan, side))
         return plan
+
+
+def _refuse_a_label_that_is_not_the_revision(side: str, spec: ArmSpec) -> None:
+    """Fail at freeze time on the mismatch ``revision_matches_arm`` would fail on later.
+
+    ``ArmSpec`` carries the commit twice. ``sha`` is what the worktree is checked out
+    to; ``label`` is what :func:`_revision_matches_arm` compares the recorded revision
+    against, because ``RunRecord`` has no revision field and the label is the only
+    carrier. Two fields, one fact, and only one of them is read by the gate.
+
+    So a plan reading ``{"label": "off", "sha": "621566b"}`` — the obvious way to
+    write an on/off trial, and the way the flag-shaped CLI trains you to think — is
+    accepted, launched, and then has **every single arm refused** by
+    ``revision_matches_arm`` after the runs are already spent. Measured on the dry-run
+    path: twelve runs, twelve refusals, zero pairs, and a report whose exclusion lines
+    name the clause but not the cause.
+
+    The relation checked here is exactly the one the clause will apply, so a plan that
+    passes freeze cannot fail admission on this ground. A trial costs days; this costs
+    a string comparison, and it happens before the first launch.
+    """
+    label, sha = spec.label.strip(), spec.sha.strip()
+    if not label:
+        raise ValueError(f"the {side} arm has no label; `revision_matches_arm` would refuse every run")
+    if not sha:
+        raise ValueError(f"the {side} arm has no sha; there is nothing to check the worktree out to")
+    if not (label.startswith(sha) or sha.startswith(label)):
+        raise ValueError(
+            f"the {side} arm is labelled `{label}` but runs at `{sha}`. The arm label is what "
+            "`revision_matches_arm` compares the run's recorded revision against, so every run "
+            "of this arm would be launched, scored, and then discarded. Label the arm with its "
+            "commit."
+        )
 
 
 def arm_order(plan: TrialPlan) -> tuple[tuple[str, str], ...]:
