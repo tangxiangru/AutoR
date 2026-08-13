@@ -168,6 +168,9 @@ from .utils import (
     FIXED_STAGE_OPTIONS,
     INTAKE_STAGE,
     MAX_STAGE_ATTEMPTS,
+    STUCK_AFTER_IDENTICAL_FAILURES,
+    attempts_exhausted,
+    is_stuck,
     STAGES,
     WRITING_STAGE,
     RunPaths,
@@ -227,7 +230,7 @@ class ResearchManager:
         unattended: bool = False,
         max_auto_skips: int = 3,
         max_rounds: int = 1,
-        max_stage_attempts: int = MAX_STAGE_ATTEMPTS,
+        max_stage_attempts: int | None = MAX_STAGE_ATTEMPTS,
         web_search_context: str | None = None,
         min_report_figures: int | None = None,
         web_search_mode: str | None = None,
@@ -1359,7 +1362,7 @@ class ResearchManager:
         mark_stage_execution_started(paths, stage)
 
         while True:
-            if attempt_no > self.max_stage_attempts:
+            if attempts_exhausted(attempt_no, self.max_stage_attempts):
                 self.ui.show_status(
                     f"{stage.stage_title} failed after {self.max_stage_attempts} attempts. Escalating to user.",
                     level="error",
@@ -1641,7 +1644,7 @@ class ResearchManager:
         continue_session = False
 
         while True:
-            if attempt_no > self.max_stage_attempts:
+            if attempts_exhausted(attempt_no, self.max_stage_attempts):
                 self.ui.show_status(
                     f"{stage.stage_title} failed after {self.max_stage_attempts} attempts. Escalating to user.",
                     level="error",
@@ -1802,7 +1805,7 @@ class ResearchManager:
         continue_session = False
 
         while True:
-            if attempt_no > self.max_stage_attempts:
+            if attempts_exhausted(attempt_no, self.max_stage_attempts):
                 self.ui.show_status(
                     f"{stage.stage_title} failed after {self.max_stage_attempts} attempts. Escalating to user.",
                     level="error",
@@ -2108,6 +2111,10 @@ class ResearchManager:
         revision_feedback: str | None = None
         continue_session = False
         last_validation_errors: list[str] = []
+        #: One entry per *failed* attempt in this stage run, newest last. The stuck check
+        #: reads only the tail, but keeping the whole list means the log can say how many
+        #: attempts it took rather than only that it stopped.
+        recent_failures: list[list[str]] = []
         mark_stage_execution_started(paths, stage)
 
         # Optional pre-loaded revision feedback. The Studio (or any other
@@ -2143,18 +2150,39 @@ class ResearchManager:
                 pass
 
         while True:
-            if loop_attempts - (polish_rounds - entry_polish_rounds) >= self.max_stage_attempts:
-                error = (
-                    f"Exceeded {self.max_stage_attempts} attempts in the current stage run. "
-                    f"Last validation errors: {'; '.join(last_validation_errors) or 'None recorded.'}"
-                )
+            # The main stage loop, and the one that actually fires: it counts attempts
+            # net of polish rounds, so its comparison is `>=` against the ceiling rather
+            # than `>` against the attempt number. Reading zero as a ceiling here means
+            # "no attempts allowed" and every stage fails before it starts, which is the
+            # opposite of no limit. Same predicate, offset by one to match the `>=`.
+            stuck = is_stuck(recent_failures)
+            if stuck or attempts_exhausted(
+                loop_attempts - (polish_rounds - entry_polish_rounds) + 1,
+                self.max_stage_attempts,
+            ):
+                if stuck:
+                    error = (
+                        f"{STUCK_AFTER_IDENTICAL_FAILURES} consecutive attempts failed in "
+                        f"exactly the same way, so another one cannot help. Repeated "
+                        f"validation errors: {'; '.join(last_validation_errors) or 'None recorded.'}"
+                    )
+                else:
+                    error = (
+                        f"Exceeded {self.max_stage_attempts} attempts in the current stage run. "
+                        f"Last validation errors: {'; '.join(last_validation_errors) or 'None recorded.'}"
+                    )
                 self.ui.show_status(
-                    f"{stage.stage_title} failed after {self.max_stage_attempts} attempts in this run.",
+                    f"{stage.stage_title} "
+                    + (
+                        f"made no progress across {STUCK_AFTER_IDENTICAL_FAILURES} identical failures."
+                        if stuck
+                        else f"failed after {self.max_stage_attempts} attempts in this run."
+                    ),
                     level="error",
                 )
                 append_log_entry(
                     paths.logs,
-                    f"{stage.slug} max_attempts_exceeded",
+                    f"{stage.slug} " + ("stage_stuck" if stuck else "max_attempts_exceeded"),
                     error,
                 )
                 mark_stage_failed_manifest(paths, stage, error)
@@ -2376,6 +2404,7 @@ class ResearchManager:
                             "with no placeholder markers and ensure every required section is substantively filled."
                         )
                         last_validation_errors = list(validation_errors)
+                        recent_failures.append(list(validation_errors))
                         continue_session = True
                         attempt_no += 1
                         continue
