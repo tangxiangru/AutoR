@@ -65,6 +65,38 @@ SEVERITIES = ("critical", "major", "minor")
 #: particular there is no "noted".
 RESPONSE_STATUSES = ("addressed", "rebutted", "accepted_limitation")
 
+#: How the adversarial pass ended, in the approval gate's vocabulary rather than a
+#: second one of this module's own.
+#:
+#: :mod:`src.approval_agent` already separates "the backend never ran"
+#: (``CRASHED_REASON``) from "it answered and the answer could not be read"
+#: (``UNREADABLE_REASON``), and exposes a single predicate,
+#: ``AutomatedReviewer.is_degraded_verdict``, for everything downstream. Both events
+#: happen to this pass too, so it reuses the split. The third member of that
+#: vocabulary, ``UNSUPPORTED_REASON``, has no counterpart here: it names a decision
+#: token outside the gate's vocabulary, and this reviewer casts no vote — an
+#: unrecognised ``category`` is coerced to ``overclaim`` rather than voiding the
+#: finding, because losing a real objection to a taxonomy mismatch is the worse error.
+COMPLETED = "completed"
+CRASHED = "crashed"
+UNREADABLE = "unreadable"
+
+#: The completions under which the stage was not attacked at all. ``reviewer_failed``
+#: in the written artifact is derived from this, so the field docs/run-artifacts.md
+#: documents keeps answering exactly the question it answered before.
+DEGRADED_COMPLETIONS = (CRASHED, UNREADABLE)
+
+
+def is_degraded_completion(completion: str) -> bool:
+    """Whether the empty finding list is AutoR's, rather than the reviewer's.
+
+    The counterpart of ``AutomatedReviewer.is_degraded_verdict``, asking the same
+    question of a pass that produces no verdict: did a reviewer look and find nothing,
+    or did no reviewer look. Those are the same value — ``[]`` — everywhere downstream,
+    and only this tells them apart.
+    """
+    return completion in DEGRADED_COMPLETIONS
+
 
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
@@ -112,6 +144,25 @@ class ValidityFinding:
             "why_it_matters": self.why_it_matters,
             "what_would_settle_it": self.what_would_settle_it,
         }
+
+
+@dataclass(frozen=True)
+class ValidityReviewOutcome:
+    """What the pass produced, and whether it ran at all.
+
+    :meth:`ValidityReviewer.review` used to return the findings alone. That makes "a
+    reviewer attacked the stage and found nothing" and "no reviewer ever returned" the
+    same value, and the value is ``[]`` — which every reader downstream, the next
+    stage's gate included, takes as nothing owed. The completion is carried beside the
+    findings so a caller cannot read one without being handed the other.
+    """
+
+    completion: str
+    findings: list[ValidityFinding]
+
+    @property
+    def degraded(self) -> bool:
+        return is_degraded_completion(self.completion)
 
 
 def load_findings(paths: RunPaths, stage_slug: str) -> list[ValidityFinding]:
@@ -317,9 +368,26 @@ class ValidityReviewer:
     def fake_mode(self) -> bool:
         return bool(getattr(self._operator, "fake_mode", False))
 
-    def review(self, *, paths: RunPaths, stage: StageSpec, stage_markdown: str) -> list[ValidityFinding]:
+    def review(
+        self,
+        *,
+        paths: RunPaths,
+        stage: StageSpec,
+        stage_markdown: str,
+        attempt_no: int = 1,
+    ) -> ValidityReviewOutcome:
+        """Attack the stage once, and say how the attempt ended.
+
+        ``attempt_no`` only reaches the operator's own logging, so a re-ask is
+        distinguishable in ``logs/raw`` from the call that provoked it. Deciding
+        *whether* to re-ask is the manager's: it owns the operator and the budget, and
+        this returns the fact it needs rather than acting on it.
+        """
         if stage.number not in REVIEWED_STAGE_NUMBERS:
-            return []
+            # Nothing to complete: before 05 there is no result to be wrong about. The
+            # empty list here is an absence of subject matter, not an absent judgement,
+            # so it must not read as degraded.
+            return ValidityReviewOutcome(COMPLETED, [])
 
         # If a panel already deliberated over this stage, its surviving concerns
         # are the findings. Running a second critic would ask the Methodologist's
@@ -329,7 +397,7 @@ class ValidityReviewer:
             self._write_review(
                 paths, stage, from_panel, note="carried from the review panel's final round"
             )
-            return from_panel
+            return ValidityReviewOutcome(COMPLETED, from_panel)
 
         if self.fake_mode:
             findings = [
@@ -346,7 +414,7 @@ class ValidityReviewer:
                 )
             ]
             self._write_review(paths, stage, findings, note="fake-operator mode")
-            return findings
+            return ValidityReviewOutcome(COMPLETED, findings)
 
         prompt_path = paths.prompt_cache_dir / f"{stage.slug}_validity_review.prompt.md"
         write_text(prompt_path, self._build_prompt(paths=paths, stage=stage, stage_markdown=stage_markdown))
@@ -364,6 +432,7 @@ class ValidityReviewer:
                     "command": command,
                     "prompt_path": str(prompt_path),
                     "session_id": session_id,
+                    "attempt_no": attempt_no,
                 }
             },
         )
@@ -371,7 +440,7 @@ class ValidityReviewer:
             command=command,
             cwd=invocation_cwd,
             stage=stage,
-            attempt_no=1,
+            attempt_no=attempt_no,
             paths=paths,
             mode="validity_review",
             stdin_text=stdin_text,
@@ -384,13 +453,32 @@ class ValidityReviewer:
                 stage,
                 [],
                 note=f"the validity reviewer failed with exit code {exit_code} and raised nothing",
-                failed=True,
+                completion=CRASHED,
             )
-            return []
+            return ValidityReviewOutcome(CRASHED, [])
 
-        findings = self._parse(stdout_text)
+        payload = self._extract_json(stdout_text)
+        if payload is None:
+            # Not "it returned nothing": there is no findings object at all. Emptiness
+            # cannot be the test, because `{"findings": []}` is a clean review and the
+            # prompt above says in as many words that raising nothing is legitimate.
+            # The absence of the object the prompt asked for can be, and it is the same
+            # event the approval gate calls unreadable.
+            self._write_review(
+                paths,
+                stage,
+                [],
+                note=(
+                    f"the validity reviewer returned {len(stdout_text)} characters carrying no "
+                    "findings object, so this stage has no judgement rather than a clean one"
+                ),
+                completion=UNREADABLE,
+            )
+            return ValidityReviewOutcome(UNREADABLE, [])
+
+        findings = self._findings_from(payload)
         self._write_review(paths, stage, findings)
-        return findings
+        return ValidityReviewOutcome(COMPLETED, findings)
 
     def _write_review(
         self,
@@ -399,12 +487,17 @@ class ValidityReviewer:
         findings: list[ValidityFinding],
         *,
         note: str = "",
-        failed: bool = False,
+        completion: str = COMPLETED,
     ) -> None:
         payload = {
             "generated_at": _now(),
             "reviewed_stage": stage.slug,
-            "reviewer_failed": failed,
+            # Derived rather than stored beside the completion, and deliberately the
+            # only shape of it that reaches disk. The authoritative record is the
+            # manager's, because `workspace/reviews/` is writable by the very stage the
+            # next gate constrains; what is written here is the artifact field
+            # docs/run-artifacts.md already documents, unchanged.
+            "reviewer_failed": is_degraded_completion(completion),
             "note": note,
             "findings": [item.to_dict() for item in findings],
         }
@@ -417,6 +510,15 @@ class ValidityReviewer:
         payload = self._extract_json(raw)
         if not isinstance(payload, dict):
             return []
+        return self._findings_from(payload)
+
+    def _findings_from(self, payload: dict) -> list[ValidityFinding]:
+        """The findings in an object that has already been recovered from a transcript.
+
+        Split from :meth:`_parse` because :meth:`review` has to know *which* of the two
+        empty results it got — no object, or an object with an empty list — and a
+        function that swallows the distinction cannot tell it.
+        """
         findings: list[ValidityFinding] = []
         for index, entry in enumerate(payload.get("findings", []), start=1):
             if not isinstance(entry, dict):

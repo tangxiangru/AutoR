@@ -15,6 +15,7 @@ import unittest
 from pathlib import Path
 
 from src.validity_review import (
+    CRASHED,
     REVIEWED_STAGE_NUMBERS,
     RESPONSE_STATUSES,
     ValidityFinding,
@@ -196,16 +197,20 @@ class ReviewerTest(ValidityTestCase):
     def test_the_fake_reviewer_writes_a_real_finding(self) -> None:
         """Fake mode has to exercise the loop, or the loop is untested end to end."""
         reviewer = ValidityReviewer(_FakeOperator())
-        findings = reviewer.review(paths=self.paths, stage=STAGE_05, stage_markdown="# Stage 05")
+        outcome = reviewer.review(paths=self.paths, stage=STAGE_05, stage_markdown="# Stage 05")
 
-        self.assertEqual(len(findings), 1)
+        self.assertEqual(len(outcome.findings), 1)
+        self.assertFalse(outcome.degraded)
         self.assertTrue(validity_review_path(self.paths, STAGE_05.slug).exists())
         self.assertEqual(load_findings(self.paths, STAGE_05.slug)[0].severity, "critical")
 
     def test_stages_with_no_result_to_attack_are_skipped(self) -> None:
         reviewer = ValidityReviewer(_FakeOperator())
         stage_03 = next(stage for stage in STAGES if stage.number == 3)
-        self.assertEqual(reviewer.review(paths=self.paths, stage=stage_03, stage_markdown="x"), [])
+        outcome = reviewer.review(paths=self.paths, stage=stage_03, stage_markdown="x")
+        self.assertEqual(outcome.findings, [])
+        # No result to attack is an absent subject, not an absent judgement.
+        self.assertFalse(outcome.degraded)
         self.assertFalse(validity_review_path(self.paths, stage_03.slug).exists())
 
     def test_a_malformed_finding_is_dropped_rather_than_half_parsed(self) -> None:
@@ -279,7 +284,7 @@ class ReviewerFailureTest(ValidityTestCase):
         """An empty findings list from a crashed critique reads as "nothing wrong"."""
         reviewer = ValidityReviewer(_FakeOperator())
         reviewer._write_review(  # noqa: SLF001
-            self.paths, STAGE_05, [], note="exit code 1", failed=True
+            self.paths, STAGE_05, [], note="exit code 1", completion=CRASHED
         )
         payload = json.loads(validity_review_path(self.paths, STAGE_05.slug).read_text(encoding="utf-8"))
         self.assertTrue(payload["reviewer_failed"])
@@ -321,7 +326,9 @@ class PanelBridgeTest(ValidityTestCase):
         self._panel_file([self._verdict("Both arms were tuned on the reporting split.", blocking=True)])
         reviewer = ValidityReviewer(_FakeOperator())
 
-        findings = reviewer.review(paths=self.paths, stage=STAGE_05, stage_markdown="# Stage 05")
+        findings = reviewer.review(
+            paths=self.paths, stage=STAGE_05, stage_markdown="# Stage 05"
+        ).findings
 
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0].severity, "critical")
@@ -330,7 +337,7 @@ class PanelBridgeTest(ValidityTestCase):
     def test_a_nonblocking_concern_is_major_rather_than_critical(self) -> None:
         self._panel_file([self._verdict("Only three seeds were run.")])
         reviewer = ValidityReviewer(_FakeOperator())
-        findings = reviewer.review(paths=self.paths, stage=STAGE_05, stage_markdown="x")
+        findings = reviewer.review(paths=self.paths, stage=STAGE_05, stage_markdown="x").findings
         self.assertEqual(findings[0].severity, "major")
 
     def test_only_the_final_round_counts(self) -> None:
@@ -340,20 +347,20 @@ class PanelBridgeTest(ValidityTestCase):
             [self._verdict("Still standing.")],
         )
         reviewer = ValidityReviewer(_FakeOperator())
-        findings = reviewer.review(paths=self.paths, stage=STAGE_05, stage_markdown="x")
+        findings = reviewer.review(paths=self.paths, stage=STAGE_05, stage_markdown="x").findings
         self.assertEqual([item.finding for item in findings], ["Still standing."])
 
     def test_a_failed_panel_member_contributes_nothing(self) -> None:
         self._panel_file([self._verdict("Never actually produced.", failed=True)])
         reviewer = ValidityReviewer(_FakeOperator())
-        findings = reviewer.review(paths=self.paths, stage=STAGE_05, stage_markdown="x")
+        findings = reviewer.review(paths=self.paths, stage=STAGE_05, stage_markdown="x").findings
         # Falls through to the standalone critic rather than reporting a clean panel.
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0].category, "insufficient_replication")
 
     def test_with_no_panel_the_standalone_critic_runs(self) -> None:
         reviewer = ValidityReviewer(_FakeOperator())
-        findings = reviewer.review(paths=self.paths, stage=STAGE_05, stage_markdown="x")
+        findings = reviewer.review(paths=self.paths, stage=STAGE_05, stage_markdown="x").findings
         self.assertEqual(findings[0].category, "insufficient_replication")
 
     def test_panel_findings_are_owed_the_same_answer(self) -> None:
