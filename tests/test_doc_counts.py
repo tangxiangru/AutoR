@@ -104,6 +104,30 @@ class CountsInProseMatchTheSymbolTests(unittest.TestCase):
                         )
         self.assertEqual(wrong, [], "\n".join(wrong))
 
+    def test_the_rubric_version_in_the_docs_is_the_live_one(self) -> None:
+        """A bump splits the archive in two; a doc still naming the old one is a lie.
+
+        Both places were already wrong when this was added — `README.md` said `"2"`
+        and `docs/framework.md` said `3` while the code said `3` and `4` respectively.
+        The version is quoted precisely because a reader needs to know which scores
+        are comparable, which is the one thing a stale copy destroys.
+        """
+        from src.rubric import RUBRIC_VERSION
+
+        for name in ("README.md", "docs/framework.md"):
+            text = (REPO / name).read_text(encoding="utf-8")
+            # Only the two canonical forms in which a doc states the *live* version.
+            # A sentence recounting which bump was which ("it went to 3 when...") is
+            # history and must stay readable, so it is deliberately not matched.
+            pattern = r'`RUBRIC_VERSION(?:` is `| = ")(\d+)'
+            quoted = set(re.findall(pattern, text))
+            self.assertTrue(quoted, f"{name} stopped naming RUBRIC_VERSION")
+            self.assertEqual(
+                quoted,
+                {RUBRIC_VERSION},
+                f"{name} quotes RUBRIC_VERSION {sorted(quoted)}, the code says {RUBRIC_VERSION}",
+            )
+
     def test_the_criteria_count_is_stated_correctly(self) -> None:
         text = (REPO / "docs/self-improvement.md").read_text(encoding="utf-8")
         self.assertIn(f"{spelled(len(CRITERIA)).capitalize()} criteria", text)

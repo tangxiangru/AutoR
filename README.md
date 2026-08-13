@@ -356,7 +356,7 @@ included.
 Every valid stage draft is measured against a rigour rubric read off disk — do the paths it names
 resolve, do the numbers it reports appear in a results file, did it produce artifacts during *this*
 execution, is the decision ledger four different things rather than one sentence four times. Eight
-weighted criteria, `RUBRIC_VERSION = "2"`:
+weighted criteria, `RUBRIC_VERSION = "4"`:
 
 | Criterion | Weight | From | What it measures |
 | --- | ---: | :---: | --- |
