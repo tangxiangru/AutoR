@@ -57,6 +57,18 @@ SERVED_ELSEWHERE: dict[str, tuple[str, str]] = {
         "src/validity_review.py",
         "def format_findings_for_prompt",
     ),
+    # AutoR writes these, and the agent must not. They became load-bearing when the
+    # gate started refusing a workspace copy that disagrees with the stamp outside
+    # `workspace/`; asking a prompt to tell the agent to produce the record of the
+    # objections raised against it is the defect that refusal exists to close.
+    "reviews/validity_review_05_experimentation.json": (
+        "src/validity_review.py",
+        "def _write_review_file",
+    ),
+    "reviews/validity_review_06_analysis.json": (
+        "src/validity_review.py",
+        "def _write_review_file",
+    ),
 }
 
 #: Where a prompt should point when the agent chooses the filename itself.
