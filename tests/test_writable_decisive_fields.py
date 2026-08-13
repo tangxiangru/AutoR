@@ -247,6 +247,19 @@ GATES: tuple[Gate, ...] = (
         "refusal turns on a word in workspace/notes/research_rounds.json.",
     ),
     Gate(
+        "hypothesis_manifest.validate_hypothesis_decision_rules",
+        ("hypothesis_manifest",),
+        COUNTED,
+        "The manifest is derived from the agent's own Stage 02 draft moments before this "
+        "runs, so every word it reads is agent-written. What the refusal turns on is not "
+        "a claim it believes but the *presence* of a decision rule on each empirical "
+        "hypothesis: a set that cannot come out negative is refused at the stage that can "
+        "still change it cheaply, three before the freeze. The agent can satisfy it with a "
+        "rule it later fails to honour — that is `validate_hypothesis_outcomes`' job at "
+        "Stage 06, cross-checked against the frozen copy and its stamp — but it cannot "
+        "satisfy it by omission, which is the escape this closes.",
+    ),
+    Gate(
         "report_plan.validate_report_plan",
         ("report_plan", "report_plan_stamp.json"),
         CROSS_CHECKED,

@@ -60,7 +60,6 @@ from .validity_review import (
     RESTORE_WITNESS_HEADING,
     ValidityReviewer,
     ValidityReviewOutcome,
-    format_findings_for_prompt,
     restore_validity_review,
     reviewed_stage_for,
 )
