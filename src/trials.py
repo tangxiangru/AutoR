@@ -45,6 +45,18 @@ from, and a generator of random drafts would show the same "effect". The mean
 difference would be real, positive, and evidence of nothing. See
 :data:`SELECTS_ON_THE_OUTCOME`.
 
+That refusal is keyed on the *pair* — capability and outcome — rather than on the
+capability alone, because ``argmax`` on ``score.total`` guarantees the win only while
+``score.total`` is what gets printed. The same ratchet scored against an external
+judge is a sound trial, and it is the one ``docs/self-improvement.md`` asks for under
+"What may not be trialled": *to trial them, the outcome has to be something the
+ratchet cannot see*. :mod:`src.rcb_trial` is that outcome — a benchmark judge run
+after the workspace is finished, against a checklist no stage was shown — so a trial
+declares which measure filled its ``stage_fitness`` and the refusal reads the
+capability against *that*. The declared measures are :data:`DECLARED_OUTCOMES`, and a
+:class:`TrialResult` carrying anything else is refused at construction: a call site
+that could invent an outcome could exempt itself from the refusal by naming one.
+
 **It does not call an unattainable result "not significant".** An exact two-sided
 paired sign-flip test over *n* pairs cannot go below ``2 / 2**n``: three pairs
 bottom out at 0.25, five at 0.0625, six at 0.031. Below six pairs no result can
@@ -83,9 +95,11 @@ from .archive import RunRecord
 #: two-sided sign-flip test over *n* pairs bottoms out at ``2 / 2**n``.
 MIN_PAIRS_FOR_SIGNIFICANCE = 6
 
-#: Capabilities whose mechanism is selection on the rubric total, which is the
-#: outcome this module reports. A paired trial of one of these measures
-#: ``max(N draws) >= 1 draw`` and nothing else.
+#: Capabilities whose mechanism is selection on the rubric total. A paired trial of
+#: one of these *against the rubric* measures ``max(N draws) >= 1 draw`` and nothing
+#: else. Scored against a measure the run cannot read, the same capability is
+#: trialable — which is why this set is a property of :data:`RUBRIC_TOTAL` and not of
+#: the module.
 #:
 #: Found the hard way. The first paired trial anyone tried to run here was the
 #: champion ratchet, ``--evolve-rounds 0`` against ``2``, and twelve real runs were
@@ -105,6 +119,86 @@ MIN_PAIRS_FOR_SIGNIFICANCE = 6
 SELECTS_ON_THE_OUTCOME: frozenset[str] = frozenset(
     {"polish_rounds", "evolve_rounds", "evolution", "champion_ratchet", "pareto_frontier"}
 )
+
+
+@dataclass(frozen=True)
+class Outcome:
+    """The measure a trial's difference is a difference *in*.
+
+    Three fields because the report needs three different things from it and each was
+    previously a literal somewhere else: ``unit`` names the scale on the
+    mean-difference line, ``measured_by`` names the instrument for a reader deciding
+    whether the number is comparable to anything, and ``selected_on_by`` is what the
+    circularity refusal reads. Keeping them on one object is what makes the refusal
+    keyed on the pair rather than on the capability: an outcome the run can read
+    during the run carries the capabilities that read it, and an outcome computed
+    after the workspace is finished carries none.
+    """
+
+    #: Stable identifier, printed in the report so a reader can tell two trials of one
+    #: capability apart when they were scored against different things.
+    key: str
+    #: The scale the mean difference is in. ``format_trial_report`` prints it.
+    unit: str
+    #: What computes the number, in a clause. Not the same claim as ``unit``: a 0–100
+    #: total says nothing about who assigned it, and who assigned it is the whole of
+    #: whether the ratchet could have optimised against it.
+    measured_by: str
+    #: Capabilities whose mechanism is ``argmax`` on *this* number. Empty is the
+    #: ordinary case and the honest one for any measure produced after the run ends.
+    selected_on_by: frozenset[str] = frozenset()
+
+    def selects(self, capability: str) -> bool:
+        return capability in self.selected_on_by
+
+
+#: AutoR grading its own drafts, during the run, while it is still choosing between
+#: them. The default for every caller that does not say otherwise, because it is what
+#: :class:`src.archive.RunRecord` holds and it is the measure that can be gamed from
+#: inside.
+RUBRIC_TOTAL = Outcome(
+    key="rubric_total",
+    unit="rubric points",
+    measured_by="AutoR's own rubric, scored during the run",
+    selected_on_by=SELECTS_ON_THE_OUTCOME,
+)
+
+#: ResearchClawBench, filled by :mod:`src.rcb_trial`. ``selected_on_by`` is empty and
+#: that is a claim, not an omission: the score is produced by a judge that runs after
+#: the workspace is finished, against a checklist no stage was shown, so no mechanism
+#: inside a run can keep a draft *because* it scores well here. A capability that read
+#: a benchmark score in-loop to decide what to keep would belong in this set, and the
+#: refusal would then fire on this outcome exactly as it does on the rubric.
+RCB_TOTAL = Outcome(
+    key="rcb_total",
+    unit="RCB points (0-100 total scale)",
+    measured_by="ResearchClawBench's judge, after the run, against a checklist no stage was shown",
+    selected_on_by=frozenset(),
+)
+
+#: Every measure a trial may declare, by key. A registry and not a free-form string
+#: for the same reason ``stage_graph.GUARDS`` is one: the failure mode of an outcome
+#: nothing recognises is silence. ``circular`` would read an empty ``selected_on_by``,
+#: the ratchet would report ``+0.0736, p = 0.031``, and the escape would be one
+#: keyword argument at one call site. Adding a measure means adding it here, where the
+#: claim that nothing selects on it is written down next to it.
+DECLARED_OUTCOMES: Mapping[str, Outcome] = {
+    outcome.key: outcome for outcome in (RUBRIC_TOTAL, RCB_TOTAL)
+}
+
+
+def outcomes_free_of(capability: str) -> tuple[Outcome, ...]:
+    """Declared measures this capability's mechanism cannot select on.
+
+    What a refusal owes the reader. "Score it on something the ratchet does not read"
+    is advice; this is the list, derived from the same registry the refusal fires off,
+    so a measure added to the registry appears in the refusal without anyone
+    remembering to update the prose.
+    """
+    return tuple(
+        outcome for outcome in DECLARED_OUTCOMES.values() if not outcome.selects(capability)
+    )
+
 
 #: Above this, the exact enumeration is replaced by the same arithmetic on a
 #: sampled basis. 2**18 is a quarter of a million sign assignments, which is
@@ -227,9 +321,42 @@ class TrialResult:
     control_arm: str
     treatment_arm: str
     pairs: tuple[Pair, ...]
+    #: What filled ``stage_fitness``. Defaults to :data:`RUBRIC_TOTAL`, which is what
+    #: an archived :class:`src.archive.RunRecord` carries, so every caller that does
+    #: not produce its own measure keeps the behaviour it had. A producer that fills
+    #: the two dicts from somewhere else declares it here, and ``circular`` is then
+    #: read against the measure that was actually used.
+    outcome: Outcome = RUBRIC_TOTAL
     #: Pairs found but not usable, with the reason. Reported rather than dropped:
     #: an analysis over four of nine pairs is a different claim from one over nine.
     excluded: tuple[tuple[str, str], ...] = ()
+
+    def __post_init__(self) -> None:
+        """Refuse an outcome that is not in the registry, at construction.
+
+        The same shape as ``Edge.__post_init__`` refusing an unregistered guard, for
+        the same reason: the failure is silent in the direction that publishes. An
+        outcome nobody declared has an empty ``selected_on_by``, so it makes
+        ``circular`` false for every capability — inventing one at the call site is
+        how a circular trial gets reported, and it would look like a keyword argument
+        rather than like an exemption. ``dataclasses.replace`` re-runs this, so the
+        rewrite in ``rcb_trial.collect_rcb_pairs`` cannot slip one past it either.
+        """
+        declared = DECLARED_OUTCOMES.get(self.outcome.key)
+        if declared is None:
+            raise ValueError(
+                f"outcome {self.outcome.key!r} is not declared. Add it to "
+                "`DECLARED_OUTCOMES` with the capabilities that select on it, next to "
+                "the argument that nothing does. An undeclared measure exempts every "
+                "capability from the circularity refusal and reads as a spelling."
+            )
+        if declared != self.outcome:
+            raise ValueError(
+                f"outcome {self.outcome.key!r} does not match the declared one: "
+                f"selected_on_by={sorted(self.outcome.selected_on_by)} against "
+                f"{sorted(declared.selected_on_by)}. A trial may choose which declared "
+                "measure it was scored on; it may not restate what selects on it."
+            )
 
     @property
     def n(self) -> int:
@@ -286,8 +413,15 @@ class TrialResult:
         "+0.0736, p = 0.031" takes the number; a caveat under it does not undo
         that, and the number here is an artifact of the arithmetic rather than a
         measurement of anything.
+
+        Read against :attr:`outcome` and not against the module. "Selects on the
+        outcome" is a relation between a mechanism and a measure, and the mechanism
+        that cannot lose a rubric-scored trial can lose one scored by a judge it never
+        sees. Keying on the capability alone refused a sound trial — the ratchet
+        against ResearchClawBench — with a message telling the reader to run exactly
+        that trial.
         """
-        return self.capability in SELECTS_ON_THE_OUTCOME
+        return self.outcome.selects(self.capability)
 
     def criterion_differences(self) -> dict[str, float]:
         """Mean per-criterion difference across pairs, worst first.
@@ -343,8 +477,17 @@ def collect_pairs(
     capability: str,
     control_arm: str,
     treatment_arm: str,
+    outcome: Outcome = RUBRIC_TOTAL,
 ) -> TrialResult:
-    """Group tagged runs into pairs and say why any were dropped."""
+    """Group tagged runs into pairs and say why any were dropped.
+
+    ``outcome`` is what filled ``stage_fitness`` on these records, and the caller is
+    the only one who knows: this function reads two dicts of floats and cannot tell a
+    rubric mean from a benchmark total. It defaults to the rubric because the archive
+    holds nothing else, and a producer that fills the dicts from another instrument
+    passes its own — :func:`src.rcb_trial.collect_rcb_pairs` passes
+    :data:`RCB_TOTAL`. Only a measure in :data:`DECLARED_OUTCOMES` is accepted.
+    """
     by_trial: dict[str, dict[str, RunRecord]] = {}
     for record in records:
         if not record.trial_id or record.capability != capability:
@@ -376,6 +519,7 @@ def collect_pairs(
         control_arm=control_arm,
         treatment_arm=treatment_arm,
         pairs=tuple(pairs),
+        outcome=outcome,
         excluded=tuple(excluded),
     )
 
@@ -389,30 +533,56 @@ def declared_trials(records: Iterable[RunRecord]) -> dict[str, set[str]]:
     return found
 
 
-def format_trial_report(result: TrialResult, *, unit: str = "rubric points") -> str:
+def format_trial_report(result: TrialResult, *, unit: str | None = None) -> str:
     """Render a trial. ``unit`` names what the mean difference is measured in.
 
     A rendering concern, so it lives here and not on :class:`TrialResult`, which is a
-    record about the statistics. The default keeps every existing caller byte-identical.
-    It exists because the arithmetic in this module is scale-free — ``sign_flip_p`` is
-    invariant to it, ``concentration`` is a ratio — and the only thing that was not was
-    the literal string on the mean-difference line. Handed a ResearchClawBench total in
-    0–100 points, that line printed "+24.6000 rubric points", which is a lie about the
-    instrument in the one place a reader takes the number from.
+    record about the statistics. It exists because the arithmetic in this module is
+    scale-free — ``sign_flip_p`` is invariant to it, ``concentration`` is a ratio — and
+    the only thing that was not was the literal string on the mean-difference line.
+    Handed a ResearchClawBench total in 0–100 points, that line printed "+24.6000 rubric
+    points", which is a lie about the instrument in the one place a reader takes the
+    number from.
+
+    Now an *override* of ``result.outcome.unit`` rather than a default of its own. The
+    scale is a property of the measure, so a caller that declared the measure has
+    already said it, and two callers saying it separately is one string that can drift
+    into disagreeing with the outcome printed two lines above it. ``None`` means "the
+    outcome's"; a string still wins, for a caller rendering the same result on a
+    rescaled axis.
     """
+    unit = result.outcome.unit if unit is None else unit
     header = f"## `{result.capability}`  —  `{result.treatment_arm}` against `{result.control_arm}`"
+    # Printed on both branches, and above the number on the reporting branch. Which
+    # instrument produced the difference decides whether the refusal below applies, so
+    # a reader who disagrees with the verdict needs it before the verdict, not in a
+    # footnote after it.
+    measure = f"- outcome: `{result.outcome.key}` — {result.outcome.measured_by}"
     if result.circular:
+        # No need to drop the measure just refused: it selects on this capability, which
+        # is why we are here, so `outcomes_free_of` has already left it out.
+        escapes = outcomes_free_of(result.capability)
         return "\n".join([
             header,
             "",
             f"- pairs: **{result.n}**",
-            "- **refused: this capability selects on the outcome measure.** The champion "
-            "ratchet keeps the highest-scoring draft and reverts the rest, so the treatment "
-            "arm is the maximum of several draws on exactly the total reported here. It "
-            "cannot lose, a random draft generator would show the same effect, and a "
-            "positive mean difference would be arithmetic rather than evidence.",
+            measure,
+            f"- **refused: `{result.capability}` selects on the outcome measure "
+            f"`{result.outcome.key}`.** The champion ratchet keeps the highest-scoring "
+            "draft and reverts the rest, so the treatment arm is the maximum of several "
+            "draws on exactly the total reported here. It cannot lose, a random draft "
+            "generator would show the same effect, and a positive mean difference would be "
+            "arithmetic rather than evidence.",
             "- To trial it, score the arms on something the ratchet does not read — a held-out "
-            "judge, a benchmark, or a human read of the draft.",
+            "judge, a benchmark, or a human read of the draft. "
+            + (
+                "Declared here: "
+                + ", ".join(f"`{outcome.key}` ({outcome.measured_by})" for outcome in escapes)
+                + "."
+                if escapes
+                else "No other measure is declared, so there is nothing to rerun this against "
+                "until one is."
+            ),
         ])
 
     lines = [
@@ -420,6 +590,7 @@ def format_trial_report(result: TrialResult, *, unit: str = "rubric points") -> 
         "",
         f"- pairs: **{result.n}**"
         + (f" ({len(result.excluded)} excluded)" if result.excluded else ""),
+        measure,
         f"- mean difference: **{result.mean_difference:+.4f}** {unit}",
         f"- won {result.wins}, lost {result.losses}, tied {result.ties}",
     ]
@@ -466,7 +637,13 @@ def format_trial_report(result: TrialResult, *, unit: str = "rubric points") -> 
 
 
 def format_all_trials(records: Sequence[RunRecord], *, arms: Mapping[str, tuple[str, str]] | None = None) -> str:
-    """Every declared trial in the archive, or a note that there are none."""
+    """Every declared trial in the archive, or a note that there are none.
+
+    No ``outcome`` parameter, and that is the refusal rather than an omission. These
+    records came out of :class:`src.archive.Archive`, where ``stage_fitness`` is
+    AutoR's own rubric by construction, so the measure is not the caller's to choose
+    here and the ratchet stays refused on this path whatever a flag says.
+    """
     declared = declared_trials(records)
     if not declared:
         return (
