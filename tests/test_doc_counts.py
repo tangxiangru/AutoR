@@ -57,12 +57,20 @@ def _forward_edges() -> int:
     return sum(1 for edge in StageGraph.adaptive().edges if edge.kind != "revisit")
 
 
+def _channels_with_a_producer() -> int:
+    """Channels whose information is made by a stage rather than by the run config."""
+    return sum(1 for channel in CHANNELS if channel.produced_by is not None)
+
+
 #: ``(noun, live value)``. Every spelled-out numeral immediately before *noun* in a
 #: tracked document must equal *value*. The noun is matched case-insensitively and
 #: must be the whole phrase, so "typed channels" does not also catch "channels".
 COUNTED_NOUNS: tuple[tuple[str, int], ...] = (
     ("typed channels", len(CHANNELS)),
     ("typed information channels", len(CHANNELS)),
+    ("typed context channels", len(CHANNELS)),
+    ("blocks are typed", len(CHANNELS)),
+    ("channels produced inside the walk", _channels_with_a_producer()),
     ("backward edges", len(REVISIT_EDGES)),
     ("backward moves", len(REVISIT_EDGES)),
     ("dotted edges", len(REVISIT_EDGES)),
@@ -71,7 +79,17 @@ COUNTED_NOUNS: tuple[tuple[str, int], ...] = (
     ("guarded forward edges", len(_ADVANCE_GUARDS)),
 )
 
-TRACKED_DOCS = ("README.md", "docs/architecture.md", "docs/self-improvement.md")
+#: Three documents state the channel count and ``docs/framework.md`` states it
+#: three times, but the framework was outside this scan: two of the three could
+#: not go stale and the third could, and nothing said which was which. It is
+#: tracked now, and the phrase it uses that the others do not — "typed context
+#: channels" — is a row above.
+TRACKED_DOCS = (
+    "README.md",
+    "docs/architecture.md",
+    "docs/self-improvement.md",
+    "docs/framework.md",
+)
 
 #: Line references outside this repo's own tree. The reader is being sent to a pinned
 #: artifact somewhere else, which this repo cannot re-derive and does not churn.

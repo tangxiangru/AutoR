@@ -767,7 +767,21 @@ def format_project_scan_for_prompt(result: ProjectBootstrapResult) -> str:
 
 
 def format_project_context_for_prompt(paths: RunPaths) -> str | None:
-    """Format the project bootstrap context for injection into stage prompts."""
+    """Format the project bootstrap context for injection into stage prompts.
+
+    Delivered by the ``project_context`` channel in ``src.information_flow``.
+
+    The stages below the recommended entry stage are left out of the assessment
+    list on purpose. ``_adopt_project_bootstrap_baseline`` writes each of them a
+    stage summary carrying that stage's status, confidence and evidence and
+    appends it to run memory, so those readings already arrive in every later
+    prompt under ``# Approved Memory``. Listing them again here would send the
+    same reading of the same repository twice, and the copy that this block
+    would add is the shorter one: it drops the evidence and keeps the verdict.
+    What is left is the half memory does not carry — the stages the run still
+    owes. When no entry stage was recorded, nothing was carried forward and
+    every assessment is still owed, so the same rule lists all of them.
+    """
     if not project_bootstrap_exists(paths):
         return None
 
@@ -777,10 +791,14 @@ def format_project_context_for_prompt(paths: RunPaths) -> str | None:
     if summary:
         parts.append(f"## Project Bootstrap Summary\n\n{summary}")
 
-    assessments = load_stage_assessments(paths)
-    if assessments:
-        lines = ["## Project Stage Assessments"]
-        for a in assessments:
+    entry_stage = load_recommended_entry_stage(paths)
+    assessments = load_stage_assessments(paths) or []
+    still_owed = [
+        a for a in assessments if entry_stage is None or a.stage_number >= entry_stage
+    ]
+    if still_owed:
+        lines = ["## Project Stage Assessments (stages this run still owes)"]
+        for a in still_owed:
             lines.append(f"- **Stage {a.stage_number:02d} ({a.stage_name}):** "
                         f"{a.status} (confidence: {a.confidence})")
         parts.append("\n".join(lines))
