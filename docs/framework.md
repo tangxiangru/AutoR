@@ -1015,8 +1015,12 @@ any.
   consistently, in two trees, one of which no template mentions and nothing renders into a prompt. A
   run resumed from an AutoR that predates the stamp is adopted on its next freeze rather than
   refused, and until then two of the three comparisons have nothing to compare against.
-- **Standing rules and obligations never reach a panel seat.** Both are injected only into the solo
-  reviewer's prompt, so `--review-panel` silently loses two of the accumulation mechanisms.
+- **Standing rules and obligations now reach a panel seat, but not the cross-model auditor.**
+  `ReviewPanel._context_block` renders both for every seat and the chair, through the same two
+  renderers `AutomatedReviewer` calls, so `--review-panel` no longer loses the two accumulation
+  mechanisms. `CrossModelReviewer.build_prompt` still renders neither: `format_policy_for_prompt`
+  and `format_for_review_prompt` are imported by `src/approval_agent.py` and `src/review_panel.py`
+  and by nothing else.
 - **The cross-model veto does not survive a resume, and never sees a human approval.** `main.py`
   seats it through `create_cross_reviewer`, so it is no longer benchmark-only — but the mode is
   absent from the keys `load_run_config` reads, so a resumed run re-decides it from whatever

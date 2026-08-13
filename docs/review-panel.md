@@ -100,6 +100,71 @@ agreement it already reached.
 
 Raise or lower the ceiling with `--panel-rounds N`.
 
+## What every seat inherits
+
+A run accumulates two records that every later review has to see:
+
+- **Standing rules** (`review_policy.json`) — the corrections earlier refusals demanded, promoted
+  into requirements checked at every gate after them. This is what makes the gate strictly harder
+  as a run proceeds.
+- **Obligations** (`obligations.json`) — what an earlier *approval* said a later stage still owes,
+  injected into that stage's prompt and into that stage's review, so the debt is actually checked.
+
+Both were rendered into `AutomatedReviewer`'s prompt and into nothing else. No seat saw either,
+and neither the seat prompt nor the chair prompt asked for `carry_forward`, so a panel run could
+not create an obligation to inherit in the first place. Stated at the dial, which is the sharpest
+form of it: **`--rigor max` had fewer live mechanisms than `--rigor standard`**, because the higher
+setting swaps the solo reviewer for the panel and the panel could not see what the solo reviewer
+sees. A knob that loses a mechanism as it is turned up is the exact thing the knob exists to
+prevent.
+
+The panel was also *writing* rules it could never read. A panel refusal reaches `record_correction`
+by the same manager path a solo refusal does, so the room was teaching itself lessons it would
+never be shown.
+
+Both blocks now render inside `_context_block`, the one builder the seat prompt and the chair
+prompt share, through `format_policy_for_prompt` and `format_for_review_prompt` — the same two
+renderers the solo reviewer calls, so the two gates argue from one copy of the rules rather than
+two that can drift. An empty policy and an empty ledger render nothing, not a heading over
+nothing.
+
+Same renderer *and* the same arguments. `format_policy_for_prompt` takes a `stage`, which
+withholds the rules this stage's own earlier attempts produced; every review that demands
+anything records one, so a gate that omits the argument raises the bar by a requirement per
+attempt and its retry loop cannot converge. Calling the shared function is therefore necessary
+and not sufficient, which is why the parity here is pinned twice: `assertIs` on the two function
+objects, and `test_neither_gate_judges_a_stage_against_a_rule_its_own_retries_invented`, which
+puts a rule from the stage under review into the fixture so the filter has a row to reject.
+
+### Who may open a debt, and who may close one
+
+| | Any seat | The chair |
+| --- | --- | --- |
+| Records `carry_forward` | yes — carried whatever the rest of the room decides | yes, added to the room's |
+| Refuses over an unmet obligation | yes | yes |
+| `discharged` actually closes one | no — recorded as a claim and put in front of the chair | yes |
+
+The asymmetry is deliberate, because the two directions fail differently. Recording a debt is the
+strict direction: it costs a line in the ledger and buys a check at the stage that owes it, so a
+seat that noticed something must not need four others to agree before the run remembers it — five
+seats make the run *stricter* than one. Discharge is the lenient direction, and five seats must
+not become five chances for someone to accept a restatement as payment, which would make the panel
+weaker than the single reviewer it replaced. So the seats advise and the chair decides.
+
+Three rules follow, and each has a test:
+
+- **The chair's last word closes a debt, and only that.** Its seat verdict when the room never
+  split — a unanimous approval makes no chair call at all — and its synthesis once it has spoken.
+  A position the chair took *before* hearing the objections stops counting once the room splits.
+- **A chair that was asked and could not answer closes nothing.** Unreachable, or unreadable
+  twice, and the debt stays open for a later gate.
+- **Nothing is discharged while a blocking objection stands.** A draft the panel is refusing is a
+  draft that is about to change, and closing a debt against it is the approval the blocking rule
+  just refused, wearing another name.
+
+Every claim a seat made is in the record next to what the chair did with it, so a discharge the
+chair declined is visible rather than lost.
+
 ## Measuring whether it helped
 
 Every panel run contains its own control arm for free: **the chair's round-1 verdict is a
@@ -220,12 +285,17 @@ Stage 08 reads `workspace/reviews/`, and a run's auditability is the product's w
 panel that reported only its verdict would be less inspectable than the single reviewer it
 replaced.
 
+Each seat's own `carry_forward` and `discharged` are recorded per verdict, and the deliberation's
+`carry_forward` and `discharged` are what the run's ledger was actually handed. The gap between
+the two is the discharge claims the chair did not take.
+
 The run log gets a one-line summary per gate:
 
 ```
 03_study_design attempt 1 panel_decision
 rounds: 2
 positions: Principal Investigator=approve; Domain Expert=approve; Methodologist=custom_feedback; ...
+obligations: 1 carried forward, 0 discharged
 chair_overridden: True
 final_choice: 4
 ```

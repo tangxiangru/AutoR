@@ -106,7 +106,7 @@ its own docstring, not everything it touches.
 | The validity chain | `test_preregistration.py`, `test_experimental_protocol.py`, `test_validity_review.py`, `test_hypothesis_manifest.py`, `test_evidence_ledger.py`, `test_report_plan.py`, `test_report_plan_robustness.py`, `test_report_plan_stamping.py`, `test_task_deliverables_contract.py` |
 | Manifests, indexes, rollback | `test_run_manifest.py`, `test_stage_rollback.py`, `test_artifact_index.py`, `test_experiment_manifest.py`, `test_writing_pipeline.py` |
 | Improvement loop | `test_rubric.py`, `test_evolution.py` (also covers `pareto.py`), `test_ideation_panel.py` |
-| Review and approval | `test_review_panel.py`, `test_panel_unreachable.py`, `test_cross_reviewer.py`, `test_review_policy.py`, `test_obligations.py`, `test_stage_comments.py`, `test_deliberation.py`, `test_crux_repeat.py`, `test_verdict_extraction.py`, `test_reviewer_unreadable_verdict.py` |
+| Review and approval | `test_review_panel.py`, `test_panel_unreachable.py`, `test_panel_inherits_the_ledger.py`, `test_cross_reviewer.py`, `test_review_policy.py`, `test_obligations.py`, `test_stage_comments.py`, `test_deliberation.py`, `test_crux_repeat.py`, `test_verdict_extraction.py`, `test_reviewer_unreadable_verdict.py` |
 | Archive and self-measurement | `test_archive.py`, `test_archive_evidence.py`, `test_archive_exploration.py`, `test_archive_exploration_wiring.py`, `test_decisions.py`, `test_trials.py`, `test_scorecard.py` |
 | Operators, recovery, backend health | `test_operator_recovery.py`, `test_operator_codex.py`, `test_bounded_recovery.py`, `test_backend_health.py` |
 | Web search | `test_web_search.py`, `test_mcp_web_search.py` |

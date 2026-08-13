@@ -25,6 +25,28 @@ blocking objection survives the final round, approval is refused *in code* — n
 chair nicely. A prompt-level rule that the chair can talk itself out of is not a rule, and a
 gate that cannot say no is not a gate.
 
+**What the room inherits.** A run accumulates two things every later review has to see: the
+standing rules earlier refusals produced (:mod:`src.review_policy`) and the obligations earlier
+approvals attached (:mod:`src.obligations`). Both reached the solo reviewer's prompt and neither
+reached a seat, so turning ``--rigor`` from ``standard`` up to ``max`` swapped one reviewer that
+reads them for five that do not — a dial that loses a mechanism as it is turned up. Worse in one
+direction than a plain omission: ``ResearchManager._record_review_correction`` promotes a *panel*
+refusal into ``review_policy.json`` exactly as it does a solo one, so the panel was writing
+standing rules it would never read back. Both blocks now reach every seat and the chair, through
+the same two renderers the solo reviewer calls rather than a second copy of the wording — and
+with the same arguments, which is the half a shared function does not give you for free: without
+``stage``, ``format_policy_for_prompt`` shows the room the rules the stage's own retries invented
+and the bar it is judged against rises by one requirement per attempt.
+
+**Who may create a debt, and who may close one.** Both halves are needed: a seat that cannot
+answer ``carry_forward`` cannot leave an obligation behind, and a panel run that never creates
+one has nothing to inherit at the next gate. The two directions are deliberately asymmetric,
+because they fail asymmetrically. Any seat may record a debt, and every seat's entries are
+carried whatever the rest of the room decides — five seats then make a run *stricter* than one.
+Discharge is the lenient direction, so five seats must not make it five chances to write an
+obligation off: only the chair's last word closes one, and nothing is closed while a blocking
+objection stands. Every seat's claim is still recorded and put in front of the chair.
+
 Every position, including dissent that lost, is written to ``workspace/reviews/panel/``. A
 panel that hides how it split is less auditable than the single reviewer it replaced.
 """
@@ -32,7 +54,7 @@ panel that hides how it split is less auditable than the single reviewer it repl
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +65,8 @@ from .approval_agent import (
     AutomatedReviewer,
     ReviewDecision,
 )
+from .obligations import format_for_review_prompt, load_ledger
+from .review_policy import format_policy_for_prompt, load_policy
 from .terminal_ui import TerminalUI
 from .utils import (
     RunPaths,
@@ -332,6 +356,19 @@ class PanelVerdict:
     concerns: tuple[str, ...] = ()
     failed: bool = False
     abstained: bool = False
+    #: Debts this seat asked a later stage to settle. Carried whatever the room decides.
+    carry_forward: tuple[Any, ...] = ()
+    #: Inherited obligation ids this seat believes were met. A claim, not a closure: only
+    #: :meth:`PanelDeliberation.settled_obligations` decides which of these are applied.
+    discharged: tuple[str, ...] = ()
+
+    #: Refused outright, because ``frozen=True`` otherwise makes this *conditionally*
+    #: hashable: ``carry_forward`` holds whatever ``record_obligations`` accepts, which
+    #: includes dicts, so a verdict from a seat that carried nothing hashes and the same
+    #: verdict from a seat that carried a debt raises ``TypeError`` from inside the tuple.
+    #: A container that works until a seat uses a feature is worse than one that never
+    #: does; nothing in the tree hashes a verdict, and this is why it may not start.
+    __hash__ = None  # type: ignore[assignment]
 
     @property
     def approves(self) -> bool:
@@ -361,6 +398,8 @@ class PanelVerdict:
             "concerns": list(self.concerns),
             "failed": self.failed,
             "abstained": self.abstained,
+            "carry_forward": list(self.carry_forward),
+            "discharged": list(self.discharged),
         }
 
 
@@ -375,6 +414,13 @@ class PanelDeliberation:
     member_calls: int = 0
     #: Which seat chairs, so :attr:`solo_baseline` can find its round-1 verdict.
     chair_key: str = ""
+    #: Whether the room went to the chair at all. A unanimous approval never does, and then
+    #: the chair's seat verdict *is* its last word.
+    chair_asked: bool = False
+    #: What the chair's synthesis step produced, once it has run. Read for the chair's
+    #: ledger positions only, which is why a stand-in written in the chair's place is
+    #: harmless here: every one of them is empty in both fields.
+    chair_verdict: ReviewDecision | None = None
 
     @property
     def final_round(self) -> list[PanelVerdict]:
@@ -382,6 +428,44 @@ class PanelDeliberation:
 
     def blocking_verdicts(self) -> list[PanelVerdict]:
         return [verdict for verdict in self.final_round if verdict.blocking]
+
+    def carried_obligations(self) -> list[Any]:
+        """Every debt the room asked to carry forward: any seat that spoke, plus the chair.
+
+        Union, not intersection, and not the chair's alone. An obligation is the cheap,
+        strict direction — recording one costs a line in the ledger and buys a check at the
+        stage that owes it — so a seat that noticed something must not need four others to
+        agree before the run remembers it. Two seats naming the same debt are both kept
+        here, because who raised it is part of the record; ``record_obligations`` is what
+        collapses them into one entry in the ledger.
+        """
+        entries = [entry for verdict in self.final_round if verdict.counts for entry in verdict.carry_forward]
+        if self.chair_verdict is not None:
+            entries.extend(self.chair_verdict.carry_forward)
+        return entries
+
+    def settled_obligations(self) -> list[str]:
+        """Which inherited debts this review closes — the chair's last word, and only that.
+
+        Discharge is the direction where five seats could make a panel *weaker* than the one
+        reviewer it replaced: five chances for some seat to accept a restatement as payment.
+        So the seats advise and the chair decides, and if a blocking objection survives the
+        final round nothing is closed at all — a draft the panel is refusing is a draft that
+        is about to change, and closing a debt against it is the approval the blocking rule
+        just refused, wearing another name.
+        """
+        if self.blocking_verdicts():
+            return []
+        if self.chair_asked:
+            # Once the room has split, the chair's seat verdict is a position it took before
+            # hearing the objections, so it stops counting as the chair's word. A chair that
+            # was asked and could not answer -- unreachable, or unreadable twice -- has not
+            # said the debt was paid, and the run keeps it open until some later gate does.
+            return [str(item) for item in self.chair_verdict.discharged] if self.chair_verdict else []
+        chair = next(
+            (v for v in self.final_round if v.role_key == self.chair_key and v.counts), None
+        )
+        return [str(item) for item in chair.discharged] if chair is not None else []
 
     @property
     def solo_baseline(self) -> PanelVerdict | None:
@@ -434,6 +518,10 @@ class PanelDeliberation:
             "homogeneous_panel": len({seat for seat in seats}) <= 1,
             "rounds": [[verdict.to_dict() for verdict in group] for group in self.rounds],
             "blocking_after_deliberation": [v.role_key for v in self.blocking_verdicts()],
+            # What the run's ledger will actually be handed, next to each seat's own claim
+            # in `rounds`, so a reader can see which discharge claims the chair did not take.
+            "carry_forward": self.carried_obligations(),
+            "discharged": self.settled_obligations(),
             "chair_overridden": self.chair_overridden,
             "override_reason": self.override_reason,
             "final_choice": self.decision.choice if self.decision else None,
@@ -506,6 +594,20 @@ def resolve_roles(keys: list[str] | None) -> tuple[PanelRole, ...]:
         first = roles[0]
         roles[0] = PanelRole(**{**first.__dict__, "chair": True})
     return tuple(roles)
+
+
+def _obligation_line(entry: Any) -> str:
+    """One human-readable line for a carried debt, for the transcript and the record.
+
+    Display only. ``record_obligations`` is the reader that decides what an entry means —
+    including that a bare string is a legal entry — and it stays the only one, so this
+    reads the same two spellings it does and never rejects anything on its behalf.
+    """
+    if isinstance(entry, dict):
+        text = str(entry.get("obligation") or entry.get("text") or "").strip()
+        target = str(entry.get("target_stage") or entry.get("stage") or "").strip()
+        return f"{text} (target: {target})" if target else text or "(empty obligation)"
+    return str(entry).strip() or "(empty obligation)"
 
 
 class ReviewPanel:
@@ -621,6 +723,15 @@ class ReviewPanel:
 
         deliberation.member_calls = self._calls
         decision = self._enforce_blocking_objections(deliberation)
+        # After the blocking rule, not before: an override rewrites the decision from
+        # scratch, so attaching the ledger positions any earlier would drop them. And on the
+        # one path every outcome passes through, not at each construction site: four of them
+        # build the decision this method returns -- the unanimous early return, the chair's
+        # own verdict, the dissent fallback and the override -- and only one of the four is
+        # the chair. A unanimous room never calls the chair at all, so a fix written into
+        # `_build_chair_prompt` and the chair's arm would reach the rarer half of the runs.
+        decision = self._attach_ledger_positions(deliberation, decision)
+        deliberation.decision = decision
         self._record(paths, deliberation)
         self._render(deliberation)
         return decision
@@ -756,6 +867,12 @@ class ReviewPanel:
             reason=decision.reason,
             feedback=decision.feedback,
             concerns=concerns,
+            # Read off the parsed verdict rather than the raw payload: `_parse_decision`
+            # already type-checks both fields (a `carry_forward` that is not a list, or a
+            # `discharged` that is a number, become empty), so taking them from `payload`
+            # would be a second, weaker reader of the same two fields.
+            carry_forward=tuple(decision.carry_forward),
+            discharged=tuple(str(item) for item in decision.discharged),
         )
 
     @staticmethod
@@ -808,6 +925,7 @@ class ReviewPanel:
             )
 
         chair = self._members[self.chair.key]
+        deliberation.chair_asked = True
         self._calls += 1
         self.ui.show_status(f"Panel chair ({self.chair.title}) is synthesizing the decision...", level="info")
         exit_code, stdout_text, stderr_text = chair.run_prompt(
@@ -836,7 +954,7 @@ class ReviewPanel:
         # failure got the harsher outcome, and the panel already encodes the rule it
         # was breaking: `_round` marks an unreadable seat non-blocking precisely so
         # one bad answer cannot veto.
-        return chair.parse_with_retry(
+        decision = chair.parse_with_retry(
             paths=paths,
             stage=stage,
             attempt_no=attempt_no,
@@ -849,6 +967,15 @@ class ReviewPanel:
                 "panel's own objections.",
             ),
         )
+        # The chair's last word on the ledger — whoever ended up writing it. A chair that
+        # could not be read is answered with a stand-in assembled from the seats' objections,
+        # and no stand-in in this tree carries `carry_forward` or `discharged`
+        # (`NoStandInVerdictClaimsADischargeTests`), so recording one here cannot close a
+        # debt on a chair's behalf. Tracking "did the chair really write this" separately
+        # was a branch no test could tell apart from this one, which is a worse thing to ship
+        # than the case it was guarding against.
+        deliberation.chair_verdict = decision
+        return decision
 
     def _enforce_blocking_objections(self, deliberation: PanelDeliberation) -> ReviewDecision:
         """Refuse approval while a blocking objection stands.
@@ -885,6 +1012,31 @@ class ReviewPanel:
         )
         deliberation.decision = overridden
         return overridden
+
+    def _attach_ledger_positions(
+        self, deliberation: PanelDeliberation, decision: ReviewDecision
+    ) -> ReviewDecision:
+        """Hand the run's ledger what the room decided it owes and what it settled.
+
+        ``ReviewDecision`` is the only channel the manager reads: ``_settle_obligations``
+        takes ``carry_forward`` and ``discharged`` off it and nothing else. Whatever a seat
+        wrote is therefore invisible to the run until it is attached here, which is why this
+        sits on the one path every outcome passes through rather than inside the chair's arm.
+
+        Unconditional, including when the room settled nothing. The decision handed in was
+        parsed from a model's payload and already carries whatever ``carry_forward`` and
+        ``discharged`` that payload asked for; skipping the rewrite when the room's own lists
+        are empty is precisely the case where the two disagree, and it lets a claim the rules
+        just refused ride through unread. ``_enforce_blocking_objections`` does not cover it:
+        that rebuilds the decision only when the chair *approved*, so a chair that refuses
+        while claiming a discharge keeps its own list. Empty in means empty on, which is what
+        every rule in :meth:`PanelDeliberation.settled_obligations` is for.
+        """
+        return replace(
+            decision,
+            carry_forward=deliberation.carried_obligations(),
+            discharged=deliberation.settled_obligations(),
+        )
 
     def _decision_from_dissent(self, verdicts: list[PanelVerdict], *, reason: str) -> ReviewDecision:
         # A room nobody could reach did not agree; it did not meet. `objections` filters
@@ -1030,14 +1182,33 @@ class ReviewPanel:
             "says what it claims.\n"
             "- Mark `blocking` true only for a defect that must be fixed before this stage can "
             "be approved at all. A blocking objection cannot be overruled by the chair, so use "
-            "it for real defects and not for preferences.\n\n"
+            "it for real defects and not for preferences.\n"
+            "- Two sections under Run Context below carry what this run has already decided, "
+            "when it has decided anything: the standing rules earlier refusals produced, and "
+            "the obligations earlier approvals attached to this stage. Check the stage against "
+            "every one of them, not only against your own charter. An inherited obligation "
+            "this stage neither discharged nor reasonably deferred is grounds to refuse, and "
+            "any seat may refuse on one.\n\n"
             "## Return Format\n\n"
             "Return JSON only, with no prose outside the JSON object:\n"
             '{"decision":"approve|suggestion_1|suggestion_2|suggestion_3|custom_feedback|abort",'
-            '"blocking":false,"concerns":["..."],"feedback":"","reason":""}\n\n'
+            '"blocking":false,"concerns":["..."],"feedback":"","reason":"",'
+            '"carry_forward":[{"obligation":"","target_stage":""}],"discharged":[]}\n\n'
             "- `feedback` must be non-empty when `decision` is `custom_feedback`.\n"
             "- `concerns` is a short list of the specific things you checked and found wanting.\n"
             "- `reason` should be concise and specific to your seat.\n"
+            "- `carry_forward` is how your seat approves without letting go. When something "
+            "still needs doing but does not have to stop this stage, record it here instead of "
+            "mentioning it in `reason`: each entry is injected into the prompt of the stage it "
+            "targets and into that stage's review, so it will actually be checked. Your entries "
+            "are carried whatever the rest of the room decides. `target_stage` is a stage slug "
+            "or number and may be omitted to mean 'any later stage'. Use it for real debts, not "
+            "for wishes.\n"
+            "- `discharged` lists the ids of inherited obligations you believe this stage "
+            "genuinely met — on work present in this stage, never on a promise or a "
+            "restatement. Only the chair's list closes a debt; yours is recorded and put in "
+            "front of the chair, so one seat cannot write off an obligation the room did not "
+            "agree was paid.\n"
             f"{self._persona_block()}\n"
             "# Suggested Refinements Available To The Panel\n\n"
             f"1. {suggestions[0]}\n2. {suggestions[1]}\n3. {suggestions[2]}\n\n"
@@ -1068,6 +1239,13 @@ class ReviewPanel:
                     lines.extend(f"- Concern: {item}" for item in verdict.concerns)
                 if verdict.feedback:
                     lines.append(f"- Requested change: {verdict.feedback}")
+                # The seats' ledger positions, so the chair's own list is a decision over
+                # what the room proposed rather than a fresh guess. Carried debts are shown
+                # because the chair should not restate them; discharge claims are shown
+                # because the chair is the only seat that can act on one.
+                lines.extend(f"- Carries forward: {_obligation_line(entry)}" for entry in verdict.carry_forward)
+                if verdict.discharged:
+                    lines.append(f"- Claims discharged: {', '.join(verdict.discharged)}")
                 if verdict.failed:
                     lines.append("- (this member could not be reached)")
                 lines.append("")
@@ -1098,11 +1276,21 @@ class ReviewPanel:
             "instructions that would satisfy the members who raised them.\n"
             "- If a built-in suggestion already captures the panel's ask, select it instead.\n"
             "- Use `abort` only if continuing automatically would be irresponsible.\n"
+            "- The transcript names every debt a seat asked to carry forward and every "
+            "inherited obligation a seat claims was met. The debts are carried whatever you "
+            "decide; the discharges are yours alone, and a claim is a recommendation to you.\n"
             f"{blocking_note}\n"
             "## Return Format\n\n"
             "Return JSON only, with no prose outside the JSON object:\n"
             '{"decision":"approve|suggestion_1|suggestion_2|suggestion_3|custom_feedback|abort",'
-            '"feedback":"","reason":""}\n\n'
+            '"feedback":"","reason":"",'
+            '"carry_forward":[{"obligation":"","target_stage":""}],"discharged":[]}\n\n'
+            "- `carry_forward` records what a later stage still owes. The seats' entries are "
+            "already carried, so add what the room missed rather than restating them.\n"
+            "- `discharged` lists the ids of inherited obligations this stage genuinely met. "
+            "Yours is the only list that closes one. Discharge on work present in this stage "
+            "and on nothing else — and while a blocking objection stands, nothing is "
+            "discharged at all.\n\n"
             f"{self._persona_block()}\n"
             "# Panel Transcript\n\n"
             f"{transcript}\n"
@@ -1110,6 +1298,35 @@ class ReviewPanel:
             f"1. {suggestions[0]}\n2. {suggestions[1]}\n3. {suggestions[2]}\n\n"
             f"{self._context_block(paths=paths, stage=stage, attempt_no=attempt_no, stage_markdown=stage_markdown)}"
         )
+
+    def _standing_rules_block(self, paths: RunPaths, stage: StageSpec) -> str:
+        """The rules this run's earlier refusals produced, rendered for every seat.
+
+        Through ``format_policy_for_prompt``, the renderer the solo reviewer calls: a second
+        copy of that wording would be a second thing to keep in step, and the two prompts
+        have to be arguing from the same rules for the panel to be the *stricter* gate it is
+        sold as. The panel is also what writes these rules — a panel refusal reaches
+        ``record_correction`` by the same manager path a solo refusal does — so before this
+        block existed the gate was teaching itself lessons it could never read back.
+
+        ``stage`` is passed for the same reason
+        :meth:`AutomatedReviewer._standing_rules_block` passes it, and calling the same
+        renderer is not enough on its own: without the argument the room is shown the rules
+        *this* stage's own retries invented, the bar rises by one requirement per attempt
+        because every review that demands anything records one, and the retry loop cannot
+        converge. Under a panel that is five seats reading the moving bar instead of one.
+        """
+        rendered = format_policy_for_prompt(load_policy(paths), stage=stage)
+        if not rendered:
+            return ""
+        return "# Standing Review Rules (learned earlier in this run)\n\n" + rendered + "\n\n"
+
+    def _obligations_block(self, paths: RunPaths, stage: StageSpec) -> str:
+        """Ask this room whether the debts it inherited were actually paid."""
+        rendered = format_for_review_prompt(load_ledger(paths), stage)
+        if not rendered:
+            return ""
+        return "# Inherited Obligations\n\n" + rendered + "\n\n"
 
     def _context_block(
         self,
@@ -1137,7 +1354,12 @@ class ReviewPanel:
             f"- artifact index: `{paths.artifact_index.resolve()}`\n"
             f"- experiment manifest: `{paths.experiment_manifest.resolve()}`\n"
             f"- workspace root: `{paths.workspace_root.resolve()}`\n\n"
-            "# Original Goal\n\n"
+            # Shared by the seat prompt and the chair prompt on purpose. Injecting the two
+            # inherited blocks here is what makes "every seat sees them" structural rather
+            # than a thing two prompt builders each have to remember.
+            + self._standing_rules_block(paths, stage)
+            + self._obligations_block(paths, stage)
+            + "# Original Goal\n\n"
             # Same reader, same fix as the solo reviewer: a seat cannot judge whether a
             # stage did the task on half the task.
             f"{goal_excerpt(read_text(paths.user_input), max_chars=GOAL_EXCERPT_CHARS)}\n\n"
@@ -1181,6 +1403,8 @@ class ReviewPanel:
             (
                 f"rounds: {len(deliberation.rounds)}\n"
                 f"positions: {summary}\n"
+                f"obligations: {len(deliberation.carried_obligations())} carried forward, "
+                f"{len(deliberation.settled_obligations())} discharged\n"
                 f"chair_overridden: {deliberation.chair_overridden}\n"
                 f"final_choice: {deliberation.decision.choice if deliberation.decision else '?'}\n"
                 f"vs single pass: {effect['summary']['verdict']}"
@@ -1205,12 +1429,28 @@ class ReviewPanel:
                     lines.extend([f"- {item}" for item in verdict.concerns] + [""])
                 if verdict.feedback:
                     lines.extend(["Requested change:", "", verdict.feedback, ""])
+                if verdict.carry_forward:
+                    lines.extend(
+                        [f"- Carries forward: {_obligation_line(entry)}" for entry in verdict.carry_forward] + [""]
+                    )
+                if verdict.discharged:
+                    lines.extend([f"- Claims discharged: {', '.join(verdict.discharged)}", ""])
                 if verdict.failed:
                     lines.extend(["_This member could not be reached._", ""])
         decision = deliberation.decision
         lines.extend(["## Outcome", ""])
         if deliberation.chair_overridden:
             lines.extend([f"> Chair approval overridden: {deliberation.override_reason}", ""])
+        # Which claims the chair took and which it left. A seat's claim sits above in its own
+        # round; printing only the applied list would hide the difference between the two.
+        carried = deliberation.carried_obligations()
+        settled = deliberation.settled_obligations()
+        if carried:
+            lines.extend([f"- Carried forward: {_obligation_line(entry)}" for entry in carried])
+        if settled:
+            lines.append(f"- Obligations discharged: {', '.join(settled)}")
+        if carried or settled:
+            lines.append("")
         if decision is not None:
             lines.append(f"- Decision: `{decision.decision_token}` (choice {decision.choice})")
             if decision.reason:

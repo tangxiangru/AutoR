@@ -395,20 +395,28 @@ one point cannot inflate the ledger.
 
 Absent unless the run uses the **automated** approval gate — `record_obligations`
 and `discharge_obligations` are reached only from the automated reviewer's
-decision, so a manual human gate never writes this file. See
-[Limits](../README.md#limits): obligations are injected into the solo reviewer's
-prompt only — `_build_review_prompt` carries the ledger and the panel's
-`_build_member_prompt` does not — so a seated review panel never sees them,
-however it was seated.
+decision, so a manual human gate never writes this file.
+
+Both automated gates are shown the ledger, through one renderer:
+`AutomatedReviewer._build_review_prompt` calls `format_for_review_prompt` for the
+solo reviewer, and `ReviewPanel._context_block` calls the same function for every
+seat and for the chair. A panel also *writes* to this file — any seat's
+`carry_forward` entries are carried whatever the room decides — but only the
+chair's last word discharges anything, and nothing is discharged while a blocking
+objection stands. See [the panel's own doc](review-panel.md) for that asymmetry.
 
 ### `review_policy.json`
 
 The standing rules the run has learned about its own work. Written by
 [`src/review_policy.py`](../src/review_policy.py) whenever a correction is
 demanded or an already-given approval is undone, and injected into every
-subsequent *solo* review prompt. As with obligations, the injection point is
-`_build_review_prompt`; a review panel's seats and chair are prompted elsewhere
-and are not shown the rules.
+subsequent review prompt. As with obligations, one renderer serves both gates:
+`format_policy_for_prompt` is called by `AutomatedReviewer._standing_rules_block`
+for the solo reviewer and by `ReviewPanel._standing_rules_block` for every seat
+and the chair. Both pass `stage`, which withholds the rules the stage under
+review produced in its own earlier attempts — a review that demands anything
+records one, so injecting them would raise the bar by a requirement per attempt
+and the retry loop could not converge.
 
 ```json
 {
