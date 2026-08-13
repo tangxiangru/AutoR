@@ -38,7 +38,9 @@ The path is recorded in ``evolution/stage_graph.json`` — every visit, the move
 of it, whether the agent's choice matched what AutoR would have picked, and the
 rubric total at the time. :mod:`src.archive` reads those across runs to learn
 which edges actually pay, which is what lets the topology improve rather than just
-exist.
+exist. :func:`block_census` sums the same record the other way, per edge rather
+than per visit, so a finished run can say which moves it was ever offered and what
+shut the rest — the walk, and not only the path through it.
 """
 
 from __future__ import annotations
@@ -713,6 +715,29 @@ class Move:
     #: Taken because nothing else was available, with its guard still failing.
     last_resort: bool = False
 
+    def __post_init__(self) -> None:
+        # The same refusal `Edge` makes about its kind, for the same reason. The two
+        # fields are one fact written twice — `admissible` reads the sentence,
+        # `block_census` reads the kind — and a `Move` carrying one without the other
+        # makes them disagree: a move with a kind and no sentence is *admissible* and
+        # counted as blocked, a move with a sentence and no kind is refused and
+        # counted nowhere. Refused at construction, so the census's arithmetic is a
+        # property of the type rather than of how carefully each call site was
+        # written.
+        if bool(self.blocked_because) != bool(self.blocked_kind):
+            raise ValueError(
+                f"Move {self.edge.source}->{self.edge.target} was given "
+                f"blocked_because={self.blocked_because!r} and "
+                f"blocked_kind={self.blocked_kind!r}; a block needs both or neither."
+            )
+        if self.blocked_kind and self.blocked_kind not in BLOCK_KINDS:
+            raise ValueError(
+                f"Move {self.edge.source}->{self.edge.target} is blocked as "
+                f"{self.blocked_kind!r}, which is not one of {', '.join(BLOCK_KINDS)}. "
+                "A kind nothing declares would be counted under a heading no reader "
+                "can interpret."
+            )
+
     @property
     def replay_cost(self) -> int:
         """Stages this move discards and has to redo. 0 for a forward move."""
@@ -1045,6 +1070,144 @@ def leave(
     visit.bypassed = bypassed
     visit.refusal = refusal
     save_graph_state(paths, state)
+
+
+# ----------------------------------------------------------------------------
+# What the walk explored
+# ----------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class BlockCensus:
+    """Per edge, what this walk was offered and what shut the rest.
+
+    The route says which edges the run *took*. It cannot say which were on the menu
+    and passed over, nor which were unavailable and why — and for a run whose claim
+    is that it explored a graph rather than continued a list, those are the two
+    halves that make the claim checkable. Each visit records both
+    (:attr:`Visit.offered`, :attr:`Visit.blocked`); this is the sum over the walk.
+
+    Counted per edge, ``source->target``, for the same reason the archive counts
+    traversals that way: the same target reached from two nodes is two different
+    moves. One node can hold two edges to one target — measured with
+    ``--final-stage 06``, where the pruned advance out of Stage 06 is replaced by a
+    live ``finish`` while the abandonment terminal at the same node stays
+    guard-blocked — so an edge key may appear in both :attr:`offered` and
+    :attr:`blocked` for a single visit. Recorded as it happened rather than
+    reconciled: the node did offer a finish and did have one shut.
+    """
+
+    #: Visits the census read. The denominator for everything else here.
+    visits: int
+    #: ``source->target`` -> visits at which that edge was live.
+    offered: dict[str, int]
+    #: ``source->target`` -> block kind -> visits at which it was shut for that
+    #: reason. The kinds are :data:`BLOCK_KINDS` and nothing else: :class:`Move`
+    #: refuses an undeclared one at construction, so this vocabulary is closed
+    #: rather than merely intended.
+    blocked: dict[str, dict[str, int]]
+    #: Visits that recorded no choice set at all — an operator's jump, a visit the
+    #: run was interrupted in before it left, or a ``stage_graph.json`` written
+    #: before the fields existed. Not a visit at which nothing was blocked: nothing
+    #: was *evaluated*. Carried as a number because a census that quietly drops the
+    #: visits it could not read describes a graph that offered less than it did.
+    unobserved: int
+    #: Visits an operator's move carried out of, from :attr:`Visit.bypassed`.
+    #: Usually also ``unobserved`` — a jump arrives with the move already made and
+    #: no guard evaluated — but not always: a resume starting somewhere other than
+    #: where the last visit was heading flags a visit the router had already closed
+    #: with a full choice set. Two counters rather than one, so that visit's offers
+    #: are not read as an operator's, and the jumps are not read as offers nobody
+    #: took.
+    bypassed: int
+
+    @property
+    def kinds(self) -> dict[str, int]:
+        """Blocks per kind over the whole walk.
+
+        Derived from :attr:`blocked` rather than tallied beside it. Two counts of
+        one thing drift, and "how often did a budget stop this run" has to be the
+        same number as the sum of the budget column under it.
+        """
+        totals: dict[str, int] = {}
+        for per_kind in self.blocked.values():
+            for kind, count in per_kind.items():
+                totals[kind] = totals.get(kind, 0) + count
+        return dict(sorted(totals.items()))
+
+    @property
+    def blocks(self) -> int:
+        """Every block recorded over the walk."""
+        return sum(self.kinds.values())
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "visits": self.visits,
+            "offered": dict(self.offered),
+            "blocked": {edge: dict(counts) for edge, counts in self.blocked.items()},
+            "kinds": self.kinds,
+            "unobserved": self.unobserved,
+            "bypassed": self.bypassed,
+        }
+
+
+def block_census(visits: Sequence[Visit]) -> BlockCensus:
+    """What the graph offered over ``visits``, and what blocked the rest.
+
+    Reads the record the walk wrote; it cannot be recomputed afterwards. A guard
+    evaluates the workspace as it was at the moment of choosing, and by the time
+    the run is over the stages that followed have changed it — which is why
+    :class:`Visit` carries the choice set at all, and why summarising a run without
+    it threw away the only copy.
+
+    A visit with no recorded choice set contributes nothing to either mapping. That
+    is the distinction an operator's move needs: a bypass had no menu, and reading
+    it as a node where every edge was shut would put an intervention into the
+    census as evidence about the graph.
+    """
+    offered: dict[str, int] = {}
+    blocked: dict[str, dict[str, int]] = {}
+    unobserved = 0
+    bypassed = 0
+    for visit in visits:
+        if visit.bypassed:
+            bypassed += 1
+        # No node to attribute an offer to, or nothing recorded to attribute.
+        if not visit.stage or (not visit.offered and not visit.blocked):
+            unobserved += 1
+            continue
+        for target in visit.offered:
+            key = f"{visit.stage}->{target}"
+            offered[key] = offered.get(key, 0) + 1
+        for target, kind in visit.blocked.items():
+            per_kind = blocked.setdefault(f"{visit.stage}->{target}", {})
+            per_kind[kind] = per_kind.get(kind, 0) + 1
+    return BlockCensus(
+        visits=len(visits),
+        offered=dict(sorted(offered.items())),
+        blocked={key: dict(sorted(counts.items())) for key, counts in sorted(blocked.items())},
+        unobserved=unobserved,
+        bypassed=bypassed,
+    )
+
+
+def format_block_census(census: BlockCensus) -> str:
+    """The census as a human reads it: what was on the menu, and what was shut."""
+    if not census.offered and not census.blocked:
+        return f"No choice set was recorded over {census.visits} visit(s)."
+    kinds = census.kinds
+    tally = ", ".join(f"{kind} {count}" for kind, count in kinds.items())
+    lines = [
+        f"{len(census.offered)} edge(s) offered over {census.visits} visit(s); "
+        f"{census.blocks} block(s) on {len(census.blocked)} edge(s)"
+        + (f" ({tally})" if tally else "")
+        + f"; {census.unobserved} visit(s) with no choice set, {census.bypassed} bypassed."
+    ]
+    for key in sorted(set(census.offered) | set(census.blocked)):
+        detail = [f"offered {census.offered[key]}"] if key in census.offered else []
+        detail += [f"{kind} {count}" for kind, count in census.blocked.get(key, {}).items()]
+        lines.append(f"  {key:<48} " + ", ".join(detail))
+    return "\n".join(lines)
 
 
 def format_route(state: GraphState) -> str:

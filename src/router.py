@@ -38,7 +38,7 @@ from typing import Any
 
 from .approval_agent import extract_json_payload
 from .rubric import StageScore, format_score_for_prompt
-from .stage_graph import FINISH, GraphState, Move, StageGraph
+from .stage_graph import FINISH, GraphState, Move, StageGraph, block_census
 from .utils import (
     RunPaths,
     StageSpec,
@@ -579,10 +579,20 @@ def routing_summary(paths: RunPaths) -> dict[str, Any]:
 
     They are counted, not silently dropped. A summary that quietly discards moves
     reports a route shorter than the one the run walked.
+
+    **`census` is the other half of the walk.** `edges` and `decisions` are about
+    moves the run *made*; every visit also records which edges were live and which
+    were shut and by what (:attr:`src.stage_graph.Visit.blocked`), and this function
+    read neither. So a finished run could say where it went and could not say what
+    it was ever offered — the exploration happened and left no record of its own
+    shape. :func:`src.stage_graph.block_census` sums it per edge. A bypassed visit
+    contributes no offer and no block, for the same reason it contributes no edge:
+    nothing was evaluated.
     """
     payload = _load_json(paths.evolution_dir / "stage_graph.json")
     if not isinstance(payload, dict):
         return {}
+    census = block_census(GraphState.from_dict(payload).path)
     edges: dict[str, int] = {}
     # The same walk, kept per decision rather than summed per edge. `edges` cannot
     # distinguish "declined" from "never offered", and those are different
@@ -633,6 +643,7 @@ def routing_summary(paths: RunPaths) -> dict[str, Any]:
     return {
         "edges": edges,
         "decisions": decisions,
+        "census": census.to_dict(),
         "steps": len(payload.get("path", [])),
         "agent_directed": agent_directed,
         "revisits": revisits,

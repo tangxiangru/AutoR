@@ -115,7 +115,9 @@ from .stage_graph import (
     FINISH as GRAPH_FINISH,
     GraphState,
     StageGraph,
+    block_census,
     enter as graph_enter,
+    format_block_census,
     format_route,
     leave as graph_leave,
     load_graph_state,
@@ -647,6 +649,7 @@ class ResearchManager:
 
     def _complete_run(self, paths: RunPaths, state: "GraphState | None" = None) -> bool:
         route = format_route(state) if state is not None else ""
+        self._record_block_census(paths, state)
 
         # Written on every way out, not only the clean one: a halted or abandoned run
         # still publishes the stage files whose validity reviews never ran, and "no
@@ -738,6 +741,37 @@ class ResearchManager:
             "All stages approved. Run complete." + (f"\n{disclosure}" if disclosure else "")
         )
         return True
+
+    def _record_block_census(self, paths: RunPaths, state: "GraphState | None") -> None:
+        """Write down which edges this walk was offered and what shut the rest.
+
+        The route already says where the run went. What it never said is what else
+        was on the menu, and what was closed and by which kind of block — the guards
+        that did the closing are evaluated against a workspace the later stages have
+        since overwritten, so the walk's own record is the only copy. `Visit` kept
+        it and every reader after the run dropped it, which left a graph-structured
+        run reporting exactly what a linear one would: the path, and nothing about
+        the graph.
+
+        Written at the top of `_complete_run`, so it covers all three ways a walk
+        ends there — completed, halted, abandoned — rather than only the one that
+        reaches the bottom. A run stopped by a budget is the case where "what was
+        still open" is worth the most, and it is the branch that returns first.
+
+        Nothing when no walk ran. A resume with nothing to resume must not report
+        the previous walk's census as this invocation's.
+        """
+        if state is None or not state.path:
+            return
+        census = block_census(state.path)
+        append_log_entry(paths.logs, "route_census", format_block_census(census))
+        if census.blocks and self.stage_graph.name != "linear":
+            tally = ", ".join(f"{kind} {count}" for kind, count in census.kinds.items())
+            self.ui.show_status(
+                f"Graph census: {len(census.offered)} edge(s) offered, "
+                f"{census.blocks} block(s) ({tally}).",
+                level="info",
+            )
 
     def _graph_entry_stage(self, paths: RunPaths, start_stage: StageSpec | None) -> StageSpec | None:
         """Where the walk starts: the requested stage, or the first unsettled one.
