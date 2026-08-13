@@ -166,6 +166,20 @@ def _guard_validity_chain(paths: RunPaths, state: "GraphState") -> GuardResult:
     if not hypotheses:
         return GuardResult(False, "the hypotheses were never frozen; there is nothing to write up against")
 
+    # The population this guard checks adjudication against is read out of a
+    # file the stage under test writes. Dropping a hypothesis from it shrinks
+    # `expected` and opens the edge, so the edge is closed while the frozen set
+    # disagrees with AutoR's own copy of it, before the ids are counted at all.
+    from .preregistration import preregistration_tamper_findings
+
+    tampered = preregistration_tamper_findings(paths)
+    if tampered:
+        return GuardResult(
+            False,
+            "the frozen preregistration no longer matches the record AutoR stamped outside "
+            "the workspace: " + " ".join(tampered),
+        )
+
     expected = {
         str(item.get("id") or "").strip()
         for item in hypotheses

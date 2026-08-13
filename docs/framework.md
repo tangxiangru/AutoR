@@ -132,6 +132,21 @@ will carry and which claim each supports, and it is stamped into
 `runs/<id>/report_plan_stamp.json` — deliberately **outside** `workspace/`, so the agent cannot
 backdate its own declaration.
 
+A commitment is only frozen if it can be checked against something the stage under test did not
+write, and `preregistration.json` fails that on its own: it sits in `workspace/notes/` and
+`format_preregistration_for_prompt` renders its `digest` into the prompt. So the frozen record is
+stamped to `runs/<id>/preregistration_stamp.json` as well, and `preregistration_tamper_findings`
+compares three things — the hypotheses against the digest the file states for them, that digest
+against the stamped one, and the length of the amendment ledger. `freeze_preregistration` runs
+before every attempt from Stage 05 on and is the repair: a workspace copy that disagrees, or that is
+gone, is written over from the stamp, with what disagreed appended to the stamp's `repairs` list.
+That is also what closed the *reset*, which was the wider hole of the two. The freeze used to be
+re-derived from the current manifest whenever the file was absent, so deleting it and rewriting
+Stage 02 produced a clean, unamended preregistration for a different hypothesis set, dated after the
+results — with no residue outside a log line no validator reads. A re-freeze now restores rather
+than re-derives, and the manifest rewrite is left where it belongs, as a change with no amendment on
+record.
+
 *Cost:* a run that discovers something better at Stage 06 has to file an amendment rather than just
 change the plan.
 *Why anyway:* this is the only structural defence against the post-hoc hypothesis, and an amendment
@@ -305,7 +320,9 @@ The chain that runs unconditionally at every rigor level, `fast` included:
 | Stage 02 | Markdown is parsed into typed `T*`/`H*`/`C*` entries with `decision_rule` | `write_hypothesis_manifest` |
 | Stage 04 approval | The hypothesis set is copied, hashed and frozen; never overwritten | `freeze_preregistration` |
 | Stage 02 re-run | The freeze is re-derived and an amendment row records `previous_digest` | `amend_preregistration` |
-| Stage 05+ | A prereg exists, has an empirical hypothesis, every one has a decision rule, the manifest has not silently changed | `validate_preregistration` |
+| Stage 05+ | A prereg exists, has an empirical hypothesis, every one has a decision rule, the manifest has not silently changed or vanished | `validate_preregistration` |
+| Stage 05+ | The frozen file hashes to the digest it states, that digest is the stamped one, and the amendment ledger is the length AutoR recorded | `preregistration_tamper_findings` |
+| Every attempt from 05 | A frozen file that disagrees with the stamp, or is missing, is written back from AutoR's copy rather than re-derived | `freeze_preregistration` |
 | Stage 05+ | A protocol declares a primary metric, planned seeds, and per-baseline `why_competent` + `tuning_budget` | `validate_experimental_protocol` |
 | Stage 06+ | Exactly one verdict per frozen hypothesis, nothing unpreregistered adjudicated, every `supported`/`refuted` verdict citing an evidence file that exists | `validate_hypothesis_outcomes` |
 | Stage 06+ | A verdict carries `n_seeds`, a `dispersion_type` from a fixed vocabulary, and a written justification if a single seed settled it | `validate_outcome_statistics` |
@@ -442,7 +459,9 @@ echoed into the outcomes file at Stage 06, and `validate_hypothesis_outcomes` re
 adjudicates something not in the frozen set, omits something that is, or cites an evidence path that
 does not resolve. Changing the set later is legal, but only as an `amendment` row carrying
 `previous_digest`, so a dropped hypothesis leaves a trace on the path the run is meant to take.
-It is not tamper-proof, and §7 says how far short it falls.
+The frozen record is also stamped outside `workspace/`, so the three comparisons in
+`preregistration_tamper_findings` are against a copy the stage being checked did not write; §7 says
+how far short of tamper-proof that still falls.
 
 The distinctive part is not the freeze — it is the **chain**: freeze at 04, adjudicate at 06 against
 a file that exists, trace every manuscript claim at 07 to a `supported` hypothesis or an explicit
@@ -521,8 +540,11 @@ Agentic workflow graphs are common. Two things here are not:
 
 **The guards are evaluated against artifacts on disk, not against agent state.** `results_exist` is
 a directory listing; `validity_chain` is a parse of `preregistration.json` and
-`hypothesis_outcomes.json`. Which move is legal is therefore a property of what the run has actually
-produced, and it survives a resume, a crash, a manual edit and a different model.
+`hypothesis_outcomes.json`, plus a comparison of the first against the copy AutoR stamped outside
+`workspace/` — the population it counts verdicts over is read out of a file the stage under test can
+write, so dropping a hypothesis from it would otherwise shrink the requirement and open the edge.
+Which move is legal is therefore a property of what the run has actually produced, and it survives a
+resume, a crash, a manual edit and a different model.
 
 **A blocked move is handed to the agent with its blocking reason.** The useful thing to say is not
 "you may go to 06" but "07 is closed because H2 has no verdict" — an agent that sees *why* writing is
@@ -559,7 +581,8 @@ What survives is not the graph. It is what the predicates are *about*:
 > Existing workflow graphs put **data-dependency and freshness** predicates on their edges: does
 > file X exist, is it newer than Y. Existing agent state machines put **heuristics or LLM judgement**
 > on theirs. AutoR puts **scientific-validity** predicates there — a frozen preregistration whose
-> digest matches its source, exactly one verdict per preregistered hypothesis, every verdict citing
+> digest matches its source, its own contents and the copy kept outside the agent's workspace,
+> exactly one verdict per preregistered hypothesis, every verdict citing
 > an evidence path that resolves to a file, every manuscript claim traced to a supported hypothesis
 > or labelled exploratory. The contribution is the predicate vocabulary and the fact that it is
 > evaluated from the filesystem rather than from the transcript — not the existence of the graph.
@@ -959,14 +982,6 @@ any.
   benchmark score. It is not enough to quantify the relationship, and it does not establish that the
   rubric is measuring nothing: rigour and rubric-coverage are different objectives, and §2.4 chose
   the first deliberately. What it does establish is that the second is not a corollary of the first.
-- **The freeze can be reset, not just edited.** `_build_stage_prompt` calls
-  `_freeze_preregistration` unconditionally for every stage from 05 on, and `freeze_preregistration`
-  writes a fresh freeze from the current manifest whenever `preregistration.json` is absent — with
-  `amendments: []`. `_amend_preregistration` early-returns when the file is gone, so no amendment is
-  ever considered. Both files live under the agent's own `workspace/notes/`, so deleting the freeze
-  and rewriting the manifest yields a clean, unamended preregistration for a different hypothesis
-  set, and every downstream validator passes. The only residue is a second `preregistration frozen`
-  line in a log no validator reads.
 - **A rejected polish round is not undone, only refused.** `_revert` restores the champion stage
   summary and nothing else, so a round that rewrote `hypothesis_outcomes.json` and was rejected for
   `verdict_drift` leaves the new verdicts on disk, disagreeing with the summary that was promoted.
@@ -978,10 +993,13 @@ any.
   agent's menu, but `default_move` takes a guard-blocked advance as a last resort. The refusal that
   actually stops an unadjudicated Stage 07 is `validate_stage_artifacts`. This is deliberate — see
   §5.4 — but it means "the graph will not let you write up" is the wrong mental model.
-- **The frozen preregistration is not checked against itself.** `validate_preregistration` compares
-  the *manifest's* digest to the recorded `source_digest`; it never recomputes the digest of the
-  frozen file. Editing `preregistration.json` in place passes. The honest claim is that a manifest
-  rewrite is detected.
+- **The preregistration stamp raises the cost of a rewrite rather than preventing one.**
+  `preregistration_stamp_path` is under the run root, which is also where the operator is invoked, so
+  the store is outside the tree every stage prompt names rather than outside the tree the process can
+  reach. What it buys is that the frozen set and AutoR's copy of it have to be rewritten together and
+  consistently, in two trees, one of which no template mentions and nothing renders into a prompt. A
+  run resumed from an AutoR that predates the stamp is adopted on its next freeze rather than
+  refused, and until then two of the three comparisons have nothing to compare against.
 - **Standing rules and obligations never reach a panel seat.** Both are injected only into the solo
   reviewer's prompt, so `--review-panel` silently loses two of the accumulation mechanisms.
 - **The cross-model veto is unreachable from `main.py`.** It is wired on the `rcb_agent.py` path
