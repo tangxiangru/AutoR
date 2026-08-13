@@ -165,8 +165,57 @@ class ValidityReviewOutcome:
         return is_degraded_completion(self.completion)
 
 
-def load_findings(paths: RunPaths, stage_slug: str) -> list[ValidityFinding]:
-    payload = _load_json(validity_review_path(paths, stage_slug))
+# ----------------------------------------------------------------------------
+# AutoR's own copy of what the pass raised
+# ----------------------------------------------------------------------------
+
+
+def validity_review_stamp_path(paths: RunPaths):
+    """What each adversarial pass raised, outside the tree the answering stage works in.
+
+    ``report_plan_stamp.json`` and ``preregistration_stamp.json`` are the precedent, and
+    the reason is the one #202 wrote down one artifact short of acting on:
+    ``workspace/reviews/`` is writable by the stage the next gate constrains, so the file
+    naming the objections a stage owes an answer to was handed to the stage that owes
+    them. #202 moved the *completion* into the harness for exactly that reason and left
+    the findings behind.
+
+    Measured on a run from ``build_run_paths`` plus one :meth:`ValidityReviewer._write_review`
+    carrying a single critical finding, ``validate_validity_response`` at Stage 06 went
+    from one problem to zero when the workspace copy was deleted, and to zero again when
+    its ``findings`` list was emptied in place — the objection and the obligation to
+    answer it disappearing together, with the run's own artifacts then saying no reviewer
+    had raised anything.
+
+    The claim is not that this store cannot be reached. Everything under ``run_root`` is
+    writable by the party the gate constrains, which ``docs/framework.md`` already states
+    for the other two stamps and which holds here unchanged. What it buys is that the
+    population the gate counts is AutoR's, that erasing an objection is no longer one
+    ``rm`` inside the directory every stage prompt names, and that the erasure is refused
+    and repaired rather than absorbed.
+    """
+    return paths.run_root / "validity_review_stamp.json"
+
+
+#: Heading of the run-log line the manager writes when it puts its copy back.
+#:
+#: The repair is what destroys the evidence it was needed — once the stamped findings are
+#: written over the workspace copy the two agree again — so the disagreement goes to
+#: ``logs.txt``, which is append-only and written by the manager, before the copy is
+#: restored. Same third-witness argument as :data:`src.preregistration.FREEZE_WITNESS_HEADING`,
+#: and with the same boundary: a tamper that also truncates the log still gets through.
+RESTORE_WITNESS_HEADING = "validity_review_restored"
+
+#: What clears the refusal. Deliberately does not say "rewrite the file": asking the stage
+#: that erased the objections to reconstruct them is asking the examinee to reprint the
+#: exam paper, and a refusal naming a step the run should not take is worse than none.
+VALIDITY_REVIEW_RECOVERY = (
+    "Leave the workspace copy alone and answer the findings as AutoR stamped them — the "
+    "next attempt's prompt writes the record back and lists them again."
+)
+
+
+def _findings_from_payload(payload: object) -> list[ValidityFinding]:
     if not isinstance(payload, dict):
         return []
     findings: list[ValidityFinding] = []
@@ -186,6 +235,134 @@ def load_findings(paths: RunPaths, stage_slug: str) -> list[ValidityFinding]:
     return findings
 
 
+def _stamped_reviews(paths: RunPaths) -> dict:
+    payload = _load_json(validity_review_stamp_path(paths))
+    reviews = payload.get("reviews") if isinstance(payload, dict) else None
+    return reviews if isinstance(reviews, dict) else {}
+
+
+def stamped_review(paths: RunPaths, stage_slug: str) -> dict | None:
+    """AutoR's record of the pass over ``stage_slug``, or None if it never stamped one.
+
+    None is the pre-stamp state and the only one in which the workspace copy is worth
+    anything: a run resumed from an AutoR that predates this, or a stage no reviewer has
+    reached yet. It is not a pass — :func:`validity_review_tamper` is silent there
+    because it has nothing to compare against, not because the file was checked.
+    """
+    entry = _stamped_reviews(paths).get(stage_slug)
+    return entry if isinstance(entry, dict) else None
+
+
+def _write_stamp(paths: RunPaths, stage_slug: str, entry: dict) -> None:
+    path = validity_review_stamp_path(paths)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    reviews = dict(_stamped_reviews(paths))
+    reviews[stage_slug] = entry
+    path.write_text(
+        json.dumps({"stamped_at": _now(), "reviews": reviews}, indent=2, ensure_ascii=False)
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def load_findings(paths: RunPaths, stage_slug: str) -> list[ValidityFinding]:
+    """The findings the run owes an answer to, from AutoR's copy where there is one.
+
+    Every reader goes through here — the gate, the prompt that lists the objections, and
+    fake mode's answerer — so the stamp being authoritative here is what makes deleting
+    the workspace copy buy nothing anywhere rather than nothing in one place.
+    """
+    stamped = stamped_review(paths, stage_slug)
+    if stamped is not None:
+        return _findings_from_payload(stamped)
+    return _findings_from_payload(_load_json(validity_review_path(paths, stage_slug)))
+
+
+def validity_review_tamper(paths: RunPaths, stage_slug: str) -> str:
+    """How the workspace copy disagrees with the stamp, in one sentence. "" when it does not.
+
+    Compares the finding records rather than the bytes. A byte comparison would never
+    converge — the restored file carries a fresh ``generated_at`` — and #206 found the
+    shape that failure takes: a repair applied on every attempt, appending an identical
+    row to the record without bound while nothing gets better.
+    """
+    stamped = stamped_review(paths, stage_slug)
+    if stamped is None:
+        return ""
+
+    expected = [item.to_dict() for item in _findings_from_payload(stamped)]
+    path = validity_review_path(paths, stage_slug)
+    payload = _load_json(path)
+    if not isinstance(payload, dict):
+        return (
+            f"workspace/reviews/{path.name} is gone or unreadable, and AutoR's stamped copy "
+            f"records {len(expected)} finding(s) raised against {stage_slug}"
+        )
+
+    present = [item.to_dict() for item in _findings_from_payload(payload)]
+    if present == expected:
+        return ""
+    dropped = [item["id"] for item in expected if item not in present]
+    return (
+        f"workspace/reviews/{path.name} holds {len(present)} finding(s) where AutoR stamped "
+        f"{len(expected)}"
+        + (f", dropping {', '.join(dropped)}" if dropped else ", rewritten in place")
+    )
+
+
+def restore_validity_review(paths: RunPaths, stage_slug: str) -> str:
+    """Write AutoR's record back over a workspace copy that disagrees. "" when clean.
+
+    Returns the disagreement so the caller can put it in the run log *before* the copy is
+    restored, because after the restore there is nothing left on disk to show it happened.
+    """
+    disagreement = validity_review_tamper(paths, stage_slug)
+    if not disagreement:
+        return ""
+    stamped = stamped_review(paths, stage_slug) or {}
+    _write_review_file(
+        paths,
+        stage_slug,
+        _findings_from_payload(stamped),
+        note=str(stamped.get("note") or ""),
+        completion=str(stamped.get("completion") or COMPLETED),
+    )
+    return disagreement
+
+
+def _write_review_file(
+    paths: RunPaths,
+    stage_slug: str,
+    findings: list[ValidityFinding],
+    *,
+    note: str,
+    completion: str,
+) -> None:
+    """The workspace artifact, from whichever party is writing it.
+
+    Shared by the reviewer and the repair so a restored file is the same shape as an
+    original one; if they diverged, :func:`validity_review_tamper` would report a tamper
+    against AutoR's own repair forever.
+    """
+    payload = {
+        "generated_at": _now(),
+        "reviewed_stage": stage_slug,
+        # Derived rather than stored beside the completion, and deliberately the
+        # only shape of it that reaches disk. Nothing decides on this copy: the
+        # completion is the manager's record (#202) and the findings are the stamp's,
+        # both for the same reason — `workspace/reviews/` is writable by the very stage
+        # the next gate constrains. What is written here is the artifact field
+        # docs/run-artifacts.md already documents, unchanged.
+        "reviewer_failed": is_degraded_completion(completion),
+        "note": note,
+        "findings": [item.to_dict() for item in findings],
+    }
+    write_text(
+        validity_review_path(paths, stage_slug),
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+    )
+
+
 def validate_validity_response(paths: RunPaths, stage: StageSpec) -> list[str]:
     """Every finding from the previous stage's review must be answered.
 
@@ -198,25 +375,41 @@ def validate_validity_response(paths: RunPaths, stage: StageSpec) -> list[str]:
     if reviewed is None:
         return []
 
+    problems: list[str] = []
+    # Refused here rather than only in the manager, which is where #202 put the
+    # *completion* and for a reason that does not carry: a Stage 06 agent cannot re-run
+    # Stage 05's reviewer, so a backend failure refused here would spend the whole
+    # attempt budget on a repair the stage cannot make. This is the opposite case. The
+    # disagreement is the answering stage's own edit, and the repair is AutoR's — the
+    # next attempt's prompt build writes the record back — so the refusal costs one
+    # attempt and clears itself, instead of clearing silently.
+    disagreement = validity_review_tamper(paths, reviewed)
+    if disagreement:
+        problems.append(
+            f"cannot be judged against the adversarial review of {reviewed}: "
+            f"{disagreement}. {VALIDITY_REVIEW_RECOVERY}"
+        )
+
     findings = load_findings(paths, reviewed)
     if not findings:
-        # No review ran, or it found nothing. Either way there is nothing owed.
-        return []
+        # No review ran, or it found nothing. Either way there is nothing owed —
+        # except an explanation for a record that disagrees with AutoR's own.
+        return problems
 
     response_path = validity_response_path(paths, reviewed)
     payload = _load_json(response_path)
     if payload is None:
-        return [
+        return problems + [
             f"requires {response_path.name} under workspace/reviews answering each of the "
             f"{len(findings)} validity findings raised against {reviewed}. A finding nobody "
             "responded to is indistinguishable from one nobody raised."
         ]
     if not isinstance(payload, dict):
-        return [f"{response_path.name} must contain a JSON object."]
+        return problems + [f"{response_path.name} must contain a JSON object."]
 
     responses = payload.get("responses")
     if not isinstance(responses, list):
-        return [f"{response_path.name} must contain a responses list."]
+        return problems + [f"{response_path.name} must contain a responses list."]
 
     by_id: dict[str, dict] = {}
     for entry in responses:
@@ -225,7 +418,6 @@ def validate_validity_response(paths: RunPaths, stage: StageSpec) -> list[str]:
             if identifier:
                 by_id[identifier] = entry
 
-    problems: list[str] = []
     for finding in findings:
         entry = by_id.get(finding.identifier)
         if entry is None:
@@ -489,21 +681,22 @@ class ValidityReviewer:
         note: str = "",
         completion: str = COMPLETED,
     ) -> None:
-        payload = {
-            "generated_at": _now(),
-            "reviewed_stage": stage.slug,
-            # Derived rather than stored beside the completion, and deliberately the
-            # only shape of it that reaches disk. The authoritative record is the
-            # manager's, because `workspace/reviews/` is writable by the very stage the
-            # next gate constrains; what is written here is the artifact field
-            # docs/run-artifacts.md already documents, unchanged.
-            "reviewer_failed": is_degraded_completion(completion),
-            "note": note,
-            "findings": [item.to_dict() for item in findings],
-        }
-        write_text(
-            validity_review_path(paths, stage.slug),
-            json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+        # Both copies, always, in that order: the stamp is the population the next
+        # stage's gate counts against, so a pass that reached the workspace and not the
+        # run root would be a review nothing can hold anybody to.
+        _write_stamp(
+            paths,
+            stage.slug,
+            {
+                "stamped_at": _now(),
+                "reviewed_stage": stage.slug,
+                "completion": completion,
+                "note": note,
+                "findings": [item.to_dict() for item in findings],
+            },
+        )
+        _write_review_file(
+            paths, stage.slug, findings, note=note, completion=completion
         )
 
     def _parse(self, raw: str) -> list[ValidityFinding]:

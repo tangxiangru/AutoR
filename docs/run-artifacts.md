@@ -27,6 +27,8 @@ runs/<run_id>/
 ├── obligations.json            # what a reviewer said a later stage still owes (agent gate only)
 ├── review_policy.json          # standing rules learned from this run's refusals and rollbacks
 ├── report_plan_stamp.json      # AutoR's copy of the report plan's date and digest
+├── preregistration_stamp.json  # AutoR's copy of the frozen hypothesis set
+├── validity_review_stamp.json  # AutoR's copy of what each adversarial pass raised
 ├── logs.txt                    # human-readable workflow log
 ├── logs_raw.jsonl              # raw backend stream-json events
 ├── prompt_cache/               # the exact prompt sent for every attempt
@@ -55,9 +57,10 @@ The directory shape is created by `ensure_run_layout` and the paths are
 defined once, in `build_run_paths` ([`src/utils.py`](../src/utils.py)). If you
 need a path in code, take it from `RunPaths` rather than joining strings.
 
-Four files sit at the run root rather than under `workspace/` on purpose:
-`obligations.json`, `review_policy.json` and `report_plan_stamp.json` are
-records *about* the run rather than part of its answer, and every stage prompt
+Five files sit at the run root rather than under `workspace/` on purpose:
+`obligations.json`, `review_policy.json`, `report_plan_stamp.json`,
+`preregistration_stamp.json` and `validity_review_stamp.json` are records
+*about* the run rather than part of its answer, and every stage prompt
 directs the agent at `workspace/` paths. Same reason `evolution/` is out here —
 and, like `evolution/`, it also keeps them out of a benchmark export that
 packages the workspace.
@@ -1137,6 +1140,18 @@ Dismissing an objection is legitimate and deliberately cheap — `rebutted` with
 an argument is a complete answer, and so is `accepted_limitation`. There is no
 `noted`. What is refused is silence, because a finding nobody responded to is
 indistinguishable in the run directory from one nobody raised.
+
+**The findings the gate counts are AutoR's, not this file's.** The same pass is
+stamped to `runs/<id>/validity_review_stamp.json`, outside `workspace/`, for the
+reason `report_plan_stamp.json` and `preregistration_stamp.json` are: this file
+sits in a directory the answering stage can write, so the record of what it owes
+an answer to was in the hands of the party that owes it. `load_findings` reads
+the stamp wherever there is one, and `validate_validity_response` refuses a
+workspace copy that disagrees with it; the next attempt's prompt writes AutoR's
+record back and logs what disagreed first, because the repair is what destroys
+the evidence it was needed for. The boundary is the same one the other two
+stamps have — everything under the run root is writable by the party the gate
+constrains, so this narrows the escape rather than closing it.
 
 `category` is one of ten named failure modes — `confound`, `weak_baseline`,
 `insufficient_replication`, `leakage`, `metric_cherry_picking`,

@@ -55,9 +55,12 @@ from .hypothesis_manifest import write_hypothesis_manifest
 from .information_flow import CHANNELS, ChannelContext, render_inbound
 from .prompt_fragments import compose_stage_template
 from .validity_review import (
+    RESTORE_WITNESS_HEADING,
     ValidityReviewer,
     ValidityReviewOutcome,
     format_findings_for_prompt,
+    restore_validity_review,
+    reviewed_stage_for,
 )
 from .research_rounds import (
     ROUND_CLOSING_STAGE_NUMBER,
@@ -2685,6 +2688,12 @@ class ResearchManager:
                 ),
             )
 
+        # Third of the same shape: the objections this stage owes an answer to live in
+        # `workspace/reviews/`, which the stage itself can write. The gate counts them
+        # from the stamp, so an edit buys nothing; this is what stops the *record* from
+        # staying wrong, and it runs before the attempt that will be judged against it.
+        self._restore_validity_review(paths, stage)
+
         # No hypotheses at all is a different problem from unfrozen ones, and
         # the stage that first needs them is the one that has to fix it.
         if stage.number >= 3 and not paths.hypothesis_manifest.exists():
@@ -3848,6 +3857,34 @@ class ResearchManager:
         return (
             f"Adversarial validity review did not complete for {named}. Those stages carry no "
             "findings because none were produced, not because none were found."
+        )
+
+    def _restore_validity_review(self, paths: RunPaths, stage: StageSpec) -> None:
+        """Put AutoR's copy of the adversarial findings back, and say it had to.
+
+        The log line goes in first. The repair is what destroys the evidence it was
+        needed for: once the stamped findings are written over the workspace copy the
+        two agree again, and the run's own artifacts would then say the objections were
+        never touched.
+        """
+        reviewed = reviewed_stage_for(stage)
+        if reviewed is None:
+            return
+        disagreement = restore_validity_review(paths, reviewed)
+        if not disagreement:
+            return
+        append_log_entry(
+            paths.logs,
+            RESTORE_WITNESS_HEADING,
+            (
+                f"Preparing {stage.slug}: {disagreement}. AutoR wrote its stamped record "
+                "back; the findings the gate counts were never the workspace copy's."
+            ),
+        )
+        self.ui.show_status(
+            f"The adversarial findings against {reviewed} had been edited in the workspace; "
+            "AutoR restored its own copy and the run says so.",
+            level="warn",
         )
 
     def _freeze_preregistration(self, paths: RunPaths) -> None:
