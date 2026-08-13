@@ -41,7 +41,7 @@ correctly — and then runs the validity-chain validators that ask whether a
 report-plan validators (`validate_report_plan`, `validate_report_plan_sources`,
 `validate_report_plan_coverage`) and the task-deliverables gate
 (`validate_deliverables_coverage`). Counting the two Stage 07 format branches,
-seventeen `validate_*` functions are reachable from it; the full table, with the
+eighteen `validate_*` functions are reachable from it; the full table, with the
 condition each one refuses on, is in the
 [README](../README.md#the-stage-contract-and-what-gets-validated). The code
 labels the split itself: *"the scientific-validity chain, distinct from the

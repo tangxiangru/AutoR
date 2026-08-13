@@ -1544,6 +1544,17 @@ def validate_stage_artifacts(
     for problem in validate_round_decision(paths, stage):
         problems.append(f"{stage.stage_title} {problem}")
 
+    if stage.number >= 2:
+        # Held at the stage that writes the hypotheses, for the reason the report-plan
+        # comment below spells out: the Stage 02 prompt requires a decision rule on
+        # every empirical hypothesis, and the first gate that read one was
+        # `validate_preregistration` at Stage 05 — three stages later, after Stage 04
+        # froze the set, where the only repair is a rollback.
+        from .hypothesis_manifest import validate_hypothesis_decision_rules
+
+        for problem in validate_hypothesis_decision_rules(paths):
+            problems.append(f"{stage.stage_title} {problem}")
+
     if stage.number >= 3:
         if count_in("data", paths.data_dir, MACHINE_DATA_SUFFIXES) == 0:
             problems.append(

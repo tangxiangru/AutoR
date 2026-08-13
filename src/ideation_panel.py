@@ -56,6 +56,11 @@ DUPLICATE_THRESHOLD = 0.5
 #: Where the pool lands. Stage 02's own artifacts live under workspace/notes.
 IDEA_POOL_FILENAME = "idea_pool.json"
 
+#: The same pool rendered for the prompt. Named rather than inlined because
+#: `rubric._harness_written_records` has to exclude it from Stage 02's `notes` kind,
+#: and a name that exists in one place cannot drift out of the other.
+IDEA_POOL_MARKDOWN_FILENAME = "idea_pool.md"
+
 
 @dataclass(frozen=True)
 class ProposerLens:
@@ -681,7 +686,7 @@ def record_idea_pool(paths: RunPaths, pool: IdeaPool, stage: StageSpec, attempt_
     payload = {"stage": stage.slug, "attempt": attempt_no, **pool.to_dict()}
     paths.notes_dir.mkdir(parents=True, exist_ok=True)
     write_text(paths.notes_dir / IDEA_POOL_FILENAME, json.dumps(payload, indent=2, ensure_ascii=False))
-    write_text(paths.notes_dir / "idea_pool.md", format_pool_for_prompt(pool))
+    write_text(paths.notes_dir / IDEA_POOL_MARKDOWN_FILENAME, format_pool_for_prompt(pool))
     append_log_entry(
         paths.logs,
         f"{stage.slug} attempt {attempt_no} idea_pool",

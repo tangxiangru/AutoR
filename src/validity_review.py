@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from .approval_agent import extract_json_payload
+from .review_panel import PANEL_DIRNAME
 from .terminal_ui import TerminalUI
 from .utils import (
     RunPaths,
@@ -315,7 +316,7 @@ def findings_from_panel(paths: RunPaths, stage: StageSpec) -> list[ValidityFindi
     deliberation was answered inside the panel, and re-raising it would punish
     the deliberation for working.
     """
-    panel_dir = paths.reviews_dir / "panel"
+    panel_dir = paths.reviews_dir / PANEL_DIRNAME
     if not panel_dir.is_dir():
         return []
 

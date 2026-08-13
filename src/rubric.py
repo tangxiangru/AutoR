@@ -41,13 +41,14 @@ import json
 import re
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Mapping, NamedTuple, Sequence
 
 from .artifact_index import is_autor_own_record
 from .utils import (
     FIGURE_SUFFIXES,
     MACHINE_DATA_SUFFIXES,
     RESULT_SUFFIXES,
+    STAGES,
     RunPaths,
     StageSpec,
     _existing_files,
@@ -57,6 +58,9 @@ from .utils import (
     stage_execution_started_at,
     validate_stage_markdown,
 )
+
+if TYPE_CHECKING:  # pragma: no cover - import cycle at runtime, type-only here
+    from .hypothesis_manifest import HypothesisEntry
 
 
 #: Bump when a criterion is added, removed, reweighted, or has its measurement
@@ -72,7 +76,16 @@ from .utils import (
 #: :func:`_cap_quantification_by_fidelity`. Every stage draft scored before the cap
 #: over-credits any Key Results section carrying unverifiable numbers, which is why
 #: this is a version bump and not a patch.
-RUBRIC_VERSION = "4"
+#: ``5`` moves two things at once. ``artifact_breadth`` now reads the four workspace
+#: directories Stages 01, 02, 07 and 08 are told to write — ``literature/``,
+#: ``notes/``, ``artifacts/`` and ``reviews/`` — and scores against
+#: :data:`STAGE_ARTIFACT_KINDS`, the kinds *this* stage's prompt asks for, instead of
+#: a bare count of any two or three; and ``reproducibility`` gains a Stage 02-03 link
+#: for the decision rule on every empirical hypothesis. Both change what an existing
+#: score means: replayed against v4, a Stage 08 that produced its whole release bundle
+#: measures 0.333 on breadth, and 0.0 if none of that bundle went under ``writing/``.
+#: So a v4 total and a v5 total are not two measurements of one thing.
+RUBRIC_VERSION = "5"
 
 #: The keys the rubric refuses to read out of an adjudication artifact.
 #:
@@ -145,7 +158,7 @@ class Criterion:
 CRITERIA: tuple[Criterion, ...] = (
     Criterion("contract", "Contract compliance", weight=2.0),
     Criterion("grounding", "References that resolve", weight=3.0),
-    Criterion("artifact_breadth", "Artifacts produced this stage", weight=2.0, min_stage=3),
+    Criterion("artifact_breadth", "Artifacts produced this stage", weight=2.0, min_stage=1),
     Criterion("quantification", "Findings carrying numbers", weight=2.0, min_stage=4),
     Criterion("numeric_fidelity", "Reported numbers trace to results", weight=3.0, min_stage=5),
     Criterion("traceability", "Decision ledger", weight=1.5),
@@ -424,6 +437,170 @@ def _score_grounding(
     return CriterionScore("grounding", CRITERIA_BY_KEY["grounding"].title, weight, score, observed, shortfall)
 
 
+def _artifact_kind_dirs(
+    paths: RunPaths, artifact_dirs: Mapping[str, Sequence[Path]] | None
+) -> dict[str, tuple[Path, ...]]:
+    """Which workspace directory each artifact kind is read from.
+
+    A kind is named after the directory it comes from, so "this stage wrote
+    ``literature``" is a claim a reader can check with ``ls``. ``writing`` is the one
+    exception: a run's manuscript lives under ``writing/`` in LaTeX mode and under
+    ``report/`` in markdown mode, and the two are one kind of work.
+
+    ``artifact_dirs`` is the operator's declaration of where a benchmark harness puts
+    its outputs, and only the three categories a benchmark contract can redirect —
+    ``data``, ``results``, ``figures`` — accept one.
+    """
+    extra = artifact_dirs or {}
+    return {
+        "data": (paths.data_dir, *extra.get("data", ())),
+        "results": (paths.results_dir, *extra.get("results", ())),
+        "figures": (paths.figures_dir, *extra.get("figures", ())),
+        "code": (paths.code_dir,),
+        "writing": (paths.writing_dir, paths.report_dir),
+        "literature": (paths.literature_dir,),
+        "notes": (paths.notes_dir,),
+        "artifacts": (paths.artifacts_dir,),
+        "reviews": (paths.reviews_dir,),
+    }
+
+
+#: What counts as a file of each kind. The four kinds added here accept ``.md``,
+#: because a reading note, an assumption map, a readiness checklist and a release note
+#: are markdown and the prompts ask for them in those words. That is not a way in for
+#: prose: ``MIN_ARTIFACT_BYTES`` still applies, the file has to be under the directory
+#: its stage was pointed at, and the criterion is a set of *kinds* — a second paragraph
+#: in a second file moves nothing.
+_ARTIFACT_KIND_SUFFIXES: dict[str, set[str]] = {
+    "data": MACHINE_DATA_SUFFIXES,
+    "results": RESULT_SUFFIXES,
+    "figures": FIGURE_SUFFIXES,
+    "code": {".py", ".sh", ".r", ".jl", ".ipynb", ".cpp", ".rs", ".go", ".ts", ".js"},
+    "writing": {".md", ".tex", ".bib"},
+    "literature": {".md", ".json", ".jsonl", ".bib", ".csv", ".tsv", ".yaml", ".yml"},
+    "notes": {".md", ".json", ".jsonl", ".csv", ".tsv", ".yaml", ".yml"},
+    "artifacts": {".md", ".json", ".jsonl", ".pdf", ".tex", ".zip", ".tar", ".gz"},
+    "reviews": {".md", ".json", ".jsonl", ".yaml", ".yml"},
+}
+
+
+#: What each stage is expected to leave behind, by stage number.
+#:
+#: Every kind named here is a directory that stage's own prompt tells the agent to
+#: write to — ``tests/test_rubric_artifact_kinds.py`` reads the ``{{WORKSPACE_*_DIR}}``
+#: placeholders out of ``src/prompts/`` and refuses any expectation the prompt never
+#: asked for. That is why Stage 03 expects ``data`` and ``notes`` and not ``code``:
+#: implementation is Stage 04's job and ``03_study_design.md`` never names the code
+#: directory. Scored as a set rather than as a count so that a stage cannot climb by
+#: emitting more of the one kind it already had, and so that the shortfall can name
+#: the directory that is missing instead of listing every directory in the run.
+STAGE_ARTIFACT_KINDS: dict[int, frozenset[str]] = {
+    1: frozenset({"literature"}),
+    2: frozenset({"literature", "notes"}),
+    3: frozenset({"data", "notes"}),
+    4: frozenset({"code", "data", "notes"}),
+    5: frozenset({"code", "results"}),
+    6: frozenset({"figures", "results"}),
+    7: frozenset({"artifacts", "writing"}),
+    8: frozenset({"artifacts", "reviews", "writing"}),
+}
+
+
+def expected_artifact_kinds(stage: StageSpec) -> frozenset[str]:
+    """The kinds this stage is graded on producing. Empty for a stage nobody declared."""
+    return STAGE_ARTIFACT_KINDS.get(stage.number, frozenset())
+
+
+class HarnessWrites(NamedTuple):
+    """The files and whole subtrees AutoR itself puts inside a graded directory.
+
+    Two members rather than one set because ``reviews/panel/`` is a *directory* AutoR
+    owns — the panel writes one transcript pair per stage per attempt, so the names are
+    not enumerable in advance and matching them one by one would leak every second file.
+    """
+
+    files: frozenset[Path]
+    trees: frozenset[Path]
+
+    def covers(self, path: Path) -> bool:
+        return path in self.files or any(tree in path.parents for tree in self.trees)
+
+
+def _harness_written_records(paths: RunPaths) -> HarnessWrites:
+    """Everything AutoR writes for the stage, into directories this criterion now reads.
+
+    :func:`is_autor_own_record` covers the scientific bookkeeping — the six files under
+    ``notes/`` and two under ``results/`` that ``RECORD_ARTIFACTS`` lists — and that list
+    is about the *experiment bundle*, so these do not belong in it. They are the same
+    hazard by a different route: each is written by AutoR's own machinery into a
+    directory the stage is graded on, so a stage that produced nothing would collect the
+    kind anyway. ``tests/test_rubric_artifact_kinds.py`` drives each writer and censuses
+    ``src/`` for a path under a graded directory that this list has not classified.
+
+    Written **before the draft is scored, inside the stage's own window**, so each one
+    is a live free kind rather than a hazard in principle:
+
+    - ``notes/idea_pool.{json,md}``: :func:`record_idea_pool` runs while the Stage 02
+      prompt is being built, and Stage 02 is graded on ``notes``.
+    - ``artifacts/report_review.json`` and ``artifacts/layout_review.json``: the manager
+      generates one — which one depends on the output format — after every Stage 07
+      attempt, and Stage 07 is graded on ``artifacts``. ``07_writing.md`` says so to the
+      agent in as many words: "generated for you by the workflow manager after each
+      attempt — read it, do not write it".
+    - ``reviews/comment_ledger.json``: ``_close_comment_round`` writes it when an
+      anchored-revision round closes, one call above ``consider``.
+    - ``reviews/deliberations.json``: ``_settle_cruxes`` writes it in the statement after
+      that, still above ``consider``.
+    - ``reviews/panel/``: ``ReviewPanel._record`` writes a transcript pair and the effect
+      ledger from ``_collect_review_decision``, which runs *after* attempt N is scored
+      and therefore before attempt N+1 is.
+    - ``reviews/effort.json``: ``_note_effort_failure`` writes it in the same window, on
+      the branch where the panel refused.
+
+    And two AutoR records in ``reviews/`` whose current call sites happen to sit after
+    the last score of the run. They are excluded on ownership, not on ordering, because
+    the ordering is not theirs to keep: ``_report_optional_machinery`` is called from
+    ``_complete_run``, and a resumed or revisited walk re-opens a stage window after it.
+
+    - ``reviews/scorecard.{json,md}``: :func:`write_scorecard`.
+    - ``reviews/validity_review_<stage>.json``: the adversarial reviewer's own findings,
+      about the stage rather than by it.
+
+    Every name is imported from the module that writes it, so a rename cannot leave this
+    list pointing at nothing — that is why ``idea_pool.md``, ``report_review.json``,
+    ``layout_review.json`` and ``panel/`` gained constants at their writers.
+    """
+    from .deliberation import LEDGER_FILENAME as DELIBERATION_LEDGER_FILENAME
+    from .effort import LEDGER_FILENAME as EFFORT_LEDGER_FILENAME
+    from .ideation_panel import IDEA_POOL_FILENAME, IDEA_POOL_MARKDOWN_FILENAME
+    from .review_panel import PANEL_DIRNAME
+    from .scorecard import SCORECARD_JSON, SCORECARD_MD
+    from .stage_comments import COMMENT_LEDGER_FILENAME
+    from .validity_review import validity_review_path
+    from .writing_manifest import LAYOUT_REVIEW_FILENAME, REPORT_REVIEW_FILENAME
+
+    return HarnessWrites(
+        files=frozenset(
+            {
+                paths.notes_dir / IDEA_POOL_FILENAME,
+                paths.notes_dir / IDEA_POOL_MARKDOWN_FILENAME,
+                paths.artifacts_dir / REPORT_REVIEW_FILENAME,
+                paths.artifacts_dir / LAYOUT_REVIEW_FILENAME,
+                paths.reviews_dir / COMMENT_LEDGER_FILENAME,
+                paths.reviews_dir / DELIBERATION_LEDGER_FILENAME,
+                paths.reviews_dir / EFFORT_LEDGER_FILENAME,
+                paths.reviews_dir / SCORECARD_JSON,
+                paths.reviews_dir / SCORECARD_MD,
+                # One per stage: the reviewer names the file after the stage it read, so
+                # the set is derived from `STAGES` rather than from a glob, which would
+                # also swallow the *response* the stage itself writes beside it.
+                *(validity_review_path(paths, stage.slug) for stage in STAGES),
+            }
+        ),
+        trees=frozenset({paths.reviews_dir / PANEL_DIRNAME}),
+    )
+
+
 def _fresh_artifact_kinds(
     paths: RunPaths,
     stage: StageSpec,
@@ -436,25 +613,13 @@ def _fresh_artifact_kinds(
     nothing at all would be indistinguishable from one that did.
     """
     cutoff = stage_execution_started_at(paths, stage)
-    kinds: dict[str, tuple[Path, ...]] = {
-        "data": (paths.data_dir, *(artifact_dirs or {}).get("data", ())),
-        "results": (paths.results_dir, *(artifact_dirs or {}).get("results", ())),
-        "figures": (paths.figures_dir, *(artifact_dirs or {}).get("figures", ())),
-        "code": (paths.code_dir,),
-        "writing": (paths.writing_dir, paths.report_dir),
-    }
-    suffixes = {
-        "data": MACHINE_DATA_SUFFIXES,
-        "results": RESULT_SUFFIXES,
-        "figures": FIGURE_SUFFIXES,
-        "code": {".py", ".sh", ".r", ".jl", ".ipynb", ".cpp", ".rs", ".go", ".ts", ".js"},
-        "writing": {".md", ".tex", ".bib"},
-    }
+    kinds = _artifact_kind_dirs(paths, artifact_dirs)
+    harness_written = _harness_written_records(paths)
 
     present: set[str] = set()
     fresh: set[str] = set()
     for kind, directories in kinds.items():
-        allowed = suffixes[kind]
+        allowed = _ARTIFACT_KIND_SUFFIXES[kind]
         for directory in directories:
             for path in _existing_files(directory):
                 if path.suffix.lower() not in allowed:
@@ -462,7 +627,7 @@ def _fresh_artifact_kinds(
                 # AutoR's own bookkeeping is not the stage's output. Per-file rather
                 # than by pruning the directory, because `artifact_dirs` are
                 # operator-declared and may point anywhere.
-                if is_autor_own_record(paths, path):
+                if is_autor_own_record(paths, path) or harness_written.covers(path):
                     continue
                 try:
                     stat = path.stat()
@@ -483,29 +648,54 @@ def _score_artifact_breadth(
     stage: StageSpec,
     artifact_dirs: Mapping[str, Sequence[Path]] | None,
 ) -> CriterionScore:
+    """The kinds this stage's own prompt asked for, written inside its own window.
+
+    Scored against :data:`STAGE_ARTIFACT_KINDS` rather than against a count of any
+    two or three kinds. The count was wrong in both directions at the ends of the
+    graph. It could not see ``literature/``, ``notes/``, ``artifacts/`` or
+    ``reviews/`` at all, so a Stage 08 was graded on whichever part of its release
+    bundle happened to land in ``writing/`` — one kind of the three it owes, or none
+    at all, in which case it was told "every artifact in the run predates this
+    stage's execution" while the bundle sat on disk seconds old. And it credited a
+    Stage 06 that wrote ``code/`` and ``notes/`` and no figures with one of its
+    three, because any three kinds were worth the same as the three the analysis
+    stage owes. Both numbers are replays against ``origin/main@fdded57``;
+    ``tests/test_rubric_artifact_kinds.py`` carries the trees they were taken on.
+    """
     weight = CRITERIA_BY_KEY["artifact_breadth"].weight
     present, fresh = _fresh_artifact_kinds(paths, stage, artifact_dirs)
-    # What a stage is reasonably expected to touch. Scored against an expectation
-    # rather than a raw count so a stage cannot climb by emitting more of the one
-    # kind it already had.
-    expected = 2 if stage.number < 5 else 3
-    score = _clamp(len(fresh) / expected)
+    expected = expected_artifact_kinds(stage)
+    if not expected:
+        return CriterionScore(
+            "artifact_breadth",
+            CRITERIA_BY_KEY["artifact_breadth"].title,
+            weight,
+            1.0,
+            "no artifact kinds are declared for this stage",
+        )
+
+    earned = fresh & expected
+    missing = expected - fresh
+    score = _clamp(len(earned) / len(expected))
     observed = (
-        f"{len(fresh)} artifact kind(s) written during this stage "
-        f"({', '.join(sorted(fresh)) or 'none'}); {len(present)} present overall"
+        f"{len(earned)}/{len(expected)} expected artifact kind(s) written during this stage "
+        f"({', '.join(sorted(earned)) or 'none'}); {len(present)} kind(s) present overall"
     )
     if score >= 1.0:
         shortfall = ""
     elif not fresh and present:
         shortfall = (
             "Every artifact in the run predates this stage's execution. Produce or "
-            "update the files this stage is responsible for."
+            "update the files this stage is responsible for: "
+            + ", ".join(f"`workspace/{kind}/`" for kind in sorted(missing))
+            + "."
         )
     else:
         shortfall = (
-            f"Only {len(fresh)} of an expected {expected} artifact kinds were written here. "
-            "Add the missing machine-readable outputs (data, results, figures, code) rather "
-            "than describing them in prose."
+            f"{len(earned)} of the {len(expected)} artifact kinds this stage is responsible "
+            "for were written here. Write the missing ones — "
+            + ", ".join(f"`workspace/{kind}/`" for kind in sorted(missing))
+            + " — as files, rather than describing them in prose."
         )
     return CriterionScore(
         "artifact_breadth", CRITERIA_BY_KEY["artifact_breadth"].title, weight, score, observed, shortfall
@@ -807,7 +997,36 @@ def _score_commitment(markdown: str) -> CriterionScore:
     )
 
 
-def _score_reproducibility(paths: RunPaths, stage: StageSpec) -> CriterionScore:
+def _empirical_hypotheses(
+    paths: RunPaths, stage: StageSpec, markdown: str
+) -> list["HypothesisEntry"]:
+    """The empirical hypotheses this draft is answerable for.
+
+    At Stage 02 they are read out of **the draft being scored**, not out of
+    ``notes/hypothesis_manifest.json``. ``score_stage`` runs once per candidate, and
+    a polish round that gets reverted leaves the loser's manifest on disk — scoring
+    the new draft against the old file would grade a document nobody wrote. From
+    Stage 03 the draft carries no hypothesis sections at all, so the manifest Stage 02
+    left behind is the only copy, and it is the one Stage 04 will freeze.
+
+    Every read is defensive by construction. ``score_stage`` has no ``try`` around it
+    and a hand-edited manifest is a file the agent can write, so a corrupt one has to
+    cost the criterion rather than end the run.
+    """
+    from .hypothesis_manifest import HypothesisEntry, build_hypothesis_manifest
+
+    if stage.number == 2:
+        manifest = build_hypothesis_manifest(markdown)
+        return list(manifest.empirical_hypotheses) if manifest is not None else []
+
+    payload = _load_json(paths.hypothesis_manifest)
+    section = payload.get("empirical_hypotheses") if isinstance(payload, dict) else None
+    if not isinstance(section, list):
+        return []
+    return [HypothesisEntry.from_dict(item) for item in section if isinstance(item, dict)]
+
+
+def _score_reproducibility(paths: RunPaths, stage: StageSpec, markdown: str) -> CriterionScore:
     """The machine-readable validity chain that applies at this stage.
 
     Each check is a boolean over an artifact that either exists and parses or does
@@ -832,6 +1051,27 @@ def _score_reproducibility(paths: RunPaths, stage: StageSpec) -> CriterionScore:
                 not validate_literature_evidence(paths),
                 "Write workspace/literature/sources.json and claims.json so each claim names the "
                 "source_ids behind it.",
+            )
+        )
+    if 2 <= stage.number <= 3:
+        # The graded twin of the Stage 02+ gate in `validate_stage_artifacts`. Stages
+        # 2-3 only, and not `>= 2`: from Stage 04 the same hypothesis set is measured
+        # by the frozen-preregistration link below, and scoring both would spend two
+        # of this criterion's links on one artifact — the run would look more
+        # reproducible for having declared its hypotheses twice.
+        from .hypothesis_manifest import hypotheses_without_decision_rule
+
+        entries = _empirical_hypotheses(paths, stage, markdown)
+        undecided = hypotheses_without_decision_rule(entries)
+        named = f" ({', '.join(undecided)})" if undecided else ""
+        checks.append(
+            (
+                "falsifiable hypothesis set",
+                bool(entries) and not undecided,
+                f"Give every empirical hypothesis{named} a `- Decision rule: ...` line saying "
+                "what result would count as support and what would count as refutation. A "
+                "hypothesis with no decision rule cannot come out negative, and Stage 04 "
+                "freezes the set as it stands.",
             )
         )
     if stage.number >= 3:
@@ -999,7 +1239,7 @@ def score_stage(
         elif criterion.key == "commitment":
             scores.append(_score_commitment(markdown))
         elif criterion.key == "reproducibility":
-            scores.append(_score_reproducibility(paths, stage))
+            scores.append(_score_reproducibility(paths, stage, markdown))
 
     scores = _cap_quantification_by_fidelity(scores)
 

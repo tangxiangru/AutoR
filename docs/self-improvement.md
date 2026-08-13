@@ -200,7 +200,7 @@ when the work moves and not when the wording does.
 | --- | --- | --- | --- |
 | `contract` | 2.0 | stage markdown contract errors | all stages |
 | `grounding` | 3.0 | every path the draft names resolves, and how much of the narrative is anchored in one | all stages |
-| `artifact_breadth` | 2.0 | artifact kinds written *during this stage's execution* | 03 |
+| `artifact_breadth` | 2.0 | the artifact kinds *this stage's prompt named*, written during its own execution | 01 |
 | `quantification` | 2.0 | findings in Key Results carrying numbers | 04 |
 | `numeric_fidelity` | 3.0 | **every reported number appears in a results artifact** | 05 |
 | `traceability` | 1.5 | the four decision-ledger buckets, filled and distinct | all stages |
@@ -342,9 +342,9 @@ the estimator underneath is worth acting on.
 ### The composition of a run is not allowed to be the improvement
 
 A stage's score is a weighted mean over the criteria that apply to it, and the late
-stages face more of them — Stage 02 is scored on five criteria worth 11, Stage 06 on
+stages face more of them — Stage 02 is scored on six criteria worth 13, Stage 06 on
 eight worth 18, including `numeric_fidelity`, the hardest. (Not *strictly* more at
-every step: 01 and 02 face the same set, and so do 05 through 08. The count is
+every step: 01, 02 and 03 face the same set, and so do 05 through 08. The count is
 non-decreasing and it rises twice.) So the *set of stages a run reached* is a free
 parameter of the objective.
 
@@ -520,8 +520,8 @@ a capability that changes how far runs get has done something, and it is not a
 score.
 
 **It does not report a total without the criterion decomposition.** A capability
-that writes more files raises `artifact_breadth` whether or not the research
-improved. The report prints the per-criterion difference and a concentration figure;
+that writes more of the artifact kinds a stage was asked for raises
+`artifact_breadth` whether or not the research improved. The report prints the per-criterion difference and a concentration figure;
 above 60% in one criterion it says so. A win concentrated in a single criterion is a
 flag, not a result.
 
@@ -624,8 +624,9 @@ run, the goal a retrieval-augmented-generation leakage question, taken to Stage 
 
 Two things follow, and both change how a number in this document should be read.
 
-**The rubric has no resolution at Stages 01 and 02 against a competent backend.**
-Every criterion scored exactly 1.0 — 8/8 referenced paths resolving, 4/4 decision
+**The rubric had no resolution at Stages 01 and 02 against a competent backend.**
+Measured at `RUBRIC_VERSION` 4, where five criteria reached Stage 01. Every one of
+them scored exactly 1.0 — 8/8 referenced paths resolving, 4/4 decision
 ledger buckets distinct, 0 forward-looking phrases in 1,611 words — and the
 improvement ledger records `rounds_spent: 0`, because the controller found no
 headroom to spend. The composition figure quoted above for stages 01–02, 0.973, is a
@@ -634,11 +635,17 @@ property of the `--fake-operator` *script*, not of the rubric: a real run scores
 worse than the table implies. Stopping early is not worth "nearly eight times what a
 promotion needs"; on a real run it buys a perfect score.
 
-**A trial cut at `--final-stage 02` therefore cannot resolve anything.** Both arms
+**A trial cut at `--final-stage 02` therefore could not resolve anything.** Both arms
 would score 1.0, every within-pair difference would be 0, and the report would say
-"no effect" when it means "no instrument". Resolution starts at Stage 03, where
-`artifact_breadth` enters, and the first two stages cost about 35 minutes each on
+"no effect" when it means "no instrument". Resolution started at Stage 03, where
+`artifact_breadth` entered, and the first two stages cost about 35 minutes each on
 opus before reaching it.
+
+`RUBRIC_VERSION` 5 moves `artifact_breadth` to Stage 01 and this ceiling has not been
+re-measured under it. Whether that opus Stage 01 would still score 1.0 turns on
+whether it wrote `literature/` inside its own execution window, which the v4 run was
+not graded on — so this document cannot say, and the run would have to be repeated
+before a `--final-stage 02` trial is called uninformative again.
 
 So when this document says a capability *is* better, it is describing an argument.
 When it says a capability *measures* better, it means the rubric, and now on one real

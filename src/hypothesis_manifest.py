@@ -4,6 +4,7 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Sequence
 
 from .utils import RunPaths, TYPED_HYPOTHESIS_HEADINGS, extract_typed_hypothesis_sections
 
@@ -115,6 +116,72 @@ def write_hypothesis_manifest(paths: RunPaths, stage_markdown: str) -> Hypothesi
         encoding="utf-8",
     )
     return manifest
+
+
+def hypotheses_without_decision_rule(entries: Sequence[HypothesisEntry]) -> list[str]:
+    """Which empirical hypotheses carry no decision rule, by identifier.
+
+    One spelling of one rule, two readers: :func:`validate_hypothesis_decision_rules`,
+    which refuses the stage, and ``src.rubric``, which grades the same condition on the
+    draft. Written here rather than in either of them because a gate and its graded
+    twin disagreeing about what "has a decision rule" means is the failure that makes a
+    score and a gate tell a run two different things.
+
+    ``derived_from`` is deliberately not required alongside it. The Stage 02 prompt
+    lists that field under "Add supporting lines under each entry **when relevant**",
+    and the repo's own Stage 02 fixtures omit it, so demanding it here would refuse a
+    draft that did exactly what it was told.
+    """
+    return [
+        entry.identifier or "(unnamed hypothesis)"
+        for entry in entries
+        if not entry.decision_rule.strip()
+    ]
+
+
+def validate_hypothesis_decision_rules(paths: RunPaths) -> list[str]:
+    """Refuse a hypothesis set that cannot come out negative, at the stage that wrote it.
+
+    The Stage 02 prompt requires a ``- Decision rule: ...`` line on every empirical
+    hypothesis. Until this existed, the first gate that read one was
+    :func:`src.preregistration.validate_preregistration` at Stage 05 — three stages
+    downstream of the mistake, after the set was frozen at Stage 04, where the only
+    repair is a rollback. That is the same shape as the experimental-protocol
+    counter-example already written at the ``validate_report_plan`` call site in
+    :func:`src.utils.validate_stage_artifacts`, and the fix is the same one: hold the
+    check at the stage that can still make the change cheaply.
+
+    A missing manifest is deliberately **not** refused here. At Stage 02
+    :func:`src.utils.validate_stage_markdown` already requires the typed hypothesis
+    subsections and ``write_hypothesis_manifest`` derives the file from them moments
+    before this runs; from Stage 03 on, absence is ``validate_preregistration``'s to
+    report, and it says something more useful about it than this could.
+    """
+    if not paths.hypothesis_manifest.exists():
+        return []
+    try:
+        payload = json.loads(paths.hypothesis_manifest.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return [
+            "cannot read workspace/notes/hypothesis_manifest.json as JSON "
+            f"({exc}). Rewrite it in the Stage 02 format; a hypothesis set nothing can "
+            "parse cannot be frozen, adjudicated, or reported."
+        ]
+
+    section = payload.get("empirical_hypotheses") if isinstance(payload, dict) else None
+    if not isinstance(section, list):
+        return []
+    entries = [HypothesisEntry.from_dict(item) for item in section if isinstance(item, dict)]
+    missing = hypotheses_without_decision_rule(entries)
+    if not missing:
+        return []
+    return [
+        "has empirical hypotheses with no decision rule in "
+        f"workspace/notes/hypothesis_manifest.json: {', '.join(missing)}. State, as "
+        "`- Decision rule: ...` under each one in Stage 02, what result would count as "
+        "support and what would count as refutation. A hypothesis with no decision rule "
+        "cannot come out negative, and Stage 04 freezes this set as it stands."
+    ]
 
 
 def load_hypothesis_manifest(path) -> HypothesisManifest | None:

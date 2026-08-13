@@ -26,6 +26,15 @@ RESULT_SUFFIXES = {".json", ".jsonl", ".csv", ".tsv", ".parquet", ".npz", ".npy"
 _LATEX_WARNING_SAMPLE_LIMIT = 5
 _REPORT_ISSUE_SAMPLE_LIMIT = 5
 
+#: The two triage files the *workflow manager* drops into `workspace/artifacts/` after a
+#: Stage 07 attempt — one per output format. `07_writing.md` tells the agent it is
+#: "generated for you by the workflow manager after each attempt — read it, do not write
+#: it", so `rubric._harness_written_records` must not let it earn Stage 07 the
+#: `artifacts` kind. Named here, at the writer, so the exclusion cannot point at a file
+#: this module has since renamed.
+REPORT_REVIEW_FILENAME = "report_review.json"
+LAYOUT_REVIEW_FILENAME = "layout_review.json"
+
 
 def build_writing_manifest(paths: RunPaths) -> dict[str, object]:
     artifact_index = write_artifact_index(paths)
@@ -281,7 +290,7 @@ def generate_layout_review(paths: RunPaths) -> dict[str, object]:
         "issues": issues,
         "priority_fixes": priority_fixes,
     }
-    output_path = paths.artifacts_dir / "layout_review.json"
+    output_path = paths.artifacts_dir / LAYOUT_REVIEW_FILENAME
     output_path.write_text(json.dumps(review, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
     return review
 
@@ -490,7 +499,7 @@ def generate_report_review(paths: RunPaths) -> dict[str, object]:
         ),
     }
     paths.artifacts_dir.mkdir(parents=True, exist_ok=True)
-    output_path = paths.artifacts_dir / "report_review.json"
+    output_path = paths.artifacts_dir / REPORT_REVIEW_FILENAME
     output_path.write_text(json.dumps(review, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
     return review
 
