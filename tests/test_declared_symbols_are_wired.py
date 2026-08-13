@@ -25,7 +25,7 @@ place the product actually starts from, including ``studio.py``, without which t
 ``src/backend/`` package would read as dead.
 
 ``tests/`` and ``tools/`` are deliberately *not* roots. A test is the thing that keeps a
-dead symbol green -- twenty of the thirty-one symbols listed below have one -- so counting
+dead symbol green -- nineteen of the thirty symbols listed below have one -- so counting
 a test as wiring would make the gate assert nothing. An instrument is not evidence:
 ``archive_sample_complexity`` was importing ``RunRecord`` and crashing on it at the same
 time. A symbol that only ``tools/`` reaches is still exempt, but by a line somebody wrote,
@@ -170,14 +170,11 @@ ALLOWLIST: dict[str, Exempt] = {
     "src/rcb_trial.py::items_from_score_payloads": Exempt(_DRIVER_ONLY, ("tools/rcb_trial.py",)),
     "src/rcb_trial.py::next_action": Exempt(_DRIVER_ONLY, ("tools/rcb_trial.py",)),
     # -- a prompt renderer with no channel to render into --------------------------------
-    "src/experimental_protocol.py::format_protocol_for_prompt": Exempt(
-        "A stage prompt is assembled from `information_flow.CHANNELS`, so a renderer "
-        "reaches a stage only by becoming a channel. Adding one moves `CHANNELS`, the "
-        "mermaid dotted-edge count, and the spelled-out counts `tests/test_doc_counts.py` "
-        "pins in README.md and docs/architecture.md. That is a channel change with its own "
-        "argument to make -- which stage consumes it and why the narrowing is right -- not "
-        "a missing reference."
-    ),
+    #
+    # `format_protocol_for_prompt` was here until #212 gave it a channel, which is what
+    # this exemption said it would take. The entry came off on the first rebase after
+    # that merge, because the other half of this gate refuses an exemption that has
+    # outlived its cause -- an allowlist nobody prunes stops being readable.
     "src/run_skills.py::format_skills_for_prompt": Exempt(
         "Same channel problem, plus its input is already dropped: `_install_skills` returns "
         "the installed names and both call sites in `manager.py` discard the return value. "
