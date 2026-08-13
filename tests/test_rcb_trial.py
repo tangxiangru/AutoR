@@ -14,6 +14,7 @@ from pathlib import Path
 
 from src.rcb_trial import (
     ADMISSION_CLAUSES,
+    RCB_TOTAL,
     SETTLED_REASONING_HEADING,
     ArmEvidence,
     ArmSpec,
@@ -230,6 +231,66 @@ class SeamTests(unittest.TestCase):
             body = (REPO_ROOT / name).read_text(encoding="utf-8")
             for forbidden in ("Archive(", "record_run", "runs.jsonl"):
                 self.assertNotIn(forbidden, body, f"{name} can reach the archive via {forbidden}")
+
+
+class TheMeasureIsDeclaredHereTests(unittest.TestCase):
+    """This module is the only thing that knows what filled `stage_fitness`.
+
+    `collect_pairs` reads two dicts of floats and cannot tell a rubric mean from a
+    judge's total, so the measure has to be declared by the producer — and the
+    circularity refusal, which is a statement about a mechanism *and* a measure, then
+    reads the capability against the one that was actually used.
+    """
+
+    def test_the_trial_declares_the_benchmark_as_its_measure(self) -> None:
+        control = arm(scores=(40, 30, 20))
+        treatment = arm(label="47f3fbf", scores=(60, 30, 20))
+        self.assertEqual(trial(control, treatment).result.outcome, RCB_TOTAL)
+
+    def test_the_champion_ratchet_is_reportable_against_the_judge(self) -> None:
+        """The whole point of the seam, and what the keyed-on-the-string refusal broke.
+
+        `EvolutionController.consider` is `argmax` on AutoR's own `score.total`. The
+        judge here runs after the workspace is finished, against a checklist no stage
+        was shown, so the ratchet cannot have optimised against it and the arm with
+        rounds can lose. Refused, this trial printed "score the arms on a held-out
+        judge, or a benchmark" over a report produced by exactly that.
+        """
+        finished = collect_rcb_pairs(
+            [arm(scores=(40, 30, 20)), arm(label="47f3fbf", scores=(60, 30, 20))],
+            capability="polish_rounds",
+            control_arm="621566b",
+            treatment_arm="47f3fbf",
+            planned_pairs=1,
+        )
+        self.assertFalse(finished.result.circular)
+
+        rendered = format_rcb_trial_report(finished)
+        self.assertIn("- mean difference: **+10.0000**", rendered)
+        self.assertNotIn("selects on the outcome measure", rendered)
+
+    def test_the_measure_is_fixed_here_rather_than_asked_for(self) -> None:
+        """An exemption a caller can request is an exemption a caller can grant itself.
+
+        Two ways it could have been made requestable, both refused: a parameter on this
+        function, and a field on `TrialPlan` — which would also have changed
+        `TrialPlan.digest` and invalidated the plan frozen before the first launch.
+        """
+        import dataclasses
+        import inspect
+
+        self.assertNotIn("outcome", inspect.signature(collect_rcb_pairs).parameters)
+        self.assertNotIn("selects_on", {f.name for f in dataclasses.fields(TrialPlan)})
+
+    def test_the_report_takes_its_scale_from_the_measure(self) -> None:
+        """The benchmark's scale used to be written out here as well as on the outcome.
+        One string, two encodings, and the copy printed beside the number is the one a
+        reader takes it from."""
+        control = arm(scores=(40, 30, 20))
+        treatment = arm(label="47f3fbf", scores=(60, 30, 20))
+        rendered = format_rcb_trial_report(trial(control, treatment))
+        self.assertIn(f"- mean difference: **+10.0000** {RCB_TOTAL.unit}", rendered)
+        self.assertIn(f"- outcome: `rcb_total` — {RCB_TOTAL.measured_by}", rendered)
 
 
 class EnvironmentTests(unittest.TestCase):

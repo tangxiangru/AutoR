@@ -14,6 +14,8 @@ from src.archive import RunRecord, TrialTag
 from src.rubric import RUBRIC_VERSION
 from src.trials import (
     MIN_PAIRS_FOR_SIGNIFICANCE,
+    RCB_TOTAL,
+    RUBRIC_TOTAL,
     Pair,
     collect_pairs,
     format_all_trials,
@@ -309,6 +311,40 @@ class RenderingContractTests(unittest.TestCase):
         rendered = format_trial_report(result, unit="RCB points (0-100 total scale)")
         self.assertIn("+0.1000** RCB points (0-100 total scale)", rendered)
         self.assertNotIn("rubric points", rendered)
+
+    def test_the_unit_comes_off_the_outcome_when_the_caller_says_nothing(self) -> None:
+        """The scale belongs to the measure, and a caller that declared the measure has
+        already said it. Two callers saying it separately is one string with two
+        encodings, and the one that drifts is the one printed beside the number."""
+        result = self.collect(paired(3, 0.5, 0.6), outcome=RCB_TOTAL)
+        rendered = format_trial_report(result)
+        self.assertIn(f"+0.1000** {RCB_TOTAL.unit}", rendered)
+        self.assertNotIn("rubric points", rendered)
+
+    def test_the_report_names_the_instrument_and_not_only_the_scale(self) -> None:
+        """"0-100 points" says nothing about who assigned them, and who assigned them
+        is the whole of whether the number could have been optimised against. The same
+        arithmetic over two measures now renders two different claims, so the measure
+        is printed above the number rather than left to the unit."""
+        rubric = format_trial_report(self.collect(paired(3, 0.5, 0.6)))
+        benchmark = format_trial_report(self.collect(paired(3, 0.5, 0.6), outcome=RCB_TOTAL))
+        self.assertIn(f"- outcome: `rubric_total` — {RUBRIC_TOTAL.measured_by}", rubric)
+        self.assertIn(f"- outcome: `rcb_total` — {RCB_TOTAL.measured_by}", benchmark)
+
+    def test_the_archive_wide_report_cannot_be_handed_another_measure(self) -> None:
+        """`format_all_trials` reads `Archive.runs()`, where `stage_fitness` is AutoR's
+        own rubric by construction. No `outcome` parameter, so the path that renders
+        every trial in the archive keeps refusing the ratchet whatever a caller wants."""
+        import inspect
+
+        self.assertNotIn("outcome", inspect.signature(format_all_trials).parameters)
+        records = [
+            run("g1", "off", stages=flat(0.5), capability="polish_rounds"),
+            run("g1", "on", stages=flat(0.9), capability="polish_rounds"),
+        ]
+        rendered = format_all_trials(records)
+        self.assertIn("selects on the outcome measure `rubric_total`", rendered)
+        self.assertNotIn("- mean difference: **", rendered)
 
     def test_the_decomposition_table_says_how_many_pairs_each_row_is_over(self) -> None:
         """A criterion seen in one pair of three renders exactly like a mean over three.

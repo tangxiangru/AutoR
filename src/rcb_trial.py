@@ -10,8 +10,20 @@ wants; the claim is that the external benchmark score moves.
 This module is a **producer**, not a second statistics module. :class:`src.trials.Pair`
 is the only reader of those two dicts anywhere in the tree, and nothing above it names
 a stage slug or a rubric key. So swapping the outcome measure is swapping what fills
-them, and every one of the refusals in :mod:`src.trials` keeps working on the new
-numbers without being touched.
+them, and the refusals in :mod:`src.trials` — the composition gate, the decomposition,
+the p-value floor — keep working on the new numbers without being touched.
+
+One of them did have to be told, and the exception is the point rather than a caveat.
+The circularity refusal is a statement about a mechanism *and* a measure: the champion
+ratchet cannot lose a trial scored on the rubric it optimises, and it can lose one
+scored here, where the judge runs after the workspace is finished against a checklist
+no stage was shown. Keyed on the capability alone it refused the ratchet on this path
+too — printing "score the arms on a held-out judge or a benchmark" over a report
+produced by exactly that. So :func:`collect_rcb_pairs` declares
+:data:`src.trials.RCB_TOTAL` as the measure that filled the dicts, and the refusal is
+read against it. The declaration lives here, in the producer that knows what the
+numbers are, and not on :class:`TrialPlan`: a trial that could name its own exemption
+would be granting it to itself.
 
 **The mapping, and why each half is shaped the way it is.**
 
@@ -73,6 +85,7 @@ from .archive import RunRecord
 from .information_flow import CHANNELS
 from .rubric import RUBRIC_VERSION
 from .trials import (
+    RCB_TOTAL,
     TrialResult,
     collect_pairs,
     format_trial_report,
@@ -636,6 +649,11 @@ def collect_rcb_pairs(
     from an arm that was never launched. Three treatment deaths against zero control
     deaths is this trial's result whenever it happens, and it cannot be the one thing the
     ledger structurally cannot see.
+
+    The ``outcome=RCB_TOTAL`` below is what makes a champion-ratchet trial reportable on
+    this path. It is not an exemption the caller can ask for: the argument is fixed
+    here, in the function that builds the records, and ``TrialResult`` refuses any
+    measure that is not in ``trials.DECLARED_OUTCOMES``.
     """
     admitted: dict[tuple[str, str], ArmEvidence] = {}
     refusals: list[Refusal] = []
@@ -663,6 +681,7 @@ def collect_rcb_pairs(
         capability=capability,
         control_arm=control_arm,
         treatment_arm=treatment_arm,
+        outcome=RCB_TOTAL,
     )
 
     named: dict[str, list[str]] = {}
@@ -814,7 +833,7 @@ def format_rcb_trial_report(
     plan_digest: str = "",
     judge_model: str = "",
     planned_judge_model: str = "",
-    unit: str = "RCB points (0-100 total scale)",
+    unit: str | None = None,
 ) -> str:
     """The whole rendering: provenance, ledger, statistics, decomposition, dose.
 
@@ -823,6 +842,11 @@ def format_rcb_trial_report(
     it is not the number underneath. The p-value sits at the bottom under the floor it
     cannot beat, because at three pairs the floor is 0.25 and the conclusion has to be
     carried by the decomposition and by which channel each task can see.
+
+    ``unit`` was the benchmark's scale written out a second time, one function away
+    from the outcome that already names it. ``None`` now means "read it off
+    ``result.outcome``", so the scale on the mean-difference line and the instrument
+    printed above it cannot come apart.
     """
     result = trial.result
     lines: list[str] = [
