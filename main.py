@@ -922,6 +922,30 @@ def create_ideation_panel(args, *, backend_name: str, model: str, ui: TerminalUI
     )
 
 
+def create_cross_reviewer(args, *, ui: TerminalUI):
+    """Seat the cross-model veto, or None when this run must not make that call.
+
+    A fake operator is refused the auditor before `resolve_cross_reviewer` is reached,
+    not after. `--fake-operator` exists to walk the whole stage graph with no model
+    behind it, and `--cross-review` defaults to `auto`, which seats a live
+    `GeminiCrossReviewer` whenever `resolve_backend` finds a usable project — including
+    the `ANTHROPIC_VERTEX_PROJECT_ID` a Claude Code host already exports. Without this
+    branch, wiring the veto here would turn every fake run into one real Gemini call per
+    approval, and hand a live model the power to send a scripted draft back for
+    refinement. `ResearchManager` refuses the same pairing again, for callers that build
+    it directly.
+    """
+    if args.fake_operator:
+        if args.cross_review != "off":
+            ui.show_status(
+                "Cross-model review is off for this run: --fake-operator makes no backend "
+                "call, and a live auditor could veto a scripted draft.",
+                level="info",
+            )
+        return None
+    return resolve_cross_reviewer(args.cross_review, args.cross_review_model)
+
+
 def main() -> int:
     args = parse_args()
     repo_root = Path(__file__).resolve().parent
@@ -1055,6 +1079,7 @@ def main() -> int:
             archive_steer=bool(walk["archive_steer"]),
             archive=archive if walk["archive_steer"] else None,
             web_search_mode=web_search_mode,
+            cross_reviewer=create_cross_reviewer(args, ui=ui),
         )
         manager.ideation_panel = create_ideation_panel(
             args, backend_name=review_operator, model=review_model, ui=ui
@@ -1143,6 +1168,7 @@ def main() -> int:
         archive_steer=bool(walk["archive_steer"]),
         archive=archive if walk["archive_steer"] else None,
         web_search_mode=web_search_mode,
+        cross_reviewer=create_cross_reviewer(args, ui=ui),
     )
 
     manager.ideation_panel = create_ideation_panel(
