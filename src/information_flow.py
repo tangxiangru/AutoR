@@ -426,9 +426,12 @@ CHANNELS: tuple[Channel, ...] = (
             "- An assessment is a reading of the files, not a result. Confirm it against "
             "the repository before building on it, and say so in your stage summary when it "
             "turns out to be wrong.\n"
-            "- The stages the bootstrap accepted as already done are in `# Approved Memory` "
-            "with their evidence. The assessments listed here are the ones the run still "
-            "owes."
+            "- Every stage the scan assessed is listed, each marked either carried forward "
+            "— this run accepted that stage as already done — or still owed. The carried-"
+            "forward ones were also written into `# Approved Memory` as stage summaries, so "
+            "you may meet them twice; that is deliberate, because a revisit to a stage below "
+            "the re-entry point rewrites that section and drops them, and this block is then "
+            "the only copy left."
         ),
         rationale=(
             "`recommend_entry_stage` returns any stage from 01 to 08, so no fixed early set "
@@ -439,7 +442,13 @@ CHANNELS: tuple[Channel, ...] = (
             "`_run_project_bootstrap` after `_run_intake`, so no scan exists while intake is "
             "running and the block would be empty every time. On a run without "
             "`--project-root` the channel is silent at every stage, which is what an "
-            "unconditional edge to a conditional artifact should look like."
+            "unconditional edge to a conditional artifact should look like. This block does "
+            "overlap `# Approved Memory` — `_adopt_project_bootstrap_baseline` copies each "
+            "below-entry assessment into a stage summary — and the overlap is kept rather "
+            "than trimmed: `append_approved_stage_summary` retains only the entries numbered "
+            "below the stage it writes, so approving the `07_writing → 01_literature_survey` "
+            "revisit on a run that re-entered at 07 erases Stages 02-06 from memory, and the "
+            "scan's reading of them survives only here."
         ),
     ),
     Channel(

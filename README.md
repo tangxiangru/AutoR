@@ -586,7 +586,10 @@ Four narrowings, because the abstraction is not the point:
   return any stage from 01 to 08, so a fixed early set of readers would withhold the description of
   the repository from the run that re-enters latest — the one that has seen least of it. Stage 00 is
   the single exclusion, because `run()` scans the repository *after* intake has finished, so the
-  block is empty there every time.
+  block is empty there every time. This block deliberately overlaps `# Approved Memory`:
+  `_adopt_project_bootstrap_baseline` copies each below-entry assessment into a stage summary, but
+  `append_approved_stage_summary` keeps only the entries numbered below the stage it writes, so the
+  first approval below the re-entry point erases them and this block becomes the only copy.
 
 `dependency_edges()` returns every `(producer, consumer, channel key)` triple, so the information
 topology can be printed and diffed rather than reconstructed from a pile of `if` statements.

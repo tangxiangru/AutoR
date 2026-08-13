@@ -19,8 +19,15 @@ delivery over, so the camouflage was not a one-off.
 it is an AST check on calls rather than a text search on names, because a text
 search is the thing that was fooled.
 
-These tests hold the topology and the arrival of the numbers, not the wording
-of either block.
+**What the second block overlaps.** ``project_context`` and ``# Approved Memory``
+do carry the same readings, because ``_adopt_project_bootstrap_baseline`` writes
+each below-entry assessment into ``memory.md`` as a stage summary. The first
+version of this channel narrowed the assessment list to remove that overlap;
+``TheOverlapWithApprovedMemoryTest`` measures why that was wrong twice over, and
+the list is complete again.
+
+These tests hold the topology, the arrival of the numbers, and the two facts the
+overlap argument turns on — not the wording of either block.
 """
 
 from __future__ import annotations
@@ -37,6 +44,8 @@ from src.information_flow import ALL_STAGES, CHANNELS, ChannelContext, render_in
 from src.manager import ResearchManager
 from src.operator import ClaudeOperator
 from src.project_bootstrap import (
+    CARRIED_FORWARD_MARK,
+    STILL_OWED_MARK,
     CodeState,
     ExperimentState,
     ProjectBootstrapResult,
@@ -51,6 +60,8 @@ from src.terminal_ui import TerminalUI
 from src.utils import (
     INTAKE_STAGE,
     STAGES,
+    append_approved_stage_summary,
+    approved_stage_numbers,
     build_run_paths,
     ensure_run_config,
     ensure_run_layout,
@@ -371,8 +382,19 @@ class ProjectContextChannelTest(unittest.TestCase):
         self.assertIn("Project Bootstrap Summary", text)
 
 
-class NoSecondCopyOfTheSameReadingTest(unittest.TestCase):
-    """The carry-forward already puts the early assessments in approved memory."""
+class TheOverlapWithApprovedMemoryTest(unittest.TestCase):
+    """What this block and ``# Approved Memory`` each hold, measured.
+
+    An earlier version of this channel dropped every assessment below the
+    recommended entry stage, arguing that ``_adopt_project_bootstrap_baseline``
+    had already written those readings into ``memory.md`` so the block would
+    otherwise send them twice. The tests below are the two measurements that
+    retired that argument, and they are here so it cannot come back by assertion:
+    the summary section above the list already re-sends every assessment with its
+    evidence, and memory's copy is destroyed by the first approval at a stage
+    below the re-entry point. The overlap is real, it is not the list's fault,
+    and the list is the only place the carried/owed split is written down.
+    """
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -405,49 +427,133 @@ class NoSecondCopyOfTheSameReadingTest(unittest.TestCase):
         self.assertIn("## Project Stage Assessments", block)
         return block.split("## Project Stage Assessments", 1)[1]
 
-    def test_a_stage_the_bootstrap_carried_forward_is_not_listed_again(self) -> None:
-        self._adopt(entry_stage=5)
-        listed = self._assessment_list()
-        self.assertNotIn("Stage 01", listed)
-        self.assertNotIn("Stage 04", listed)
+    def test_the_summary_section_already_re_sends_every_carried_forward_reading(self) -> None:
+        """Measurement one: narrowing the list narrows the wrong copy.
 
-    def test_the_stages_the_run_still_owes_are_listed(self) -> None:
-        """Control: dropping the whole section would also pass the test above."""
+        ``save_project_bootstrap`` writes ``result.summary or
+        _generate_summary_text(result)`` and nothing in the tree assigns
+        ``ProjectBootstrapResult.summary``, so ``bootstrap_summary.md`` is always
+        the generated text — which lists every stage's status, confidence *and*
+        evidence. Whatever the list below it does, the block re-sends the
+        below-entry readings in full, with the same evidence strings memory got.
+        """
         self._adopt(entry_stage=5)
-        listed = self._assessment_list()
-        self.assertIn("Stage 05", listed)
-        self.assertIn("Stage 07", listed)
-
-    def test_what_the_block_drops_is_still_in_approved_memory(self) -> None:
-        """Narrowing must not lose the reading, only the second copy of it — and
-        the copy that survives is the longer one, carrying the evidence."""
-        self._adopt(entry_stage=5)
+        block = format_project_context_for_prompt(self.paths) or ""
+        summary_section = block.split("## Project Stage Assessments", 1)[0]
         memory = read_text(self.paths.memory)
-        self.assertIn("Bootstrap carry-forward status: complete (confidence: high).", memory)
-        self.assertIn("12 references in refs.bib", memory)
-        self.assertIn("15 code files", memory)
+        for evidence in ("12 references in refs.bib", "15 code files"):
+            with self.subTest(evidence=evidence):
+                self.assertIn(evidence, summary_section)
+                self.assertIn(evidence, memory)
 
-    def test_nothing_is_withheld_when_nothing_was_carried_forward(self) -> None:
-        """Entry Stage 01 makes ``_adopt_project_bootstrap_baseline`` a no-op, so
-        every assessment is still owed and every one of them is listed."""
-        save_project_bootstrap(self.paths, _scan_result(entry_stage=1))
+    def test_nothing_sets_the_summary_field_the_generated_text_falls_back_from(self) -> None:
+        """Control for the test above: if some caller wrote an agent-authored
+        summary, ``bootstrap_summary.md`` need not list the assessments and the
+        overlap would be conditional rather than certain."""
+        constructed = 0
+        assigns: list[str] = []
+        for path in sorted(SRC.rglob("*.py")):
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                where = f"{path.relative_to(REPO_ROOT)}:{getattr(node, 'lineno', 0)}"
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "ProjectBootstrapResult"
+                ):
+                    constructed += 1
+                    if any(kw.arg == "summary" for kw in node.keywords):
+                        assigns.append(f"{where} passes summary=")
+                if isinstance(node, ast.Assign) and any(
+                    isinstance(t, ast.Attribute) and t.attr == "summary"
+                    for t in node.targets
+                ):
+                    assigns.append(f"{where} assigns .summary")
+        self.assertGreater(constructed, 0, "the scan found no construction site at all")
+        self.assertEqual(assigns, [], "\n".join(assigns))
+
+    def test_an_approval_below_the_entry_stage_erases_memorys_copy(self) -> None:
+        """Measurement two: memory's copy is not durable.
+
+        ``07_writing → 01_literature_survey`` is a ``guard="always"`` revisit
+        edge, and ``recommend_entry_stage`` can put the walk at Stage 07. Once
+        that Stage 01 is approved, ``append_approved_stage_summary`` keeps only
+        the entries numbered below 1 — so Stages 02-06 leave memory and the scan's
+        reading of them exists nowhere but in this block.
+        """
+        self.assertIn(
+            ("07_writing", "01_literature_survey"),
+            {(edge.source, edge.target) for edge in REVISIT_EDGES},
+        )
+        self._adopt(entry_stage=7)
+        self.assertEqual(
+            approved_stage_numbers(read_text(self.paths.memory)), {1, 2, 3, 4, 5, 6}
+        )
+
+        append_approved_stage_summary(
+            self.paths.memory, STAGE["01_literature_survey"], "# Stage 01: redone\n"
+        )
+        memory = read_text(self.paths.memory)
+        self.assertEqual(approved_stage_numbers(memory), {1})
+        self.assertNotIn("15 code files", memory)
+        self.assertIn("15 code files", format_project_context_for_prompt(self.paths) or "")
+
+    def test_every_assessment_is_listed_whatever_the_entry_stage(self) -> None:
+        """The consequence of both measurements: no assessment is withheld."""
+        self._adopt(entry_stage=5)
         listed = self._assessment_list()
         for number in ("Stage 01", "Stage 04", "Stage 05", "Stage 07"):
             with self.subTest(stage=number):
                 self.assertIn(number, listed)
 
+    def test_each_line_says_whether_this_run_accepted_that_stage_or_owes_it(self) -> None:
+        """What the list adds over the summary above it. The status is duplicated
+        on purpose; the carried/owed split is written down here and nowhere else —
+        ``bootstrap_summary.md`` predates the entry-stage decision, and memory
+        holds it only as one carry-forward sentence per stage."""
+        self._adopt(entry_stage=5)
+        listed = self._assessment_list()
+        by_stage = {
+            line.split("(", 1)[0].strip(" -*"): line
+            for line in listed.splitlines()
+            if line.startswith("- **Stage")
+        }
+        self.assertEqual(sorted(by_stage), ["Stage 01", "Stage 04", "Stage 05", "Stage 07"])
+        self.assertIn(CARRIED_FORWARD_MARK, by_stage["Stage 01"])
+        self.assertIn(CARRIED_FORWARD_MARK, by_stage["Stage 04"])
+        self.assertIn(STILL_OWED_MARK, by_stage["Stage 05"])
+        self.assertIn(STILL_OWED_MARK, by_stage["Stage 07"])
+
+    def test_with_no_entry_stage_recorded_every_stage_is_owed(self) -> None:
+        """``load_recommended_entry_stage`` returns ``None`` when the scan metadata
+        is missing or unparseable. Nothing was carried forward in that case, so
+        marking a stage accepted would tell the run it may skip work it owes."""
+        save_project_bootstrap(self.paths, _scan_result(entry_stage=5))
+        (self.paths.bootstrap_dir / "scan_metadata.json").unlink()
+        listed = self._assessment_list()
+        self.assertNotIn(CARRIED_FORWARD_MARK, listed)
+        self.assertEqual(listed.count(STILL_OWED_MARK), len(_assessments()))
+
     def test_the_prompt_the_stage_actually_receives_carries_both_halves(self) -> None:
-        """End to end through ``_build_stage_prompt``: the surviving assessment in
-        the channel block, the carried-forward one in ``# Approved Memory``."""
+        """End to end through ``_build_stage_prompt``: the marked list in the
+        channel block, the carry-forward sentence in ``# Approved Memory``."""
         self._adopt(entry_stage=5)
         prompt = self.manager._build_stage_prompt(  # noqa: SLF001
             self.paths, STAGE["05_experimentation"], None, False
         )
         self.assertIn("# Existing Project Repository (from the project bootstrap)", prompt)
         self.assertIn("Bootstrap carry-forward status:", prompt)
-        self.assertIn(
-            "Stage 05 (Experimentation)", prompt.split("Existing Project Repository", 1)[1]
-        )
+        block = prompt.split("Existing Project Repository", 1)[1]
+        self.assertIn("Stage 05 (Experimentation)", block)
+        self.assertIn(CARRIED_FORWARD_MARK, block)
+
+    def test_the_preface_does_not_deny_the_overlap_it_creates(self) -> None:
+        """The rationale and preface are the part of this that a reviewer reads.
+        Both were wrong before, and a sentence saying the carried-forward stages
+        are *only* in memory is the specific claim the two measurements refuted."""
+        channel = BY_KEY["project_context"]
+        self.assertIn("only copy left", channel.preface)
+        self.assertIn("append_approved_stage_summary", channel.rationale)
+        self.assertNotIn("the ones the run still owes", channel.preface)
 
 
 if __name__ == "__main__":

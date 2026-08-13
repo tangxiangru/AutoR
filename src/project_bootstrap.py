@@ -766,21 +766,51 @@ def format_project_scan_for_prompt(result: ProjectBootstrapResult) -> str:
     return "\n".join(parts)
 
 
+#: Written after each assessment line, saying what this run did with that reading
+#: rather than restating the reading. ``_adopt_project_bootstrap_baseline`` accepts
+#: every stage below the recommended entry stage as already done and writes it an
+#: approved stage summary; the entry stage and everything after it are the run's
+#: own work. The distinction is not in ``bootstrap_summary.md`` and not in any one
+#: place in ``memory.md``, so this is the only line in the block that the summary
+#: above it does not already carry.
+CARRIED_FORWARD_MARK = "carried forward: this run accepted it and did not redo it"
+STILL_OWED_MARK = "still owed: this run has to do this stage itself"
+
+
 def format_project_context_for_prompt(paths: RunPaths) -> str | None:
     """Format the project bootstrap context for injection into stage prompts.
 
     Delivered by the ``project_context`` channel in ``src.information_flow``.
 
-    The stages below the recommended entry stage are left out of the assessment
-    list on purpose. ``_adopt_project_bootstrap_baseline`` writes each of them a
-    stage summary carrying that stage's status, confidence and evidence and
-    appends it to run memory, so those readings already arrive in every later
-    prompt under ``# Approved Memory``. Listing them again here would send the
-    same reading of the same repository twice, and the copy that this block
-    would add is the shorter one: it drops the evidence and keeps the verdict.
-    What is left is the half memory does not carry — the stages the run still
-    owes. When no entry stage was recorded, nothing was carried forward and
-    every assessment is still owed, so the same rule lists all of them.
+    **Every assessment is listed, and the overlap with approved memory is real.**
+    An earlier version of this function dropped the assessments below the
+    recommended entry stage, on the argument that
+    ``_adopt_project_bootstrap_baseline`` had already written each of them into
+    ``memory.md`` as an approved stage summary, so listing them here would send
+    the same reading twice. Two measurements say that argument does not hold:
+
+    1. It narrows the wrong copy. ``save_project_bootstrap`` writes
+       ``bootstrap_summary.md`` as ``result.summary or _generate_summary_text``,
+       and no caller sets ``ProjectBootstrapResult.summary`` — ``scan_project``
+       leaves it ``""`` and nothing writes it afterwards. So the summary is
+       always the generated one, and the generated one lists *every* stage's
+       status, confidence and evidence. Dropping a stage from the list below
+       removed a one-line restatement while the block above it kept re-sending
+       the same reading in full, evidence strings included.
+    2. Memory's copy is not durable. ``append_approved_stage_summary`` keeps only
+       the entries numbered below the stage being written, so any approval at a
+       stage below the re-entry point erases the carry-forward entries above it.
+       Take ``07_writing → 01_literature_survey`` (a ``guard="always"`` revisit
+       edge) on a run that re-entered at Stage 07: approving that Stage 01 leaves
+       memory holding Stage 01 alone, and the readings for Stages 02-06 exist
+       nowhere but here. A block that had narrowed them away would have deleted
+       the last copy.
+
+    What the list adds over the summary above it is therefore not the status —
+    that is duplicated on purpose — but ``CARRIED_FORWARD_MARK`` versus
+    ``STILL_OWED_MARK``: which stages this run accepted from the scan and which
+    it still owes. With no entry stage recorded nothing was carried forward, so
+    every stage is marked owed.
     """
     if not project_bootstrap_exists(paths):
         return None
@@ -793,14 +823,13 @@ def format_project_context_for_prompt(paths: RunPaths) -> str | None:
 
     entry_stage = load_recommended_entry_stage(paths)
     assessments = load_stage_assessments(paths) or []
-    still_owed = [
-        a for a in assessments if entry_stage is None or a.stage_number >= entry_stage
-    ]
-    if still_owed:
-        lines = ["## Project Stage Assessments (stages this run still owes)"]
-        for a in still_owed:
+    if assessments:
+        lines = ["## Project Stage Assessments"]
+        for a in assessments:
+            carried = entry_stage is not None and a.stage_number < entry_stage
+            mark = CARRIED_FORWARD_MARK if carried else STILL_OWED_MARK
             lines.append(f"- **Stage {a.stage_number:02d} ({a.stage_name}):** "
-                        f"{a.status} (confidence: {a.confidence})")
+                        f"{a.status} (confidence: {a.confidence}) — {mark}")
         parts.append("\n".join(lines))
 
     return "\n\n".join(parts) if parts else None
