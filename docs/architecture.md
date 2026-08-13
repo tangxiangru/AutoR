@@ -23,7 +23,7 @@ survives a crash because it was never anywhere else.
 **No conversation crosses a stage boundary.** Stage 05 cannot see Stage 03's
 session. What crosses is `memory.md` — the approved stage summaries — plus
 `handoff/<slug>.md`, the same summaries cut down to Objective / Key Results /
-Files Produced (`write_stage_handoff`, `src/utils.py`), plus sixteen typed
+Files Produced (`write_stage_handoff`, `src/utils.py`), plus eighteen typed
 channels in [`src/information_flow.py`](../src/information_flow.py), each of
 which declares which stages read it. Memory and the handoff are the free text;
 everything else that crosses a boundary is a typed channel or a JSON artifact.
@@ -154,7 +154,7 @@ touching a verdict — see **[framework.md](framework.md)**.
 | --- | --- |
 | [`src/utils.py`](../src/utils.py) | The contract layer. `STAGES`, `RunPaths`/`build_run_paths`, `REQUIRED_STAGE_HEADINGS`, `FIXED_STAGE_OPTIONS`, prompt assembly, `validate_stage_markdown`, `validate_stage_artifacts`, memory rendering, handoff read/write, venue resolution, `run_config.json` I/O, and every default the CLI overrides. |
 | [`src/preregistration.py`](../src/preregistration.py) | Freezes and hashes the hypothesis set before results exist, adjudicates every frozen hypothesis at Stage 06 against a named result artifact, and traces every manuscript claim back to a supported hypothesis at Stage 07. A post-freeze change is legal only as an `amend_preregistration` amendment carrying the previous digest. |
-| [`src/experimental_protocol.py`](../src/experimental_protocol.py) | Declares the primary metric, the seed count and each baseline's `why_competent` and `tuning_budget` before the experiments run. `MIN_SEEDS_FOR_A_VERDICT = 2` refuses a supported/refuted verdict resting on one run unless the run says why one run settles it. |
+| [`src/experimental_protocol.py`](../src/experimental_protocol.py) | Declares the primary metric, the seed count and each baseline's `why_competent` and `tuning_budget` before the experiments run. `MIN_SEEDS_FOR_A_VERDICT = 2` refuses a supported/refuted verdict resting on one run unless the run says why one run settles it. The declared values reach Stages 04-07 through the `experimental_protocol` channel: until they did, the protocol was a standard the run was measured against and never shown. |
 | [`src/validity_review.py`](../src/validity_review.py) | The adversarial pass after Stages 05 and 06 (`REVIEWED_STAGE_NUMBERS`). Asks why the result is wrong across ten named failure modes rather than whether the stage is complete, and requires the next stage to answer every finding. Has no authority to approve or reject. |
 | [`src/manifest.py`](../src/manifest.py) | `run_manifest.json`: stage lifecycle, status transitions, rollback and stale marking, memory rebuild from approved entries. |
 | [`src/artifact_index.py`](../src/artifact_index.py) | Scans `data/`, `results/`, `figures/`; infers or reads declared schemas; writes `artifact_index.json`. |
@@ -204,11 +204,11 @@ for the argument.
 
 | Module | Responsibility |
 | --- | --- |
-| [`src/information_flow.py`](../src/information_flow.py) | Sixteen typed channels (`CHANNELS`). Each declares `produced_by`, a `consumed_by` set of real stage slugs, and a rationale for every narrowing. `render_inbound()` composes a stage's context per consumer; `dependency_edges()` prints the producer→consumer topology. |
+| [`src/information_flow.py`](../src/information_flow.py) | Eighteen typed channels (`CHANNELS`). Each declares `produced_by`, a `consumed_by` set of real stage slugs, and a rationale for every narrowing. `render_inbound()` composes a stage's context per consumer; `dependency_edges()` prints the producer→consumer topology. |
 | [`src/prompt_fragments.py`](../src/prompt_fragments.py) | The rules every stage prompt shares, held once. `compose_stage_template` orders them: the stage's own instructions, then the output-format rules that constrain them, then `RUN_SAFETY`. |
 | [`src/intake.py`](../src/intake.py) | Stage 00: clarification-question parsing, resource classification and ingestion, `intake_context.json`. Runs before the graph walk begins. |
 | [`src/bootstrap.py`](../src/bootstrap.py) | `--paper-corpus`: scans your prior papers (PDF/LaTeX/BibTeX) into a researcher profile, citation neighborhood, and style profile. |
-| [`src/project_bootstrap.py`](../src/project_bootstrap.py) | `--project-root`: scans an existing repository, assesses per-stage completion, recommends a re-entry stage. |
+| [`src/project_bootstrap.py`](../src/project_bootstrap.py) | `--project-root`: scans an existing repository, assesses per-stage completion, recommends a re-entry stage. The scan reaches every stage the run can be dropped into through the `project_context` channel, minus the assessments the carry-forward already wrote into `memory.md`. |
 | [`src/prompts/`](../src/prompts) | One markdown template per stage, plus intake and bootstrap templates. Editing these changes agent behaviour with no code change. |
 | [`src/skills/`](../src/skills) | Agent skills, installed into each run's `.claude/skills/` by [`src/run_skills.py`](../src/run_skills.py). Pull-based counterpart to the templates: loaded only when the model judges one relevant. The install path is load-bearing — the operator runs with `cwd=run_root`, so skills left in the AutoR checkout are never discovered. |
 

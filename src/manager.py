@@ -11,7 +11,6 @@ from .bootstrap import (
     bootstrap_profile_exists,
     format_corpus_for_prompt,
     format_corpus_stats_for_log,
-    format_profile_for_prompt,
     missing_bootstrap_profile_artifacts,
     scan_corpus,
 )
@@ -27,7 +26,10 @@ from .obligations import (
 )
 from .review_policy import load_policy, policy_summary, record_correction
 from .project_bootstrap import (
-    format_project_context_for_prompt,
+    # `format_project_context_for_prompt` is deliberately absent: the
+    # `project_context` channel delivers it. Importing it here and never calling
+    # it is what made a grep for the symbol answer "wired" while no prompt
+    # carried the block.
     format_project_scan_for_prompt,
     format_scan_stats_for_log,
     load_recommended_entry_stage,
@@ -49,8 +51,8 @@ from .intake import (
     parse_intake_clarification_question,
     save_intake_context
 )
-from .artifact_index import format_artifact_index_for_prompt, write_artifact_index
-from .experiment_manifest import format_experiment_manifest_for_prompt, write_experiment_manifest
+from .artifact_index import write_artifact_index
+from .experiment_manifest import write_experiment_manifest
 from .hypothesis_manifest import write_hypothesis_manifest
 from .information_flow import CHANNELS, ChannelContext, render_inbound
 from .prompt_fragments import compose_stage_template
@@ -69,15 +71,12 @@ from .research_rounds import (
     unreopened_abandonment,
     read_round_decision,
     format_round_status,
-    format_rounds_for_prompt,
     load_rounds,
     record_round,
     resume_stage_slug_for,
 )
 from .preregistration import (
     amend_preregistration,
-    format_outcomes_for_prompt,
-    format_preregistration_for_prompt,
     freeze_preregistration,
     load_preregistration,
 )
@@ -157,7 +156,6 @@ from .ideation_panel import (
 )
 from .writing_manifest import (
     build_writing_manifest,
-    format_manifest_for_prompt,
     generate_layout_review,
     generate_report_review,
 )
@@ -187,7 +185,6 @@ from .utils import (
     ensure_run_config,
     ensure_run_layout,
     format_stage_template,
-    format_venue_for_prompt,
     filtered_approved_memory,
     initialize_memory,
     initialize_run_config,
