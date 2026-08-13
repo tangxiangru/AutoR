@@ -555,7 +555,9 @@ the digest the file states for them, that digest against the stamped one, and th
 amendment ledger. Each catches a rewrite the other two miss: an edited statement, an edited
 statement with the header recomputed, and a deleted amendment row. Deleting the frozen file is not a
 way around them either — `freeze_preregistration` restores the stamped record rather than deriving a
-fresh one, so a re-freeze cannot hand the run a post-results date and an empty ledger, and the
+fresh one, and deleting *both* copies is refused rather than re-derived, because the first freeze is
+witnessed in the run log. So a re-freeze cannot hand the run a post-results date and an empty
+ledger, and the
 disagreement it found is appended to the stamp's `repairs` list before the copy goes back.
 
 The complete gate, including every JSON schema that is parsed rather than merely counted, is in
@@ -953,11 +955,14 @@ code that would have to change.
 - **The preregistration stamp is outside the tree the agent is told to write in, not outside the
   tree it can write to.** `preregistration_stamp_path` puts it under the run root, which the operator
   is invoked at; no prompt template names it and nothing renders it into a prompt, so a rewrite of
-  the frozen set has to be a matching rewrite of two files in two trees rather than an edit to one.
-  That raises the cost, it does not close the door. And a run that reaches Stage 05 with no stamp —
-  resumed from an AutoR that predates it — is adopted rather than refused, because refusing it would
-  fail a run for a reason the run cannot fix: until the next `freeze_preregistration` adopts the
-  file, only the comparison that needs no stamp is running.
+  the frozen set has to be a matching rewrite of two files in two trees, plus a truncation of the
+  append-only run log that witnesses the first freeze, rather than an edit to one. That raises the
+  cost and makes the cheapest remaining route a visible one; it does not close the door, and nothing
+  under the run root can, because that is the directory the operator is invoked in with
+  `bypassPermissions`. A run reaching Stage 05 with no stamp is no longer treated as a legacy run:
+  the population that justified the leniency is empty, since the freeze runs before every attempt
+  from Stage 05 on and every validation is post-attempt, so the only way to arrive without a stamp
+  is to have deleted it.
 - **Standing rules and obligations never reach a panel seat.** Both are injected only into the solo
   reviewer's prompt. Under `--review-panel`, no seat is shown the accumulated rules and no seat is
   asked whether an inherited obligation was met — and because neither the seat nor the chair prompt

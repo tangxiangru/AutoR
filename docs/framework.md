@@ -140,12 +140,27 @@ compares three things — the hypotheses against the digest the file states for 
 against the stamped one, and the length of the amendment ledger. `freeze_preregistration` runs
 before every attempt from Stage 05 on and is the repair: a workspace copy that disagrees, or that is
 gone, is written over from the stamp, with what disagreed appended to the stamp's `repairs` list.
-That is also what closed the *reset*, which was the wider hole of the two. The freeze used to be
+That is also what narrowed the *reset*, which was the wider hole of the two. The freeze used to be
 re-derived from the current manifest whenever the file was absent, so deleting it and rewriting
 Stage 02 produced a clean, unamended preregistration for a different hypothesis set, dated after the
-results — with no residue outside a log line no validator reads. A re-freeze now restores rather
-than re-derives, and the manifest rewrite is left where it belongs, as a change with no amendment on
-record.
+results. A re-freeze restores rather than re-derives, and the manifest rewrite is left where it
+belongs, as a change with no amendment on record.
+
+The stamp alone did not close it. Deleting *both* the stamp and the workspace copy fell through to
+the first-freeze branch and reproduced the reset verbatim — measured against the commit that added
+the stamp: a different hypothesis set, `amendments: []`, a post-results `frozen_at`, and
+`validate_preregistration` clean. One extra `rm`, in the directory the operator is invoked in. So
+the first freeze is now witnessed in the run log, which is append-only and written by the manager,
+and a run whose log says it already froze will not derive a replacement — the gates refuse the stage
+instead, and the recovery text names the rollback to Stage 02 that is the legitimate way to change a
+hypothesis set.
+
+**The honest boundary.** This is not a claim that the reset is unreachable. The operator runs with
+`bypassPermissions` at `cwd=run_root`, so every artifact the check reads is writable by the party
+the check constrains, and a reset that also truncates the log still gets through. What the third
+witness buys is that the cheapest escape stops being cheap and stops being silent: a missing file is
+invisible, a truncated append-only log is not. Closing it properly needs a store outside the run
+tree, which is a different change and is not made here.
 
 *Cost:* a run that discovers something better at Stage 06 has to file an amendment rather than just
 change the plan.
