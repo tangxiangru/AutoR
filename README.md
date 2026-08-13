@@ -94,9 +94,9 @@ resumable, with redo and rollback.
 ### The one thing the docs will not claim
 
 Approved stage summaries are the only *free-text* cross-stage memory. Every other cross-stage edge is
-a typed artifact with a declared reader: **sixteen channels** in
+a typed artifact with a declared reader: **eighteen typed channels** in
 [`information_flow.py`](src/information_flow.py) each name the exact stage slugs that consume them,
-and the eight produced inside the walk name their producing stage as well. `obligations.json` and
+and the nine channels produced inside the walk name their producing stage as well. `obligations.json` and
 `review_policy.json` cross stages without touching a summary at all — both only behind an agent
 approval gate.
 
@@ -125,7 +125,7 @@ naming them.
 | Conditional terminal edges | `TERMINAL_EDGES` | 1 |
 | Edges in the default (`adaptive`) graph | `StageGraph.adaptive()` | 22 |
 | Edges in `--stage-graph linear` | `StageGraph.linear()` | 9 |
-| Typed information channels | `CHANNELS`, [src/information_flow.py](src/information_flow.py) | 16 |
+| Typed information channels | `CHANNELS`, [src/information_flow.py](src/information_flow.py) | 18 |
 | `validate_*` functions the stage gate calls | `validate_stage_artifacts`, [src/utils.py](src/utils.py) | 17 |
 | Required stage-summary headings | `REQUIRED_STAGE_HEADINGS` | 7 |
 | Rubric criteria (weighted, backend-free) | `CRITERIA`, [src/rubric.py](src/rubric.py) | 8 |
@@ -566,14 +566,15 @@ The complete gate, including every JSON schema that is parsed rather than merely
 ## Execution model
 
 Context is composed per consumer, not per availability. A stage's inbound block is built by
-`render_inbound(ChannelContext(...), CHANNELS)` from the **sixteen** typed channels in
+`render_inbound(ChannelContext(...), CHANNELS)` from the **eighteen** typed channels in
 [src/information_flow.py](src/information_flow.py). Each channel declares `produced_by`, a
 `consumed_by` set of real stage slugs, and a `rationale`;
 `test_every_narrowing_is_argued_for` ([tests/test_information_flow.py](tests/test_information_flow.py))
 fails a channel that withholds itself from a stage without saying why. Withholding has to be argued
 for, not just done.
 
-Three narrowings, because the abstraction is not the point:
+Four narrowings worth knowing, because the abstraction is not the point. Seventeen channels narrow;
+these four are the ones whose reason is not readable off the key:
 
 - the **artifact index** skips Stages 00-02 — they produce no data, results or figures, so the index
   is empty noise there
@@ -582,12 +583,20 @@ Three narrowings, because the abstraction is not the point:
   approval supersedes them. Before that edge was typed, the same H1 went into every prompt from
   Stage 05 on twice — one copy labelled editable, sitting next to the frozen one at exactly the
   stages where the freeze is the point.
+- the **project bootstrap** narrows by exactly one stage and no more. `recommend_entry_stage` can
+  return any stage from 01 to 08, so a fixed early set of readers would withhold the description of
+  the repository from the run that re-enters latest — the one that has seen least of it. Stage 00 is
+  the single exclusion, because `run()` scans the repository *after* intake has finished, so the
+  block is empty there every time. This block deliberately overlaps `# Approved Memory`:
+  `_adopt_project_bootstrap_baseline` copies each below-entry assessment into a stage summary, but
+  `append_approved_stage_summary` keeps only the entries numbered below the stage it writes, so the
+  first approval below the re-entry point erases them and this block becomes the only copy.
 
 `dependency_edges()` returns every `(producer, consumer, channel key)` triple, so the information
 topology can be printed and diffed rather than reconstructed from a pile of `if` statements.
 `_record_inbound_channels` writes the delivered channel keys per stage into the run log.
 
-Honest scope: sixteen blocks are typed. Six more — `obligations_context`, `intake_context_text`,
+Honest scope: eighteen blocks are typed. Six more — `obligations_context`, `intake_context_text`,
 `web_search_context`, `approved_memory`, `handoff_context`, and the `# What the Task Asks For` block
 that `build_prompt` composes inline from
 [`format_deliverables_for_prompt`](src/deliverables.py) — are still delivered by `build_prompt`
@@ -707,7 +716,7 @@ Full file-by-file reference: **[docs/run-artifacts.md](docs/run-artifacts.md)**.
 ```mermaid
 flowchart LR
     P[rigor.py · effort.py<br/>policy: what machinery runs] --> M
-    C[information_flow.py<br/>16 typed channels] --> M
+    C[information_flow.py<br/>18 typed channels] --> M
     M[manager.py<br/>walks the stage graph] --> W[walk<br/>stage_graph · router]
     M --> G[gates<br/>utils · preregistration · experimental_protocol<br/>report_plan · deliverables · validity_review]
     M --> I[improvement<br/>rubric · evolution · pareto]
@@ -735,7 +744,7 @@ flowchart LR
 | [src/writing_manifest.py](src/writing_manifest.py) | The Stage 07 inventory plus the AutoR-owned triage artifact for each output format |
 | [src/approval_agent.py](src/approval_agent.py) | The solo approval gate, its six-choice vocabulary and its unreadable-verdict fallback |
 | [src/preregistration.py](src/preregistration.py) | Freeze, amend, adjudicate, trace |
-| [src/information_flow.py](src/information_flow.py) | Sixteen typed information channels, each with declared readers and a written rationale |
+| [src/information_flow.py](src/information_flow.py) | Eighteen typed information channels, each with declared readers and a written rationale |
 | [src/router.py](src/router.py) | The agent's choice among admissible moves; an off-menu choice is refused and logged |
 | [src/validity_review.py](src/validity_review.py) | The adversarial pass after Stages 05 and 06, and the response gate that follows it |
 | [src/research_rounds.py](src/research_rounds.py) | Stages 03-06 as a repeatable round, bounded by `--max-rounds` |

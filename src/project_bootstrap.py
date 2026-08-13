@@ -766,8 +766,59 @@ def format_project_scan_for_prompt(result: ProjectBootstrapResult) -> str:
     return "\n".join(parts)
 
 
+#: Written after each assessment line, saying what this run did with that reading
+#: rather than restating the reading. ``_adopt_project_bootstrap_baseline`` accepts
+#: every stage below the recommended entry stage as already done and writes it an
+#: approved stage summary; the entry stage and everything after it are the run's
+#: own work. The distinction cannot be in ``bootstrap_summary.md``: that file is
+#: written by ``save_project_bootstrap`` before the operator's turn, and the entry
+#: stage is decided and stored by ``save_recommended_entry_stage`` after it. Nor is
+#: it in any one place in ``memory.md``. This mark is where it is written down.
+CARRIED_FORWARD_MARK = "carried forward: this run accepted it and did not redo it"
+STILL_OWED_MARK = "still owed: this run has to do this stage itself"
+
+
 def format_project_context_for_prompt(paths: RunPaths) -> str | None:
-    """Format the project bootstrap context for injection into stage prompts."""
+    """Format the project bootstrap context for injection into stage prompts.
+
+    Delivered by the ``project_context`` channel in ``src.information_flow``.
+
+    **Every assessment is listed, and the overlap with approved memory is real.**
+    An earlier version of this function dropped the assessments below the
+    recommended entry stage, on the argument that
+    ``_adopt_project_bootstrap_baseline`` had already written each of them into
+    ``memory.md`` as an approved stage summary, so listing them here would send
+    the same reading twice. The measurement that retired that argument is that
+    memory's copy is not durable: ``append_approved_stage_summary`` keeps only
+    the entries numbered below the stage being written, so any approval at a
+    stage below the re-entry point erases the carry-forward entries above it.
+    Take ``07_writing → 01_literature_survey`` (a ``guard="always"`` revisit
+    edge) on a run that re-entered at Stage 07: approving that Stage 01 leaves
+    memory holding Stage 01 alone, and the readings for Stages 02-06 exist
+    nowhere but here. A block that had narrowed them away would have deleted the
+    last copy of what the run was told about the repository it is working in.
+    ``test_an_approval_below_the_entry_stage_erases_memorys_copy`` runs that path.
+
+    **The summary section above the list is not a second copy to fall back on.**
+    ``save_project_bootstrap`` writes ``bootstrap_summary.md`` once, from
+    ``result.summary or _generate_summary_text(result)``, before the bootstrap
+    operator's turn; ``src/prompts/project_bootstrap.md`` then instructs the agent
+    to write ``{{WORKSPACE_BOOTSTRAP_DIR}}/bootstrap_summary.md`` as prose, and
+    that placeholder resolves to ``paths.bootstrap_dir`` — the same path
+    ``load_project_bootstrap_summary`` reads, in the directory the operator runs
+    against. So the section this function puts above the list is agent-owned from
+    the first approved bootstrap onward and may contain no per-stage line at all.
+    That is not an argument against the list; it is the reason the list has to be
+    complete, because it is the only part of this block whose per-stage coverage
+    is decided by code. ``test_the_summary_above_the_list_is_agent_owned``
+    measures it by overwriting the file the template names.
+
+    What the list adds over the summary above it is therefore ``CARRIED_FORWARD_MARK``
+    versus ``STILL_OWED_MARK`` — which stages this run accepted from the scan and
+    which it still owes — plus, whenever the agent has rewritten the summary, the
+    per-stage readings themselves. With no entry stage recorded nothing was carried
+    forward, so every stage is marked owed.
+    """
     if not project_bootstrap_exists(paths):
         return None
 
@@ -777,12 +828,15 @@ def format_project_context_for_prompt(paths: RunPaths) -> str | None:
     if summary:
         parts.append(f"## Project Bootstrap Summary\n\n{summary}")
 
-    assessments = load_stage_assessments(paths)
+    entry_stage = load_recommended_entry_stage(paths)
+    assessments = load_stage_assessments(paths) or []
     if assessments:
         lines = ["## Project Stage Assessments"]
         for a in assessments:
+            carried = entry_stage is not None and a.stage_number < entry_stage
+            mark = CARRIED_FORWARD_MARK if carried else STILL_OWED_MARK
             lines.append(f"- **Stage {a.stage_number:02d} ({a.stage_name}):** "
-                        f"{a.status} (confidence: {a.confidence})")
+                        f"{a.status} (confidence: {a.confidence}) — {mark}")
         parts.append("\n".join(lines))
 
     return "\n\n".join(parts) if parts else None

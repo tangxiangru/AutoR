@@ -13,6 +13,27 @@ deliberately narrow — a fixed list of (phrase, live value) pairs — because a
 "find every number in the docs" check would be all false positives. Adding a row here
 is how a new claim gets protected.
 
+**A count written in digits is checked against the same symbol.** The word scan
+alone let two README sites keep saying `16` through the commit that took
+``CHANNELS`` to 18, and the sweep meant to catch that was ``grep -rni sixteen``,
+which cannot match a digit. One of the two was the architecture diagram.
+
+**A row of the README's "counts you can re-derive" table is re-derived, or exempt
+by name.** Its values are digits in the cell *after* the noun, so neither numeral
+scan can see them at all. Every row is in ``RE_DERIVABLE_TABLE_ROWS`` or in
+``UNDERIVABLE_TABLE_ROWS`` with a reason, so deleting a row from the checked list
+fails rather than quietly retiring the claim.
+
+``COUNTED_NOUNS`` has no such coverage rule and deleting a row from it is a
+surviving mutation. That is deliberate rather than missed: its population is
+prose. Scanning the four tracked docs for every spelled-out numeral before a
+phrase containing "channel" or "edge" returned forty-eight phrases when this note
+was written, and thirty-one of them were ordinary sentences no symbol counts —
+"one edge out of each node", "eighteen edges to twenty-two", "Six of the eight
+forward edges". A coverage rule there would be an exemption list longer than the
+check, which is the same reason the scan is a fixed list of phrases and not a
+search for numbers.
+
 **A doc may not cite a line number in this repo's own source.** Of the forty-four
 `file.py:NNN` references the docs carried before this test existed, twelve of twelve
 spot-checked pointed at the wrong line, and two of the survivors were right by
@@ -29,10 +50,10 @@ import re
 import unittest
 from pathlib import Path
 
-from src.information_flow import CHANNELS
+from src.information_flow import ALL_STAGES, CHANNELS
 from src.rubric import CRITERIA
-from src.stage_graph import _ADVANCE_GUARDS, REVISIT_EDGES, StageGraph
-from src.utils import STAGES
+from src.stage_graph import _ADVANCE_GUARDS, REVISIT_EDGES, TERMINAL_EDGES, StageGraph
+from src.utils import REQUIRED_STAGE_HEADINGS, STAGES
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -57,12 +78,31 @@ def _forward_edges() -> int:
     return sum(1 for edge in StageGraph.adaptive().edges if edge.kind != "revisit")
 
 
+def _channels_with_a_producer() -> int:
+    """Channels whose information is made by a stage rather than by the run config."""
+    return sum(1 for channel in CHANNELS if channel.produced_by is not None)
+
+
+def _channels_that_narrow() -> int:
+    """Channels that withhold themselves from at least one stage.
+
+    The README lists four narrowings by name and this is why that list is not a
+    count: almost every channel narrows, and the four are the ones whose reason is
+    not readable off the key.
+    """
+    return sum(1 for channel in CHANNELS if set(channel.consumed_by) != set(ALL_STAGES))
+
+
 #: ``(noun, live value)``. Every spelled-out numeral immediately before *noun* in a
 #: tracked document must equal *value*. The noun is matched case-insensitively and
 #: must be the whole phrase, so "typed channels" does not also catch "channels".
 COUNTED_NOUNS: tuple[tuple[str, int], ...] = (
     ("typed channels", len(CHANNELS)),
     ("typed information channels", len(CHANNELS)),
+    ("typed context channels", len(CHANNELS)),
+    ("blocks are typed", len(CHANNELS)),
+    ("channels produced inside the walk", _channels_with_a_producer()),
+    ("channels narrow", _channels_that_narrow()),
     ("backward edges", len(REVISIT_EDGES)),
     ("backward moves", len(REVISIT_EDGES)),
     ("dotted edges", len(REVISIT_EDGES)),
@@ -71,7 +111,83 @@ COUNTED_NOUNS: tuple[tuple[str, int], ...] = (
     ("guarded forward edges", len(_ADVANCE_GUARDS)),
 )
 
-TRACKED_DOCS = ("README.md", "docs/architecture.md", "docs/self-improvement.md")
+#: Three documents state the channel count and ``docs/framework.md`` states it
+#: three times, but the framework was outside this scan: two of the three could
+#: not go stale and the third could, and nothing said which was which. It is
+#: tracked now, and the phrase it uses that the others do not — "typed context
+#: channels" — is a row above.
+TRACKED_DOCS = (
+    "README.md",
+    "docs/architecture.md",
+    "docs/self-improvement.md",
+    "docs/framework.md",
+)
+
+#: ``(row label, live value)`` for the README table headed "Every number below comes
+#: from a named symbol in the source. Re-derive them". These values are digits in a
+#: table cell, so neither numeral scan above can see them: the channel row sat at 16
+#: through the commit that took ``CHANNELS`` to 18 and nothing went red.
+RE_DERIVABLE_TABLE_ROWS: tuple[tuple[str, int], ...] = (
+    ("Stages (nodes in the walk)", len(STAGES)),
+    ("Guarded forward edges", len(_ADVANCE_GUARDS)),
+    ("Backward edges", len(REVISIT_EDGES)),
+    ("Conditional terminal edges", len(TERMINAL_EDGES)),
+    ("Edges in the default (`adaptive`) graph", _adaptive_edges()),
+    ("Edges in `--stage-graph linear`", len(StageGraph.linear().edges)),
+    ("Typed information channels", len(CHANNELS)),
+    ("Required stage-summary headings", len(REQUIRED_STAGE_HEADINGS)),
+    ("Rubric criteria (weighted, backend-free)", len(CRITERIA)),
+)
+
+
+#: Rows of the same table whose value no symbol in this module can produce, each
+#: with the reason it is exempt. A row in neither this mapping nor
+#: ``RE_DERIVABLE_TABLE_ROWS`` fails ``test_every_row_of_that_table_is_accounted_for``,
+#: because otherwise the cheapest way to pass the check above is to delete a row
+#: from it and leave the claim standing in the README.
+UNDERIVABLE_TABLE_ROWS: dict[str, str] = {
+    "`validate_*` functions the stage gate calls": (
+        "the count is of call sites inside validate_stage_artifacts, not of a "
+        "collection; counting them here would be a second implementation of the "
+        "gate rather than a re-derivation of it"
+    ),
+    "Flags on `main.py` / `rcb_agent.py`": (
+        "two numbers in one cell, and parse_args builds them imperatively"
+    ),
+    "Python modules / lines / tests": (
+        "the stated symbol is 'the tree'; the test count in particular moves with "
+        "every branch in flight, so pinning it here would red the suite on merges "
+        "that changed nothing about it"
+    ),
+}
+
+#: The sentence the table promises under. Split on it rather than counting tables,
+#: so that a new table added above cannot silently take this one's place.
+RE_DERIVABLE_TABLE_PROMISE = (
+    "Every number below comes from a named symbol in the source. Re-derive them"
+)
+
+
+def _re_derivable_table(path: Path) -> dict[str, str]:
+    """``{first cell: last cell}`` for the first markdown table after the promise."""
+    text = path.read_text(encoding="utf-8")
+    if RE_DERIVABLE_TABLE_PROMISE not in text:
+        return {}
+    rows: dict[str, str] = {}
+    started = False
+    for line in text.split(RE_DERIVABLE_TABLE_PROMISE, 1)[1].splitlines():
+        stripped = line.strip()
+        if not (stripped.startswith("|") and stripped.endswith("|")):
+            if started:
+                break
+            continue
+        started = True
+        cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+        if len(cells) < 2 or set(cells[0]) <= {"-", ":", " "} or cells[0] == "Count":
+            continue
+        rows[cells[0]] = cells[-1]
+    return rows
+
 
 #: Line references outside this repo's own tree. The reader is being sent to a pinned
 #: artifact somewhere else, which this repo cannot re-derive and does not churn.
@@ -103,6 +219,96 @@ class CountsInProseMatchTheSymbolTests(unittest.TestCase):
                             f"counts {value} ({spelled(value)})"
                         )
         self.assertEqual(wrong, [], "\n".join(wrong))
+
+    def test_a_count_written_in_digits_matches_its_symbol_too(self) -> None:
+        """The same nouns, counted in digits instead of words.
+
+        A channel was added and the two README sites that state the count as `16`
+        rather than "sixteen" stayed behind, because the scan above requires a
+        spelled-out numeral and the sweep that was supposed to catch the rot was
+        `grep -rni sixteen` — which cannot match a digit by construction. One of
+        the two was the architecture diagram, the only picture of the layer.
+        """
+        wrong: list[str] = []
+        for name in TRACKED_DOCS:
+            text = (REPO / name).read_text(encoding="utf-8")
+            for noun, value in COUNTED_NOUNS:
+                spaced = r"\s+".join(re.escape(word) for word in noun.split())
+                pattern = re.compile(r"\b(\d+)\s+" + spaced + r"\b", re.IGNORECASE)
+                for match in pattern.finditer(text):
+                    if int(match.group(1)) != value:
+                        line = text[: match.start()].count("\n") + 1
+                        wrong.append(
+                            f"{name}:{line} says '{match.group(0)}' but the symbol "
+                            f"counts {value}"
+                        )
+        self.assertEqual(wrong, [], "\n".join(wrong))
+
+    def test_the_re_derivable_table_rows_are_re_derivable(self) -> None:
+        """The README's own promise, enforced on the rows that can keep it.
+
+        The table is introduced with "Every number below comes from a named symbol
+        in the source. Re-derive them", and nothing did: its channel row said 16
+        against a `CHANNELS` of 18. Neither scan above can reach it — the value is
+        a digit in the cell *after* the noun, not a numeral before it.
+
+        Rows whose value no symbol here can produce are exempt by name in
+        `UNDERIVABLE_TABLE_ROWS`, with the reason. Listing one of those as
+        re-derivable would put a hand-typed number in a test and call it a
+        measurement.
+        """
+        rows = _re_derivable_table(REPO / "README.md")
+        wrong: list[str] = []
+        for label, value in RE_DERIVABLE_TABLE_ROWS:
+            found = rows.get(label)
+            self.assertIsNotNone(
+                found,
+                f"README.md no longer has a re-derivable table row labelled "
+                f"{label!r}; if it was renamed, rename it here too — a row that "
+                f"stops matching stops being checked, silently",
+            )
+            assert found is not None  # for type checkers; assertIsNotNone above
+            if found != str(value):
+                wrong.append(f"README.md row {label!r} says {found}, {value} is live")
+        self.assertEqual(wrong, [], "\n".join(wrong))
+
+    def test_every_row_of_that_table_is_accounted_for(self) -> None:
+        """Deleting a row from the checked list has to cost something.
+
+        The check above iterates the rows *it* declares, so the cheapest way to
+        pass it is to stop declaring one while the number stays in the README —
+        the same shape as the defect it was written for. Every row of the table is
+        therefore either re-derived or exempt by name with a reason, and a new row
+        is neither until someone says which.
+        """
+        rows = set(_re_derivable_table(REPO / "README.md"))
+        declared = {label for label, _ in RE_DERIVABLE_TABLE_ROWS}
+        self.assertEqual(
+            rows - declared - set(UNDERIVABLE_TABLE_ROWS),
+            set(),
+            "README table rows that are neither re-derived nor exempt",
+        )
+        self.assertEqual(
+            (declared | set(UNDERIVABLE_TABLE_ROWS)) - rows,
+            set(),
+            "labels claimed here that the README table no longer has",
+        )
+
+    def test_the_table_scan_reads_a_table_that_has_the_stale_shape(self) -> None:
+        """Control for both tests above: a parser that finds nothing passes anything.
+
+        The failure this guards against is not a wrong number but an empty
+        population — a changed table format, a moved heading, a `_re_derivable_table`
+        that returns `{}`. It also pins the promise the rows are checked against, so
+        deleting the sentence and keeping the table cannot quietly retire them.
+        """
+        text = (REPO / "README.md").read_text(encoding="utf-8")
+        self.assertIn(RE_DERIVABLE_TABLE_PROMISE, text)
+        rows = _re_derivable_table(REPO / "README.md")
+        self.assertGreaterEqual(len(rows), len(RE_DERIVABLE_TABLE_ROWS))
+        for label, _ in RE_DERIVABLE_TABLE_ROWS:
+            with self.subTest(row=label):
+                self.assertRegex(rows[label], r"^\d+$")
 
     def test_the_rubric_version_in_the_docs_is_the_live_one(self) -> None:
         """A bump splits the archive in two; a doc still naming the old one is a lie.
