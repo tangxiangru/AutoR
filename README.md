@@ -526,7 +526,7 @@ Seventeen `validate_*` functions are reachable from it in all:
 | --- | --- | --- |
 | 01 | `validate_literature_evidence` | A claim cites a `source_id` that is not in `sources.json` |
 | 03+ | `validate_report_plan` | The plan has no task outputs, non-contiguous slots, a slot with no supported claim, or headline numbers without a quantity, unit and source |
-| 05+ | `validate_preregistration` | Nothing is frozen, an empirical hypothesis has no decision rule, or the manifest changed with no amendment on record |
+| 05+ | `validate_preregistration` | Nothing is frozen, an empirical hypothesis has no decision rule, the frozen file disagrees with its own digest or with AutoR's stamped copy, or the manifest changed — or went missing — with no amendment on record |
 | 05+ | `validate_experimental_protocol` | No primary metric, `planned_seeds < 1`, or a baseline missing `why_competent` / `tuning_budget` |
 | 05+ | `validate_experiment_manifest` | The manifest does not parse into the declared shape |
 | 06+ | `validate_hypothesis_outcomes` | A frozen hypothesis has no verdict, a verdict adjudicates something unpreregistered, or a `supported`/`refuted` verdict cites an evidence path that does not exist |
@@ -546,10 +546,17 @@ The code labels the split itself: *"the scientific-validity chain, distinct from
 around it"*. A run can fail because a claim is unwarranted, not only because a file is absent. The
 06→07 router edge is closed on top of that, in the `adaptive` topology only.
 
-**A gate that is honest about what it does not check.** `validate_preregistration` compares the
-*manifest's* digest to the recorded `source_digest`; it does not recompute the digest of the frozen
-file itself. Editing `preregistration.json` in place, leaving the manifest alone, passes. The honest
-claim is that a manifest rewrite is detected, not that the frozen file is tamper-proof.
+**The frozen preregistration is checked against a copy the stage cannot reach.** A digest stored
+beside the bytes it describes certifies nothing, and this one is worse than most: the agent is shown
+it, because `format_preregistration_for_prompt` renders `digest` into the prompt. So AutoR keeps its
+own copy of the frozen record at `runs/<id>/preregistration_stamp.json`, outside `workspace/`, and
+`preregistration_tamper_findings` runs three comparisons rather than one — the hypotheses against
+the digest the file states for them, that digest against the stamped one, and the length of the
+amendment ledger. Each catches a rewrite the other two miss: an edited statement, an edited
+statement with the header recomputed, and a deleted amendment row. Deleting the frozen file is not a
+way around them either — `freeze_preregistration` restores the stamped record rather than deriving a
+fresh one, so a re-freeze cannot hand the run a post-results date and an empty ledger, and the
+disagreement it found is appended to the stamp's `repairs` list before the copy goes back.
 
 The complete gate, including every JSON schema that is parsed rather than merely counted, is in
 **[docs/stage-contract.md](docs/stage-contract.md)**.
@@ -647,7 +654,7 @@ runs/<run_id>/
 ├── user_input.txt      memory.md             run_config.json
 ├── run_manifest.json   artifact_index.json   intake_context.json
 ├── obligations.json    review_policy.json    # both per-run; nothing crosses runs
-├── report_plan_stamp.json                    # AutoR's copy, outside workspace/ on purpose
+├── report_plan_stamp.json   preregistration_stamp.json   # AutoR's copies, outside workspace/ on purpose
 ├── logs.txt            logs_raw.jsonl
 ├── prompt_cache/       operator_state/       handoff/        stages/
 ├── .claude/skills/     # the skill pack, pulled on demand by the agent
@@ -668,8 +675,9 @@ runs/<run_id>/
 
 `evolution/` sits outside `workspace/` on purpose, and the dataclass records the reason: it is *"a
 record of how the run reached its answer, not part of the answer, and a benchmark export that swept
-it up would ship the losing drafts alongside the report"*. `report_plan_stamp.json` is outside
-`workspace/` for the same class of reason: the agent must not be able to backdate its own declaration.
+it up would ship the losing drafts alongside the report"*. `report_plan_stamp.json` and
+`preregistration_stamp.json` are outside `workspace/` for the same class of reason: the agent must
+not be able to backdate its own declaration, or rewrite the commitment it is being held to.
 
 The only state AutoR writes outside a run directory is the cross-run archive at `~/.autor/archive`
 (`--archive`, `--no-archive`).
@@ -942,10 +950,14 @@ code that would have to change.
 - **Attribution stops at the log.** `_record_inbound_channels` writes which channels reached each
   stage, but `RunRecord` ([src/archive.py](src/archive.py)) has no channel field, so "this edge
   helped" cannot yet become "this information helped".
-- **The frozen preregistration is not checked against itself.** `validate_preregistration` compares
-  the manifest's digest to the recorded `source_digest` and never recomputes the digest of the frozen
-  file. Editing `preregistration.json` in place passes; deleting the manifest silences the check
-  entirely.
+- **The preregistration stamp is outside the tree the agent is told to write in, not outside the
+  tree it can write to.** `preregistration_stamp_path` puts it under the run root, which the operator
+  is invoked at; no prompt template names it and nothing renders it into a prompt, so a rewrite of
+  the frozen set has to be a matching rewrite of two files in two trees rather than an edit to one.
+  That raises the cost, it does not close the door. And a run that reaches Stage 05 with no stamp —
+  resumed from an AutoR that predates it — is adopted rather than refused, because refusing it would
+  fail a run for a reason the run cannot fix: until the next `freeze_preregistration` adopts the
+  file, only the comparison that needs no stamp is running.
 - **Standing rules and obligations never reach a panel seat.** Both are injected only into the solo
   reviewer's prompt. Under `--review-panel`, no seat is shown the accumulated rules and no seat is
   asked whether an inherited obligation was met — and because neither the seat nor the chair prompt

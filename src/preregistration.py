@@ -24,6 +24,25 @@ Changing the hypotheses after the freeze is allowed — a rollback to Stage 02 i
 a legitimate reason — but only as a recorded amendment. An unrecorded change is
 a validation error, because the difference between "we revised our hypothesis
 and said so" and "we revised our hypothesis" is the whole of the thing.
+
+That last sentence only holds if the frozen file can be checked against
+something the stage under suspicion did not write. It cannot check itself:
+``preregistration.json`` sits in ``workspace/notes/`` with every other artifact
+the agent owns, and :func:`format_preregistration_for_prompt` renders its
+``digest`` into the prompt, so the one field that would prove the bytes were
+not rewritten is shown to the party that would rewrite them, in the format it
+would have to produce. So AutoR keeps its own copy of the record at
+:func:`preregistration_stamp_path`, outside ``workspace/``, and
+:func:`preregistration_tamper_findings` runs three comparisons rather than one:
+the hypotheses against the digest the file states for them, that digest against
+the stamped one, and the length of the amendment ledger against the stamped
+ledger. Each catches a rewrite the other two do not — an edited statement, an
+edited statement with the header recomputed, and a deleted amendment row.
+
+Deleting the frozen file is not a way around them. :func:`freeze_preregistration`
+restores the stamped record when the workspace copy is missing or disagrees,
+rather than deriving a fresh one from the current manifest, so a re-freeze
+cannot manufacture a post-results ``frozen_at`` and an empty ledger.
 """
 
 from __future__ import annotations
@@ -142,8 +161,12 @@ def hypothesis_manifest_digest(paths: RunPaths) -> str:
     return _digest(committed)
 
 
-def load_preregistration(paths: RunPaths) -> Preregistration | None:
-    payload = _load_json(paths.preregistration)
+def _preregistration_from_payload(payload: object) -> Preregistration | None:
+    """One reader for the two places a frozen record is stored.
+
+    The workspace copy and the stamp hold the same shape, and a second parser
+    for the second copy would be a second answer to "what did this run freeze".
+    """
     if not isinstance(payload, dict):
         return None
     hypotheses = [
@@ -167,6 +190,10 @@ def load_preregistration(paths: RunPaths) -> Preregistration | None:
     )
 
 
+def load_preregistration(paths: RunPaths) -> Preregistration | None:
+    return _preregistration_from_payload(_load_json(paths.preregistration))
+
+
 def _write_preregistration(paths: RunPaths, prereg: Preregistration) -> None:
     paths.preregistration.parent.mkdir(parents=True, exist_ok=True)
     paths.preregistration.write_text(
@@ -175,21 +202,155 @@ def _write_preregistration(paths: RunPaths, prereg: Preregistration) -> None:
     )
 
 
-def freeze_preregistration(
-    paths: RunPaths,
-    *,
-    before_stage: str = "05_experimentation",
-) -> Preregistration | None:
-    """Write the preregistration if there is not one yet.
+# ----------------------------------------------------------------------------
+# AutoR's own copy of the record
+# ----------------------------------------------------------------------------
 
-    Never overwrites. A run that already froze its hypotheses keeps the frozen
-    set; a legitimate later change goes through :func:`amend_preregistration`,
-    which keeps the original digest in the record.
+
+def preregistration_stamp_path(paths: RunPaths) -> Path:
+    """The frozen record as AutoR wrote it, outside the tree the stage works in.
+
+    ``report_plan_stamp.json`` is the precedent and the reason carries over: a
+    stamp kept only in ``workspace/notes/`` is a receipt the payer prints. The
+    preregistration is the worse case of the two, because
+    :func:`format_preregistration_for_prompt` renders ``digest`` into the
+    prompt — the field that is supposed to prove the file was not rewritten is
+    handed to the party that would rewrite it, in the format it would have to
+    produce.
+
+    The claim is not that this store cannot be reached. It is that a rewrite of
+    the frozen set now has to be a matching rewrite of two files in two trees:
+    this one is outside the directory every stage prompt names, no template
+    mentions it, and nothing renders it into a prompt.
     """
-    existing = load_preregistration(paths)
-    if existing is not None:
-        return existing
+    return paths.run_root / "preregistration_stamp.json"
 
+
+def recorded_preregistration_stamp(paths: RunPaths) -> Preregistration | None:
+    """The stamped record, or None when AutoR has never stamped this run.
+
+    None is neither a pass nor a failure. It is the state of a run resumed from
+    an AutoR that predates the stamp, and refusing that would fail a run for a
+    reason the run cannot fix. The self-consistency comparison in
+    :func:`preregistration_tamper_findings` needs no stamp and still runs; the
+    two that need one are skipped, and the next :func:`freeze_preregistration`
+    adopts the file as it stands.
+    """
+    stamped = _preregistration_from_payload(_load_json(preregistration_stamp_path(paths)))
+    if stamped is None or not stamped.digest or not stamped.hypotheses:
+        return None
+    return stamped
+
+
+def recorded_preregistration_repairs(paths: RunPaths) -> list[dict[str, str]]:
+    """Every time AutoR had to put its copy back, and what disagreed.
+
+    Kept because the repair is what destroys the evidence: once the stamped
+    record is written over the workspace copy the two agree again, and without
+    this the run's own artifacts would say the frozen set was never touched.
+    """
+    payload = _load_json(preregistration_stamp_path(paths))
+    if not isinstance(payload, dict):
+        return []
+    return [dict(item) for item in payload.get("repairs", []) if isinstance(item, dict)]
+
+
+def _write_preregistration_stamp(
+    paths: RunPaths,
+    prereg: Preregistration,
+    repairs: list[dict[str, str]] | None = None,
+) -> None:
+    path = preregistration_stamp_path(paths)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = prereg.to_dict()
+    payload["repairs"] = [
+        dict(item)
+        for item in (recorded_preregistration_repairs(paths) if repairs is None else repairs)
+    ]
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+
+
+def _self_digest(prereg: Preregistration) -> str:
+    """The digest the hypotheses in hand actually have, however they got there."""
+    return _digest([item.to_dict() for item in prereg.hypotheses])
+
+
+def _tamper_findings(
+    prereg: Preregistration | None, stamped: Preregistration | None
+) -> list[str]:
+    """The three comparisons, one sentence each, no recovery advice.
+
+    Split from :func:`preregistration_tamper_problems` so the router's edge
+    reason and the stage gate's refusal cannot drift into two accounts of one
+    disagreement. ``stamped is None`` leaves only the first comparison, which is
+    the one that needs nothing outside the file.
+    """
+    if prereg is None:
+        return []
+
+    findings: list[str] = []
+    recomputed = _self_digest(prereg)
+    if recomputed != prereg.digest:
+        findings.append(
+            f"preregistration.json states digest {prereg.digest[:12] or '(none)'}, but the "
+            f"hypotheses in it hash to {recomputed[:12]}. The frozen set on disk is not the "
+            "set the file says was frozen."
+        )
+    if stamped is None:
+        return findings
+
+    if prereg.digest != stamped.digest:
+        findings.append(
+            f"preregistration.json states digest {prereg.digest[:12] or '(none)'}; AutoR froze "
+            f"{stamped.digest[:12]}. The hypothesis set was replaced after the freeze."
+        )
+    if len(prereg.amendments) != len(stamped.amendments):
+        findings.append(
+            f"preregistration.json records {len(prereg.amendments)} amendment(s); AutoR "
+            f"recorded {len(stamped.amendments)}. The ledger of what changed has itself changed."
+        )
+    return findings
+
+
+#: Named by every tamper refusal, and deliberately not ``amend_preregistration``.
+#: That function re-freezes only when the *manifest* digest has moved; when the
+#: manifest is untouched it returns the existing record unchanged, so pointing a
+#: rewritten file at it would name a step that cannot clear the refusal. A
+#: refusal nothing clears leaves deleting the file as the cheapest move left,
+#: which is the escape these comparisons exist to close.
+PREREGISTRATION_RECOVERY = (
+    "Leave the file alone: AutoR writes its own copy back over it before the next attempt, "
+    "and deleting it restores that same copy rather than freezing a new one. If the "
+    "hypotheses genuinely have to change, that is a rollback to Stage 02 — rewriting the "
+    "manifest there records an amendment carrying the superseded digest."
+)
+
+
+def preregistration_tamper_findings(paths: RunPaths) -> list[str]:
+    """What disagrees between the frozen file, its own digest and AutoR's copy."""
+    return _tamper_findings(
+        load_preregistration(paths), recorded_preregistration_stamp(paths)
+    )
+
+
+def preregistration_tamper_problems(paths: RunPaths) -> list[str]:
+    """The findings a stage gate reports, each carrying the step that clears it."""
+    return [
+        f"{finding} {PREREGISTRATION_RECOVERY}"
+        for finding in preregistration_tamper_findings(paths)
+    ]
+
+
+def _derive_preregistration(
+    paths: RunPaths, before_stage: str
+) -> Preregistration | None:
+    """Build the record the current hypothesis manifest implies. Writes nothing.
+
+    Separated from :func:`freeze_preregistration` because the two callers want
+    different things from a manifest read: the freeze wants it only when AutoR
+    has never stamped this run, while :func:`amend_preregistration` wants it
+    precisely when the stamp exists and the manifest has legitimately moved.
+    """
     manifest = _load_json(paths.hypothesis_manifest)
     if not isinstance(manifest, dict):
         return None
@@ -220,15 +381,73 @@ def freeze_preregistration(
     if not hypotheses:
         return None
 
-    prereg = Preregistration(
+    return Preregistration(
         frozen_at=_now(),
         frozen_before_stage=before_stage,
         source_digest=hypothesis_manifest_digest(paths),
         digest=_digest([item.to_dict() for item in hypotheses]),
         hypotheses=hypotheses,
     )
-    _write_preregistration(paths, prereg)
-    return prereg
+
+
+def freeze_preregistration(
+    paths: RunPaths,
+    *,
+    before_stage: str = "05_experimentation",
+) -> Preregistration | None:
+    """Fix the hypothesis set once, and hold that one record for the whole run.
+
+    Called on Stage 04 approval and again before every attempt from Stage 05 on,
+    so this is also the hook that repairs the frozen file. Three states:
+
+    * **AutoR has stamped this run.** The stamp is the record. A workspace copy
+      that disagrees with it — edited, truncated, or deleted outright — is
+      written over with the stamped one, and the disagreement is appended to
+      :func:`recorded_preregistration_repairs`. Deriving a fresh freeze here
+      instead is what made deletion the cheapest escape from a tamper refusal:
+      the re-freeze took the current manifest, dated itself after the results
+      existed, and started an empty amendment ledger, and every downstream
+      validator passed.
+    * **No stamp, but a frozen file.** A run that froze before this stamp
+      existed. Adopt the file as it stands: refusing it would fail a run for a
+      reason the run cannot fix.
+    * **Neither.** The first freeze. Derive from the manifest and write both.
+
+    The set is never re-derived once stamped. A legitimate later change goes
+    through :func:`amend_preregistration`, which keeps the superseded digest.
+    """
+    stamped = recorded_preregistration_stamp(paths)
+    existing = load_preregistration(paths)
+
+    if stamped is not None:
+        disagreements = (
+            ["preregistration.json is gone; AutoR still holds the record it froze."]
+            if existing is None
+            else _tamper_findings(existing, stamped)
+        )
+        if not disagreements:
+            return existing
+        _write_preregistration(paths, stamped)
+        _write_preregistration_stamp(
+            paths,
+            stamped,
+            repairs=[
+                *recorded_preregistration_repairs(paths),
+                {"repaired_at": _now(), "found": " ".join(disagreements)},
+            ],
+        )
+        return stamped
+
+    if existing is not None:
+        _write_preregistration_stamp(paths, existing)
+        return existing
+
+    derived = _derive_preregistration(paths, before_stage)
+    if derived is None:
+        return None
+    _write_preregistration(paths, derived)
+    _write_preregistration_stamp(paths, derived)
+    return derived
 
 
 def amend_preregistration(paths: RunPaths, reason: str) -> Preregistration | None:
@@ -237,8 +456,14 @@ def amend_preregistration(paths: RunPaths, reason: str) -> Preregistration | Non
     Called when the run legitimately revisits Stage 02 — a rollback, or a
     reviewer sending the hypotheses back. The amendment is what makes the
     change honest: the record says the hypotheses moved, when, and why.
+
+    The record being amended is read from the stamp when there is one, not from
+    the workspace copy. Otherwise a rewritten ``preregistration.json`` would
+    supply its own ``source_digest`` to the comparison below, and a Stage 02
+    re-run would launder the rewrite into the amendment as though AutoR had
+    frozen it.
     """
-    existing = load_preregistration(paths)
+    existing = recorded_preregistration_stamp(paths) or load_preregistration(paths)
     if existing is None:
         return freeze_preregistration(paths)
 
@@ -246,10 +471,10 @@ def amend_preregistration(paths: RunPaths, reason: str) -> Preregistration | Non
     if current_source == existing.source_digest:
         return existing
 
-    paths.preregistration.unlink(missing_ok=True)
-    refrozen = freeze_preregistration(paths, before_stage=existing.frozen_before_stage)
+    refrozen = _derive_preregistration(paths, existing.frozen_before_stage)
     if refrozen is None:
         _write_preregistration(paths, existing)
+        _write_preregistration_stamp(paths, existing)
         return existing
 
     amended = Preregistration(
@@ -270,6 +495,7 @@ def amend_preregistration(paths: RunPaths, reason: str) -> Preregistration | Non
         ],
     )
     _write_preregistration(paths, amended)
+    _write_preregistration_stamp(paths, amended)
     return amended
 
 
@@ -282,6 +508,18 @@ def validate_preregistration(paths: RunPaths) -> list[str]:
     """Checks that run from Stage 05 on, once the hypotheses should be frozen."""
     prereg = load_preregistration(paths)
     if prereg is None:
+        stamped = recorded_preregistration_stamp(paths)
+        if stamped is not None:
+            # Not "never frozen" — AutoR froze this run and still holds the
+            # record, so the message that fits a run which never preregistered
+            # would be a false description of the state on disk and would point
+            # at a Stage 04 approval that already happened.
+            return [
+                "is missing workspace/notes/preregistration.json. AutoR froze "
+                f"{len(stamped.adjudicated_ids)} empirical hypothesis(es) at {stamped.frozen_at} "
+                f"with digest {stamped.digest[:12]} and still holds that record. "
+                f"{PREREGISTRATION_RECOVERY}"
+            ]
         if not paths.hypothesis_manifest.exists():
             # The usual cause is a `--project-root` run that carried Stage 02
             # forward from an existing codebase without deriving hypotheses
@@ -316,8 +554,25 @@ def validate_preregistration(paths: RunPaths) -> list[str]:
                 "support and what would count as refutation."
             )
 
+    # Against itself and against AutoR's copy, before against its source. A
+    # record that does not describe its own bytes is not evidence about the
+    # manifest it was taken from.
+    problems.extend(preregistration_tamper_problems(paths))
+
     current_source = hypothesis_manifest_digest(paths)
-    if current_source and current_source != prereg.source_digest:
+    if not current_source:
+        # `_derive_preregistration` returns None without a parseable manifest,
+        # so a frozen record proves one existed. Its absence now is the source
+        # being removed after the fact — and the falsy digest used to skip the
+        # comparison below rather than fail it, which made deleting the manifest
+        # the way to make a manifest rewrite unprovable.
+        problems.append(
+            "workspace/notes/hypothesis_manifest.json is gone, and the preregistration was "
+            "frozen from it. Restore the Stage 02 manifest: with no source on record there is "
+            "nothing the frozen set can be compared against, and a comparison that is skipped "
+            "when its input is missing is not a check."
+        )
+    elif current_source != prereg.source_digest:
         problems.append(
             "the hypothesis manifest changed after preregistration and no amendment was "
             "recorded. Hypotheses may be revised, but the revision has to be on the record — "
