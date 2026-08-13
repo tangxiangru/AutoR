@@ -55,7 +55,7 @@ The directory shape is created by `ensure_run_layout` and the paths are
 defined once, in `build_run_paths` ([`src/utils.py`](../src/utils.py)). If you
 need a path in code, take it from `RunPaths` rather than joining strings.
 
-Three files sit at the run root rather than under `workspace/` on purpose:
+Four files sit at the run root rather than under `workspace/` on purpose:
 `obligations.json`, `review_policy.json` and `report_plan_stamp.json` are
 records *about* the run rather than part of its answer, and every stage prompt
 directs the agent at `workspace/` paths. Same reason `evolution/` is out here —

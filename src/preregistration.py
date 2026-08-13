@@ -53,7 +53,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from .utils import RunPaths
+from .utils import RunPaths, append_log_entry, read_text
 
 
 #: A verdict has to be one of these. "It's complicated" is `inconclusive`, which
@@ -226,15 +226,60 @@ def preregistration_stamp_path(paths: RunPaths) -> Path:
     return paths.run_root / "preregistration_stamp.json"
 
 
+#: Heading of the run-log line written the first time a run freezes.
+#:
+#: The third witness, and the reason there has to be one. The stamp closed
+#: "delete ``preregistration.json`` and re-freeze". It did not close "delete the
+#: stamp *and* ``preregistration.json`` and re-freeze", which costs one extra
+#: ``rm`` in a directory the operator already runs in with ``bypassPermissions``
+#: at ``cwd=paths.run_root`` — and which reproduced the original reset verbatim:
+#: a different hypothesis set, ``amendments: []``, a ``frozen_at`` after the
+#: results existed, and every validator clean.
+#:
+#: The log is append-only and written by the manager, so a reset now has to
+#: truncate it as well, and a truncated log is visible in a way a missing file is
+#: not. **This is not a claim that the hole is shut.** Everything under
+#: ``run_root`` is writable by the party the gate constrains; what a third
+#: witness buys is that the cheapest escape stops being cheap and stops being
+#: silent. The boundary is stated in ``docs/framework.md``.
+FREEZE_WITNESS_HEADING = "preregistration_frozen"
+
+
+def witnessed_freeze_digests(paths: RunPaths) -> list[str]:
+    """Source digests this run has been logged as freezing, oldest first."""
+    log = read_text(paths.logs)
+    if FREEZE_WITNESS_HEADING not in log:
+        return []
+    found: list[str] = []
+    for block in log.split(f"| {FREEZE_WITNESS_HEADING} ===")[1:]:
+        for line in block.splitlines():
+            marker = "source_digest="
+            if marker in line:
+                found.append(line.split(marker, 1)[1].strip())
+                break
+    return [digest for digest in found if digest]
+
+
+def _witness_the_freeze(paths: RunPaths, prereg: Preregistration) -> None:
+    if prereg.digest in witnessed_freeze_digests(paths):
+        return
+    append_log_entry(
+        paths.logs,
+        FREEZE_WITNESS_HEADING,
+        f"source_digest={prereg.digest}\nhypotheses={len(prereg.hypotheses)}",
+    )
+
+
 def recorded_preregistration_stamp(paths: RunPaths) -> Preregistration | None:
     """The stamped record, or None when AutoR has never stamped this run.
 
-    None is neither a pass nor a failure. It is the state of a run resumed from
-    an AutoR that predates the stamp, and refusing that would fail a run for a
-    reason the run cannot fix. The self-consistency comparison in
-    :func:`preregistration_tamper_findings` needs no stamp and still runs; the
-    two that need one are skipped, and the next :func:`freeze_preregistration`
-    adopts the file as it stands.
+    None is not a pass. It used to be treated as one, on the argument that a run
+    resumed from an AutoR predating the stamp cannot produce one and refusing it
+    would fail a run for a reason the run cannot fix. That population is empty:
+    ``_build_stage_prompt`` freezes before every attempt from Stage 05 on and all
+    four ``validate_stage_artifacts`` call sites are post-attempt, so a resumed
+    run is stamped before anything validates it. The only way to reach a missing
+    stamp is to delete it, which is why :data:`FREEZE_WITNESS_HEADING` exists.
     """
     stamped = _preregistration_from_payload(_load_json(preregistration_stamp_path(paths)))
     if stamped is None or not stamped.digest or not stamped.hypotheses:
@@ -319,10 +364,12 @@ def _tamper_findings(
 #: refusal nothing clears leaves deleting the file as the cheapest move left,
 #: which is the escape these comparisons exist to close.
 PREREGISTRATION_RECOVERY = (
-    "Leave the file alone: AutoR writes its own copy back over it before the next attempt, "
-    "and deleting it restores that same copy rather than freezing a new one. If the "
-    "hypotheses genuinely have to change, that is a rollback to Stage 02 — rewriting the "
-    "manifest there records an amendment carrying the superseded digest."
+    "Leave the file alone. While AutoR still holds its own copy it writes that copy back "
+    "before the next attempt, and deleting the file restores it rather than freezing a new "
+    "one; once both are gone this run will not freeze a replacement, because a set fixed "
+    "after the results exist is not a preregistration. If the hypotheses genuinely have to "
+    "change, that is a rollback to Stage 02 — rewriting the manifest there records an "
+    "amendment carrying the superseded digest."
 )
 
 
@@ -438,15 +485,37 @@ def freeze_preregistration(
         )
         return stamped
 
+    witnessed = witnessed_freeze_digests(paths)
+
     if existing is not None:
-        _write_preregistration_stamp(paths, existing)
+        # Adopt only a record that is consistent with itself. Adopting one that is
+        # not bricks the run: comparison (a) fires on every attempt forever, this
+        # function "repairs" by writing the bad record back over itself, and the
+        # stamp's repair list grows by an identical row per attempt without bound —
+        # while `PREREGISTRATION_RECOVERY` tells the agent to leave the file alone
+        # because AutoR writes its own copy back, which in exactly that state it
+        # does not.
+        if not _tamper_findings(existing, None):
+            _write_preregistration_stamp(paths, existing)
+            _witness_the_freeze(paths, existing)
         return existing
+
+    if witnessed:
+        # The stamp and the frozen file are both gone and the log says this run
+        # already froze. That is not a first freeze, and deriving one here is the
+        # reset the stamp was added to close: a fresh set taken from whatever the
+        # manifest says now, dated after the results exist, with an empty amendment
+        # ledger. Refuse to re-derive; the gates then refuse the stage, and the
+        # recovery text names the rollback that is the legitimate way to change a
+        # hypothesis set.
+        return None
 
     derived = _derive_preregistration(paths, before_stage)
     if derived is None:
         return None
     _write_preregistration(paths, derived)
     _write_preregistration_stamp(paths, derived)
+    _witness_the_freeze(paths, derived)
     return derived
 
 
