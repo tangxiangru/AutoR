@@ -260,5 +260,30 @@ class TheRatchetReallyIsArgmaxOnTheReportedTotalTests(unittest.TestCase):
         self.assertIn("regressed", source)
 
 
+class ABareStringOutcomeIsRefusedTests(unittest.TestCase):
+    """`outcome="rubric"` is the natural mistake and used to fail three frames away.
+
+    It matters more than an ordinary type slip: the registry check exists because an
+    outcome nobody declared has an empty `selected_on_by` and therefore exempts every
+    capability from the circularity refusal. A `TypeError` from deep inside
+    `__post_init__` reads as a bug in the module rather than as a rejected exemption.
+    """
+
+    def test_a_string_is_refused_with_the_registry_in_the_message(self) -> None:
+        from src.trials import DECLARED_OUTCOMES
+
+        with self.assertRaises(TypeError) as caught:
+            TrialResult(
+                capability="polish_rounds",
+                control_arm="off",
+                treatment_arm="on",
+                pairs=(),
+                outcome="rubric",
+            )
+        message = str(caught.exception)
+        for key in DECLARED_OUTCOMES:
+            self.assertIn(key, message)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -342,6 +342,16 @@ class TrialResult:
         rather than like an exemption. ``dataclasses.replace`` re-runs this, so the
         rewrite in ``rcb_trial.collect_rcb_pairs`` cannot slip one past it either.
         """
+        if not isinstance(self.outcome, Outcome):
+            # A bare string is the natural mistake — `outcome="rubric"` reads like a
+            # keyword argument and today raises `AttributeError: 'str' object has no
+            # attribute 'key'` three frames away from the call. Refuse it here with the
+            # registry in the message, because the whole point of this check is that an
+            # outcome nobody declared exempts every capability from the refusal.
+            raise TypeError(
+                f"outcome must be a declared `Outcome`, not {type(self.outcome).__name__}. "
+                f"Pass one of {sorted(DECLARED_OUTCOMES)} from `src.trials`."
+            )
         declared = DECLARED_OUTCOMES.get(self.outcome.key)
         if declared is None:
             raise ValueError(
