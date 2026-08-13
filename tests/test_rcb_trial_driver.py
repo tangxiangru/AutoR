@@ -1114,3 +1114,112 @@ class StallTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ForeignRunDetectionTests(unittest.TestCase):
+    """A mention is not an execution, and a fake operator is not contention.
+
+    Both of these refused a real trial on a live box. The driver stands down for ten
+    minutes per refusal, so a detector that fires on the wrong thing does not merely
+    add noise -- on a machine where anyone is running the test suite, or where anyone
+    types a one-liner to check whether a run is up, the trial never starts at all.
+
+    This is the same shape as the quota classifier matching the bare substring "429":
+    a detector matching a broader pattern than the thing it protects against.
+    """
+
+    def setUp(self) -> None:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "rcb_trial_tool", Path(__file__).resolve().parent.parent / "tools" / "rcb_trial.py"
+        )
+        self.tool = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.tool)
+
+    def test_a_real_benchmark_run_is_a_run(self) -> None:
+        argv = ["python3", "/home/u/AutoR/rcb_agent.py", "--workspace", "/w", "--model", "opus"]
+        self.assertTrue(self.tool.is_backed_run(argv))
+
+    def test_a_real_goal_run_is_a_run(self) -> None:
+        argv = ["python", "main.py", "--goal-file", "/tmp/g.txt", "--full-auto", "--model", "opus"]
+        self.assertTrue(self.tool.is_backed_run(argv))
+
+    def test_a_fake_operator_run_contends_for_nothing(self) -> None:
+        # What the test suite runs, constantly. It makes no backend call.
+        argv = ["python", "main.py", "--fake-operator", "--full-auto", "--goal", "coverage"]
+        self.assertFalse(self.tool.is_backed_run(argv))
+
+    def test_a_fake_operator_benchmark_run_contends_for_nothing_either(self) -> None:
+        argv = ["python3", "/home/u/AutoR/rcb_agent.py", "--fake-operator", "--no-synthesis"]
+        self.assertFalse(self.tool.is_backed_run(argv))
+
+    def test_a_shell_that_merely_names_the_script_is_not_a_run(self) -> None:
+        # The exact false positive: a diagnostic one-liner asking whether a run is up.
+        argv = ["/bin/bash", "-c", 'pgrep -af "rcb_agent.py" | head -3']
+        self.assertFalse(self.tool.is_backed_run(argv))
+
+    def test_a_grep_for_the_script_is_not_a_run(self) -> None:
+        argv = ["grep", "-rn", "rcb_agent.py", "/home/u/AutoR"]
+        self.assertFalse(self.tool.is_backed_run(argv))
+
+    def test_a_non_python_binary_is_not_a_run(self) -> None:
+        # The script name is a bare argument to grep too. Requiring an interpreter at
+        # argv[0] is what separates reading the file from running it. A shebang
+        # execution is unaffected: the kernel rewrites argv to put python first.
+        self.assertFalse(self.tool.is_backed_run(["/usr/bin/rcb_agent.py"]))
+        self.assertFalse(self.tool.is_backed_run(["vim", "rcb_agent.py"]))
+        self.assertTrue(self.tool.is_backed_run(["/usr/bin/python3.11", "rcb_agent.py", "-w", "/w"]))
+
+    def test_main_py_without_a_goal_is_not_a_run(self) -> None:
+        # `main.py --trial-report` reads artifacts and calls nothing.
+        self.assertFalse(self.tool.is_backed_run(["python", "main.py", "--trial-report"]))
+
+    def test_an_empty_argv_is_not_a_run(self) -> None:
+        # Kernel threads have an empty cmdline.
+        self.assertFalse(self.tool.is_backed_run([]))
+
+    def test_process_argv_splits_on_nul_rather_than_joining(self) -> None:
+        argv = self.tool.process_argv(os.getpid())
+        self.assertGreater(len(argv), 1)
+        self.assertNotIn(" ", argv[0])
+
+    def test_process_argv_on_a_dead_pid_is_empty_not_an_error(self) -> None:
+        self.assertEqual(self.tool.process_argv(999999), [])
+
+    def test_foreign_runs_reads_real_proc_and_separates_mention_from_execution(self) -> None:
+        """The producer, not just the predicate.
+
+        Every other test here calls ``is_backed_run`` with a hand-built argv, which
+        leaves ``foreign_runs`` free to go on substring-matching the joined command
+        line -- the very thing that refused a live trial. This spawns three real
+        processes and asks the scanner what it sees.
+        """
+        import subprocess
+        import tempfile
+        import time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            script = Path(tmp) / "rcb_agent.py"
+            script.write_text("import time; time.sleep(30)\n", encoding="utf-8")
+            real = subprocess.Popen([sys.executable, str(script), "--workspace", tmp])
+            faked = subprocess.Popen(
+                [sys.executable, str(script), "--fake-operator", "--workspace", tmp]
+            )
+            mention = subprocess.Popen(["sleep", "30"] if False else
+                                       ["/bin/sh", "-c", "sleep 30 # rcb_agent.py --workspace x"])
+            try:
+                deadline = time.time() + 10
+                while time.time() < deadline:
+                    listed = self.tool.foreign_runs()
+                    if any(str(real.pid) == line.split()[0] for line in listed):
+                        break
+                    time.sleep(0.2)
+                pids = {line.split()[0] for line in listed}
+                self.assertIn(str(real.pid), pids, f"a real run must be seen: {listed}")
+                self.assertNotIn(str(faked.pid), pids, f"a fake operator contends for nothing: {listed}")
+                self.assertNotIn(str(mention.pid), pids, f"a mention is not an execution: {listed}")
+            finally:
+                for proc in (real, faked, mention):
+                    proc.kill()
+                    proc.wait()

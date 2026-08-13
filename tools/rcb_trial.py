@@ -150,6 +150,22 @@ def process_cmdline(pid: int) -> str:
     return raw.replace(b"\0", b" ").decode("utf-8", "replace")
 
 
+def process_argv(pid: int) -> list[str]:
+    """The real argument vector, not the joined string.
+
+    ``/proc/pid/cmdline`` is NUL-separated, and joining it before matching is what
+    turns *mentioning* a script into *running* one. A shell running
+    ``grep rcb_agent.py`` -- or the diagnostic one-liner someone types to check
+    whether a run is up -- has ``rcb_agent.py`` in its joined command line and is
+    not a run.
+    """
+    try:
+        raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError:
+        return []
+    return [part.decode("utf-8", "replace") for part in raw.split(b"\0") if part]
+
+
 def lock_is_live(payload: Mapping[str, Any], *, marker: str = "rcb_trial.py") -> bool:
     """Three conditions, all required. Any one alone gives a false answer.
 
@@ -250,6 +266,46 @@ def autor_pids() -> frozenset[int]:
     return frozenset(found)
 
 
+#: Scripts whose execution is a run competing for the same per-base-model quota.
+_RUN_SCRIPTS = ("rcb_agent.py", "main.py")
+
+
+def is_backed_run(argv: Sequence[str]) -> bool:
+    """True only for a process that will actually call a model.
+
+    Two false positives cost a live trial ten minutes each, and on a busy box they
+    cost it forever:
+
+    * **A mention is not an execution.** The first version joined ``cmdline`` and
+      substring-matched it, so a shell scanning ``/proc`` for ``rcb_agent.py``
+      refused the driver by existing. The script has to be an *argument*, and after
+      the interpreter -- ``argv[0]`` is the python binary.
+    * **A fake operator makes no backend calls at all.** ``--fake-operator`` is what
+      the test suite runs, constantly, and a driver that stands down for the unit
+      tests never starts on a machine anybody is developing on. It contends for
+      nothing, so it is not contention.
+    """
+    if not argv or "--fake-operator" in argv:
+        return False
+    # argv[0] must be the interpreter. Without this, ``grep -rn rcb_agent.py .``
+    # reads as a run: the script name is a bare argument there too. A shebang
+    # execution still shows the interpreter first -- the kernel rewrites argv --
+    # so requiring it costs nothing real.
+    binary = argv[0].rsplit("/", 1)[-1]
+    if not binary.startswith("python"):
+        return False
+    script_args = argv[1:]
+    for arg in script_args:
+        if arg.startswith("-"):
+            continue
+        name = arg.rsplit("/", 1)[-1]
+        if name == "rcb_agent.py":
+            return True
+        if name == "main.py":
+            return any(a == "--goal" or a.startswith("--goal") for a in script_args)
+    return False
+
+
 def foreign_runs() -> list[str]:
     """Any AutoR process that is not ours. Refuse to start alongside one."""
     found: list[str] = []
@@ -259,9 +315,9 @@ def foreign_runs() -> list[str]:
         pid = int(entry.name)
         if pid == os.getpid():
             continue
-        line = process_cmdline(pid)
-        if "rcb_agent.py" in line or ("main.py" in line and "--goal" in line):
-            found.append(f"{pid} {line.strip()[:110]}")
+        argv = process_argv(pid)
+        if is_backed_run(argv):
+            found.append(f"{pid} {' '.join(argv).strip()[:110]}")
     return found
 
 
