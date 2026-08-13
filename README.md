@@ -950,9 +950,19 @@ code that would have to change.
   reviewer's prompt. Under `--review-panel`, no seat is shown the accumulated rules and no seat is
   asked whether an inherited obligation was met — and because neither the seat nor the chair prompt
   asks for `carry_forward`, a panel run essentially never creates an obligation either.
-- **The cross-model veto is unreachable from `main.py`.** `--cross-review` is declared and parsed
-  there, but `resolve_cross_reviewer` is called only from `rcb_agent.py`. The feature is live on the
-  benchmark path only.
+- **The cross-model veto now reaches both front ends, but no test runs it against a real model, it
+  does not survive a resume, and it never sees a human approval.** `main.py` seats it through
+  `create_cross_reviewer`, which both `ResearchManager` constructions call — and which refuses the
+  auditor outright under `--fake-operator`, as `ResearchManager.__init__` then does again for any
+  caller. That refusal is not a nicety: `--cross-review` defaults to `auto`,
+  `VERTEX_PROJECT_ENV_VARS` includes `ANTHROPIC_VERTEX_PROJECT_ID`, and
+  `tests/test_fake_pipeline_end_to_end.py` approves every stage twice, so without it the suite would
+  buy a Gemini call per approval on any developer box and let a live model veto a scripted draft. The
+  price is that the audit is only ever exercised against a stubbed verdict. The mode is also absent
+  from the keys `load_run_config` reads, so unlike `--web-search` a resumed run re-decides it from
+  whatever credentials are in the environment that day; and `_collect_review_decision` returns before
+  `_apply_cross_review` whenever no automated reviewer is seated, so under a manual gate the reviewer
+  is built and nothing consults it.
 - **The validity chain is bypassable in unattended mode, and past the skip budget it is bypassed
   deliberately.** A stage that burns its attempts against the gate is auto-skipped, up to
   `--max-auto-skips` (default 3). Past that, `_route_to_deliverable` routes to the writing stage

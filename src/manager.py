@@ -300,7 +300,17 @@ class ResearchManager:
         self.artifact_roots = artifact_roots or []
         # A veto-only second opinion from a different model family. Never overrides a
         # refusal, so enabling it can only make the gate stricter.
-        self.cross_reviewer = cross_reviewer
+        #
+        # Refused outright behind a fake operator, and refused here rather than only at
+        # the front ends so it holds for every caller — `main.py`, `rcb_agent.py` and a
+        # manager built directly. A fake operator emits the same scripted draft whatever
+        # it is asked, so there is nothing an auditor could find in it, while
+        # `--cross-review` defaults to `auto` and seats a live `GeminiCrossReviewer`
+        # wherever `resolve_backend` finds a project. The pairing therefore buys one real
+        # call per approval and, worse, lets a live model's veto send a scripted stage
+        # back — a non-deterministic outcome inside `test_fake_pipeline_end_to_end`, which
+        # asserts that every stage was approved on its first attempt.
+        self.cross_reviewer = None if getattr(operator, "fake_mode", False) else cross_reviewer
         # Where a stage's machine-readable output may legitimately land outside the run
         # tree. The benchmark's read-only data/ is excluded on purpose: it is always
         # populated, so counting it would make the stage-03 gate vacuous.

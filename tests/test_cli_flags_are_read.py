@@ -24,19 +24,15 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 
 #: Flags this repository knowingly parses and does not act on, each with the reason.
-#: Deliberately exact rather than a prefix match: adding a third entry has to be a decision
-#: somebody wrote down, not a line that quietly grew.
+#: Deliberately exact rather than a prefix match: adding an entry has to be a decision
+#: somebody wrote down, not a line that quietly grew. Both sets are empty today —
+#: `--cross-review` and `--cross-review-model` were the last two, exempted on `main.py`
+#: because wiring them would have added a Gemini call to every approval on any machine
+#: with a project in the environment. `create_cross_reviewer` makes that a decision
+#: instead of a side effect: it refuses the auditor behind `--fake-operator`, so the
+#: flags are now read on both front ends and neither needs an exemption.
 KNOWN_UNWIRED: dict[str, set[str]] = {
-    "main.py": {
-        # `resolve_cross_reviewer` is imported here and called only from `rcb_agent.py`, so
-        # neither `ResearchManager(...)` construction in this file passes `cross_reviewer=`.
-        # The cross-model veto is therefore live on the benchmark path alone. Recorded as a
-        # limitation in README.md rather than fixed, because wiring it would add a Gemini
-        # call to every approval on any machine with a key in the environment, which is a
-        # default worth choosing deliberately rather than inheriting from a bug fix.
-        "--cross-review",
-        "--cross-review-model",
-    },
+    "main.py": set(),
     "rcb_agent.py": set(),
 }
 
