@@ -172,20 +172,42 @@ def record_correction(
     return rule
 
 
-def format_policy_for_prompt(policy: ReviewPolicy) -> str:
-    """Render the standing rules for injection into a review prompt."""
-    if not policy.rules:
+def format_policy_for_prompt(policy: ReviewPolicy, *, stage: StageSpec | None = None) -> str:
+    """Render the standing rules for injection into a review prompt.
+
+    ``stage`` excludes the rules this stage's own retries produced, which is what the
+    mechanism was always documented to do -- "a correction demanded once is checked on
+    every stage *after* it". Without it a rule the reviewer invents at attempt 3 is
+    enforced against attempt 4 of the same draft, under a prompt that says a stage
+    repeating a corrected mistake "must not be approved". Since a review that demands
+    anything records a rule, the bar then rises by one requirement per attempt and the
+    loop cannot converge: the stage is refused for a requirement that did not exist when
+    it was written.
+
+    Measured on the ResearchClawBench batch before this argument existed --
+    `Information_001` learned 8 rules across Stage 02's 9 attempts and 7 across Stage
+    03's 9, and both stages exhausted the retry budget with **no validation errors
+    recorded**; `Astronomy_003` accumulated 33 rules, ran 46 stage executions for 7
+    stages, and took 18.4 hours. `Chemistry_003`, with 6 rules, took 6.0.
+
+    Cross-stage carry is untouched: a rule from Stage 02 still binds Stage 03 onward,
+    which is the accumulation the design is for.
+    """
+    rules = policy.rules
+    if stage is not None:
+        rules = [rule for rule in rules if rule.origin_stage != stage.slug]
+    if not rules:
         return ""
 
     lines = [
-        "These corrections were demanded earlier in this run. They are now standing "
-        "requirements: check this stage against every one of them, not only against the "
-        "stage's own objectives. A stage that repeats a mistake already corrected once "
-        "must not be approved.",
+        "These corrections were demanded earlier in this run, at *other* stages. They are "
+        "now standing requirements: check this stage against every one of them, not only "
+        "against the stage's own objectives. A stage that repeats a mistake already "
+        "corrected once must not be approved.",
         "",
     ]
     for source in ("rollback", "refinement"):
-        group = [rule for rule in policy.rules if rule.source == source]
+        group = [rule for rule in rules if rule.source == source]
         if not group:
             continue
         lines.append(f"**{SOURCE_LABELS[source]}:**")
