@@ -227,9 +227,9 @@ same credulity it is built to remove.
 
 ### 2.6 No runtime dependency outside the standard library
 
-AutoR's runtime imports nothing that is not in the Python standard library. The runtime is 53
-modules and ~31 k lines; with the test suite the tree is 151 files and ~63 k lines, and 1826 tests
-run in ~69 s with no install step. The MCP web-search server
+AutoR's runtime imports nothing that is not in the Python standard library. The runtime under
+`src/` is 61 modules and ~37 k lines; counting the entry points, `tools/` and the suite, the tree is
+170 files and ~75 k lines, and 2282 tests run with no install step. The MCP web-search server
 ([`mcp_web_search.py`](../src/mcp_web_search.py)) is a stdlib JSON-RPC 2.0 implementation over stdio
 rather than an SDK. `google-genai` is needed only by three optional paths (`--web-search gemini`,
 `--cross-review`, `--research-diagram`), and each degrades to a recorded *unavailable* rather than a
