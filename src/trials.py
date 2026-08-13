@@ -125,11 +125,11 @@ SELECTS_ON_THE_OUTCOME: frozenset[str] = frozenset(
 class Outcome:
     """The measure a trial's difference is a difference *in*.
 
-    Three fields because the report needs three different things from it and each was
-    previously a literal somewhere else: ``unit`` names the scale on the
-    mean-difference line, ``measured_by`` names the instrument for a reader deciding
-    whether the number is comparable to anything, and ``selected_on_by`` is what the
-    circularity refusal reads. Keeping them on one object is what makes the refusal
+    Four fields, three of which the report needs separately: ``unit`` names the scale
+    on the mean-difference line and was previously a literal there, ``measured_by``
+    names the instrument for a reader deciding whether the number is comparable to
+    anything, and ``selected_on_by`` is what the circularity refusal reads. ``key``
+    identifies the outcome in :data:`DECLARED_OUTCOMES` and in the refusal message. Keeping them on one object is what makes the refusal
     keyed on the pair rather than on the capability: an outcome the run can read
     during the run carries the capabilities that read it, and an outcome computed
     after the workspace is finished carries none.

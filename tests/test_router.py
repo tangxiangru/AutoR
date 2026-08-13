@@ -542,11 +542,10 @@ class RouterTests(unittest.TestCase):
     def test_the_summary_carries_what_was_offered_and_what_blocked_the_rest(self) -> None:
         """The census, and the hole it fills.
 
-        `edges` and `decisions` are about the moves the run *made*. Every visit also
-        records which edges were live and which were shut and by what, and this
-        function read neither — so a finished run could say where it went and could
-        not say what it was ever offered. The exploration happened and left no
-        record of its own shape.
+        `edges` and `decisions` are about the moves the run *made*. `decisions`
+        already carried each visit's `offered` set, so the hole was narrower than
+        "no record of the exploration": `Visit.blocked` was read by nothing, and
+        there was no per-edge total over the whole walk.
         """
         state = GraphState()
         enter(self.paths, state, STAGE_06)
@@ -573,13 +572,16 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(census["visits"], 1)
         self.assertEqual((census["unobserved"], census["bypassed"]), (0, 0))
 
-    def test_a_bypassed_visit_contributes_no_offer_and_no_block(self) -> None:
+    def test_a_visit_with_no_choice_set_contributes_no_offer_and_no_block(self) -> None:
         """The same rule that keeps a jump out of `edges`, applied to the census.
 
-        A bypass had no menu. Counted as a visit where nothing was blocked, an
-        operator's intervention would read as evidence that the graph was wide open
-        at that node; counted as one where nothing was offered, as evidence that it
-        was shut. It is neither, and `unobserved` is where it goes.
+        This is about a visit with *no menu* — not about every bypass. A bypass that
+        did record a choice set contributes on both axes, which
+        `test_a_bypass_that_did_record_a_choice_set_is_counted_on_both_axes` pins.
+        Counted as a visit where nothing was blocked, an operator's intervention
+        would read as evidence that the graph was wide open at that node; counted as
+        one where nothing was offered, as evidence that it was shut. It is neither,
+        and `unobserved` is where it goes.
         """
         state = GraphState()
         enter(self.paths, state, STAGE_06)

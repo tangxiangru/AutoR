@@ -314,17 +314,27 @@ class DisclosureBannerTest(CompletionTestCase):
         self.assertIn("not because none were found", banner)
 
     def test_a_completed_run_prints_the_banner_beside_all_stages_approved(self) -> None:
-        """Both sentences are true separately; alone the first one reads as a clean bill."""
+        """Both sentences are true separately; alone the first one reads as a clean bill.
+
+        The tail, not the whole stream. `_run_validity_review` already prints its own
+        warning containing "did not complete", so asserting over everything printed
+        passes whether or not `_complete_run` says anything — measured: deleting the
+        disclosure from the closing line left all 2,148 tests green. What has to be
+        held is that the sentence appears *beside the closing line*, because that
+        line is the one a reader takes as the verdict on the run.
+        """
         stream = io.StringIO()
         manager = self.manager(ScriptedOperator((1, "")))
         manager.ui = TerminalUI(output_stream=stream, interactive=False)
         manager._run_validity_review(self.paths, STAGE_05, "# Stage 05")  # noqa: SLF001
+        already_printed = len(stream.getvalue())
 
         manager._complete_run(self.paths)  # noqa: SLF001
 
-        printed = stream.getvalue()
-        self.assertIn("All stages approved", printed)
-        self.assertIn("did not complete", printed)
+        closing = stream.getvalue()[already_printed:]
+        self.assertIn("All stages approved", closing)
+        self.assertIn("did not complete", closing)
+        self.assertIn("not because none were found", closing)
         self.assertIn("validity_review_not_completed", read_text(self.paths.logs))
 
     def test_a_completed_run_with_every_pass_intact_prints_only_the_usual_line(self) -> None:

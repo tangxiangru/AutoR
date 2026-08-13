@@ -1017,10 +1017,13 @@ any.
   refused, and until then two of the three comparisons have nothing to compare against.
 - **Standing rules and obligations never reach a panel seat.** Both are injected only into the solo
   reviewer's prompt, so `--review-panel` silently loses two of the accumulation mechanisms.
-- **The cross-model veto is unreachable from `main.py`.** It is wired on the `rcb_agent.py` path
-  only.
-- **A crashed adversarial reviewer is indistinguishable from a clean result.** `reviewer_failed:
-  true` is written and nothing reads it.
+- **The cross-model veto does not survive a resume, and never sees a human approval.** `main.py`
+  seats it through `create_cross_reviewer`, so it is no longer benchmark-only — but the mode is
+  absent from the keys `load_run_config` reads, so a resumed run re-decides it from whatever
+  credentials are in the environment that day; and `_collect_review_decision` returns before
+  `_apply_cross_review` when no automated reviewer is seated, so under a manual gate the reviewer
+  is built and nothing consults it. It is also refused outright behind `--fake-operator`, so the
+  audit is only ever exercised against a stubbed verdict.
 - **The chain is bypassable in unattended mode, and now deliberately so.** A stage that burns its
   attempts against the gate is auto-skipped, up to three per run; past that the terminal edge routes
   to the writing stage *around* the validity guard (§6.5). The bypass used to be an accident of the

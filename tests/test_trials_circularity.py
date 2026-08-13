@@ -123,7 +123,7 @@ class ACircularTrialIsRefusedTests(unittest.TestCase):
 
     def test_the_rubric_outcome_carries_the_module_constant(self) -> None:
         """One rule, not two. `SELECTS_ON_THE_OUTCOME` is named by
-        `docs/self-improvement.md` and by three docstrings; the refusal now reads
+        `docs/self-improvement.md` and by the module docstring of `src/trials.py`; the refusal now reads
         `RUBRIC_TOTAL.selected_on_by`. If those two ever hold different sets, the doc
         describes a gate that is not the one running."""
         self.assertEqual(RUBRIC_TOTAL.selected_on_by, SELECTS_ON_THE_OUTCOME)

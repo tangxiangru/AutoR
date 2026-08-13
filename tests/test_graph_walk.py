@@ -537,11 +537,13 @@ class GraphWalkTests(unittest.TestCase):
         self.assertIn("route_census", read_text(paths.logs))
 
     def test_an_operators_jump_is_not_a_node_where_the_graph_was_open(self) -> None:
-        """A bypass arrives with the move already made: no guard was evaluated and
-        nothing was on offer. Counted as a visit at which nothing was blocked, an
-        operator's intervention would enter the census as evidence about the graph —
-        the same error `Visit.offered` exists to keep out of the archive's edge
-        observations, one artifact along."""
+        """An operator's jump arrives with the move already made, so the router never
+        built a menu and no guard was evaluated. Counted as a visit at which nothing
+        was blocked, that intervention would enter the census as evidence about the
+        graph — the same error `Visit.offered` exists to keep out of the archive's
+        edge observations, one artifact along. The rule is about the missing choice
+        set, not about the bypass flag: a bypass that did record one contributes on
+        both axes and is counted separately as `bypassed`."""
         _operator, manager = self.build(stage_graph=StageGraph.adaptive(), routing_mode="agent")
         jumped = {"done": False}
         real_run_stage = manager._run_stage

@@ -1145,10 +1145,12 @@ indistinguishable in the run directory from one nobody raised.
 "any problems": an open-ended critique reliably returns prose quality, which is
 not what is dangerous here. `severity` is `critical`, `major` or `minor`.
 
-A reviewer that crashed records `reviewer_failed: true`, and `note` carries
-what went wrong. An empty finding list from a failed critique would read as
-"nothing wrong" — though see [Limits](../README.md#limits): the flag is written
-and nothing currently reads it.
+A reviewer that crashed records `completion: "crashed"`, an answer with no
+findings object records `"unreadable"`, and `note` carries what went wrong.
+`reviewer_failed` is still derived from `completion` for readers of this schema.
+An empty finding list from a failed critique would read as "nothing wrong", so
+the manager re-asks once and then names the stage in the run's closing line; see
+[Limits](../README.md#limits) for what that disclosure does and does not do.
 
 **When a review panel left concerns standing**, those concerns *become* the
 findings and no second critic runs: `ValidityReviewer.review` calls

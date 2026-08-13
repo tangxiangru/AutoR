@@ -428,9 +428,9 @@ class BlockCensusTests(unittest.TestCase):
     """What the walk was offered, and what shut the rest.
 
     The route says where the run went. Every visit also records the menu it chose
-    from and why each closed edge was closed, and until this census existed nothing
-    read that after the run — so a graph-structured run reported exactly what a
-    linear one would. These tests are about the two ways that record can be
+    from and why each closed edge was closed; `routing_summary` published the menu
+    under `decisions` and never the closures, and nothing totalled either per edge
+    over the whole walk. These tests are about the two ways that record can be
     misread: pooling an edge that was never offered with one that was refused, and
     pooling an operator's intervention with either.
     """

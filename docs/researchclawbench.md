@@ -491,22 +491,21 @@ or unattended switch of its own.
 --no-synthesis          Skip the operator-backed report synthesis pass and use only the
                         deterministic fallback.
 --fake-operator         Smoke-test the adapter. rcb_agent.py threads fake_mode into the
-                        operator, the approval reviewer and each panel it seats. It does
-                        not reach the cross-model reviewer, which is built separately by
-                        resolve_cross_reviewer and has no fake mode: pair it with
-                        --cross-review off for a run that makes no external call.
+                        operator, the approval reviewer and each panel it seats, and
+                        ResearchManager now refuses a cross reviewer behind a fake
+                        operator for every caller, so a fake run makes no external call
+                        without --cross-review off.
 --export-only           Skip the pipeline and only re-export the most recent run in the
                         workspace. Use this to recover deliverables from an interrupted job
                         — but note that the export prunes images, so it is not a read-only
                         operation.
 ```
 
-**`--cross-review` is live on this path only.** `main.py` declares and parses the same two
-flags, but `resolve_cross_reviewer` is called from `rcb_agent.py` and nowhere else, so on the
-interactive CLI the flags are accepted and then do nothing. The benchmark adapter is the only
-place the cross-model veto is actually wired to a gate.
+**`--cross-review` is live on both paths now.** `main.py` seats it through
+`create_cross_reviewer`; this adapter builds it directly. What differs is that the interactive
+path re-decides the mode on resume, because the value is recorded in no run config.
 
-That inertness runs both ways, and `--cross-review` is not the only flag it touches: the two
+Other flags are still inert on one side or the other, and the two
 parsers are mirror images, each declaring something the other honours and it does not —
 `--routine-model` is the one that works on `main.py` and not here. `docs/cli-reference.md`
 diffs the two parsers row by row.
@@ -846,13 +845,13 @@ an execution backend. Expect exit code 0, a `report/report.md`, and a figure pub
 into the run tree, so a fake run normally exports `"report_source": "stage"` even while
 auto-skipping stages. Read the source off the final JSON line rather than assuming it.
 
-**`--cross-review off` is not optional if you want a free run.** `--fake-operator` does not
-reach the cross-model reviewer: `rcb_agent.py` builds that one through
-`resolve_cross_reviewer`, whose default `auto` seats a live `GeminiCrossReviewer` whenever
-`resolve_backend` finds a usable Gemini backend — and the Vertex project it will accept
-includes `ANTHROPIC_VERTEX_PROJECT_ID`, so the boxes the web-search section above is written
-for are exactly the ones where a "fake" run makes real calls, one per approval, each capable
-of vetoing it.
+**`--cross-review off` used to be mandatory for a free run, and no longer is.**
+`resolve_cross_reviewer`'s default `auto` seats a live `GeminiCrossReviewer` whenever
+`resolve_backend` finds a usable Gemini backend — and the Vertex project it accepts includes
+`ANTHROPIC_VERTEX_PROJECT_ID`, so the boxes the web-search section above is written for were
+exactly the ones where a "fake" run made real calls, one per approval, each capable of vetoing
+it. `ResearchManager` now refuses a cross reviewer behind a fake operator whatever the caller
+passed, so the flag is belt to that braces rather than the only thing holding it.
 
 `--max-auto-skips 9` lifts the budget above the default of 3, so a fake run whose stages
 exhaust their retries reaches the export instead of aborting part-way; how many it actually
