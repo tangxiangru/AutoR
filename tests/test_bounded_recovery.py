@@ -21,6 +21,7 @@ from src.operator import ClaudeOperator
 from src.terminal_ui import TerminalUI
 from src.utils import (
     MAX_STAGE_ATTEMPTS,
+    attempts_exhausted,
     STAGES,
     build_continuation_prompt,
     build_run_paths,
@@ -35,12 +36,28 @@ from src.utils import (
 
 
 class TestMaxStageAttemptsConstant(unittest.TestCase):
-    def test_max_stage_attempts_is_positive_integer(self):
-        self.assertIsInstance(MAX_STAGE_ATTEMPTS, int)
-        self.assertGreater(MAX_STAGE_ATTEMPTS, 0)
+    """The default is no ceiling, and the sentinel is not a number.
 
-    def test_default_value_is_five(self):
-        self.assertEqual(MAX_STAGE_ATTEMPTS, 5)
+    It was 5. Exhausting it does not stop a run -- it auto-skips the stage and carries
+    on -- so the ceiling's real effect was to turn "this stage is taking a while" into
+    "this stage did not happen", inside an artifact that still reads as a finished run.
+    A live ResearchClawBench run skipped its literature survey and its hypothesis
+    generation exactly that way.
+    """
+
+    def test_the_default_is_no_ceiling(self):
+        self.assertIsNone(MAX_STAGE_ATTEMPTS)
+        self.assertFalse(attempts_exhausted(10_000, MAX_STAGE_ATTEMPTS))
+
+    def test_the_sentinel_is_none_and_not_zero(self):
+        # Zero already meant something: allow no attempts, fail at once. It is how a test
+        # forces the skip path. Overloading it would turn that lever into its opposite and
+        # hang the run instead of failing it.
+        self.assertTrue(attempts_exhausted(1, 0))
+
+    def test_an_integer_ceiling_still_caps(self):
+        self.assertFalse(attempts_exhausted(5, 5))
+        self.assertTrue(attempts_exhausted(6, 5))
 
 
 class TestRecoveryContextInContinuationPrompt(unittest.TestCase):
@@ -228,7 +245,7 @@ class TestRunStageMaxAttempts(unittest.TestCase):
         self.operator.run_stage.assert_called_once()
         self.assertTrue(self.paths.stage_file(stage).exists())
 
-    def test_the_attempt_ceiling_defaults_to_the_module_value_and_can_be_raised(self):
+    def test_the_attempt_ceiling_defaults_to_no_limit_and_can_be_set(self):
         from src.manager import ResearchManager
 
         default = ResearchManager(
@@ -238,6 +255,7 @@ class TestRunStageMaxAttempts(unittest.TestCase):
             ui=self.ui,
         )
         self.assertEqual(default.max_stage_attempts, MAX_STAGE_ATTEMPTS)
+        self.assertIsNone(default.max_stage_attempts)
 
         # A caller with time to spend can buy more retries, which is the whole point: each one
         # re-runs the stage with the previous attempt's validation errors attached.
@@ -246,9 +264,9 @@ class TestRunStageMaxAttempts(unittest.TestCase):
             runs_dir=self.runs_dir,
             operator=self.operator,
             ui=self.ui,
-            max_stage_attempts=MAX_STAGE_ATTEMPTS + 4,
+            max_stage_attempts=9,
         )
-        self.assertEqual(raised.max_stage_attempts, MAX_STAGE_ATTEMPTS + 4)
+        self.assertEqual(raised.max_stage_attempts, 9)
 
     def test_the_recorded_ceiling_is_the_instance_value_not_a_constant(self):
         # Pinning a value other than 0 is what proves the loop reads self.max_stage_attempts:

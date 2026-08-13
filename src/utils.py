@@ -64,7 +64,71 @@ def code_version() -> str:
     _code_version_cache = sha[:12] + suffix
     return _code_version_cache
 DEFAULT_VENUE = "neurips_2025"
-MAX_STAGE_ATTEMPTS = 5
+#: Attempts a stage may take before AutoR gives up on it. **None means no limit, and
+#: None is the default.**
+#:
+#: It used to be 5, and the ceiling was doing harm rather than good. Exhausting it does not
+#: stop the run: it auto-skips the stage and carries on, so the budget's real effect was to
+#: convert "this stage is taking a while" into "this stage did not happen" -- silently, in
+#: an artifact that still looks like a finished run. A ResearchClawBench run watched live
+#: skipped its literature survey and its hypothesis generation that way and went on to write
+#: a report standing on neither, and the cause was not the research: the reviewing backend
+#: was emitting its verdict after a tool transcript AutoR could not yet parse (#176), so
+#: every attempt was refused by the parser and the stage ran out of tries it never needed.
+#:
+#: A skipped stage is the expensive failure. Waiting is not. An integer still caps, for a
+#: caller who wants a bound.
+#:
+#: The sentinel is ``None`` rather than ``0`` because ``0`` was already a value with a
+#: meaning -- "allow no attempts, fail at once", which is how a test forces the skip path.
+#: Overloading it would have made that test hang forever instead of failing, and a lever
+#: that silently becomes its own opposite is worse than a slightly longer type.
+MAX_STAGE_ATTEMPTS: int | None = None
+
+
+#: Consecutive attempts that may fail *in exactly the same way* before a stage is
+#: declared stuck. Removing the attempt ceiling removes the only thing that used to stop
+#: a stage that cannot pass, and an unbounded retry of a stage whose fixture can never
+#: satisfy its own gate is a run that never ends -- a worse outcome than the skip the
+#: ceiling was removed to prevent, because it produces nothing at all rather than
+#: something with a hole in it.
+#:
+#: The stop is *no progress*, not *no patience*. A stage that fails differently each time
+#: is working through its problems and gets as many attempts as it needs; a stage whose
+#: validation errors are byte-identical three times running has shown that another
+#: attempt cannot help. That distinction is the whole reason the count is on repeats
+#: rather than on tries.
+STUCK_AFTER_IDENTICAL_FAILURES = 3
+
+
+def is_stuck(recent_failures: Sequence[Sequence[str]]) -> bool:
+    """Whether the last :data:`STUCK_AFTER_IDENTICAL_FAILURES` attempts failed identically.
+
+    Order within one attempt's errors is not meaningful -- validators run in whatever
+    order they are registered -- so the comparison is over the sorted set. Two attempts
+    that surfaced the same problems in a different order made the same amount of
+    progress, which is none.
+    """
+    if len(recent_failures) < STUCK_AFTER_IDENTICAL_FAILURES:
+        return False
+    window = recent_failures[-STUCK_AFTER_IDENTICAL_FAILURES:]
+    signatures = {tuple(sorted(str(item) for item in errors)) for errors in window}
+    if len(signatures) != 1:
+        return False
+    # An attempt that recorded no errors at all did not fail in a way we can compare.
+    # Treating an empty signature as a repeat would stop a stage that is failing for a
+    # reason no validator named, which is the case most in need of another attempt.
+    return bool(next(iter(signatures)))
+
+
+def attempts_exhausted(attempt_no: int, ceiling: int | None) -> bool:
+    """Whether *attempt_no* has run past *ceiling*, with ``None`` meaning no ceiling.
+
+    A predicate rather than four copies of the comparison: the call sites are the places
+    a stage can be sent back from, they do not all compare the same way, and one added
+    later should not have to remember that None is special.
+    """
+    return ceiling is not None and attempt_no > ceiling
 DEFAULT_CODEX_SANDBOX = "workspace-write"
 CODEX_SANDBOX_CHOICES = {"read-only", "workspace-write", "danger-full-access"}
 

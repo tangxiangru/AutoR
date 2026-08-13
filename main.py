@@ -266,9 +266,12 @@ def parse_args() -> argparse.Namespace:
         "--max-attempts",
         type=int,
         default=MAX_STAGE_ATTEMPTS,
-        help="Attempts allowed per stage before AutoR escalates or auto-skips. Each retry "
-             "re-runs the stage with the previous attempt's validation errors attached. "
-             f"Defaults to {MAX_STAGE_ATTEMPTS}.",
+        help="Attempts allowed per stage before AutoR escalates or auto-skips. "
+             "**Omitted, the default, means no limit**: a stage is retried until it passes its "
+             "gate, because exhausting the budget does not stop the run, it skips the "
+             "stage and writes a report standing on nothing. Each retry re-runs the stage "
+             "with the previous attempt's validation errors attached. "
+             "Omit it for no limit; pass an integer to cap.",
     )
     parser.add_argument(
         "--review-operator",
