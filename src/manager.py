@@ -54,7 +54,11 @@ from .experiment_manifest import format_experiment_manifest_for_prompt, write_ex
 from .hypothesis_manifest import write_hypothesis_manifest
 from .information_flow import CHANNELS, ChannelContext, render_inbound
 from .prompt_fragments import compose_stage_template
-from .validity_review import ValidityReviewer, format_findings_for_prompt
+from .validity_review import (
+    ValidityReviewer,
+    ValidityReviewOutcome,
+    format_findings_for_prompt,
+)
 from .research_rounds import (
     ROUND_CLOSING_STAGE_NUMBER,
     RoundIntent,
@@ -289,6 +293,13 @@ class ResearchManager:
         # loop, not to save money, so callers with time to spend should raise it.
         self.max_stage_attempts = max_stage_attempts
         self.auto_skipped_stages: list[str] = []
+        #: Which stages the adversarial pass never actually judged, and how it ended:
+        #: stage slug -> `crashed` or `unreadable`. Kept on the harness rather than read
+        #: back out of `workspace/reviews/`, because that directory is writable by the
+        #: stage the next gate constrains — a stage that cleared its own
+        #: `reviewer_failed` would be clearing the disclosure that its result went
+        #: unattacked. A stage re-reviewed after a revisit drops out of here again.
+        self.validity_reviews_not_completed: dict[str, str] = {}
         self.web_search_context = web_search_context
         self.min_report_figures = min_report_figures
         # The *mode* is recorded in run_config so a resume reconciles it the way it does
@@ -637,6 +648,13 @@ class ResearchManager:
     def _complete_run(self, paths: RunPaths, state: "GraphState | None" = None) -> bool:
         route = format_route(state) if state is not None else ""
 
+        # Written on every way out, not only the clean one: a halted or abandoned run
+        # still publishes the stage files whose validity reviews never ran, and "no
+        # findings" means the same misleading thing in all three.
+        disclosure = self.validity_disclosure()
+        if disclosure:
+            append_log_entry(paths.logs, "validity_review_not_completed", disclosure)
+
         # A run that concluded it cannot answer its question reached the end of the
         # graph legitimately, and it did not produce what it set out to produce.
         # `completed` and `cancelled` are both wrong, and `cancelled` is the worse
@@ -714,7 +732,11 @@ class ResearchManager:
         if route and self.stage_graph.name != "linear":
             self.ui.show_status(f"Route taken: {route}", level="info")
         self._report_optional_machinery(paths)
-        self._print("All stages approved. Run complete.")
+        # The disclosure rides on this line rather than beside it, because "All stages
+        # approved" is the sentence it qualifies.
+        self._print(
+            "All stages approved. Run complete." + (f"\n{disclosure}" if disclosure else "")
+        )
         return True
 
     def _graph_entry_stage(self, paths: RunPaths, start_stage: StageSpec | None) -> StageSpec | None:
@@ -3667,6 +3689,14 @@ class ResearchManager:
         stage did its work, and an agent asked to do both jobs at once reliably
         does the easier one. This has no authority to approve or reject — the
         next stage simply has to answer what it raises.
+
+        It is also where a pass that did not complete is caught, and the choice of
+        *here* is the point. The alternative site is ``validate_validity_response``,
+        which feeds Stage 06's retry loop — and a Stage 06 agent cannot re-run Stage
+        05's reviewer, so a backend hiccup refused there would spend the stage's whole
+        attempt budget on a repair it has no way to make, then auto-skip. Vertex 429s
+        are ordinary. This method holds the operator, so it is the one party in the run
+        that can simply ask again.
         """
         from .validity_review import REVIEWED_STAGE_NUMBERS
 
@@ -3675,20 +3705,46 @@ class ResearchManager:
         self.ui.show_status(
             f"Adversarial validity review of {stage.stage_title}...", level="info"
         )
-        try:
-            findings = ValidityReviewer(self.operator, ui=self.ui).review(
-                paths=paths, stage=stage, stage_markdown=stage_markdown
+        reviewer = ValidityReviewer(self.operator, ui=self.ui)
+        outcome = self._attempt_validity_review(paths, stage, stage_markdown, reviewer, attempt_no=1)
+        if outcome.degraded:
+            # Exactly once. A second failure is evidence about the backend, not about
+            # this prompt, and a third call would buy the same empty list at the same
+            # price. What the re-ask does buy back is the routine case: a single 429 or
+            # a truncated stream, where the stage really is one call from being judged.
+            self.ui.show_status(
+                f"The adversarial pass did not complete ({outcome.completion}); asking once "
+                "more before the run records this stage as unattacked.",
+                level="warn",
             )
-        except Exception as exc:  # noqa: BLE001 - a failed critique must not lose the stage
+            outcome = self._attempt_validity_review(
+                paths, stage, stage_markdown, reviewer, attempt_no=2
+            )
+
+        if outcome.degraded:
+            # A revisit can bring the stage back through here, so this is a set-and-clear
+            # record rather than an append-only one: the disclosure has to describe the
+            # last pass, not every pass.
+            self.validity_reviews_not_completed[stage.slug] = outcome.completion
             append_log_entry(
                 paths.logs,
-                f"{stage.slug} validity_review_failed",
-                f"The adversarial validity review did not run: {exc}",
+                f"{stage.slug} validity_review_not_completed",
+                (
+                    f"The adversarial pass did not complete on either attempt "
+                    f"({outcome.completion}), so this stage was never attacked. Its empty "
+                    "finding list is AutoR's, not a reviewer's, and the run discloses it "
+                    "rather than reading it as a clean result."
+                ),
             )
             self.ui.show_status(
-                "Validity review did not run; the stage stands unchallenged.", level="warn"
+                f"Validity review did not complete ({outcome.completion}) on either attempt "
+                f"for {stage.stage_title}; the stage stands unchallenged and the run says so.",
+                level="warn",
             )
             return
+
+        self.validity_reviews_not_completed.pop(stage.slug, None)
+        findings = outcome.findings
         append_log_entry(
             paths.logs,
             f"{stage.slug} validity_review",
@@ -3707,6 +3763,58 @@ class ResearchManager:
                 "The next stage must answer each one.",
                 level="warn",
             )
+
+    def _attempt_validity_review(
+        self,
+        paths: RunPaths,
+        stage: StageSpec,
+        stage_markdown: str,
+        reviewer: ValidityReviewer,
+        *,
+        attempt_no: int,
+    ) -> ValidityReviewOutcome:
+        """One pass, with a raised exception reported as a completion rather than as nothing.
+
+        The ``except`` used to return, which left the caller with no outcome at all and
+        the run with no record — the same shape as the bug this method now catches, one
+        level up.
+        """
+        from .validity_review import CRASHED
+
+        try:
+            return reviewer.review(
+                paths=paths,
+                stage=stage,
+                stage_markdown=stage_markdown,
+                attempt_no=attempt_no,
+            )
+        except Exception as exc:  # noqa: BLE001 - a failed critique must not lose the stage
+            append_log_entry(
+                paths.logs,
+                f"{stage.slug} validity_review_failed",
+                f"The adversarial validity review did not run (attempt {attempt_no}): {exc}",
+            )
+            return ValidityReviewOutcome(CRASHED, [])
+
+    def validity_disclosure(self) -> str:
+        """The run's banner line when a stage was approved but never attacked.
+
+        Without it the run's closing output says "All stages approved", every artifact
+        under `workspace/reviews/` says zero findings, and both are true. Together they
+        read as "nothing was found wrong", which is a claim the run cannot make about a
+        stage no reviewer reached. Empty when every pass completed, so a healthy run
+        prints nothing extra.
+        """
+        if not self.validity_reviews_not_completed:
+            return ""
+        named = ", ".join(
+            f"{slug} ({completion})"
+            for slug, completion in sorted(self.validity_reviews_not_completed.items())
+        )
+        return (
+            f"Adversarial validity review did not complete for {named}. Those stages carry no "
+            "findings because none were produced, not because none were found."
+        )
 
     def _freeze_preregistration(self, paths: RunPaths) -> None:
         """Fix the hypothesis set before any result exists.
