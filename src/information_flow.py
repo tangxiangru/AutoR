@@ -24,11 +24,23 @@ cannot become "this information helped".
 
 **The graph is inspectable.** ``dependency_edges()`` returns the producer →
 consumer pairs, so the information topology can be printed, tested, and diffed
-rather than reconstructed by reading sixteen ``if`` statements.
+rather than reconstructed by reading a pile of ``if`` statements.
 
 A channel is deliberately allowed to have no producer (``produced_by=None``):
-run configuration, the researcher profile and the deliverable contract come
-from outside the stage graph.
+run configuration, the researcher profile, the deliverable contract and the
+scan of an existing project repository come from outside the stage graph.
+
+**A renderer with no caller is not a channel.** Two of them shipped that way.
+``format_protocol_for_prompt`` was imported by nothing outside its own tests,
+so the primary metric, planned seed count and per-baseline tuning budgets that
+Stage 03 declares reached no prompt as data — Stage 05's template names the file
+path, and the templates for 04, 06 and 07 do not mention the protocol at all.
+``format_project_context_for_prompt`` was worse than uncalled: ``src.manager``
+imported the name and never called it, so a grep for the symbol answered "wired"
+and a run started with ``--project-root`` walked the stage graph over a
+repository no prompt described. ``experimental_protocol`` and ``project_context`` are the
+two edges; ``test_no_prompt_renderer_is_imported_without_being_called`` is the
+guard for the trap that hid the second one.
 
 **A constraint has to arrive while it can still be obeyed.** The figure ceiling
 was the worst case of the opposite: ``MAX_REPORT_FIGURES`` reached Stage 07 and
@@ -303,6 +315,22 @@ def _preregistration(context: ChannelContext) -> str | None:
     return format_preregistration_for_prompt(prereg) if prereg is not None else None
 
 
+def _experimental_protocol(context: ChannelContext) -> str | None:
+    from .experimental_protocol import (
+        format_protocol_for_prompt,
+        load_experimental_protocol,
+    )
+
+    protocol = load_experimental_protocol(context.paths)
+    return format_protocol_for_prompt(protocol) if protocol is not None else None
+
+
+def _project_context(context: ChannelContext) -> str | None:
+    from .project_bootstrap import format_project_context_for_prompt
+
+    return format_project_context_for_prompt(context.paths)
+
+
 def _rounds(context: ChannelContext) -> str | None:
     from .research_rounds import format_rounds_for_prompt
 
@@ -387,6 +415,43 @@ CHANNELS: tuple[Channel, ...] = (
         ),
     ),
     Channel(
+        key="project_context",
+        heading="# Existing Project Repository (from the project bootstrap)",
+        produced_by=None,
+        consumed_by=_from("01_literature_survey"),
+        build=_project_context,
+        preface=(
+            "This run was started against a repository that already existed. What follows "
+            "is what the scan found in it, not what this run produced.\n"
+            "- An assessment is a reading of the files, not a result. Confirm it against "
+            "the repository before building on it, and say so in your stage summary when it "
+            "turns out to be wrong.\n"
+            "- Every stage the scan assessed is listed, each marked either carried forward "
+            "— this run accepted that stage as already done — or still owed. The carried-"
+            "forward ones were also written into `# Approved Memory` as stage summaries, so "
+            "you may meet them twice; that is deliberate, because a revisit to a stage below "
+            "the re-entry point rewrites that section and drops them, and this block is then "
+            "the only copy left."
+        ),
+        rationale=(
+            "`recommend_entry_stage` returns any stage from 01 to 08, so no fixed early set "
+            "of readers is right: the run that re-enters at Stage 07 to write up results "
+            "that already exist is the run that most needs to be told what the repository "
+            "holds, and a `{03,04,05,07}` would withhold it from exactly that run. Stage 00 "
+            "is the one stage that provably cannot read it — `run()` calls "
+            "`_run_project_bootstrap` after `_run_intake`, so no scan exists while intake is "
+            "running and the block would be empty every time. On a run without "
+            "`--project-root` the channel is silent at every stage, which is what an "
+            "unconditional edge to a conditional artifact should look like. This block does "
+            "overlap `# Approved Memory` — `_adopt_project_bootstrap_baseline` copies each "
+            "below-entry assessment into a stage summary — and the overlap is kept rather "
+            "than trimmed: `append_approved_stage_summary` retains only the entries numbered "
+            "below the stage it writes, so approving the `07_writing → 01_literature_survey` "
+            "revisit on a run that re-entered at 07 erases Stages 02-06 from memory, and the "
+            "scan's reading of them survives only here."
+        ),
+    ),
+    Channel(
         key="idea_pool",
         heading="## Candidate Hypothesis Pool",
         produced_by=None,
@@ -454,6 +519,39 @@ CHANNELS: tuple[Channel, ...] = (
         consumed_by=_from("05_experimentation"),
         build=_preregistration,
         rationale="From the freeze onward this is the authoritative statement of what the run predicted.",
+    ),
+    Channel(
+        key="experimental_protocol",
+        heading="# Experimental Protocol (declared at Stage 03)",
+        produced_by="03_study_design",
+        consumed_by=frozenset(
+            {"04_implementation", "05_experimentation", "06_analysis", "07_writing"}
+        ),
+        build=_experimental_protocol,
+        preface=(
+            "Stage 04 builds for this protocol and Stage 05 spends it. A harness fixed to "
+            "one seed, or with no way to give a baseline the budget declared below, cannot "
+            "be made to obey the protocol at Stage 05 without going back through the "
+            "`05_experimentation → 04_implementation` revisit edge and rebuilding it — an "
+            "edge here is cheaper than that repair. Stage 04's smoke run is not the "
+            "experiment: build for the planned seeds and the declared budgets, do not spend "
+            "them there."
+        ),
+        rationale=(
+            "Stage 03 writes it and four later stages are bound by it, none of which is "
+            "shown its contents anywhere else. Stage 05's template names the file path and "
+            "states the obligations it creates; the templates for 04, 06 and 07 do not "
+            "mention it. 04 builds the harness that has to run `planned_seeds` runs and "
+            "each declared baseline. 05 owes each baseline the budget it declared. 06 may "
+            "not replace the primary metric with one that came out better, and "
+            "`validate_outcome_statistics` refuses a `supported` or `refuted` verdict "
+            "without `statistics.n_seeds` — the count the design planned reaches its prompt "
+            "here or not at all. 07 reports that metric and states a budget shortfall as a "
+            "limitation. Stage 03 is the author and its own template carries the schema and "
+            "the rules, so re-sending the file to its writer would restate the instruction "
+            "rather than deliver anything; Stages 00-02 precede the design; Stage 08 "
+            "packages a comparison it cannot re-run."
+        ),
     ),
     Channel(
         key="settled_reasoning",

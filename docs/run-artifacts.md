@@ -642,9 +642,25 @@ See [Recursive Self-Improvement](self-improvement.md).
 | `bootstrap/` | the `--project-root` scan, all of it: `project_state.json`, `experiment_inventory.json`, `writing_state.json`, `stage_assessments.json`, `scan_metadata.json`, `bootstrap_summary.md` | — |
 | `profile/` | the `--paper-corpus` scan — derived researcher profile and style notes: `research_profile.json`, `citation_neighborhood.json`, `style_profile.json`, `corpus_manifest.json`, `style_notes.md`, `bootstrap_summary.md` | — |
 
-The two scans do not share a directory. `--project-root` is the only writer of
-`bootstrap/`: `save_project_bootstrap` emits all six files there in one call,
-before the bootstrap stage runs. `--paper-corpus` writes nothing to
+The two scans do not share a directory. `--project-root` is the only scan that
+writes `bootstrap/`: `save_project_bootstrap` emits all six files there in one
+call, before the bootstrap stage runs. It is not the last writer, though.
+`src/prompts/project_bootstrap.md` points the bootstrap agent at
+`{{WORKSPACE_BOOTSTRAP_DIR}}` and asks it for four of those six —
+`stage_assessments.json`, `experiment_inventory.json`, `writing_state.json` and
+`bootstrap_summary.md` — so from that stage's approval on, four of the six hold
+whatever the agent wrote. AutoR relies on exactly that for one of them:
+`_run_project_bootstrap` re-reads `load_stage_assessments` after approval and
+prefers it to the scan's own list. The consequence worth knowing is for the
+other: `format_project_context_for_prompt` puts `bootstrap_summary.md` above its
+assessment list, and the template asks for 300-500 words of prose there, so the
+per-stage readings in that section are not guaranteed to survive the bootstrap
+stage — which is why the list under it is never narrowed. The split is pinned by
+`test_the_template_hands_the_agent_four_of_the_six_files_the_scan_wrote`: the two
+the template leaves alone are `project_state.json` and `scan_metadata.json`, and
+the second of those is where the re-entry stage lives.
+
+`--paper-corpus` writes nothing to
 `bootstrap/`; its whole output set goes to `profile/`, and it gets there a
 different way — `src/prompts/bootstrap.md` points the agent at
 `{{WORKSPACE_PROFILE_DIR}}` and asks it for `research_profile.json`,
