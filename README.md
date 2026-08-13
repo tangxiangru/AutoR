@@ -546,7 +546,7 @@ Eighteen `validate_*` functions are reachable from it in all:
 | 06+ | `validate_hypothesis_outcomes` | A frozen hypothesis has no verdict, a verdict adjudicates something unpreregistered, or a `supported`/`refuted` verdict cites an evidence path that does not exist |
 | 06+ | `validate_outcome_statistics` | A verdict has no `n_seeds`, an unrecognised `dispersion_type`, a single seed with no justification, or `dispersion_type: none` with two or more seeds |
 | 06+ | `validate_report_plan_sources` | A planned figure or headline number's `source_artifact` is missing or empty |
-| 06, 07 | `validate_validity_response` | The stage did not answer every adversarial finding from the one before it, with a status, a ≥40-character explanation, and evidence when it claims `addressed` |
+| 06, 07 | `validate_validity_response` | The stage did not answer every adversarial finding from the one before it, with a status, a ≥40-character explanation, and evidence when it claims `addressed` — or the workspace copy of that review disagrees with AutoR's stamped copy |
 | 06 | `validate_round_decision` | A round closes as `converged` with no supported hypothesis and no `negative_result: true` |
 | 07+ | `validate_claim_provenance` | A manuscript claim is `confirmatory` on a hypothesis that is not `supported`, or cites no evidence file that exists |
 | 07 md | `validate_markdown_report` | The report is under 1200 characters, carries placeholder text, references an image that does not resolve, or publishes fewer than `min_report_figures` |
@@ -679,7 +679,8 @@ runs/<run_id>/
 ├── user_input.txt      memory.md             run_config.json
 ├── run_manifest.json   artifact_index.json   intake_context.json
 ├── obligations.json    review_policy.json    # both per-run; nothing crosses runs
-├── report_plan_stamp.json   preregistration_stamp.json   # AutoR's copies, outside workspace/ on purpose
+├── report_plan_stamp.json   preregistration_stamp.json   validity_review_stamp.json
+│                       # AutoR's copies, outside workspace/ on purpose
 ├── logs.txt            logs_raw.jsonl
 ├── prompt_cache/       operator_state/       handoff/        stages/
 ├── .claude/skills/     # the skill pack, pulled on demand by the agent
@@ -700,9 +701,10 @@ runs/<run_id>/
 
 `evolution/` sits outside `workspace/` on purpose, and the dataclass records the reason: it is *"a
 record of how the run reached its answer, not part of the answer, and a benchmark export that swept
-it up would ship the losing drafts alongside the report"*. `report_plan_stamp.json` and
-`preregistration_stamp.json` are outside `workspace/` for the same class of reason: the agent must
-not be able to backdate its own declaration, or rewrite the commitment it is being held to.
+it up would ship the losing drafts alongside the report"*. `report_plan_stamp.json`,
+`preregistration_stamp.json` and `validity_review_stamp.json` are outside `workspace/` for the same
+class of reason: the agent must not be able to backdate its own declaration, rewrite the commitment
+it is being held to, or edit the record of the objections it owes an answer to.
 
 The only state AutoR writes outside a run directory is the cross-run archive at `~/.autor/archive`
 (`--archive`, `--no-archive`).

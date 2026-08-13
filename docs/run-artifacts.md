@@ -27,6 +27,8 @@ runs/<run_id>/
 ├── obligations.json            # what a reviewer said a later stage still owes (agent gate only)
 ├── review_policy.json          # standing rules learned from this run's refusals and rollbacks
 ├── report_plan_stamp.json      # AutoR's copy of the report plan's date and digest
+├── preregistration_stamp.json  # AutoR's copy of the frozen hypothesis set
+├── validity_review_stamp.json  # AutoR's copy of what each adversarial pass raised
 ├── logs.txt                    # human-readable workflow log
 ├── logs_raw.jsonl              # raw backend stream-json events
 ├── prompt_cache/               # the exact prompt sent for every attempt
@@ -55,9 +57,10 @@ The directory shape is created by `ensure_run_layout` and the paths are
 defined once, in `build_run_paths` ([`src/utils.py`](../src/utils.py)). If you
 need a path in code, take it from `RunPaths` rather than joining strings.
 
-Four files sit at the run root rather than under `workspace/` on purpose:
-`obligations.json`, `review_policy.json` and `report_plan_stamp.json` are
-records *about* the run rather than part of its answer, and every stage prompt
+Five files sit at the run root rather than under `workspace/` on purpose:
+`obligations.json`, `review_policy.json`, `report_plan_stamp.json`,
+`preregistration_stamp.json` and `validity_review_stamp.json` are records
+*about* the run rather than part of its answer, and every stage prompt
 directs the agent at `workspace/` paths. Same reason `evolution/` is out here —
 and, like `evolution/`, it also keeps them out of a benchmark export that
 packages the workspace.
@@ -501,6 +504,96 @@ content**: a round that left the plan alone adds no amendment and leaves the
 plan file's bytes alone, so carrying a correct plan through a second round does
 not manufacture a spurious record of having changed it. Absent until a
 `report_plan.json` exists.
+
+### `preregistration_stamp.json`
+
+AutoR's own copy of the frozen hypothesis set. Written by
+`_write_preregistration_stamp` in
+[`src/preregistration.py`](../src/preregistration.py) at the same moment as
+[`workspace/notes/preregistration.json`](#workspacenotespreregistrationjson),
+and carrying the same object — `frozen_at`, `frozen_before_stage`,
+`source_digest`, `digest`, `hypotheses`, `amendments` — plus one field the
+workspace copy does not have:
+
+```json
+{
+  "repairs": [
+    {
+      "repaired_at": "2026-03-30T19:11:07",
+      "found": "preregistration.json states digest 3bf263f5..., but AutoR stamped 9c1f0b7e..."
+    }
+  ]
+}
+```
+
+Every time AutoR had to write its copy back over a workspace file that
+disagreed, and what disagreed. The list is kept because the repair is what
+destroys the evidence it was needed for: once the stamped record is written over
+the workspace copy the two agree again, and the run's own artifacts would
+otherwise say the frozen set was never touched. `recorded_preregistration_stamp`
+reads this file, never `preregistration.json`, and treats a stamp with no digest
+or no hypotheses as absent rather than as an empty freeze.
+
+Absent until a run freezes, which is Stage 04's approval at the earliest.
+Deleting it *and* `preregistration.json` reproduces the pre-stamp reset, which
+is why `validate_preregistration` also reads the append-only freeze witness in
+`logs.txt` — see #203 and `FREEZE_WITNESS_HEADING`.
+
+### `validity_review_stamp.json`
+
+AutoR's own copy of what each adversarial pass raised. Written by
+`ValidityReviewer._write_review` in
+[`src/validity_review.py`](../src/validity_review.py), at the same moment as the
+workspace copy and never separately — a pass that reached
+[`workspace/reviews/validity_review_<stage>.json`](#workspacereviewsvalidity_review_stagejson-and-validity_response_stagejson)
+and not the run root would be a review nothing can hold anyone to.
+
+```json
+{
+  "stamped_at": "2026-08-13T11:50:07",
+  "reviews": {
+    "05_experimentation": {
+      "stamped_at": "2026-08-13T11:50:07",
+      "reviewed_stage": "05_experimentation",
+      "completion": "completed",
+      "note": "fake-operator mode",
+      "findings": [
+        {
+          "id": "V1",
+          "category": "insufficient_replication",
+          "severity": "critical",
+          "finding": "The reported comparison rests on a single run of a two-row synthetic split.",
+          "why_it_matters": "A single run cannot separate the effect from variance.",
+          "what_would_settle_it": "Repeat across at least five seeds and report the spread."
+        }
+      ]
+    }
+  }
+}
+```
+
+One file, one entry per reviewed stage, so Stage 07's obligations do not
+overwrite Stage 06's. `completion` is one of `completed`, `crashed` or
+`unreadable`: an empty `findings` list under `completed` is a reviewer that
+attacked the stage and found nothing, and the same list under the other two is
+a pass that never happened, which is the distinction the workspace copy's
+`reviewer_failed` flag also carries.
+
+`load_findings` reads this file wherever there is one, so the gate, the prompt
+that lists the objections and fake mode's answerer all count the same
+population. `validity_review_tamper` compares the *finding records* against the
+workspace copy — not the bytes, which never converge, because a restored file
+carries a fresh `generated_at` — and reports a dropped id and a rewritten one
+apart, since an equal-length rewrite is the cheaper edit and the one a reader of
+`logs.txt` is most likely to misread. `validate_validity_response` refuses while
+the two disagree, and the next attempt's prompt writes AutoR's record back after
+logging what disagreed under `validity_review_restored`.
+
+Absent until a validity review has run, which is Stage 05 at the earliest. A
+run resumed from an AutoR that predates this file has no stamp, and
+`stamped_review` returning `None` is that state rather than a clean comparison:
+there is nothing to compare against, so the workspace copy is authoritative
+again, exactly as it was before.
 
 ### `logs.txt` and `logs_raw.jsonl`
 
@@ -1162,6 +1255,18 @@ Dismissing an objection is legitimate and deliberately cheap — `rebutted` with
 an argument is a complete answer, and so is `accepted_limitation`. There is no
 `noted`. What is refused is silence, because a finding nobody responded to is
 indistinguishable in the run directory from one nobody raised.
+
+**The findings the gate counts are AutoR's, not this file's.** The same pass is
+stamped to `runs/<id>/validity_review_stamp.json`, outside `workspace/`, for the
+reason `report_plan_stamp.json` and `preregistration_stamp.json` are: this file
+sits in a directory the answering stage can write, so the record of what it owes
+an answer to was in the hands of the party that owes it. `load_findings` reads
+the stamp wherever there is one, and `validate_validity_response` refuses a
+workspace copy that disagrees with it; the next attempt's prompt writes AutoR's
+record back and logs what disagreed first, because the repair is what destroys
+the evidence it was needed for. The boundary is the same one the other two
+stamps have — everything under the run root is writable by the party the gate
+constrains, so this narrows the escape rather than closing it.
 
 `category` is one of ten named failure modes — `confound`, `weak_baseline`,
 `insufficient_replication`, `leakage`, `metric_cherry_picking`,

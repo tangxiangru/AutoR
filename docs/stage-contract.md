@@ -173,7 +173,7 @@ stage and select their own.
 | **06+** | Every live slot's and headline number's `source_artifact` resolves to a file that exists and is not empty. | `validate_report_plan_sources` |
 | **06+** | At least one figure under `workspace/figures/` with a suffix in `.png .pdf .svg .jpg .jpeg`. | `FIGURE_SUFFIXES` |
 | **08+** | At least one file under `workspace/reviews/`. | — |
-| **06 and 07 only** | Every finding of the adversarial validity review of the previous stage is answered in `workspace/reviews/`. Stage 06 answers Stage 05, Stage 07 answers Stage 06; every other stage owes nothing, and so does a stage whose review found nothing. | `validate_validity_response` |
+| **06 and 07 only** | Every finding of the adversarial validity review of the previous stage is answered in `workspace/reviews/`. Stage 06 answers Stage 05, Stage 07 answers Stage 06; every other stage owes nothing, and so does a stage whose review found nothing. **The findings counted are the ones AutoR stamped** to `runs/<id>/validity_review_stamp.json`, so deleting or softening the workspace copy changes nothing about what is owed — and the disagreement is itself refused, on a stage that answered everything and on a stage whose review found nothing alike. | `validate_validity_response` |
 | **06, then 07+** | At Stage 06, `workspace/notes/round_decision.json` names one of the four round decisions. From Stage 07 on, a closed round must exist and must not stand `abandon`ed. | `validate_round_decision` |
 
 One Stage 07 requirement is shared by both output formats, because it runs
