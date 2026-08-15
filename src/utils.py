@@ -323,13 +323,21 @@ MIN_REPORT_CHARS = 1200
 #: How many figures may reach the judge.
 #:
 #: ResearchClawBench's scorer collects one set of agent images per *workspace*, by an
-#: unsorted ``rglob`` over ``outputs/`` and then ``report/``, and attaches the first five of
-#: that same set to every image checklist item (``generated_images[:5]``) — not five chosen
-#: per item. Filesystem order is not alphabetical, so naming cannot influence which five
-#: survive; the only way to choose them is to publish no more than five. Image items carry
-#: ~61% of the benchmark's total weight, so a sixth figure does not dilute the score, it
-#: randomises it.
-MAX_REPORT_FIGURES = 5
+#: unsorted ``rglob`` over ``outputs/`` and then ``report/``, and attaches the first N of that
+#: same set to every image checklist item — not N chosen per item. Filesystem order is not
+#: alphabetical, so naming cannot influence which survive; the only way to choose them is to
+#: publish no more than N. Image items carry ~61% of the benchmark's total weight, so an
+#: N+1'th figure does not dilute the score, it randomises which ones the judge ever sees.
+#:
+#: The benchmark raised its cap from 5 to 15 (`generated_images[:15]`, "Increase judge
+#: generated image cap"). A ceiling is only worth having where it matches the reader's, and
+#: five stopped matching: a run that had a sixth figure worth showing was throwing it away
+#: for a constraint that no longer existed.
+#:
+#: This is a ceiling on what *reaches* the judge, never a target. Nothing in AutoR asks for
+#: more figures than the study needs; `report_plan` still requires each slot to settle a
+#: distinct claim, and a run with four questions publishes four figures.
+MAX_REPORT_FIGURES = 15
 
 #: Distinct figures a markdown report must carry. One is the floor for an ordinary research
 #: run, where how much the question needs illustrating is the researcher's call.
@@ -339,8 +347,8 @@ MAX_REPORT_FIGURES = 5
 #: 40 shipped tasks carry two or more image criteria, which together hold about 61% of the
 #: total weight. A single-figure report clears the old gate while structurally forfeiting most
 #: of that: one image cannot answer two different questions. The floor is a *count of distinct
-#: figures*, never a target to pad toward, and is capped by MAX_REPORT_FIGURES because a sixth
-#: figure is not shown to the judge at all.
+#: figures*, never a target to pad toward, and is capped by MAX_REPORT_FIGURES because a
+#: figure past that ceiling is not shown to the judge at all.
 MIN_REPORT_FIGURES = 1
 BENCHMARK_MIN_REPORT_FIGURES = 3
 

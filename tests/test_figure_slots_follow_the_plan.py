@@ -1,7 +1,7 @@
 """Which five figures reach the judge, when the report names none of them.
 
-ResearchClawBench shows the judge at most five images and scores ~61% of the benchmark's
-weight against them. When the report references its figures, `collect_figures` publishes
+ResearchClawBench shows the judge at most `MAX_REPORT_FIGURES` images and scores ~61% of the
+benchmark's weight against them. When the report references its figures, `collect_figures` publishes
 those and this branch never runs. When it references none -- a synthesized or assembled
 report -- the slots were filled in `_figure_candidates` order, which resolves to filename
 order. One benchmark run reached that branch holding 426 candidate PNGs, so five were
@@ -44,6 +44,15 @@ class PlannedRankTest(unittest.TestCase):
         self.workspace = root / "ws"
         ensure_workspace_layout(self.workspace)
 
+    def _filler(self, extra: int = 2) -> list[str]:
+        """Enough figures to contest the slots, whatever the ceiling is.
+
+        These tests used to hardcode six names against a ceiling of five. That pinned the
+        constant rather than the behaviour, so raising the ceiling to match the benchmark's
+        own `generated_images[:15]` broke six tests that were not about the ceiling at all.
+        """
+        return [f"f{i:03d}.png" for i in range(MAX_REPORT_FIGURES + extra)]
+
     def _figures(self, *names: str) -> None:
         self.paths.figures_dir.mkdir(parents=True, exist_ok=True)
         for name in names:
@@ -75,67 +84,76 @@ class PlannedRankTest(unittest.TestCase):
 
     def test_the_plans_top_five_win_over_the_alphabet(self) -> None:
         """The exact failure: a main-result figure whose name sorts last is dropped."""
-        self._figures("a.png", "b.png", "c.png", "d.png", "e.png", "f.png", "zz_main_result.png")
-        self._plan("zz_main_result.png", "f.png", "e.png", "d.png", "c.png")
-        # collect_figures returns a sorted listing of what it published, so membership is
-        # the assertion: the ranking decides which five survive, not what order they appear in.
-        self.assertEqual(
-            set(self._publish()), {"zz_main_result.png", "f.png", "e.png", "d.png", "c.png"}
-        )
+        filler = self._filler()
+        self._figures(*filler, "zz_main_result.png")
+        planned = ["zz_main_result.png", *filler[-(MAX_REPORT_FIGURES - 1):]]
+        self._plan(*planned)
+        # collect_figures returns a sorted listing of what it published, so membership is the
+        # assertion: the ranking decides which survive, not what order they appear in.
+        self.assertEqual(set(self._publish()), set(planned))
 
     def test_the_planned_figure_is_not_pruned_off_disk(self) -> None:
         """Losing the slot also deleted the file: the prune enforces the budget on disk."""
-        self._figures("a.png", "b.png", "c.png", "d.png", "e.png", "f.png", "zz_main_result.png")
-        self._plan("zz_main_result.png", "f.png", "e.png", "d.png", "c.png")
+        filler = self._filler()
+        self._figures(*filler, "zz_main_result.png")
+        self._plan("zz_main_result.png", *filler[-(MAX_REPORT_FIGURES - 1):])
         self._publish()
         self.assertTrue((self.workspace / "report" / "images" / "zz_main_result.png").exists())
 
     def test_a_run_with_no_plan_is_unchanged(self) -> None:
         """The fix cannot make a run worse than it was."""
-        self._figures("a.png", "b.png", "c.png", "d.png", "e.png", "f.png")
-        self.assertEqual(self._publish(), ["a.png", "b.png", "c.png", "d.png", "e.png"])
+        filler = self._filler()
+        self._figures(*filler)
+        self.assertEqual(self._publish(), sorted(filler)[:MAX_REPORT_FIGURES])
 
     def test_an_unreadable_plan_is_unchanged(self) -> None:
-        self._figures("a.png", "b.png", "c.png", "d.png", "e.png", "f.png")
+        filler = self._filler()
+        self._figures(*filler)
         self.paths.report_plan.parent.mkdir(parents=True, exist_ok=True)
         self.paths.report_plan.write_text("{not json", encoding="utf-8")
-        self.assertEqual(self._publish(), ["a.png", "b.png", "c.png", "d.png", "e.png"])
+        self.assertEqual(self._publish(), sorted(filler)[:MAX_REPORT_FIGURES])
 
     def test_unplanned_figures_fill_the_slots_a_thin_plan_leaves(self) -> None:
         """A run whose plan names two figures must still publish five."""
-        self._figures("a.png", "b.png", "c.png", "d.png", "e.png", "zz_main.png")
-        self._plan("zz_main.png", "e.png")
+        filler = self._filler()
+        self._figures(*filler, "zz_main.png")
+        self._plan("zz_main.png", filler[-1])
         published = self._publish()
         self.assertEqual(len(published), MAX_REPORT_FIGURES)
         # Both planned figures survive; the remaining three slots go to unplanned ones. The
         # sentinel has to sit above every real slot or the plan's *last* figure ties with
         # the unplanned pool and loses the tie to the alphabet.
         self.assertIn("zz_main.png", published)
-        self.assertIn("e.png", published)
+        self.assertIn(filler[-1], published)
 
     def test_a_dropped_slot_is_not_reinstated_at_export(self) -> None:
         """`dropped_because` records a decision; ranking it last would quietly undo it."""
-        self._figures("a.png", "b.png", "c.png", "d.png", "e.png", "zz_dropped.png")
-        self._plan("zz_dropped.png", "e.png", dropped=("zz_dropped.png",))
+        # A dropped slot must not be reinstated, and with a ceiling that can exceed the
+        # candidate pool it must also not simply arrive as an unplanned filler -- so the pool
+        # is kept larger than the ceiling.
+        filler = self._filler(extra=3)
+        self._figures(*filler, "zz_dropped.png")
+        self._plan("zz_dropped.png", filler[-1], dropped=("zz_dropped.png",))
         published = self._publish()
-        self.assertIn("e.png", published)
+        self.assertIn(filler[-1], published)
         self.assertNotIn("zz_dropped.png", published)
 
     def test_the_plan_wins_on_a_case_mismatch(self) -> None:
         """The plan names an intended file; the code that drew it chose the real name."""
-        self._figures("a.png", "b.png", "c.png", "d.png", "e.png", "Zz_Main_Result.png")
+        self._figures(*self._filler(), "Zz_Main_Result.png")
         self._plan("zz_main_result.PNG", "e.png")
         self.assertIn("Zz_Main_Result.png", self._publish())
 
     def test_a_plan_naming_files_that_do_not_exist_changes_nothing(self) -> None:
-        self._figures("a.png", "b.png", "c.png", "d.png", "e.png", "f.png")
+        filler = self._filler()
+        self._figures(*filler)
         self._plan("never_drawn.png", "also_missing.png")
-        self.assertEqual(self._publish(), ["a.png", "b.png", "c.png", "d.png", "e.png"])
+        self.assertEqual(self._publish(), sorted(filler)[:MAX_REPORT_FIGURES])
 
     def test_a_referenced_report_still_outranks_the_plan(self) -> None:
         """The report saying which figures it argues with is better evidence than a plan."""
-        self._figures("a.png", "b.png", "c.png", "d.png", "e.png", "zz_main.png")
-        self._plan("zz_main.png", "e.png")
+        self._figures(*self._filler(), "zz_main.png", "b.png", "c.png")
+        self._plan("zz_main.png")
         published = collect_figures(
             self.paths, self.workspace, report_text="![one](images/b.png)\n![two](images/c.png)"
         )

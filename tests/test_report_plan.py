@@ -1043,3 +1043,77 @@ class StampCarriesEveryAuthoredFieldTest(ReportPlanTestCase):
                 continue
             with self.subTest(field=f.name):
                 self.assertEqual(getattr(after, f.name), getattr(before, f.name))
+
+
+class HeadlineNumbersReachTheReaderTest(unittest.TestCase):
+    """A declared headline result that is first stated on page four was mis-ranked.
+
+    Measured over 40 benchmark runs: AutoR's median report is 36 KB, so a grader reading the
+    first JUDGE_VISIBLE_PREFIX_CHARS sees 28% of it, and 340 of its median 520 numbers fall
+    outside that window. The bare agent it loses to writes 26 KB and puts more of its numbers
+    inside. The rule itself is ordinary scientific writing -- state the result before the
+    method that produced it -- and it is checked against `headline_numbers`, which the run
+    declared at Stage 03 before any result existed and so cannot be fitted to what came out.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.paths = build_run_paths(Path(self._tmp.name) / "run_0001")
+        ensure_run_layout(self.paths)
+
+    def _plan_with(self, *quantities: str) -> None:
+        payload = {
+            "declared_at": "2026-08-14T00:00:00", "digest": "d", "no_figures_because": "",
+            "task_outputs": [], "figures": [],
+            "headline_numbers": [
+                {"quantity": q, "unit": "unit", "source_artifact": "outputs/r.json"}
+                for q in quantities
+            ],
+        }
+        self.paths.report_plan.parent.mkdir(parents=True, exist_ok=True)
+        self.paths.report_plan.write_text(json.dumps(payload), encoding="utf-8")
+
+    def _report(self, head: str, tail_quantities: str = "") -> None:
+        filler = "Methodology detail. " * 800
+        write_text(self.paths.report_file, f"# Report\n\n{head}\n\n{filler}\n\n{tail_quantities}\n")
+
+    def _problems(self) -> list[str]:
+        return [p for p in validate_report_plan_coverage(self.paths) if "headline quantities" in p]
+
+    def test_a_buried_headline_is_refused(self) -> None:
+        self._plan_with("class-balanced accuracy on the held-out split",
+                        "skillful lead time for the primary field")
+        self._report("An abstract that states no numbers.",
+                     "balanced accuracy held-out 74.1%; skillful lead time primary field 9.2 d")
+        problems = self._problems()
+        self.assertEqual(len(problems), 1)
+        self.assertIn("2 of 2", problems[0])
+
+    def test_a_headline_stated_up_front_passes(self) -> None:
+        self._plan_with("class-balanced accuracy on the held-out split")
+        self._report("Balanced accuracy on the held-out split is 74.1%.")
+        self.assertEqual(self._problems(), [])
+
+    def test_wording_may_differ_from_the_plan(self) -> None:
+        """Demanding the phrase verbatim would fail honest reports and pass pasted ones."""
+        self._plan_with("RMSE of the identified parameters")
+        self._report("The identified parameters reach an RMSE of 0.0117.")
+        self.assertEqual(self._problems(), [])
+
+    def test_a_minority_buried_is_tolerated(self) -> None:
+        """The gate is about a report that buries its findings, not about one straggler."""
+        self._plan_with("balanced accuracy", "lead time", "throughput in samples")
+        self._report("Balanced accuracy 74.1%. Lead time 9.2 d.", "throughput samples 31/s")
+        self.assertEqual(self._problems(), [])
+
+    def test_a_short_report_is_exempt(self) -> None:
+        """Nothing is buried when the whole report fits inside what the reader sees."""
+        self._plan_with("balanced accuracy on the held-out split")
+        write_text(self.paths.report_file, "# Report\n\nNo numbers here at all.\n")
+        self.assertEqual(self._problems(), [])
+
+    def test_a_plan_declaring_no_headline_numbers_is_exempt(self) -> None:
+        self._plan_with()
+        self._report("Nothing declared, nothing owed.")
+        self.assertEqual(self._problems(), [])

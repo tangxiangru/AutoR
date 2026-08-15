@@ -128,6 +128,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--review-model", help="Model for the reviewer agent. Defaults to the backend default.")
     parser.add_argument(
+        "--codex-command",
+        default="codex",
+        metavar="BIN",
+        help="Executable to invoke as the Codex CLI. Defaults to `codex`. Point it at a "
+             "wrapper to run the benchmark against a different endpoint or model without "
+             "touching this machine's own codex configuration: the operator is an agent "
+             "harness, so the binary is the only place a different backend can be selected.",
+    )
+    parser.add_argument(
         "--codex-sandbox",
         default="workspace-write",
         help="Codex CLI sandbox mode, used only with --operator codex.",
@@ -349,6 +358,8 @@ def create_operator(
     ui: TerminalUI,
     stage_timeout: int,
     web_search_mcp: bool = False,
+    codex_command: str = "codex",
+    codex_web_search: bool = False,
 ):
     if backend == "codex":
         return CodexOperator(
@@ -357,6 +368,11 @@ def create_operator(
             fake_mode=fake_mode,
             ui=ui,
             stage_timeout=stage_timeout,
+            command=codex_command,
+            # `native` means "the operator's own search tool". For codex that tool is served
+            # by the Responses API, so it works from inside the sandbox; AutoR's Gemini
+            # helper is a local subprocess and does not.
+            web_search=codex_web_search,
         )
     return ClaudeOperator(
         model=model,
@@ -468,6 +484,8 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
         ui=ui,
         stage_timeout=args.stage_timeout,
         web_search_mcp=web_search_context is not None,
+        codex_command=args.codex_command,
+        codex_web_search=args.web_search == "native",
     )
     synthesizer = None if args.no_synthesis else ReportSynthesizer(operator)
 
@@ -529,6 +547,7 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
     else:
         reviewer = AutomatedReviewer(
             review_backend,
+            codex_command=args.codex_command,
             model=review_model,
             fake_mode=args.fake_operator,
             ui=ui,
@@ -614,6 +633,8 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
                 ui=ui,
                 stage_timeout=args.stage_timeout,
                 web_search_mcp=web_search_context is not None,
+                codex_command=args.codex_command,
+                codex_web_search=args.web_search == "native",
             )
             manager.concentration.routine_model = args.routine_model
         # `unattended=True` like every other reviewer this file builds. Without it the
@@ -622,11 +643,17 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
         # and this was the only construction that did not say otherwise.
         manager.solo_reviewer = (
             reviewer if isinstance(reviewer, AutomatedReviewer)
-            else AutomatedReviewer(review_backend, model=review_model,
+            else AutomatedReviewer(review_backend, codex_command=args.codex_command, model=review_model,
                                    fake_mode=args.fake_operator, ui=ui,
                                    stage_timeout=args.stage_timeout,
                                    unattended=True)
         )
+
+    # ResearchClawBench task ids are `<Field>_<nnn>`, so the run's field is known before it
+    # starts. Handing it to the manager narrows the field-specific skills to the one field
+    # this study is in; without it every run is offered advice about nine fields it is not in.
+    _task_id = infer_task_id(workspace) or ""
+    manager.skill_discipline = _task_id.rsplit("_", 1)[0].casefold() if "_" in _task_id else None
 
     pipeline_completed = False
     try:

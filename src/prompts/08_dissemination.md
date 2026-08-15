@@ -52,3 +52,11 @@ Additional expectations for this stage:
 
 - Do not present unfinished work as publication-ready if it is not.
 - Do not leave `{{WORKSPACE_REVIEWS_DIR}}` empty.
+
+## Leave a note for the next run
+
+Before you finish, read the `record-what-you-learned` skill and act on it. If this
+run hit something a later run in the same field would hit too — an archive
+convention, an undocumented flag, a check that caught a real mistake — record it.
+If it hit nothing transferable, record nothing; an empty pool is better than one
+nobody reads.

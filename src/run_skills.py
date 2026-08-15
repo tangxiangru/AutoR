@@ -118,14 +118,56 @@ def validate_skill_pack(source_dir: Path) -> list[str]:
     return problems
 
 
-def install_run_skills(paths: RunPaths, source_dir: Path) -> list[str]:
+#: Skills whose name begins with one of these are specific to a research field, and are
+#: installed only for a run in that field. Everything else is installed always.
+#:
+#: A skill reaches the operator by its `description`, and the model picks from what is
+#: there. Twenty field-specific skills in one run is twenty descriptions to route past on
+#: every decision, nineteen of which describe a field this study is not in -- so the pack
+#: gets less useful as it grows, which is the wrong direction for a pack meant to grow.
+DISCIPLINE_PREFIXES = (
+    "astronomy", "chemistry", "earth", "energy", "information",
+    "life", "material", "math", "neuroscience", "physics",
+)
+
+
+def discipline_of(name: str) -> str:
+    """The field a skill belongs to, or "" for one that belongs to all of them."""
+    head = name.split("-", 1)[0].casefold()
+    return head if head in DISCIPLINE_PREFIXES else ""
+
+
+def install_run_skills(
+    paths: RunPaths, source_dir: Path, *, discipline: str | None = None
+) -> list[str]:
     """Copy the skill pack into the run's ``.claude/skills/``.
 
     Idempotent and re-run on resume, so a run picks up skill edits without
     needing a fresh run directory. Returns the installed skill names.
+
+    ``discipline`` narrows the field-specific half of the pack to one field. Passing None
+    installs everything, which is right for a run whose field is unknown and wrong for one
+    where it is not: a materials run does not benefit from being offered advice about
+    observational astronomy, it just has one more description to read past.
     """
     entries = read_skill_pack(source_dir)
+    all_names = {entry.name for entry in entries}
+    if discipline:
+        wanted = discipline.casefold()
+        entries = [
+            entry for entry in entries
+            if not discipline_of(entry.name) or discipline_of(entry.name) == wanted
+        ]
     paths.skills_dir.mkdir(parents=True, exist_ok=True)
+    wanted = {entry.name for entry in entries}
+    # Remove a skill this call is not installing but a previous one did. Without this the
+    # narrowing is a no-op on any resume: the first install writes every field's skills, the
+    # second writes eleven of them, and the run still offers the model all twenty-nine. Only
+    # pack members are removed -- `learned-from-earlier-runs` is written by another module
+    # into the same directory, and deleting what we do not own is how that layer disappears.
+    for existing in paths.skills_dir.iterdir() if paths.skills_dir.is_dir() else []:
+        if existing.is_dir() and existing.name in all_names and existing.name not in wanted:
+            shutil.rmtree(existing)
     installed: list[str] = []
     for entry in entries:
         destination = paths.skills_dir / entry.name
