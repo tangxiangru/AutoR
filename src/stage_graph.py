@@ -58,7 +58,6 @@ from .utils import (
     RunPaths,
     StageSpec,
     STAGES,
-    _count_files_with_suffixes,
     read_text,
     write_text,
 )
@@ -102,12 +101,50 @@ def _load_json(path: Path) -> Any:
         return None
 
 
+def _load_json_if_live(paths: RunPaths, path: Path) -> Any:
+    """``_load_json``, except a file a rollback withdrew reads as absent.
+
+    For the gates that read one named document rather than counting a directory. The
+    ``preregistration`` is deliberately not read through this: it has its own
+    invalidation path in :mod:`src.preregistration`, stamped outside the workspace, and
+    two mechanisms deciding whether one frozen document counts is how they drift apart.
+    """
+
+    from .provenance import path_is_live
+
+    if not path_is_live(paths, path):
+        return None
+    return _load_json(path)
+
+
 def _guard_always(paths: RunPaths, state: "GraphState") -> GuardResult:
     return GuardResult(True, "no precondition")
 
 
+def _count_live(paths: RunPaths, directory: Path, suffixes: set[str]) -> int:
+    """Count the files in ``directory`` that a rollback has not withdrawn.
+
+    Every counting guard below reads this rather than ``_count_files_with_suffixes``,
+    and the difference is the one that decided runs. A rollback used to be a manifest
+    edit: ``workspace/`` was untouched, so the files the abandoned future had written
+    stayed on disk and stayed countable. A run that reached Stage 06, found the design
+    wrong and went back to Stage 03 met an already-open forward edge — opened by the
+    data files Stage 04 and Stage 05 had written under the design being abandoned. The
+    gate that exists to prove *this* visit did the work was answering for the visit the
+    run had just repudiated.
+
+    :func:`src.provenance.count_live_files` subtracts what
+    :func:`src.provenance.invalidate_from` withdrew, and counts anything unattributed,
+    so a run with no ledger behaves exactly as it did before.
+    """
+
+    from .provenance import count_live_files
+
+    return count_live_files(paths, directory, suffixes)
+
+
 def _guard_design_artifacts(paths: RunPaths, state: "GraphState") -> GuardResult:
-    count = _count_files_with_suffixes(paths.data_dir, MACHINE_DATA_SUFFIXES)
+    count = _count_live(paths, paths.data_dir, MACHINE_DATA_SUFFIXES)
     protocol = _load_json(paths.experimental_protocol)
     has_protocol = isinstance(protocol, dict) and bool(protocol.get("baselines"))
     if count and has_protocol:
@@ -121,8 +158,8 @@ def _guard_design_artifacts(paths: RunPaths, state: "GraphState") -> GuardResult
 
 
 def _guard_runnable_code(paths: RunPaths, state: "GraphState") -> GuardResult:
-    count = _count_files_with_suffixes(
-        paths.code_dir, {".py", ".sh", ".r", ".jl", ".ipynb", ".cpp", ".rs", ".go"}
+    count = _count_live(
+        paths, paths.code_dir, {".py", ".sh", ".r", ".jl", ".ipynb", ".cpp", ".rs", ".go"}
     )
     if count:
         return GuardResult(True, f"{count} executable file(s) under workspace/code")
@@ -138,7 +175,7 @@ def _guard_results_exist(paths: RunPaths, state: "GraphState") -> GuardResult:
     the forward move out of Stage 05 was permanently closed. A precondition no real
     run can meet is not a strict gate, it is a broken one.
     """
-    count = _count_files_with_suffixes(paths.results_dir, RESULT_SUFFIXES)
+    count = _count_live(paths, paths.results_dir, RESULT_SUFFIXES)
     manifest = _load_json(paths.experiment_manifest)
     indexed = manifest.get("result_artifacts") if isinstance(manifest, dict) else None
     if count and indexed:
@@ -187,7 +224,7 @@ def _guard_validity_chain(paths: RunPaths, state: "GraphState") -> GuardResult:
         for item in hypotheses
         if isinstance(item, dict) and str(item.get("type") or "") == "empirical"
     }
-    outcomes = _load_json(paths.hypothesis_outcomes)
+    outcomes = _load_json_if_live(paths, paths.hypothesis_outcomes)
     recorded = {
         str(item.get("id") or "").strip()
         for item in (outcomes.get("outcomes", []) if isinstance(outcomes, dict) else [])
@@ -199,14 +236,18 @@ def _guard_validity_chain(paths: RunPaths, state: "GraphState") -> GuardResult:
             False,
             "these preregistered hypotheses have no verdict yet: " + ", ".join(unadjudicated),
         )
-    figures = _count_files_with_suffixes(paths.figures_dir, FIGURE_SUFFIXES)
+    figures = _count_live(paths, paths.figures_dir, FIGURE_SUFFIXES)
     if not figures:
         return GuardResult(False, "the analysis produced no figure under workspace/figures")
     return GuardResult(True, f"every hypothesis is adjudicated and {figures} figure(s) exist")
 
 
 def _guard_report_exists(paths: RunPaths, state: "GraphState") -> GuardResult:
-    if paths.report_file.exists() or _count_files_with_suffixes(paths.writing_dir, {".tex", ".md"}):
+    from .provenance import path_is_live
+
+    if path_is_live(paths, paths.report_file) or _count_live(
+        paths, paths.writing_dir, {".tex", ".md"}
+    ):
         return GuardResult(True, "a written deliverable exists")
     return GuardResult(False, "no report or manuscript source has been written")
 
@@ -240,6 +281,13 @@ def _guard_round_abandoned(paths: RunPaths, state: "GraphState") -> GuardResult:
     # This one reads a ledger, so the scoping has to be explicit: the closing round
     # is stamped on the `Visit`, and the guard asks whether *this* traversal closed
     # a round that concluded abandon.
+    #
+    # That first sentence was the reason given for scoping this guard and leaving the
+    # others global, and until `src.provenance` existed it was false: a rollback edited
+    # manifest rows and left `workspace/` alone, so every artifact the other guards
+    # counted survived the rollback that was supposed to invalidate it. The distinction
+    # this comment draws — artifacts a rollback withdraws, ledgers it does not — is now
+    # the distinction the code makes, via `_count_live` and `_load_json_if_live`.
     visit = state.path[-1] if state.path else None
     closed = visit.closed_round if visit is not None else 0
     if not closed:
@@ -267,7 +315,7 @@ def _guard_round_abandoned(paths: RunPaths, state: "GraphState") -> GuardResult:
 
 
 def _guard_has_hypotheses(paths: RunPaths, state: "GraphState") -> GuardResult:
-    manifest = _load_json(paths.hypothesis_manifest)
+    manifest = _load_json_if_live(paths, paths.hypothesis_manifest)
     if isinstance(manifest, dict) and manifest.get("empirical_hypotheses"):
         return GuardResult(True, "typed hypotheses are on record")
     return GuardResult(False, "no empirical hypothesis has been stated yet")

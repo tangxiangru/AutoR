@@ -52,6 +52,13 @@ from .intake import (
     save_intake_context
 )
 from .artifact_index import write_artifact_index
+from .effects import independence_obstruction, load_accumulator
+from .emissions import (
+    pending as pending_emissions,
+    release as release_emissions,
+    withhold as withhold_emission,
+)
+from .provenance import format_withdrawal_plan, observe as observe_artifacts, plan_withdrawal
 from .experiment_manifest import write_experiment_manifest
 from .hypothesis_manifest import write_hypothesis_manifest
 from .information_flow import CHANNELS, ChannelContext, render_inbound
@@ -1287,6 +1294,10 @@ class ResearchManager:
             min_report_figures=self.min_report_figures,
         )
         initialize_run_manifest(paths)
+        # Whatever bootstrap has already put in the workspace belongs to intake, not to
+        # Stage 01. Attributing it at the first stage boundary instead would make a
+        # rollback to Stage 01 delete the run's own starting material.
+        observe_artifacts(paths, INTAKE_STAGE)
         write_artifact_index(paths)
         write_experiment_manifest(paths)
         append_log_entry(paths.logs, "run_start", f"Run root: {paths.run_root}")
@@ -2287,7 +2298,7 @@ class ResearchManager:
             stage_markdown = strip_revision_delta(stage_markdown)
             write_text(result.stage_file_path, stage_markdown)
             if stage.slug == "02_hypothesis_generation":
-                write_hypothesis_manifest(paths, stage_markdown)
+                write_hypothesis_manifest(paths, stage_markdown, stage)
                 self._amend_preregistration(
                     paths, "Stage 02 was re-run and rewrote the hypothesis manifest."
                 )
@@ -2344,7 +2355,7 @@ class ResearchManager:
                 stage_markdown = strip_revision_delta(stage_markdown)
                 write_text(repair_result.stage_file_path, stage_markdown)
                 if stage.slug == "02_hypothesis_generation":
-                    write_hypothesis_manifest(paths, stage_markdown)
+                    write_hypothesis_manifest(paths, stage_markdown, stage)
                     self._amend_preregistration(
                         paths, "Stage 02 was re-run and rewrote the hypothesis manifest."
                     )
@@ -2380,7 +2391,7 @@ class ResearchManager:
 
                     stage_markdown = read_text(repair_result.stage_file_path)
                     if stage.slug == "02_hypothesis_generation":
-                        write_hypothesis_manifest(paths, stage_markdown)
+                        write_hypothesis_manifest(paths, stage_markdown, stage)
                         self._amend_preregistration(
                             paths, "Stage 02 was re-run and rewrote the hypothesis manifest."
                         )
@@ -2627,13 +2638,34 @@ class ResearchManager:
                             ),
                         )
                 elif stage.slug == "08_dissemination":
+                    # The one place the run assembles something meant to leave it. The
+                    # intent is registered before the package is built and released
+                    # after, so the boundary crossing is in the record either way: an
+                    # intent marked released with no package is a visible discrepancy,
+                    # and a package with no intent is an emission the run cannot
+                    # account for. A rollback past Stage 08 discards the intent, which
+                    # is the whole reason it is registered rather than assumed.
+                    intent = withhold_emission(
+                        paths,
+                        stage,
+                        "outside_run_write",
+                        "release package assembled from the run's deliverables",
+                        {"run_root": str(paths.run_root)},
+                    )
                     package = generate_release_package(paths.run_root)
+                    release_emissions(paths, stage, f"{stage.slug} approved")
                     append_log_entry(
                         paths.logs,
                         f"{stage.slug} release_package",
-                        package.summary,
+                        f"{package.summary}\nEmission intent {intent.emission_id} released.",
                     )
                 write_stage_handoff(paths, stage, stage_markdown)
+                # Attribution happens at the boundary, before the index reads it. The
+                # stage's agent wrote these files directly, so this comparison against
+                # the previous observation is the only record of who produced them —
+                # and the only thing that lets a later rollback withdraw this stage's
+                # contribution without touching anyone else's.
+                observe_artifacts(paths, stage)
                 write_artifact_index(paths)
                 write_experiment_manifest(paths)
                 append_log_entry(
@@ -3555,6 +3587,10 @@ class ResearchManager:
             kind=kind,
         )
         write_stage_handoff(paths, stage, stage_markdown)
+        # A skipped stage is still a stage that may have written before it gave up, and
+        # what it wrote is what `_skip_stage` was patched by hand to deal with at one
+        # path. Attributing here covers the rest of them.
+        observe_artifacts(paths, stage)
         write_artifact_index(paths)
         write_experiment_manifest(paths)
         append_log_entry(
@@ -3664,6 +3700,43 @@ class ResearchManager:
             lines.extend(f"- {slug}" for slug in stale_candidates)
         else:
             lines.append("No downstream stages currently need invalidation.")
+        # What the rollback does to the workspace, shown before it does it. The manifest
+        # half of this preview was the whole of it while the workspace half did not
+        # happen; an operator reading "three stages will be marked stale" had no way to
+        # tell that the files those stages wrote would still be there afterwards.
+        lines.append(format_withdrawal_plan(plan_withdrawal(paths, rollback_stage)))
+
+        # What the rollback costs beyond the stage being withdrawn. Reverse-order
+        # withdrawal takes the later stages with it whatever they wrote; withdrawing this
+        # stage alone would need them to be independent of it, and they are exactly when
+        # no ordered key was written by both. Reported rather than acted on: the action
+        # is the operator's, and knowing that Stage 04 could have gone on its own — or
+        # that it could not, and why — is what a backward edge in a graph is worth.
+        later = [
+            record
+            for spec in STAGES
+            if spec.number > rollback_stage.number
+            for record in load_accumulator(paths, spec)
+        ]
+        own = load_accumulator(paths, rollback_stage)
+        if own and later:
+            obstruction = independence_obstruction(own, later)
+            lines.append(
+                f"Withdrawing {rollback_stage.slug} alone was not available: {obstruction}"
+                if obstruction is not None
+                else (
+                    f"The stages after {rollback_stage.slug} are independent of it; their "
+                    "accumulated work is being withdrawn because the rollback is in "
+                    "reverse order, not because it had to be."
+                )
+            )
+
+        withheld = pending_emissions(paths)
+        if withheld:
+            lines.append(
+                f"{len(withheld)} withheld emission intent(s) will be discarded; "
+                "none of them was performed."
+            )
         return "\n".join(lines)
 
     def describe_run_status(self, run_root: Path) -> str:

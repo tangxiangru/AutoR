@@ -254,8 +254,8 @@ same credulity it is built to remove.
 ### 2.6 No runtime dependency outside the standard library
 
 AutoR's runtime imports nothing that is not in the Python standard library. The runtime under
-`src/` is 61 modules and ~37 k lines; counting the entry points, `tools/` and the suite, the tree is
-170 files and ~75 k lines, and 2282 tests run with no install step. The MCP web-search server
+`src/` is 64 modules and ~40 k lines; counting the entry points, `tools/` and the suite, the tree is
+183 files and ~82 k lines, and 2497 tests run with no install step. The MCP web-search server
 ([`mcp_web_search.py`](../src/mcp_web_search.py)) is a stdlib JSON-RPC 2.0 implementation over stdio
 rather than an SDK. `google-genai` is needed only by three optional paths (`--web-search gemini`,
 `--cross-review`, `--research-diagram`), and each degrades to a recorded *unavailable* rather than a
@@ -444,6 +444,9 @@ An explicit `--flag`/`--no-flag` always beats the level. The validity chain is n
 | [`deliverables.py`](../src/deliverables.py) | Did the run answer what the task statement actually demanded? |
 | [`evidence_ledger.py`](../src/evidence_ledger.py) | Stage 01's `sources.json`/`claims.json` cross-reference, and Stage 07's citation self-report. |
 | [`experiment_manifest.py`](../src/experiment_manifest.py) · [`artifact_index.py`](../src/artifact_index.py) · [`writing_manifest.py`](../src/writing_manifest.py) | The machine-readable inventories later stages read instead of guessing from filenames. |
+| [`provenance.py`](../src/provenance.py) | Which stage wrote each workspace file, every version it has held, and whether a rollback has withdrawn it. The counting guards read the live count from here, so an abandoned future cannot open the edge it was abandoned at. |
+| [`effects.py`](../src/effects.py) | The inverse of each write, accumulated per stage and applied in reverse when a backward edge is taken. Classifies each shared location as commutative or ordered, which is what decides whether one stage could have been withdrawn without the ones after it. |
+| [`emissions.py`](../src/emissions.py) | Actions that leave the run — a release package, a pull request, a spent quota — held until the stage that asked for them is approved, and dropped when it is rolled back. The one class of act no inverse takes back, so the only recovery is not having performed it. |
 
 ### Review — five kinds of critic, two of which are the gate
 

@@ -446,8 +446,33 @@ def sync_stage_session_id(paths: RunPaths, stage: StageSpec, session_id: str | N
 
 
 def rollback_to_stage(paths: RunPaths, rollback_stage: StageSpec, reason: str | None = None) -> RunManifest:
+    """Mark the manifest back to ``rollback_stage`` **and** take the workspace back with it.
+
+    This function used to do only the first half. It set ``status``, ``approved``,
+    ``dirty``, ``stale`` and ``invalidated_by_stage`` on the entries at and after the
+    target and left ``workspace/`` untouched, so the artifacts of the future being
+    abandoned stayed on disk and stayed countable. Six of the graph's forward guards count
+    files; a run that rolled back from Stage 06 to Stage 03 found the edge out of Stage 03
+    already open, satisfied by the data Stage 04 and Stage 05 had written under the design
+    being abandoned.
+
+    The recovery is wired here rather than at the three call sites so that no caller can
+    reach a rollback without it. ``/back`` from the operator, a research round that
+    redirected itself, and a review that withdrew an approval all go through this seam,
+    and a rollback that recovered the workspace on two of the three paths would be worse
+    than one that recovered on none: the difference between the paths is invisible in the
+    run record.
+    """
+
+    from .effects import recover_to_stage
+    from .utils import append_log_entry
+
     manifest = ensure_run_manifest(paths)
     invalidated_reason = reason or f"Rolled back to {rollback_stage.stage_title}"
+
+    recovery = recover_to_stage(paths, rollback_stage, invalidated_reason)
+    if recovery.touched:
+        append_log_entry(paths.logs, "rollback recovery", recovery.render())
     updated_stages: list[StageManifestEntry] = []
 
     for entry in manifest.stages:
