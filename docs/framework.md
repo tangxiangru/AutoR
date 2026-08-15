@@ -277,36 +277,55 @@ Three things it deliberately does not do.
   supported one does; the demand verbs (`verify`, `validate`, `demonstrate`) are read off the task
   side only, so no phrasing of a result can reach them.
 
-Replayed over the 263 stage drafts of that pass: the existing eight read mean 0.964 / sd 0.043,
-with 20% at exactly 1.000 — a fitness function with almost no gradient left, which turns the polish
+Replayed over the 263 stage drafts of that pass: the existing eight read mean 0.989 / sd 0.036,
+with 60% at exactly 1.000 — a fitness function with almost no gradient left, which turns the polish
 loop off at `evolution.py`'s `champion.total >= 1.0` short-circuit. The new criterion reads mean
-0.657 / sd 0.326 and **generally falls with stage number** — 0.74 / 0.94 / 0.65 / 0.55 / 0.61 /
+0.644 / sd 0.322 and **generally falls with stage number** — 0.70 / 0.94 / 0.62 / 0.54 / 0.61 /
 0.54 / 0.51 across Stages 01 to 07 — because a late stage owes more of the task than an early one.
 It is not monotone: Stage 02 is the high point, and an earlier version of this paragraph claimed
 monotonicity from the two endpoints alone. On the 0.0 run it reads 0.00 from Stage 05 on, which is
 the stage at which that run stopped producing the object the task named.
 
+Every number in this section is re-derived by `python tools/rubric_replay.py`, which exists because
+this section twice published a figure that did not survive replay — once a trend quoted from its two
+endpoints, once a whole set computed with `artifact_roots` omitted when the live scorer always
+passes it.
+
 *Cost:* it is the first criterion prose can move at all, so gaming it is the attack it has to
-survive; the on-disk match is the whole defence and must not be relaxed. Of the 263 drafts, 52 sat
+survive; the on-disk match is the whole defence and must not be relaxed. Of the 263 drafts, 157 sat
 at exactly 1.000 on the existing eight — the ones the ratchet's `total >= 1.0` short-circuit turns
-off — and 27 of those now have headroom, which buys polish rounds and therefore tokens.
+off — and 99 of those now have headroom, which buys polish rounds and therefore tokens.
 *Why anyway:* a ratchet climbing a surface that does not include the question is a machine for
 polishing the wrong answer, and it had been running.
 
-**How far prose can move it, and the three routes that were open when it landed.** The first
-version of this criterion shipped with the attack surface unmeasured, and an adversarial replay
-found three ways to raise it without doing any work: restating a demand in its own words scored
-**1.000** at every stage below 05 on 40 of 40 tasks; quoting the task statement counted as
-answering it; and — worst — pasting back the shortfall the ratchet had just printed raised the
-*total* on **89 of 89** drafts, median **+0.069**, every one past `DEFAULT_MIN_GAIN`. A fitness
-function whose own feedback is a recipe for beating it is the failure §2.4 exists to prevent,
-reached from a direction the design did not consider for the second time. All three are closed in
-`RUBRIC_VERSION` 7: the on-disk half now applies at every stage rather than from Stage 05, a
-sentence made only of the demand's own vocabulary is not engagement, an eight-word span of the task
-statement is not engagement, and the shortfall's own phrases are filtered. Measured after: pure
-restatement scores **0.504** — not zero, because a report that names what was asked does beat one
-silent about it, and never more than half, because nothing it says is checkable — pasting the task
-statement moves the total by a median of **−0.008**, and pasting the shortfall moves **0 of 55**.
+**How far prose can move it, in four routes and what is left.** This criterion shipped with its
+attack surface unmeasured, and two rounds of adversarial replay found four ways to raise it without
+doing any work. In the order they were found:
+
+| route | when it worked | now |
+|:---|---:|---:|
+| restate the demand in its own words | **1.000** at every stage below 05, 40/40 tasks | 0.51 |
+| quote the task statement | counted as answering it | median **−0.0025** on the total |
+| paste back the shortfall the ratchet just printed | **+0.036** median on 88 of the 118 drafts that had one, all past `DEFAULT_MIN_GAIN` | **0 of 173** past it |
+| cite a path that merely resolves (`/etc/hostname`, the stage's own `stages/*.md`) | **1.000** on 263/263 drafts, **+0.0476** median total | identical to no citation at all |
+
+The third is the one worth naming twice: the ratchet prints the shortfall into the next polish
+prompt, so the fitness function was shipping the recipe for beating it — §2.4's failure reached from
+a direction the design did not consider, for the second time after
+`_cap_quantification_by_fidelity`. The fourth is the largest by size: **+0.0476** for four sentences,
+against a median **+0.0221** for a real polish round in the same archive, so writing was worth twice
+doing the work. `RUBRIC_VERSION` 7 closes all four — the on-disk half applies at every stage rather
+than from Stage 05, a sentence made only of the demand's own vocabulary is not engagement, an
+eight-word span of the task statement is not engagement, the shortfall names demands by *number* so
+there is nothing in it to paste, and `_result_file_cited` asks who wrote the file instead of whether
+the path resolves.
+
+**What is left, published rather than denied.** Adding one sentence per demand that merely
+*mentions* it still gains up to **+0.094** of the stage total, on 88 of 263 drafts. That is the free
+half doing its job, and it is the largest gradient remaining. It is not closed and should not be: a
+criterion where mentioning earned nothing would also refuse the honest report that names a
+requirement it could not meet and says why, which §2.7 and the deliverables contract both require to
+stay valid.
 
 The same version bump fixes a smaller thing pointing the same way. `numeric_fidelity` admitted any
 token containing a dot as a reported measurement, so an arXiv id, a DOI and a `Fig. 3` all became

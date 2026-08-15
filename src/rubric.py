@@ -40,7 +40,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, Mapping, NamedTuple, Sequence
 
 from .artifact_index import is_autor_own_record
@@ -90,11 +90,15 @@ if TYPE_CHECKING:  # pragma: no cover - import cycle at runtime, type-only here
 #: did not write -- the task statement -- and asks whether the draft speaks to what was
 #: asked, with a number an artifact holds. Every criterion before it measured the run
 #: against its own record. Replayed over the 263 stage drafts of a 40-task benchmark
-#: pass, the existing eight read mean 0.964 / sd 0.043; the new one reads mean 0.657 /
-#: sd 0.326 and generally falls with stage number -- 0.74 / 0.94 / 0.65 / 0.55 / 0.61 /
-#: 0.54 / 0.51 for Stages 01 to 07 -- because a late stage owes more of the task than an
-#: early one. It is *not* monotone: Stage 02 is the high point, and an earlier version of
-#: this note claimed monotonicity from the two endpoints alone. On the run that pass
+#: pass -- `python tools/rubric_replay.py`, which re-derives every number in this note --
+#: the existing eight read mean 0.989 / sd 0.036; the new one reads mean 0.644 / sd 0.322
+#: and generally falls with stage number -- 0.70 / 0.94 / 0.62 / 0.54 / 0.61 / 0.54 /
+#: 0.51 for Stages 01 to 07 -- because a late stage owes more of the task than an early
+#: one. It is *not* monotone: Stage 02 is the high point, and an earlier version of this
+#: note claimed monotonicity from the two endpoints alone. Those figures are with
+#: ``artifact_roots`` passed, which is what :class:`EvolutionController` does on every
+#: real call; an earlier version quoted a replay that omitted it and so described a
+#: configuration no run is ever scored under. On the run that pass
 #: scored 0.0 externally the eight read 0.97 at Stage 06 and the new criterion reads 0.00
 #: from Stage 05 on, which is the stage the run stopped producing the object the task
 #: named. ``6`` also stops ``numeric_fidelity`` treating an arXiv id or a "Fig. 3" as a
@@ -193,8 +197,9 @@ CRITERIA: tuple[Criterion, ...] = (
     Criterion("reproducibility", "Machine-readable validity chain", weight=3.0),
     # min_stage=1 deliberately: a survey that never mentions what the task asked for is
     # where the substitution starts, and `min_stage=3` would make an early draft's total
-    # a different measurement from a late one's. Below Stage 05 only the "spoken to"
-    # half is scored, since there are no results to carry a number yet.
+    # a different measurement from a late one's. Both halves apply at every stage --
+    # the exemption that scored only the "spoken to" half below Stage 05 is what let a
+    # draft of restated demands reach 1.000 there, and Stage 01 does write `literature/`.
     Criterion("deliverable_coverage", "Answers the task's demands", weight=3.0),
 )
 
@@ -986,7 +991,6 @@ def _demand_terms(demands: Sequence[str]) -> list[set[str]]:
 def _score_deliverable_coverage(
     markdown: str,
     paths: RunPaths,
-    stage: StageSpec,
     artifact_roots: Sequence[Path] | None = None,
 ) -> CriterionScore:
     """Does the draft speak to what the task asked for, and with a number?
@@ -1005,24 +1009,40 @@ def _score_deliverable_coverage(
     the criterion is moved by keyword-stuffing; without the first, it is
     `numeric_fidelity` again.
 
-    **How far prose can move it, measured rather than asserted.** A draft of one restated
-    demand per line, no numbers, no files, no work, scores **0.504** over the 40 archived
-    tasks -- not zero, because a report that names what was asked does beat one silent
-    about it, and not more than half, because nothing it says is checkable. That is the
-    designed ceiling for talk. Three cheaper routes are closed outright and each was open
-    when this criterion first landed:
+    **How far prose can move it, measured rather than asserted.** Every figure below comes
+    from ``python tools/rubric_replay.py`` over the 40 archived runs, and the tool exists
+    because this docstring has twice carried a number that did not re-derive.
+
+    A draft of one restated demand per line -- no numbers, no files, no work -- averages
+    **0.51**. That is the designed half: a report that names what the task asked for does
+    beat one silent about it, and the other half cannot be bought with words. Four
+    cheaper routes were open at one time or another and are closed:
 
     * a sentence made of nothing but the demand's own vocabulary is not engagement (it
-      scored **1.000** at every stage below 05, on 40 of 40 tasks, before this);
+      scored **1.000** at every stage below 05, on 40 of 40 tasks, in v6);
     * a sentence that is an eight-word span of the task statement does not count (pasting
-      the whole task statement now moves the total by a median of **-0.008**);
-    * a sentence carrying this criterion's own shortfall text does not count. That one
-      was the worst: the ratchet prints the shortfall into the next polish prompt, so
-      pasting it back raised the *total* on **89 of 89** drafts, median **+0.069**, every
-      one past ``DEFAULT_MIN_GAIN``. A fitness function whose feedback is a recipe for
-      beating it is the failure this module exists to prevent, reached from a direction
-      the design did not consider -- for the second time, after
-      :func:`_cap_quantification_by_fidelity`. It now moves **0 of 55**.
+      the whole task statement moves the total by a median of **-0.0025**);
+    * a sentence carrying this criterion's own shortfall does not count. That one was the
+      worst: the ratchet prints the shortfall into the next polish prompt, so pasting it
+      back raised the *total* on 88 of the 118 v6 drafts that had one, median **+0.036**,
+      all past ``DEFAULT_MIN_GAIN``. It now moves **0 of 173** past that threshold. The
+      shortfall names demands by number for this reason -- an index has nothing in it to
+      match;
+    * citing a path that merely *resolves* -- ``/etc/hostname``, or the stage's own
+      summary under ``stages/`` -- took the criterion to 1.000 on 263 of 263 drafts for a
+      median total gain of +0.0476, against a median +0.0221 for a real polish round in
+      the same archive. :func:`_result_file_cited` asks who wrote the file, and the same
+      injection now scores exactly what the same sentences score with no citation at all.
+
+    **What remains, stated rather than closed.** Adding one sentence per demand that
+    merely *mentions* it still gains up to **+0.094** of the stage total, on 88 of 263
+    drafts. That is the free half doing what it is for, and it is the largest gradient
+    left; a criterion where mentioning earned nothing would also refuse the honest report
+    that says a requirement could not be met and why, which the rest of this design
+    requires to stay valid. A fitness function whose own feedback is a recipe for beating
+    it is the failure this module exists to prevent, reached twice from directions the
+    design did not consider -- after :func:`_cap_quantification_by_fidelity` and again
+    here -- so the number is published rather than the claim that there is none.
 
     Verdict-blind, and structurally so: nothing here opens
     ``paths.hypothesis_outcomes`` or reads an :data:`OUTCOME_BLIND_FIELDS` key. A
@@ -1100,40 +1120,48 @@ def _score_deliverable_coverage(
     total = len(demands)
     score = _clamp((len(engaged) + len(answered)) / (2 * total))
 
-    missing = [demand for demand in demands if demand not in engaged]
-    unanswered = [demand for demand in engaged if demand not in answered]
+    missing = [
+        index for index, demand in enumerate(demands, start=1) if demand not in engaged
+    ]
+    unanswered = [
+        index
+        for index, demand in enumerate(demands, start=1)
+        if demand in engaged and demand not in answered
+    ]
     observed = (
         f"{len(engaged)}/{total} of the task's demands are spoken to, "
         f"{len(answered)}/{total} by something on disk"
     )
+    # The shortfall names demands by their *number* in the `# What the Task Asks For`
+    # block every stage prompt already carries. It carried the demand's text once, and
+    # once its subject words; the ratchet prints the shortfall into the next polish
+    # prompt, so both times the feedback was a phrase that could be pasted back for
+    # engagement credit. An index cannot be pasted into a sentence about the demand --
+    # there is nothing in it to match -- and it is no less actionable, because the
+    # numbered list it refers to is in the same prompt.
     if score >= 1.0:
         shortfall = ""
     elif missing:
-        # Deliberately paraphrased rather than quoted. The shortfall used to carry the
-        # demand verbatim, and pasting it back into Key Results raised the *total* on
-        # every draft it was tried on -- median +0.069, all of them past
-        # ``DEFAULT_MIN_GAIN`` -- so the ratchet's own feedback was a recipe for a new
-        # champion that did no work. Naming the demand's subject is enough to act on.
         shortfall = (
-            "Key Results does not speak to one of the things the task asked for -- the one "
-            f"about {_demand_subject(missing[0])}. State the result for it, with the number "
-            "or the file that carries it, or state that it could not be produced and why."
+            f"Key Results says nothing about demand {_numbers(missing)} of "
+            f"`# What the Task Asks For`. Report the result for it, with the number or the "
+            "result file that carries it, or say that it could not be produced and why."
         )
     else:
         shortfall = (
-            f"What the report says about {_demand_subject(unanswered[0])} carries nothing "
-            "checkable. Give it the number the run produced, or name the file under "
-            "workspace/results that holds the answer."
+            f"Demand {_numbers(unanswered)} of `# What the Task Asks For` is discussed with "
+            "nothing checkable behind it. Give the number the run measured for it, or name "
+            "the result file this run wrote that holds the answer."
         )
     return CriterionScore(key, title, weight, score, observed, shortfall)
 
 
-def _demand_subject(demand: str) -> str:
-    """A demand's subject, short enough to act on and not long enough to paste back."""
-    from .deliverables import _content_words
-
-    words = [word for word in _content_words(demand) if word not in _PROCESS_WORDS]
-    return ", ".join(sorted(words)[:4]) or demand[:40]
+def _numbers(indices: Sequence[int]) -> str:
+    """`2`, or `2 and 4`, or `2, 4 and 5`."""
+    listed = [str(index) for index in indices[:4]]
+    if len(listed) == 1:
+        return listed[0]
+    return ", ".join(listed[:-1]) + " and " + listed[-1]
 
 
 #: How much of a sentence has to be a contiguous span of the task statement before it
@@ -1147,10 +1175,8 @@ _QUOTE_RUN_WORDS = 8
 #: function whose own feedback is a recipe for beating it is the failure this module's
 #: docstring exists to prevent, arrived at from a direction the design did not consider.
 _SHORTFALL_MARKERS = (
-    "does not speak to one of the things the task asked for",
-    "carries nothing checkable",
-    "or state that it could not be produced and why",
-    "name the file under workspace/results that holds the answer",
+    "of `# what the task asks for`",
+    "of # what the task asks for",
 )
 
 
@@ -1180,11 +1206,19 @@ def _sentence_lands_on_disk(
 ) -> bool:
     """Whether a sentence's answer exists outside the sentence.
 
-    Either a measurement an artifact on disk also holds, or a reference to a file the run
-    produced. The second disjunct is not slack: a task that names an *object* as its
-    output -- a derivation, an equation set, a table, a sequence -- has no statistic to
-    report, and a criterion that only accepted numbers would cap exactly the deliverable
-    it exists to protect at half marks.
+    Either a measurement an artifact on disk also holds, or a reference to a file **this
+    run produced as a result**. The second disjunct is not slack: a task that names an
+    *object* as its output -- a derivation, an equation set, a table, a sequence -- has no
+    statistic to report, and a criterion that only accepted numbers would cap exactly the
+    deliverable it exists to protect at half marks.
+
+    "Produced as a result" is the whole of it, and the first version asked the wrong
+    question. It called :func:`_listed_file_exists` against the run root, which answers
+    *does this path resolve* -- so one sentence per demand citing ``/etc/hostname``, or
+    the stage's own summary under ``stages/``, took the criterion to 1.000 on 263 of 263
+    archived drafts for a median total gain of +0.0476. A real polish round in the same
+    archive gained a median +0.0221, so writing four sentences was worth twice doing the
+    work. :func:`_result_file_cited` asks who wrote the file instead.
     """
     stripped = re.sub(r"`[^`\n]*`", " ", sentence)
     for match in re.finditer(r"(?<![\w.])([-+]?\d+(?:\.\d+)?)\s*(%?)", stripped):
@@ -1198,10 +1232,44 @@ def _sentence_lands_on_disk(
             continue
         if _matches_artifact_number(value, raw, percent, known):
             return True
-    return any(
-        _listed_file_exists(paths.run_root, reference, artifact_roots)
-        for reference in _extract_path_references(sentence)
-    )
+    return _result_file_cited(sentence, paths, artifact_roots)
+
+
+def _result_file_cited(
+    sentence: str, paths: RunPaths, artifact_roots: Sequence[Path] | None = None
+) -> bool:
+    """Whether a sentence names a file this run wrote *as a result*.
+
+    Three narrowings against "the path resolves", each closing a measured route to a free
+    score. An absolute path is refused outright -- ``/etc/hostname`` is on every machine.
+    The path must land under one of the run's own output directories, so a benchmark's
+    read-only input under ``data/`` is not an answer the run produced. And AutoR's own
+    record files are excluded: ``stages/``, ``artifacts/``, ``notes/`` and ``reviews/``
+    exist on every run by construction, so citing them would price bookkeeping as
+    evidence -- the substitution this whole criterion exists to catch, arrived at through
+    the criterion itself.
+    """
+    roots = [paths.results_dir, paths.figures_dir, paths.report_dir, paths.literature_dir]
+    for extra in artifact_roots or ():
+        roots.extend(
+            extra / name for name in ("results", "figures", "report", "outputs", "literature")
+        )
+    resolved_roots = [root.resolve() for root in roots]
+
+    for reference in _extract_path_references(sentence):
+        candidate = PurePosixPath(reference.strip())
+        if candidate.is_absolute():
+            continue
+        for base in (paths.run_root, paths.workspace_root, *(artifact_roots or ())):
+            target = (base / reference).resolve()
+            if not target.is_file():
+                continue
+            if any(
+                target == root or root in target.parents
+                for root in resolved_roots
+            ):
+                return True
+    return False
 
 
 def _score_traceability(markdown: str) -> CriterionScore:
@@ -1574,7 +1642,7 @@ def score_stage(
         elif criterion.key == "reproducibility":
             scores.append(_score_reproducibility(paths, stage, markdown))
         elif criterion.key == "deliverable_coverage":
-            scores.append(_score_deliverable_coverage(markdown, paths, stage, artifact_roots))
+            scores.append(_score_deliverable_coverage(markdown, paths, artifact_roots))
 
     scores = _cap_quantification_by_fidelity(scores)
 
