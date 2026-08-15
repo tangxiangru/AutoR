@@ -130,9 +130,9 @@ naming them.
 | Required stage-summary headings | `REQUIRED_STAGE_HEADINGS` | 7 |
 | Rubric criteria (weighted, backend-free) | `CRITERIA`, [src/rubric.py](src/rubric.py) | 9 |
 | Flags on `main.py` / `rcb_agent.py` | `parse_args` | 61 / 37 |
-| Python modules / lines / tests | the tree | 183 / 82 k / 2497 |
+| Python modules / lines / tests | the tree | 178 / 81 k / 2558 |
 
-`python -m unittest discover -s tests -p "test_*.py"` runs **2497 tests** across 109 test
+`python -m unittest discover -s tests -p "test_*.py"` runs **2558 tests** across 111 test
 modules, with no third-party dependency.
 
 ## Quick start
@@ -355,8 +355,8 @@ included.
 
 Every valid stage draft is measured against a rigour rubric read off disk — do the paths it names
 resolve, do the numbers it reports appear in a results file, did it produce artifacts during *this*
-execution, is the decision ledger four different things rather than one sentence four times. Eight
-weighted criteria, `RUBRIC_VERSION = "6"`:
+execution, is the decision ledger four different things rather than one sentence four times. Nine
+weighted criteria, `RUBRIC_VERSION = "7"`:
 
 | Criterion | Weight | From | What it measures |
 | --- | ---: | :---: | --- |
@@ -855,7 +855,8 @@ comparators run GPT-5.4; and it is a `gpt-5.1` number.
 ### The re-run, and the control that matters more
 
 #180 and #181 closed the routes that produced the stubs. Re-running all forty tasks on the repaired
-code took the mean to **23.57** with no run scoring zero. The same batch made the obvious control
+code took the mean to **23.57** and removed six of the seven zeros; the seventh, `Information_002`,
+still scores 0.0 and is the case §2.4.1 dissects. The same batch made the obvious control
 cheap, and it had never been run: the same model, on the same machine, handed the same forty task
 statements with no AutoR at all.
 
@@ -865,9 +866,9 @@ statements with no AutoR at all.
 | AutoR (Opus), post-repair | 23.57 | 35 (23%) | 15 |
 
 Paired over the forty tasks that is **−5.67 ± 1.84**. The scaffold currently makes the model worse
-at the benchmark than not having it, and it does so while writing 39% more prose — it covers less,
+at the benchmark than not having it, and it does so while writing 36% more prose — it covers less,
 not less well. [§6.8](docs/framework.md#68-the-scaffold-is-currently-worth-less-than-no-scaffold) is
-the account of why, and `RUBRIC_VERSION` 6 is the first change aimed at it.
+the account of why, and `RUBRIC_VERSION` 7 is the first change aimed at it.
 
 [The framework document's §6](docs/framework.md#6-the-system-measured-against-itself) is the full
 account, including the part that is worse than the mean: the two highest scores came from runs that

@@ -85,11 +85,14 @@ def demanding_sentences(task_statement: str) -> list[str]:
 #: figures are mandatory, that `report.md` is the deliverable. Measured over the 40
 #: archived ResearchClawBench tasks: reading the whole fenced statement returns 337
 #: demanding sentences of which 200 (59.3%) are the same five contract lines present in
-#: all 40 tasks. Scoping to these headings returns 137. :func:`task_statement` already
+#: all 40 tasks. Scoping to these headings returns 59, and 75 once they are split into
+#: clauses. (An earlier version of this note said 137: that is the count with
+#: `Available Data Files` admitted, which the next comment says is deliberately out.)
+#: :func:`task_statement` already
 #: strips AutoR's own wrapper; this strips the benchmark's inner one.
 #: `Available Data Files` is deliberately not here. A file description says what the run
-#: has, not what it owes, and admitting the block made 45 of 147 demands across the 40
-#: archived tasks a dataset blurb -- the same dilution in miniature.
+#: has, not what it owes, and admitting the block took the 40 archived tasks from 75
+#: demands to 147, the 72 added being dataset blurbs -- the same dilution in miniature.
 _BRIEF_HEADINGS = re.compile(
     r"^#{1,6}\s*(?:Task Description|Scientific Objective|Research Objective)\s*:?\s*$",
     re.IGNORECASE | re.MULTILINE,
@@ -229,8 +232,13 @@ def validate_deliverables_coverage(paths: RunPaths, task_statement: str) -> list
 
 #: Fragments that locate nothing. A `where` of "images/foo.png" splits to "images", which
 #: is in every report that has a figure, so the pointer resolves without pointing
-#: anywhere. Information_002's entire physics deliverable -- the entry carrying all three
-#: criteria the external judge scored 0 -- was validated by that six-character substring.
+#: anywhere. Honest about its reach: replayed over the 603 coverage entries of the 40
+#: archived runs this changes **no** verdict, and it does not save the case that
+#: motivated it -- Information_002's entry 4 also names `derived_hamiltonians.png`, 24
+#: characters and genuinely in the report, and the fragment loop is a disjunction. It
+#: closes the class for the next corpus, not this one. The measured refusal that *would*
+#: have caught entry 4 -- rejecting an entry discharged by figure filenames alone -- was
+#: rejected instead: it fails 148 of 575 addressed entries across 38 of the 40 runs.
 _GENERIC_LOCATORS = frozenset({
     "images", "figure", "figures", "section", "results", "report", "appendix",
     "table", "tables", "method", "methods", "data", "abstract", "discussion",

@@ -90,16 +90,29 @@ if TYPE_CHECKING:  # pragma: no cover - import cycle at runtime, type-only here
 #: did not write -- the task statement -- and asks whether the draft speaks to what was
 #: asked, with a number an artifact holds. Every criterion before it measured the run
 #: against its own record. Replayed over the 263 stage drafts of a 40-task benchmark
-#: pass, the existing eight read mean 0.964 / sd 0.043; the new one reads mean 0.746 /
-#: sd 0.329 and falls monotonically with stage number, 0.95 at Stage 01 to 0.51 at
-#: Stage 07, because a late stage owes more of the task than an early one. On the run
-#: that pass scored 0.0 externally the eight read 0.97 at Stage 06 and the new criterion
-#: reads 0.00 from Stage 05 on, which is the stage the run stopped producing the object
-#: the task named. ``6`` also stops ``numeric_fidelity`` treating an arXiv id or a "Fig. 3"
-#: as a reported measurement, which had made deleting the subject paper's name from a
-#: draft worth five times ``DEFAULT_MIN_GAIN``. Both change what an existing score means,
-#: so a v5 total and a v6 total are not two measurements of one thing.
-RUBRIC_VERSION = "6"
+#: pass, the existing eight read mean 0.964 / sd 0.043; the new one reads mean 0.657 /
+#: sd 0.326 and generally falls with stage number -- 0.74 / 0.94 / 0.65 / 0.55 / 0.61 /
+#: 0.54 / 0.51 for Stages 01 to 07 -- because a late stage owes more of the task than an
+#: early one. It is *not* monotone: Stage 02 is the high point, and an earlier version of
+#: this note claimed monotonicity from the two endpoints alone. On the run that pass
+#: scored 0.0 externally the eight read 0.97 at Stage 06 and the new criterion reads 0.00
+#: from Stage 05 on, which is the stage the run stopped producing the object the task
+#: named. ``6`` also stops ``numeric_fidelity`` treating an arXiv id or a "Fig. 3" as a
+#: reported measurement, which had made deleting the subject paper's name from a draft
+#: worth 9.5x ``DEFAULT_MIN_GAIN``. Both change what an existing score means, so a v5
+#: total and a v6 total are not two measurements of one thing.
+#:
+#: ``7`` is a correction, not a feature, and it is a version bump because it moves every
+#: ``deliverable_coverage`` score. Three ways to raise the criterion without doing any
+#: work were open in v6 and are closed here -- restating a demand in its own words,
+#: quoting the task statement, and pasting back the shortfall the ratchet had just
+#: printed (the last raised the total on 89 of 89 drafts). The on-disk half now applies
+#: at every stage rather than from Stage 05, so a v6 early-stage score and a v7 one are
+#: not comparable either. ``_IDENTIFIER_PREFIX`` also gains the left word boundary it
+#: shipped without: ``v`` was matching the tail of CV, HIV, dev and MeV, so writing
+#: "CV 0.821" hid an invented number from ``numeric_fidelity`` for a gain of +0.0476 --
+#: the same size as the gradient v6 added the filter to remove.
+RUBRIC_VERSION = "7"
 
 #: The keys the rubric refuses to read out of an adjudication artifact.
 #:
@@ -803,10 +816,20 @@ def _artifact_numbers(paths: RunPaths) -> set[float]:
 #: controlled pair at Stage 06, everything else held fixed: a draft ending "on the
 #: 2111.01152 system" totals 0.7587, with ``numeric_fidelity`` 0.67 and the shortfall
 #: "These reported values appear in no results artifact: 2111.01152"; the same draft
-#: ending "on the target system" totals 0.8063. That +0.0476 is nearly ten times
+#: ending "on the target system" totals 0.8063. That +0.0476 is 9.5x
 #: ``DEFAULT_MIN_GAIN``, so the ratchet records the deletion of the paper's identity as a
 #: new champion.
+#: The left boundary is load-bearing and was missing when this landed. Without it the
+#: alternative ``v`` matched the *tail* of CV, PV, HIV, dev, MeV and .csv, ``table``
+#: matched stable and suitable, ``section`` matched cross-section. Measured over the 263
+#: archived stage drafts, 29 numeric tokens across 11 of the 40 runs were silently
+#: dropped that way -- and it cut both ways: an invented number written "CV 0.821"
+#: escaped ``numeric_fidelity`` entirely, worth +0.0476 of total for one word, which is
+#: the same size as the gradient this filter was added to remove; and an honest on-disk
+#: "CV 0.0230" stopped counting as an answer for ``deliverable_coverage``.
 _IDENTIFIER_PREFIX = re.compile(
+    # The hyphen is in the boundary class too, or `section` matches `cross-section`.
+    r"(?<![A-Za-z0-9_-])"
     r"(?:arxiv|doi|fig|figure|eq|eqn|equation|table|section|sec|ref|v|#)\s*[.:]?\s*$",
     re.IGNORECASE,
 )
@@ -977,9 +1000,29 @@ def _score_deliverable_coverage(
 
     So this criterion, alone among them, reads a document the run did not write: the
     task statement. For each demand in it, the draft must have a sentence *about* that
-    demand, and from Stage 05 on that sentence must carry a number an artifact on disk
-    holds. Both halves matter -- without the second, the criterion is moved by
-    keyword-stuffing; without the first, it is `numeric_fidelity` again.
+    demand, and that sentence must also land on disk -- a number an artifact holds, or a
+    file the run wrote. Both halves matter, and each is worth half: without the second,
+    the criterion is moved by keyword-stuffing; without the first, it is
+    `numeric_fidelity` again.
+
+    **How far prose can move it, measured rather than asserted.** A draft of one restated
+    demand per line, no numbers, no files, no work, scores **0.504** over the 40 archived
+    tasks -- not zero, because a report that names what was asked does beat one silent
+    about it, and not more than half, because nothing it says is checkable. That is the
+    designed ceiling for talk. Three cheaper routes are closed outright and each was open
+    when this criterion first landed:
+
+    * a sentence made of nothing but the demand's own vocabulary is not engagement (it
+      scored **1.000** at every stage below 05, on 40 of 40 tasks, before this);
+    * a sentence that is an eight-word span of the task statement does not count (pasting
+      the whole task statement now moves the total by a median of **-0.008**);
+    * a sentence carrying this criterion's own shortfall text does not count. That one
+      was the worst: the ratchet prints the shortfall into the next polish prompt, so
+      pasting it back raised the *total* on **89 of 89** drafts, median **+0.069**, every
+      one past ``DEFAULT_MIN_GAIN``. A fitness function whose feedback is a recipe for
+      beating it is the failure this module exists to prevent, reached from a direction
+      the design did not consider -- for the second time, after
+      :func:`_cap_quantification_by_fidelity`. It now moves **0 of 55**.
 
     Verdict-blind, and structurally so: nothing here opens
     ``paths.hypothesis_outcomes`` or reads an :data:`OUTCOME_BLIND_FIELDS` key. A
@@ -1012,9 +1055,13 @@ def _score_deliverable_coverage(
     # Backticked spans are kept, unlike in `numeric_fidelity`: a demand whose answer is
     # an *object* rather than a statistic is answered by the file holding the object, and
     # that reference is written in backticks.
-    sentences = [s for s in re.split(r"(?<=[.!?])\s+|\n+", body) if s.strip()]
-    known = _artifact_numbers(paths) if stage.number >= 5 else set()
-    want_number = stage.number >= 5
+    normalized_task = " ".join(read_text(paths.user_input).split()).casefold()
+    sentences = [
+        sentence
+        for sentence in re.split(r"(?<=[.!?])\s+|\n+", body)
+        if sentence.strip() and not _is_quoted_from(sentence, normalized_task)
+    ]
+    known = _artifact_numbers(paths)
 
     from .deliverables import _content_words
 
@@ -1027,48 +1074,102 @@ def _score_deliverable_coverage(
             continue
         need = min(2, len(terms))
         hit = False
-        with_number = False
+        landed = False
         for sentence in sentences:
-            if len(_content_words(sentence) & terms) < need:
+            words = _content_words(sentence)
+            if len(words & terms) < need:
                 continue
-            hit = True
-            if not want_number:
-                break
             if _sentence_lands_on_disk(sentence, known, paths, artifact_roots):
-                with_number = True
+                # Evidence needs no vocabulary test. "The quasiparticle gap is 41.7 meV"
+                # is made of nothing but the demand's own nouns and a number, and it is
+                # the answer.
+                hit = landed = True
                 break
+            # An *unsupported* sentence made of nothing but the demand's own vocabulary
+            # says the demand back. The free half is for having something of the run's
+            # own to say, so at least one content word has to come from somewhere other
+            # than the ask. Without this, a draft of one restated demand per line scored
+            # 1.000 at every stage below 05, on 40 of 40 archived tasks, with no work.
+            if words - terms - _PROCESS_WORDS:
+                hit = True
         if hit:
             engaged.append(demand)
-        if with_number:
+        if landed:
             answered.append(demand)
 
     total = len(demands)
-    if want_number:
-        score = _clamp((len(engaged) + len(answered)) / (2 * total))
-    else:
-        score = _clamp(len(engaged) / total)
+    score = _clamp((len(engaged) + len(answered)) / (2 * total))
 
     missing = [demand for demand in demands if demand not in engaged]
     unanswered = [demand for demand in engaged if demand not in answered]
     observed = (
-        f"{len(engaged)}/{total} of the task's demands are spoken to"
-        + (f", {len(answered)}/{total} with a number from a results artifact" if want_number else "")
+        f"{len(engaged)}/{total} of the task's demands are spoken to, "
+        f"{len(answered)}/{total} by something on disk"
     )
     if score >= 1.0:
         shortfall = ""
     elif missing:
+        # Deliberately paraphrased rather than quoted. The shortfall used to carry the
+        # demand verbatim, and pasting it back into Key Results raised the *total* on
+        # every draft it was tried on -- median +0.069, all of them past
+        # ``DEFAULT_MIN_GAIN`` -- so the ratchet's own feedback was a recipe for a new
+        # champion that did no work. Naming the demand's subject is enough to act on.
         shortfall = (
-            f"Key Results does not speak to what the task asked: {missing[0][:110]!r}. "
-            "State the result for it, with its number, or state that it could not be "
-            "produced and why."
+            "Key Results does not speak to one of the things the task asked for -- the one "
+            f"about {_demand_subject(missing[0])}. State the result for it, with the number "
+            "or the file that carries it, or state that it could not be produced and why."
         )
     else:
         shortfall = (
-            f"The task's demand {unanswered[0][:110]!r} is discussed without a measured "
-            "value. Give it the number the run produced for it, and write that number to "
-            "a file under workspace/results so it can be checked."
+            f"What the report says about {_demand_subject(unanswered[0])} carries nothing "
+            "checkable. Give it the number the run produced, or name the file under "
+            "workspace/results that holds the answer."
         )
     return CriterionScore(key, title, weight, score, observed, shortfall)
+
+
+def _demand_subject(demand: str) -> str:
+    """A demand's subject, short enough to act on and not long enough to paste back."""
+    from .deliverables import _content_words
+
+    words = [word for word in _content_words(demand) if word not in _PROCESS_WORDS]
+    return ", ".join(sorted(words)[:4]) or demand[:40]
+
+
+#: How much of a sentence has to be a contiguous span of the task statement before it
+#: stops counting as the run's own words.
+_QUOTE_RUN_WORDS = 8
+
+#: Fixed spans of this criterion's own shortfall templates. The ratchet prints the
+#: shortfall into the polish prompt, so anything the shortfall says is text the next
+#: draft has in front of it -- and pasting it back used to raise the *total* on every
+#: draft it was tried on, median +0.069, all of them past ``DEFAULT_MIN_GAIN``. A fitness
+#: function whose own feedback is a recipe for beating it is the failure this module's
+#: docstring exists to prevent, arrived at from a direction the design did not consider.
+_SHORTFALL_MARKERS = (
+    "does not speak to one of the things the task asked for",
+    "carries nothing checkable",
+    "or state that it could not be produced and why",
+    "name the file under workspace/results that holds the answer",
+)
+
+
+def _is_quoted_from(sentence: str, normalized_task: str) -> bool:
+    """Whether a sentence is the task statement, or this criterion's own complaint, handed back.
+
+    Quoting the ask is not answering it, and quoting the grader is not answering it
+    either.
+    """
+    normalized = " ".join(sentence.split()).casefold()
+    if any(marker in normalized for marker in _SHORTFALL_MARKERS):
+        return True
+    words = normalized.split()
+    if len(words) < _QUOTE_RUN_WORDS:
+        return False
+    for start in range(len(words) - _QUOTE_RUN_WORDS + 1):
+        if " ".join(words[start : start + _QUOTE_RUN_WORDS]) in normalized_task:
+            return True
+    return False
 
 
 def _sentence_lands_on_disk(

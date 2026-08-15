@@ -1195,4 +1195,22 @@ def format_report_plan_for_prompt(plan: ReportPlan) -> str:
             lines.append(
                 f"- {number.quantity} ({number.unit}), from `{number.source_artifact}`"
             )
+
+    # `task_outputs` was the one block this renderer never emitted, which made the whole
+    # field invisible to the stage that has to publish it: Stage 07's prompt tells the
+    # writer to read `task_outputs`, and the `# Report Plan` channel it reads is where
+    # `task_outputs` was guaranteed not to be. An `artifact:` coverage kind that no
+    # prompt ever shows anyone is a field the gate checks and nobody answers.
+    if plan.task_outputs:
+        lines.append("")
+        lines.append("What the task asked for, and what in this plan produces it:")
+        for output in plan.task_outputs:
+            answer = {
+                "figure": lambda o: f"figure slot {o.target}",
+                "number": lambda o: f"headline number {o.target}",
+                "artifact": lambda o: f"the object in `{o.target}` — show it in the report",
+                "prose": lambda o: "prose in the report",
+                "not_attempted": lambda o: f"NOT ATTEMPTED: {o.why_not}",
+            }.get(output.kind, lambda o: o.covered_by)(output)
+            lines.append(f"- {output.stated} → {answer}")
     return "\n".join(lines)

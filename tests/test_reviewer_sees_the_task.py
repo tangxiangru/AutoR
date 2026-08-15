@@ -146,8 +146,19 @@ class ReviewerSeesTheCoverageRecordTest(unittest.TestCase):
         self.assertIn("It is not evidence; it is the claim", prompt)
         self.assertIn("runnable from what is in this workspace", prompt)
 
-    def test_a_stage_that_has_not_written_one_yet_still_gets_a_review(self) -> None:
-        self.assertIn("Task Coverage Record", self._prompt())
+    def test_a_stage_that_has_not_written_one_yet_gets_no_block_at_all(self) -> None:
+        """Absent means absent, not a heading over the word "(missing)".
+
+        The record is written at Stage 07 on 38 of 40 archived runs. Emitted
+        unconditionally, the block spent 700 characters telling six reviewers out of
+        seven — 1,340 of 1,600 archived review prompts — to read each `addressed: true`
+        of a file that says `(missing)`. That is how a prompt teaches a reader to skip a
+        section, and the section it teaches them to skip is the one that matters at 07.
+        """
+        prompt = self._prompt()
+        self.assertNotIn("Task Coverage Record", prompt)
+        self.assertIn("# Recent Log Excerpt", prompt)
+        self.assertIn("## The substitution check", prompt)
 
 
 class PanelSeatsSeeItTooTest(unittest.TestCase):

@@ -135,14 +135,23 @@ class DeliverableCoverageTest(unittest.TestCase):
         )
         self.assertEqual(self.score(markdown), 0.75)
 
-    def test_the_shortfall_names_the_demand_that_was_dropped(self) -> None:
+    def test_the_shortfall_names_the_dropped_demand_without_quoting_it(self) -> None:
+        """Actionable, and not pasteable.
+
+        The shortfall used to carry the demand verbatim. The ratchet prints it into the
+        next polish prompt, so pasting it back raised the *total* on 89 of 89 archived
+        drafts — median +0.069, every one past `DEFAULT_MIN_GAIN`. It now names the
+        subject instead, and `_SHORTFALL_MARKERS` filters the text itself.
+        """
         markdown = draft(
             objective="Answer half the task.",
             what_i_did="Computed the gap.",
             key_results="The quasiparticle gap is 41.7 meV against the published 43.2 meV.",
         )
+        shortfall = self.shortfall(markdown)
         self.assertLess(self.score(markdown), 1.0)
-        self.assertIn("Hartree-Fock", self.shortfall(markdown))
+        self.assertIn("hamiltonian", shortfall)
+        self.assertNotIn("Derive the Hartree-Fock Hamiltonian for the target", shortfall)
 
     # -- what it must not reward ---------------------------------------------------
 
@@ -161,7 +170,7 @@ class DeliverableCoverageTest(unittest.TestCase):
             ),
         )
         self.assertEqual(self.score(markdown), 0.5)
-        self.assertIn("without a measured value", self.shortfall(markdown))
+        self.assertIn("carries nothing checkable", self.shortfall(markdown))
 
     def test_a_number_no_artifact_holds_does_not_answer_a_demand(self) -> None:
         """Catching the invented number is `numeric_fidelity`'s job; not counting it
@@ -187,9 +196,15 @@ class DeliverableCoverageTest(unittest.TestCase):
 
     # -- shape ---------------------------------------------------------------------
 
-    def test_before_stage_05_only_the_engagement_half_is_scored(self) -> None:
-        """A survey has no results to carry a number and must not be failed for it."""
-        markdown = draft(
+    def test_an_early_stage_is_held_to_the_same_contract(self) -> None:
+        """The on-disk half applies at every stage, and it is reachable at every stage.
+
+        v6 scored only the engagement half below Stage 05, on the theory that an early
+        stage has no results to point at. It has: Stage 01 writes `literature/`. What the
+        exemption actually bought was a draft of restated demands scoring 1.000 at Stages
+        01, 03 and 04 on 40 of 40 archived tasks.
+        """
+        talk = draft(
             objective="Survey.",
             what_i_did="Reviewed prior derivations.",
             key_results=(
@@ -198,8 +213,72 @@ class DeliverableCoverageTest(unittest.TestCase):
                 "against a computed one."
             ),
         )
-        self.assertEqual(self.score(markdown, stage=STAGE_03), 1.0)
-        self.assertLess(self.score(markdown, stage=STAGE_06), 1.0)
+        self.assertEqual(self.score(talk, stage=STAGE_03), 0.5)
+
+        write_text(self.paths.literature_dir / "prior_derivations.md", "notes\n" * 40)
+        grounded = draft(
+            objective="Survey.",
+            what_i_did="Reviewed prior derivations.",
+            key_results=(
+                "Prior work derives the Hartree-Fock Hamiltonian for related target "
+                "bilayers, collected in `workspace/literature/prior_derivations.md`. Two "
+                "papers compare a published quasiparticle gap against a computed one, "
+                "also in `workspace/literature/prior_derivations.md`."
+            ),
+        )
+        self.assertEqual(self.score(grounded, stage=STAGE_03), 1.0)
+
+    # -- the three free routes to a higher score, all measured open in v6 ---------------
+
+    def test_restating_a_demand_in_its_own_words_is_not_engagement(self) -> None:
+        """Scored 1.000 at Stages 01/03/04 on 40 of 40 archived tasks before this."""
+        markdown = draft(
+            objective="x",
+            what_i_did="y",
+            key_results=(
+                "Hartree-Fock Hamiltonian target bilayer derive.\n"
+                "Quasiparticle compare published value compute against."
+            ),
+        )
+        self.assertEqual(self.score(markdown), 0.0)
+
+    def test_quoting_the_task_statement_back_is_not_engagement(self) -> None:
+        markdown = draft(
+            objective="x",
+            what_i_did="y",
+            key_results=(
+                "Derive the Hartree-Fock Hamiltonian for the target bilayer; compute the "
+                "quasiparticle gap in meV and compare it against the published value."
+            ),
+        )
+        self.assertEqual(self.score(markdown), 0.0)
+
+    def test_pasting_the_shortfall_back_earns_nothing(self) -> None:
+        """The ratchet prints the shortfall into the next polish prompt.
+
+        Before the filter this was the cheapest new champion in the system: +0.069 median
+        on the total across 89 archived drafts, all past `DEFAULT_MIN_GAIN`, for a paste.
+        """
+        markdown = draft(objective="x", what_i_did="y", key_results="Nothing yet.")
+        before = self.score(markdown)
+        pasted = draft(
+            objective="x",
+            what_i_did="y",
+            key_results="Nothing yet. " + self.shortfall(markdown),
+        )
+        self.assertEqual(self.score(pasted), before)
+
+    def test_talking_about_everything_and_grounding_nothing_caps_at_half(self) -> None:
+        markdown = draft(
+            objective="Discuss.",
+            what_i_did="Considered both parts of the brief at length.",
+            key_results=(
+                "Our treatment of the derived Hartree-Fock Hamiltonian across the target "
+                "bilayer remains qualitative throughout. Similarly we compare the "
+                "quasiparticle gap against published expectations only in narrative form."
+            ),
+        )
+        self.assertEqual(self.score(markdown), 0.5)
 
     def test_a_task_stating_no_demand_does_not_penalise_the_draft(self) -> None:
         write_text(self.paths.user_input, "Some background prose about bilayers.")
@@ -265,6 +344,30 @@ class IdentifiersAreNotMeasurementsTest(unittest.TestCase):
         self.assertTrue(_is_measurement_like("41.7", 41.7, prefix="the gap is "))
         self.assertTrue(_is_measurement_like("0.741", 0.741, prefix="accuracy of "))
         self.assertTrue(_is_measurement_like("2048", 2048.0, prefix="context of "))
+
+    def test_the_prefix_needs_a_word_boundary_on_its_left(self) -> None:
+        """Shipped without one, and it opened a hole bigger than the one it closed.
+
+        `v` matched the *tail* of CV, HIV, dev, MeV and .csv; `table` matched stable;
+        `section` matched cross-section. Measured over the 263 archived stage drafts, 29
+        numeric tokens across 11 of the 40 runs were silently dropped. It cut both ways:
+        an invented number written "CV 0.821" escaped `numeric_fidelity` for +0.0476 of
+        total — the same size as the gradient the filter was added to remove — and an
+        honest on-disk "CV 0.0230" stopped counting as an answer for
+        `deliverable_coverage`.
+        """
+        from src.rubric import _is_measurement_like
+
+        for prefix in (
+            "AUROC on HIV ", "the CV ", "mean dev ", "a stable ", "cross-section ",
+            "measured in mSv ", "the ratio D_DV ", "sub-section width ",
+        ):
+            with self.subTest(prefix=prefix):
+                self.assertTrue(_is_measurement_like("0.821", 0.821, prefix=prefix))
+
+        for prefix in ("see arXiv:", "Fig. ", "in equation ", "Table ", "see Section ", "ref. "):
+            with self.subTest(prefix=prefix):
+                self.assertFalse(_is_measurement_like("3.5", 3.5, prefix=prefix))
 
 
 if __name__ == "__main__":
