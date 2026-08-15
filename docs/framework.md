@@ -193,11 +193,12 @@ exists to prevent, reached by a route the design did not consider. Declining to 
 fabrication is not the same as declining to *pay* for it. `_cap_quantification_by_fidelity` now caps
 the first criterion at the second wherever both apply, which makes the middle row 0.0; the cap is
 recorded in `observed` so a stage can still tell which half to fix, and Stage 04 is exempt because
-fidelity does not apply before there are results. `RUBRIC_VERSION` is `6` — it went to 3 when
+fidelity does not apply before there are results. `RUBRIC_VERSION` is `7` — it went to 3 when
 that cap landed, to 4 when the length gradient came out of `commitment`, to 5 when
 `artifact_breadth` learned to read the four workspace directories Stages 01, 02, 07 and 08 are
-told to write and `reproducibility` gained its Stage 02-03 link, and to 6 when
-`deliverable_coverage` was added (§2.4.1) — and the archive
+told to write and `reproducibility` gained its Stage 02-03 link, to 6 when
+`deliverable_coverage` was added (§2.4.1), and to 7 when three ways to raise that criterion
+without doing any work were closed — and the archive
 ranks no score from before a bump against one after it, so each bump is a clean break rather
 than a silent drift.
 
@@ -279,21 +280,39 @@ Three things it deliberately does not do.
 Replayed over the 263 stage drafts of that pass: the existing eight read mean 0.964 / sd 0.043,
 with 20% at exactly 1.000 — a fitness function with almost no gradient left, which turns the polish
 loop off at `evolution.py`'s `champion.total >= 1.0` short-circuit. The new criterion reads mean
-0.746 / sd 0.329 and **falls monotonically with stage number**, 0.95 at Stage 01 to 0.51 at Stage
-07, because a late stage owes more of the task than an early one. On the 0.0 run it reads 0.00 from
-Stage 05 on, which is the stage at which that run stopped producing the object the task named.
+0.657 / sd 0.326 and **generally falls with stage number** — 0.74 / 0.94 / 0.65 / 0.55 / 0.61 /
+0.54 / 0.51 across Stages 01 to 07 — because a late stage owes more of the task than an early one.
+It is not monotone: Stage 02 is the high point, and an earlier version of this paragraph claimed
+monotonicity from the two endpoints alone. On the 0.0 run it reads 0.00 from Stage 05 on, which is
+the stage at which that run stopped producing the object the task named.
 
-*Cost:* it is the first criterion prose can move at all, so keyword-stuffing is the attack it has
-to survive; the on-disk match is the whole defence and must not be relaxed. It also gives 125 of
-those drafts headroom where they had none, which buys polish rounds and therefore tokens.
+*Cost:* it is the first criterion prose can move at all, so gaming it is the attack it has to
+survive; the on-disk match is the whole defence and must not be relaxed. Of the 263 drafts, 52 sat
+at exactly 1.000 on the existing eight — the ones the ratchet's `total >= 1.0` short-circuit turns
+off — and 27 of those now have headroom, which buys polish rounds and therefore tokens.
 *Why anyway:* a ratchet climbing a surface that does not include the question is a machine for
 polishing the wrong answer, and it had been running.
+
+**How far prose can move it, and the three routes that were open when it landed.** The first
+version of this criterion shipped with the attack surface unmeasured, and an adversarial replay
+found three ways to raise it without doing any work: restating a demand in its own words scored
+**1.000** at every stage below 05 on 40 of 40 tasks; quoting the task statement counted as
+answering it; and — worst — pasting back the shortfall the ratchet had just printed raised the
+*total* on **89 of 89** drafts, median **+0.069**, every one past `DEFAULT_MIN_GAIN`. A fitness
+function whose own feedback is a recipe for beating it is the failure §2.4 exists to prevent,
+reached from a direction the design did not consider for the second time. All three are closed in
+`RUBRIC_VERSION` 7: the on-disk half now applies at every stage rather than from Stage 05, a
+sentence made only of the demand's own vocabulary is not engagement, an eight-word span of the task
+statement is not engagement, and the shortfall's own phrases are filtered. Measured after: pure
+restatement scores **0.504** — not zero, because a report that names what was asked does beat one
+silent about it, and never more than half, because nothing it says is checkable — pasting the task
+statement moves the total by a median of **−0.008**, and pasting the shortfall moves **0 of 55**.
 
 The same version bump fixes a smaller thing pointing the same way. `numeric_fidelity` admitted any
 token containing a dot as a reported measurement, so an arXiv id, a DOI and a `Fig. 3` all became
 numbers the draft had to justify against a results file. Measured on a controlled pair at Stage 06
 with everything else held fixed, a draft ending *"on the 2111.01152 system"* totals 0.7587 and the
-same draft ending *"on the target system"* totals 0.8063 — a gain of 0.0476, nearly ten times
+same draft ending *"on the target system"* totals 0.8063 — a gain of 0.0476, 9.5 times
 `DEFAULT_MIN_GAIN`, which means the ratchet recorded **deleting the subject paper's name** as a new
 champion.
 
@@ -1015,8 +1034,13 @@ this document is:
 ### 6.8 The scaffold is currently worth less than no scaffold
 
 The repairs of §6.5 worked, in the sense that they were aimed at: the floor came up from 14.16 to
-**23.57**, and the seven zeros became zero — every one of the forty runs now ships a report with
-methodology, results and figures in it. That is the last piece of good news in this section.
+**23.57**, and six of the seven zeros went away — every one of the forty runs now ships a report
+with methodology, results and figures in it. **One zero survived**, and it is `Information_002`:
+0.0 on all three of its criteria, `gpt-5.1`, no judge failure. It is the run §2.4.1 is about — the
+one with 71,671 bytes of derivation on disk and no equation in its report — so the surviving zero
+is not an artefact of the repair, it is the defect the repair did not touch. An earlier version of
+this section said "the seven zeros became zero", which was wrong and contradicted §2.4.1 in the
+same commit. That is the last piece of good news in this section.
 
 Because the obvious control had never been run, and the batch above made it cheap to run. Same
 model, same machine, same forty tasks, same `gpt-5.1` judge, no AutoR at all — just Claude Code
@@ -1033,16 +1057,18 @@ reviewer gates, a rigour rubric and a champion ratchet make the same model, on t
 measurably **worse** at the task than being handed the task.
 
 The composition of that deficit is not where the design's story predicted. AutoR is not shipping
-less: its median report is 37,068 bytes against bare Claude Code's 26,668, 39% *more* prose. It is
+less: its median report is 36,330 bytes against bare Claude Code's 26,669, 36% *more* prose. It is
 not shipping fewer figures: both arms have ~5 images in front of the judge. It covers **less** —
-23% of criteria score zero against 16% — which means the extra 39% of prose is spent on criteria the
+23% of criteria score zero against 16% — which means the extra 36% of prose is spent on criteria the
 task never asked about, and the missing 7 points are things the task did ask about and the report
 never mentioned.
 
 That is the diagnosis this whole document has been circling, and §2.4.1 is the first fix aimed
 directly at it: every surface allocating AutoR's attention was defined over the run's own record
-rather than over the task statement. Across the seven stage prompts, instructions that produce a
-*record about the work* outnumber instructions that *advance the work* 254 to 147. Two of the
+rather than over the task statement. A hand classification of the seven stage prompts put
+instructions that produce a *record about the work* ahead of those that *advance the work* by
+roughly 254 to 147 — that split is a judgement, no rule in the tree reproduces it, and it is quoted
+here as an impression rather than a measurement. What is mechanical, and enough on its own: two of the
 prompts that decide what gets written — Stage 05, which produces the numbers, and Stage 07, which
 publishes them — contained the word "task" zero times each. The demand list every stage was held to
 was 59.3% delivery contract: over the forty tasks, 200 of 337 "demands" were the same five lines
@@ -1137,8 +1163,8 @@ any.
   choice has been measured to move a score by up to 16.2. The landscape study's first conclusion
   stands and now has a local instance: model choice dominates harness choice.
 - **The §6.5 repairs are measured; the §2.4.1 change is not.** The repairs took the mean from 14.16
-  to 23.57 and removed all seven zeros, and that was still 5.67 points short of no scaffold at all.
-  `RUBRIC_VERSION` 6 and the Stage 01/05/07 prompt changes are aimed at the composition of that
+  to 23.57 and removed six of seven zeros, and that was still 5.67 points short of no scaffold at
+  all. `RUBRIC_VERSION` 7 and the Stage 01/05/07 prompt changes are aimed at the composition of that
   remaining deficit and **have not been run on the benchmark**. Nothing in §2.4.1's numbers is a
   benchmark result: they are replays of a new criterion over archived drafts, which say the
   criterion has a gradient, not that following the gradient scores better.

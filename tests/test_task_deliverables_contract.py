@@ -162,6 +162,37 @@ class TheDeliveryContractIsNotTheResearchQuestionTest(unittest.TestCase):
         self.assertEqual(task_demands(TASK), demanding_sentences(TASK))
         self.assertEqual(task_demands("Some background prose about black holes."), [])
 
+    def test_the_gate_holds_the_narrowed_population_and_not_the_wide_one(self) -> None:
+        """The one line that gives the coverage gate any teeth, pinned.
+
+        `_uncovered_demands` reads `task_demands`, not `demanding_sentences`. Reverting
+        that single call left the whole suite green while taking the gate from firing on
+        3 of 40 archived runs back to 0 of 40 — its entire measurable effect, uncovered.
+        Asserted behaviourally rather than by reading the source: a record that accounts
+        only for the delivery contract must not satisfy a brief that asks for something
+        else.
+        """
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        paths = build_run_paths(Path(tmp.name) / "run")
+        ensure_run_layout(paths)
+        write_text(paths.user_input, self.BENCHMARK_SHAPED)
+        write_text(paths.report_file, "# Report\n\n## Findings\n\nSee images/f.png\n")
+        write_text(
+            paths.artifacts_dir / COVERAGE_FILENAME,
+            json.dumps({"deliverables": [{
+                "task_quote": "Figures are mandatory",
+                "addressed": True,
+                "where": "## Findings",
+            }]}),
+        )
+        problems = validate_deliverables_coverage(paths, self.BENCHMARK_SHAPED)
+        self.assertTrue(
+            any("does not account for what the task asked" in p for p in problems),
+            problems,
+        )
+        self.assertTrue(any("coupling strengths" in p or "ULB" in p for p in problems), problems)
+
     def test_the_brief_is_the_headed_part_only(self) -> None:
         brief = research_brief(self.BENCHMARK_SHAPED)
         self.assertIn("coupling strengths", brief)

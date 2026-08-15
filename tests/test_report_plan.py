@@ -1019,6 +1019,33 @@ class TaskOutputCoverageTest(ReportPlanTestCase):
         )
         self.assertTrue(any("which does not exist" in p for p in self.problems()))
 
+    def test_the_task_outputs_reach_the_stage_that_has_to_publish_them(self) -> None:
+        """The field the gate checks has to be the field the writer is shown.
+
+        `format_report_plan_for_prompt` rendered `figures` and `headline_numbers` and
+        never `task_outputs`, while the Stage 07 prompt told the writer to read
+        `task_outputs` from the injected `# Report Plan` — the one place it was
+        guaranteed not to be. An `artifact:` coverage kind nobody is shown is a field the
+        gate checks and no one answers.
+        """
+        write_text(self.paths.results_dir / "hamiltonians.md", "H_HF = ...\n" * 20)
+        self.write_plan(
+            task_outputs=[
+                {"stated": "correctly derived Hartree-Fock Hamiltonians",
+                 "covered_by": "artifact:results/hamiltonians.md"},
+                {"stated": "the accuracy comparison", "covered_by": "figure:1"},
+                {"stated": "posterior chains", "covered_by": "not_attempted",
+                 "why_not": "the supplied data carries only best-fit values"},
+            ]
+        )
+        plan = load_report_plan(self.paths)
+        assert plan is not None
+        rendered = format_report_plan_for_prompt(plan)
+        self.assertIn("correctly derived Hartree-Fock Hamiltonians", rendered)
+        self.assertIn("results/hamiltonians.md", rendered)
+        self.assertIn("show it in the report", rendered)
+        self.assertIn("NOT ATTEMPTED", rendered)
+
     def test_an_unknown_coverage_kind_is_refused(self) -> None:
         self.write_plan(task_outputs=[{"stated": "constraints", "covered_by": "somehow"}])
         self.assertTrue(any("expected one of" in p for p in self.problems()))

@@ -534,11 +534,15 @@ class EvolutionController:
             "",
             "- Do not lengthen a section to raise a score. Eight of these criteria are ratios or "
             "counts over artifacts on disk and prose cannot move any of them. "
-            "`deliverable_coverage` is the exception and it is not moved by prose either: a "
-            "sentence stuffed with the task's nouns scores nothing unless it also carries a "
-            "number that appears in a file under `workspace/results`. Raise it by doing the work "
-            "the task named and reporting the result, or by stating in that demand's own section "
-            "that it could not be produced and why.",
+            "`deliverable_coverage` is the exception, and it is honest about how far prose can "
+            "move it: **half**. Mentioning a thing the task asked for earns half its share, "
+            "because a report that names it beats one that is silent about it. The other half is "
+            "only paid when the sentence that mentions it also carries a number that appears in "
+            "a file under `workspace/results`, or names a file the run actually wrote. Restating "
+            "the task, or pasting back the shortfall printed above, earns nothing at all -- both "
+            "are filtered. So the way to raise this is to do the work the task named and report "
+            "the result, or to state in that demand's own section that it could not be produced "
+            "and why.",
             "- Do not restate an unverified number more confidently. If a value is not in a file "
             "under `workspace/results`, either measure it and write it there or remove the claim.",
             "- Do not delete a weak part of the draft to raise an average. A dropped file "
