@@ -150,8 +150,11 @@ class DeliverableCoverageTest(unittest.TestCase):
         )
         shortfall = self.shortfall(markdown)
         self.assertLess(self.score(markdown), 1.0)
-        self.assertIn("hamiltonian", shortfall)
-        self.assertNotIn("Derive the Hartree-Fock Hamiltonian for the target", shortfall)
+        self.assertIn("demand 1 of", shortfall)
+        # Nothing in it can be pasted into a sentence about the demand: no subject words,
+        # no quote. The numbered list it points at is in the same prompt.
+        self.assertNotIn("Hartree", shortfall)
+        self.assertNotIn("hamiltonian", shortfall.casefold())
 
     # -- what it must not reward ---------------------------------------------------
 
@@ -170,7 +173,7 @@ class DeliverableCoverageTest(unittest.TestCase):
             ),
         )
         self.assertEqual(self.score(markdown), 0.5)
-        self.assertIn("carries nothing checkable", self.shortfall(markdown))
+        self.assertIn("nothing checkable behind it", self.shortfall(markdown))
 
     def test_a_number_no_artifact_holds_does_not_answer_a_demand(self) -> None:
         """Catching the invented number is `numeric_fidelity`'s job; not counting it
@@ -267,6 +270,47 @@ class DeliverableCoverageTest(unittest.TestCase):
             key_results="Nothing yet. " + self.shortfall(markdown),
         )
         self.assertEqual(self.score(pasted), before)
+
+    def test_citing_a_path_that_merely_resolves_is_not_evidence(self) -> None:
+        """The largest exploit this criterion has had, and the cheapest to write.
+
+        `_sentence_lands_on_disk` asked `_listed_file_exists` against the run root, which
+        answers *does this path resolve*. One sentence per demand citing `/etc/hostname`
+        — or the stage's own summary under `stages/`, which exists on every run by
+        construction — took the criterion to 1.000 on 263 of 263 archived drafts for a
+        median total gain of +0.0476. A real polish round in the same archive gained a
+        median +0.0221, so four sentences were worth twice doing the work.
+        """
+        from src.rubric import _result_file_cited
+
+        for path in (
+            "/etc/hostname",
+            "stages/06_analysis.md",
+            "workspace/artifacts/deliverables_coverage.json",
+            "workspace/notes/open_questions.md",
+            "workspace/data/input.csv",
+        ):
+            with self.subTest(path=path):
+                self.assertFalse(
+                    _result_file_cited(f"The answer is in `{path}`.", self.paths),
+                    f"{path} is not something this run produced as a result",
+                )
+
+    def test_a_result_this_run_wrote_is_evidence(self) -> None:
+        from src.rubric import _result_file_cited
+
+        write_text(self.paths.figures_dir / "gap.png", "x" * 200)
+        write_text(self.paths.report_dir / "report.md", "# Report\n\nBody.\n")
+        for path in (
+            "workspace/results/hamiltonian.md",
+            "results/metrics.json",
+            "workspace/figures/gap.png",
+            "workspace/report/report.md",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(
+                    _result_file_cited(f"The answer is in `{path}`.", self.paths), path
+                )
 
     def test_talking_about_everything_and_grounding_nothing_caps_at_half(self) -> None:
         markdown = draft(
