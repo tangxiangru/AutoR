@@ -64,6 +64,33 @@ def _drafts(run_dir: Path):
         yield paths, stage, markdown, [workspace]
 
 
+def _mentioned(paths) -> str | None:
+    """One sentence per demand that *mentions* it and grounds nothing: the free half."""
+    demands = task_demands(task_statement(read_text(paths.user_input)))
+    if not demands:
+        return None
+    return "\n".join(
+        f"Our finding on this point is recorded fully; see detail on {' '.join(sorted(terms)[:4])}."
+        for terms in _demand_terms(demands)
+    )
+
+
+def _cited(paths, path: str) -> str | None:
+    """The same sentences, citing a path -- the round-2 and round-3 exploits."""
+    body = _mentioned(paths)
+    if body is None:
+        return None
+    return "\n".join(f"{line[:-1]} in `{path}`." for line in body.splitlines())
+
+
+def _invented(paths) -> str | None:
+    """The same sentences carrying a number nobody measured -- the round-3 exploit."""
+    body = _mentioned(paths)
+    if body is None:
+        return None
+    return "\n".join(f"{line[:-1]}, which gives 74.1% overall." for line in body.splitlines())
+
+
 def _restated(paths) -> str:
     """A draft that says every demand back and does nothing: the free-half probe."""
     demands = task_demands(task_statement(read_text(paths.user_input)))
@@ -101,6 +128,8 @@ def main() -> int:
     old_totals: list[float] = []
     new_totals: list[float] = []
     restated_scores: list[float] = []
+    probe_deltas: dict[str, list[float]] = {}
+    probe_full: dict[str, int] = {}
     paste_task_delta: list[float] = []
     paste_shortfall_delta: list[float] = []
     shortfall_population = 0
@@ -139,6 +168,34 @@ def main() -> int:
                     paths=paths, stage=stage, markdown=_restated(paths), artifact_roots=roots
                 ).by_key["deliverable_coverage"].score
             )
+
+            # Every route anyone has found to buy score with prose, priced on the same
+            # draft. A route missing from this list is a claim in the docs with no owner.
+            probes = {
+                "mention only (the documented free half)": _mentioned(paths),
+                "  + cite the benchmark's own reference paper": _cited(
+                    paths, "workspace/literature/paper_000.pdf"
+                ),
+                "  + cite AutoR's own experiment manifest": _cited(
+                    paths, "workspace/results/experiment_manifest.json"
+                ),
+                "  + cite a path that merely resolves": _cited(paths, "/etc/hostname"),
+                "  + an invented percentage": _invented(paths),
+            }
+            for label, injection in probes.items():
+                if injection is None:
+                    continue
+                probed = score_stage(
+                    paths=paths,
+                    stage=stage,
+                    markdown=markdown.replace(
+                        "## Files Produced", injection + "\n\n## Files Produced", 1
+                    ),
+                    artifact_roots=roots,
+                )
+                probe_deltas.setdefault(label, []).append(probed.total - score.total)
+                if probed.by_key["deliverable_coverage"].score >= 1.0 - 1e-9:
+                    probe_full[label] = probe_full.get(label, 0) + 1
 
             statement = task_statement(read_text(paths.user_input))
             pasted = markdown.replace("## Files Produced", statement + "\n\n## Files Produced", 1)
@@ -179,9 +236,14 @@ def main() -> int:
     line("drafts at 1.000 before / gaining headroom",
          f"{headroom_before} / {headroom_after}")
     print()
-    print("free-half probes (a gain here is a score bought without doing the work):")
+    print("prose probes (a gain here is score bought without doing the work):")
     line("  restated demands, no evidence: mean / max",
          f"{statistics.mean(restated_scores):.4f} / {max(restated_scores):.4f}")
+    for label, deltas in probe_deltas.items():
+        line(f"  {label}",
+             f"median {statistics.median(deltas):+.4f}  max {max(deltas):+.4f}  "
+             f"past 0.005: {sum(d > 0.005 for d in deltas)}/{len(deltas)}  "
+             f"coverage at 1.000: {probe_full.get(label, 0)}")
     line("  paste the task statement: median total delta",
          f"{statistics.median(paste_task_delta):+.4f}")
     line("  paste the shortfall: median / n moved / n",

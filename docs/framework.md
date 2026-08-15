@@ -320,12 +320,38 @@ eight-word span of the task statement is not engagement, the shortfall names dem
 there is nothing in it to paste, and `_result_file_cited` asks who wrote the file instead of whether
 the path resolves.
 
-**What is left, published rather than denied.** Adding one sentence per demand that merely
-*mentions* it still gains up to **+0.094** of the stage total, on 88 of 263 drafts. That is the free
-half doing its job, and it is the largest gradient remaining. It is not closed and should not be: a
-criterion where mentioning earned nothing would also refuse the honest report that names a
-requirement it could not meet and says why, which §2.7 and the deliverables contract both require to
-stay valid.
+**What is left — and the previous version of this paragraph was wrong about it.** It said the free
+half, +0.094 on 88 of 263 drafts, was the largest gradient remaining. A third round found two
+larger, both inside the on-disk half the same paragraph had called "the whole defence":
+
+| route | measured | status |
+|:---|---:|:---|
+| cite a file the run did not earn: the benchmark's own reference PDFs, copied into `workspace/literature/` before the agent starts, or AutoR's `results/experiment_manifest.json` | median **+0.0625**, coverage 1.000 on 263/263 | closed — the resolver now asks *when* and *by whom*, not *which directory* |
+| **invent a number** | median **+0.0625**, max **+0.3810**, past the archive's gate on **173/263** | *partly* closed |
+| mention a demand and ground nothing | +0.094 max, 88/263 | open by design |
+
+The invented number is the one that matters and it is not fully fixed. It moves three criteria at
+once — this one, then `quantification`, then `numeric_fidelity` through the cap. One cause was a
+one-line tolerance bug: the percentage branch of `_matches_artifact_number` collapsed to the integer
+tolerance, so `74.1%` was satisfied by a results file holding `0.700` — five percentage points, not
+half of the last decimal. That is fixed. The other cause is not fixable in this criterion:
+`_artifact_numbers` pools **every** number in every result and data file, a median of **5,400** per
+archived run and **126,413** on one of them, most in [0, 1]. Against a bag that size an invented
+three-significant-figure metric matches by coincidence. That oracle predates this work — it is
+`numeric_fidelity`'s too — but adding a second consumer of it made the weakness worth more, and that
+is this criterion's doing.
+
+The free half stays open on purpose: a criterion where mentioning earned nothing would also refuse
+the honest report that names a requirement it could not meet and says why, which §2.7 and the
+deliverables contract both require to stay valid.
+
+**Three rounds, three corrections, and the pattern is the finding.** Each round of adversarial
+replay found a way to buy score that the previous round's fix had left open or introduced, and each
+round found published numbers that did not re-derive. That is worth more to a reader of this
+document than the criterion is: a mechanically-scored self-improvement loop is a target, the author
+of the target is the worst person to estimate its attack surface, and the only thing that worked was
+handing the artifact to something adversarial and rerunning it after every fix.
+`tools/rubric_replay.py` exists so the next round starts from prices rather than from prose.
 
 The same version bump fixes a smaller thing pointing the same way. `numeric_fidelity` admitted any
 token containing a dot as a reported measurement, so an arXiv id, a DOI and a `Fig. 3` all became

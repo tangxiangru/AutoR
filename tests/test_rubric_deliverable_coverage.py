@@ -139,8 +139,9 @@ class DeliverableCoverageTest(unittest.TestCase):
         """Actionable, and not pasteable.
 
         The shortfall used to carry the demand verbatim. The ratchet prints it into the
-        next polish prompt, so pasting it back raised the *total* on 89 of 89 archived
-        drafts — median +0.069, every one past `DEFAULT_MIN_GAIN`. It now names the
+        next polish prompt, so pasting it back raised the *total* on 88 of the 118
+        archived drafts that carried one — median +0.036, every one past
+        `DEFAULT_MIN_GAIN`. It now names the
         subject instead, and `_SHORTFALL_MARKERS` filters the text itself.
         """
         markdown = draft(
@@ -259,7 +260,7 @@ class DeliverableCoverageTest(unittest.TestCase):
     def test_pasting_the_shortfall_back_earns_nothing(self) -> None:
         """The ratchet prints the shortfall into the next polish prompt.
 
-        Before the filter this was the cheapest new champion in the system: +0.069 median
+        Before the filter this was the cheapest new champion in the system: +0.036 median
         on the total across 89 archived drafts, all past `DEFAULT_MIN_GAIN`, for a paste.
         """
         markdown = draft(objective="x", what_i_did="y", key_results="Nothing yet.")
@@ -283,12 +284,24 @@ class DeliverableCoverageTest(unittest.TestCase):
         """
         from src.rubric import _result_file_cited
 
+        write_text(self.paths.results_dir / "experiment_manifest.json", '{"experiments": []}')
+        # The benchmark copies its reference papers into `literature/` before the agent
+        # starts. A directory whitelist called that a result; an mtime does not.
+        handed_over = self.paths.literature_dir / "paper_000.pdf"
+        write_text(handed_over, "%PDF-1.4\n" + "x" * 400)
+        import os
+
+        stamp = os.path.getmtime(self.paths.user_input) - 3600
+        os.utime(handed_over, (stamp, stamp))
+
         for path in (
             "/etc/hostname",
             "stages/06_analysis.md",
             "workspace/artifacts/deliverables_coverage.json",
             "workspace/notes/open_questions.md",
             "workspace/data/input.csv",
+            "workspace/results/experiment_manifest.json",
+            "workspace/literature/paper_000.pdf",
         ):
             with self.subTest(path=path):
                 self.assertFalse(
@@ -381,6 +394,22 @@ class IdentifiersAreNotMeasurementsTest(unittest.TestCase):
         for prefix in ("as shown in Fig. ", "in equation ", "see Section ", "Table "):
             with self.subTest(prefix=prefix):
                 self.assertFalse(_is_measurement_like("3.5", 3.5, prefix=prefix))
+
+    def test_a_percentage_is_matched_against_its_own_fraction_not_a_neighbourhood(self) -> None:
+        """`74.1%` was satisfied by a results file holding `0.700`.
+
+        The fraction branch read `max(0.5 * 10**-decimals / 100, tolerance)`, and the
+        first term is a hundredth of the second, so the max is always `tolerance` — the
+        window was ±0.05 on the fraction where the docstring three lines above promised
+        ±0.0005. Five percentage points. The same function decides `numeric_fidelity`.
+        """
+        from src.rubric import _matches_artifact_number
+
+        self.assertTrue(_matches_artifact_number(74.1, "74.1", True, {0.741}))
+        self.assertTrue(_matches_artifact_number(74.1, "74.1", True, {74.1}))
+        self.assertFalse(_matches_artifact_number(74.1, "74.1", True, {0.700}))
+        self.assertFalse(_matches_artifact_number(74.1, "74.1", True, {0.79}))
+        self.assertFalse(_matches_artifact_number(0.741, "0.741", False, {0.700}))
 
     def test_a_measurement_is_still_a_measurement(self) -> None:
         from src.rubric import _is_measurement_like
