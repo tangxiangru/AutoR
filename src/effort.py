@@ -260,7 +260,9 @@ def tier_notice(stage: StageSpec, tier: str, next_stage: StageSpec | None) -> st
             "Something genuinely undecided is at stake here. Take the time. Consider more than "
             "one way the question could be answered, say why you chose the one you chose, and "
             "record what would have changed your mind. Work that is complete and unargued is "
-            "not what this stage is for."
+            "not what this stage is for. What the task names as its outputs is not one of the "
+            "things this stage decides: if two readings of the task are live, carry both and "
+            "let the stage that costs the design choose between them."
         )
 
     if next_stage is None:

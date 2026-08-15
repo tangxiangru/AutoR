@@ -139,10 +139,16 @@ Rules:
 - `task_outputs` answers the task description item by item. Read what the task says it
   wants — many task descriptions carry a literal `Outputs:` sentence naming the constraints,
   comparisons, distributions or tables expected — and list each one, with what in this plan
-  produces it: `figure:<slot>`, `number:<index>`, `prose`, or `not_attempted` with a reason.
+  produces it: `figure:<slot>`, `number:<index>`, `artifact:<workspace-relative path>`,
+  `prose`, or `not_attempted` with a reason.
   This is the closest thing to a specification of the deliverable that exists, and a
   deliverable the task named which the report never mentions is the cheapest thing there is
   to lose. Splitting it finely is better than one line saying "everything".
+- Use `artifact:` — not `figure:` — when the task names an **object** as an output: a
+  derivation, an equation set, a table, a sequence, a structure. The file must exist by
+  Stage 07 and the report must show the object it holds, in full or in its final form. A
+  figure *about* an object is a summary of the deliverable, not the deliverable, and a rate
+  computed over a set of them is a second result rather than a substitute for the first.
 
 - Do not write `declared_at`, `digest` or `amendments` — the workflow manager stamps those on
   approval, and a later round amends this file rather than rewriting it.

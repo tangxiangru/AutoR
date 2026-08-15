@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+from .deliverables import COVERAGE_FILENAME
 from .operator import ClaudeOperator
 from .obligations import format_for_review_prompt, load_ledger
 from .review_policy import format_policy_for_prompt, load_policy
@@ -636,6 +637,19 @@ class AutomatedReviewer:
             f"{self._read_excerpt(paths.artifact_index, max_chars=6000)}\n\n"
             "# Experiment Manifest Excerpt\n\n"
             f"{self._read_excerpt(paths.experiment_manifest, max_chars=6000)}\n\n"
+            # The one machine-readable artifact in which the stage states, item by item,
+            # which of the task's demands it did not meet and why -- and the substitution
+            # check above was run without it. On the run that scored 0.0 externally, this
+            # file marked the task's first named output addressed with four PNG filenames
+            # as its evidence, and marked the only named data file unmet with a reason.
+            "# Task Coverage Record (self-reported by the stage)\n\n"
+            "The stage wrote this about itself. It is not evidence; it is the claim the "
+            "substitution check is about. Read each `addressed: true` and ask what in the "
+            "report or the artifacts actually discharges it -- an entry whose `where` is "
+            "only a figure filename has published a picture about the deliverable, not the "
+            "deliverable. Read each `addressed: false` and apply the discriminating "
+            "question above: was the named work runnable from what is in this workspace?\n\n"
+            f"{self._read_excerpt(paths.artifacts_dir / COVERAGE_FILENAME, max_chars=4000)}\n\n"
             "# Recent Log Excerpt\n\n"
             f"{self._read_excerpt(paths.logs, max_chars=5000, tail=True)}\n"
             + CLOSING_VERDICT_INSTRUCTION

@@ -982,6 +982,43 @@ class TaskOutputCoverageTest(ReportPlanTestCase):
         )
         self.assertTrue(any("without saying why" in p for p in self.problems()))
 
+    def test_an_object_the_task_names_can_be_covered_by_the_object(self) -> None:
+        """`figure:` was the only home a non-statistical deliverable had.
+
+        Observed: a run whose first named output was "correctly derived Hartree-Fock
+        Hamiltonians" covered it with `figure:1`, a grid of pass/fail cells, and the plan
+        validated — fifteen hours before the report existed. A picture *about* a
+        deliverable is not the deliverable.
+        """
+        write_text(self.paths.results_dir / "hamiltonians.md", "H_HF = ...\n" * 20)
+        self.write_plan(
+            task_outputs=[
+                {
+                    "stated": "correctly derived Hartree-Fock Hamiltonians",
+                    "covered_by": "artifact:results/hamiltonians.md",
+                }
+            ]
+        )
+        self.assertEqual([p for p in self.problems() if "task output" in p], [])
+
+    def test_an_artifact_with_no_path_is_refused(self) -> None:
+        self.write_plan(task_outputs=[{"stated": "the derivation", "covered_by": "artifact:"}])
+        self.assertTrue(any("with no path" in p for p in self.problems()))
+
+    def test_a_planned_artifact_need_not_exist_before_the_report_does(self) -> None:
+        """A Stage 03 plan names a file that does not exist yet. That is what a plan is."""
+        self.write_plan(
+            task_outputs=[{"stated": "the derivation", "covered_by": "artifact:results/later.md"}]
+        )
+        self.assertEqual([p for p in self.problems() if "task output" in p], [])
+
+    def test_an_artifact_missing_at_write_up_is_refused(self) -> None:
+        write_text(self.paths.report_file, "# Report\n\nBody.\n")
+        self.write_plan(
+            task_outputs=[{"stated": "the derivation", "covered_by": "artifact:results/never.md"}]
+        )
+        self.assertTrue(any("which does not exist" in p for p in self.problems()))
+
     def test_an_unknown_coverage_kind_is_refused(self) -> None:
         self.write_plan(task_outputs=[{"stated": "constraints", "covered_by": "somehow"}])
         self.assertTrue(any("expected one of" in p for p in self.problems()))

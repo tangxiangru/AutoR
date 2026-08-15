@@ -193,7 +193,7 @@ nothing to have.
 
 ### The rubric
 
-Eight criteria, all read off disk rather than off the prose, so the score moves
+Nine criteria, all read off disk rather than off the prose, so the score moves
 when the work moves and not when the wording does.
 
 | Criterion | Weight | Measures | From |
@@ -206,6 +206,7 @@ when the work moves and not when the wording does.
 | `traceability` | 1.5 | the four decision-ledger buckets, filled and distinct | all stages |
 | `commitment` | 1.5 | reports completed work rather than intentions | all stages |
 | `reproducibility` | 3.0 | the machine-readable validity chain for this stage | all stages |
+| `deliverable_coverage` | 3.0 | **each demand of the task statement is spoken to, with a number an artifact holds** | all stages |
 
 `numeric_fidelity` is the deep-review check. It extracts every measurement the
 draft reports and looks for it in `workspace/results` and `workspace/data`,
@@ -342,8 +343,8 @@ the estimator underneath is worth acting on.
 ### The composition of a run is not allowed to be the improvement
 
 A stage's score is a weighted mean over the criteria that apply to it, and the late
-stages face more of them — Stage 02 is scored on six criteria worth 13, Stage 06 on
-eight worth 18, including `numeric_fidelity`, the hardest. (Not *strictly* more at
+stages face more of them — Stage 02 is scored on seven criteria worth 16, Stage 06 on
+nine worth 21, including `numeric_fidelity`, the hardest. (Not *strictly* more at
 every step: 01, 02 and 03 face the same set, and so do 05 through 08. The count is
 non-decreasing and it rises twice.) So the *set of stages a run reached* is a free
 parameter of the objective.

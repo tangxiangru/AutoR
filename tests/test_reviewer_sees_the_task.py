@@ -22,6 +22,7 @@ import unittest
 from pathlib import Path
 
 from src.approval_agent import GOAL_EXCERPT_CHARS, AutomatedReviewer
+from src.deliverables import COVERAGE_FILENAME
 from src.utils import (
     TASK_BEGIN_MARKER,
     TASK_END_MARKER,
@@ -98,6 +99,55 @@ class ReviewerGoalBlockTest(unittest.TestCase):
     def test_the_budget_covers_every_benchmark_task(self) -> None:
         """Stated rather than assumed: 10,000 against a measured maximum of 8,540."""
         self.assertGreaterEqual(GOAL_EXCERPT_CHARS, 8540)
+
+
+class ReviewerSeesTheCoverageRecordTest(unittest.TestCase):
+    """The substitution check was run without the artifact that reports the substitution.
+
+    `deliverables_coverage.json` is the one machine-readable file in which a stage states,
+    item by item, which of the task's demands it met and which it did not. On the run an
+    external judge scored 0.0, it marked the task's first named output addressed with four
+    PNG filenames as its evidence, and marked the only named data file unmet with a
+    reason. The reviewer running "did this stage do the task, or an adjacent cheaper one?"
+    was shown the run manifest, the artifact index, the experiment manifest and a log
+    tail — and none of that.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.paths = build_run_paths(Path(self._tmp.name) / "run_0001")
+        ensure_run_layout(self.paths)
+        write_text(self.paths.memory, "# Memory\n")
+        write_text(self.paths.user_input, "Derive the Hartree-Fock Hamiltonian.")
+        self.reviewer = AutomatedReviewer("claude", model="opus", unattended=True)
+
+    def _prompt(self) -> str:
+        return self.reviewer._build_review_prompt(  # noqa: SLF001
+            paths=self.paths, stage=STAGE, attempt_no=1,
+            stage_markdown="# Stage 01\n\n## Key Results\n\nSomething.",
+            suggestions=["a", "b", "c"],
+        )
+
+    def test_the_record_reaches_the_reviewer(self) -> None:
+        write_text(
+            self.paths.artifacts_dir / COVERAGE_FILENAME,
+            '{"deliverables": [{"task_quote": "Derive the Hartree-Fock Hamiltonian.", '
+            '"addressed": true, "where": "images/derived_hamiltonians.png"}]}',
+        )
+        prompt = self._prompt()
+        self.assertIn("images/derived_hamiltonians.png", prompt)
+        self.assertIn("Task Coverage Record", prompt)
+
+    def test_it_is_framed_as_a_claim_rather_than_as_evidence(self) -> None:
+        """A self-report read as evidence would make the check circular."""
+        write_text(self.paths.artifacts_dir / COVERAGE_FILENAME, '{"deliverables": []}')
+        prompt = self._prompt()
+        self.assertIn("It is not evidence; it is the claim", prompt)
+        self.assertIn("runnable from what is in this workspace", prompt)
+
+    def test_a_stage_that_has_not_written_one_yet_still_gets_a_review(self) -> None:
+        self.assertIn("Task Coverage Record", self._prompt())
 
 
 class PanelSeatsSeeItTooTest(unittest.TestCase):

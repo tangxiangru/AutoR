@@ -169,7 +169,7 @@ with a `previous_digest` is a record of the change rather than an erasure of it.
 
 ### 2.4 The improvement loop is scored by something it cannot influence
 
-`src/rubric.py` scores a draft on eight weighted criteria, **never calls a backend**, and is
+`src/rubric.py` scores a draft on nine weighted criteria, **never calls a backend**, and is
 **verdict-blind**: a refuted hypothesis with clean evidence outscores a supported one resting on an
 assertion. `src/evolution.py` keeps the champion and reverts a round that scores worse. On top of
 that, `verdict_digest()` hashes the `(id, verdict)` set, and any AutoR-initiated polish round that
@@ -193,10 +193,11 @@ exists to prevent, reached by a route the design did not consider. Declining to 
 fabrication is not the same as declining to *pay* for it. `_cap_quantification_by_fidelity` now caps
 the first criterion at the second wherever both apply, which makes the middle row 0.0; the cap is
 recorded in `observed` so a stage can still tell which half to fix, and Stage 04 is exempt because
-fidelity does not apply before there are results. `RUBRIC_VERSION` is `5` — it went to 3 when
-that cap landed, to 4 when the length gradient came out of `commitment`, and to 5 when
+fidelity does not apply before there are results. `RUBRIC_VERSION` is `6` — it went to 3 when
+that cap landed, to 4 when the length gradient came out of `commitment`, to 5 when
 `artifact_breadth` learned to read the four workspace directories Stages 01, 02, 07 and 08 are
-told to write and `reproducibility` gained its Stage 02-03 link — and the archive
+told to write and `reproducibility` gained its Stage 02-03 link, and to 6 when
+`deliverable_coverage` was added (§2.4.1) — and the archive
 ranks no score from before a bump against one after it, so each bump is a clean break rather
 than a silent drift.
 
@@ -236,6 +237,65 @@ rejection) is belt and braces, on purpose: the failure it prevents — a loop th
 *answer* rather than its *work* — is the one that would be hardest to detect after the fact. The
 episode above is the honest qualifier on that: the guarantee is only as good as the arithmetic that
 combines the criteria, and it took an adversarial read rather than a test to find it.
+
+### 2.4.1 A fitness function defined over the run's own record cannot see the task
+
+The eight criteria above share a property nobody stated until it cost something: **every one of
+them measures the run against a document the run wrote.** Do the paths it named resolve. Is the
+ledger it wrote four different things. Do the numbers it reported appear in the files it produced.
+Each is a good question. Their conjunction is satisfied, completely, by a rigorous study of the
+wrong question.
+
+That is not hypothetical. On the 40-task pass of §6.8, the run scored 0.0 by the external judge
+carries a 71,671-byte Hartree-Fock derivation on disk, a report with zero display equations, and a
+`What I Did` that says in its own words that the derivation is not the deliverable. The eight
+criteria read **0.97** on its Stage 06 draft. Nothing was comparing the draft against the ask,
+because nothing in the rubric had ever read the task statement.
+
+`deliverable_coverage` (weight 3.0, every stage) is the one criterion that reads a document the run
+did not write. For each demand in the task statement it asks two things: does some sentence of the
+draft's `Objective`, `What I Did` or `Key Results` speak to that demand — measured on the demand's
+*distinctive* content words, so a task's shared vocabulary cannot cover everything at once — and,
+from Stage 05, does that same sentence land on disk, as a number an artifact holds or as a
+reference to a file the run produced. The second disjunct is not slack: a task that names an
+*object* as its output has no statistic to report, and a criterion accepting only numbers would cap
+exactly the deliverable it exists to protect at half marks.
+
+Three things it deliberately does not do.
+
+- **It does not read the coverage record.** `deliverables_coverage.json` is written by the stage
+  about itself, and the operator can run its validator locally — a gate the executing agent can
+  execute is a fill-in-the-blank exercise. On the run that scored 0.0 the record is 16 entries, 14
+  of them `addressed: true`, which would have scored 0.875 for a run the judge scored 0.0. The
+  criterion scores the *draft's prose against the task statement* and never opens the record.
+- **It is not promoted to a gate.** #208 measured four mechanical task-completion gates against
+  twelve scored runs and every one of them would have blocked the best run in the set. Partial
+  credit into the ratchet is the form that survives that finding.
+- **It stays verdict-blind.** Nothing in it opens `hypothesis_outcomes.json` or touches an
+  `OUTCOME_BLIND_FIELDS` key. A refuted answer carrying a traceable number scores exactly what a
+  supported one does; the demand verbs (`verify`, `validate`, `demonstrate`) are read off the task
+  side only, so no phrasing of a result can reach them.
+
+Replayed over the 263 stage drafts of that pass: the existing eight read mean 0.964 / sd 0.043,
+with 20% at exactly 1.000 — a fitness function with almost no gradient left, which turns the polish
+loop off at `evolution.py`'s `champion.total >= 1.0` short-circuit. The new criterion reads mean
+0.746 / sd 0.329 and **falls monotonically with stage number**, 0.95 at Stage 01 to 0.51 at Stage
+07, because a late stage owes more of the task than an early one. On the 0.0 run it reads 0.00 from
+Stage 05 on, which is the stage at which that run stopped producing the object the task named.
+
+*Cost:* it is the first criterion prose can move at all, so keyword-stuffing is the attack it has
+to survive; the on-disk match is the whole defence and must not be relaxed. It also gives 125 of
+those drafts headroom where they had none, which buys polish rounds and therefore tokens.
+*Why anyway:* a ratchet climbing a surface that does not include the question is a machine for
+polishing the wrong answer, and it had been running.
+
+The same version bump fixes a smaller thing pointing the same way. `numeric_fidelity` admitted any
+token containing a dot as a reported measurement, so an arXiv id, a DOI and a `Fig. 3` all became
+numbers the draft had to justify against a results file. Measured on a controlled pair at Stage 06
+with everything else held fixed, a draft ending *"on the 2111.01152 system"* totals 0.7587 and the
+same draft ending *"on the target system"* totals 0.8063 — a gain of 0.0476, nearly ten times
+`DEFAULT_MIN_GAIN`, which means the ratchet recorded **deleting the subject paper's name** as a new
+champion.
 
 ### 2.5 Every optional mechanism carries its own control arm
 
@@ -465,7 +525,7 @@ An explicit `--flag`/`--no-flag` always beats the level. The validity chain is n
 
 | Module | Owns |
 | --- | --- |
-| [`rubric.py`](../src/rubric.py) | Eight weighted criteria over a draft and the artifacts it names. Backend-free, verdict-blind, versioned. |
+| [`rubric.py`](../src/rubric.py) | Nine weighted criteria over a draft and the artifacts it names. Backend-free, verdict-blind, versioned. |
 | [`evolution.py`](../src/evolution.py) | The champion ratchet, the polish budget, the revert, and the `verdict_drift` rejection. |
 | [`pareto.py`](../src/pareto.py) | Non-dominated drafts kept beside the champion. |
 | [`ideation_panel.py`](../src/ideation_panel.py) | Five divergent Stage 02 proposers, Jaccard-deduplicated into a scored candidate pool. It decides nothing. |
@@ -915,10 +975,9 @@ Three consequences, and none of them is optional.
 
 ### 6.7 The graph fires now, and that was not the predicate
 
-The batch in flight, on the repaired code, is already a different object. Both batches ran
-`adaptive` + `auto`:
+The re-run on the repaired code is a different object. Both batches ran `adaptive` + `auto`:
 
-| | pre-repair batch | in flight |
+| | pre-repair batch | post-repair |
 |:---|---:|---:|
 | visits offering more than one move | 20% | **58%** |
 | visits the agent, not the default, decided | 3% | **58%** |
@@ -945,13 +1004,63 @@ nobody chose.
 
 **The experiment this document owes.** Same model, same judge, same 40 tasks, `--stage-graph
 adaptive` against `--stage-graph linear`, paired, with enough seeds to say something. The control arm
-is one flag and has never been passed. It is not run *here* because until the batch above lands there
-is no measurement of the treatment arm to pair it against; the ordering is repair, re-measure, then
-ablate. Until that ablation lands, the correct summary of this document is:
+is one flag and has still never been passed. The ordering was repair, re-measure, then ablate; the
+first two are done (§6.8) and the third is not. Until that ablation lands, the correct summary of
+this document is:
 
 > A system whose stated contribution is a topology has demonstrated that the topology is
 > inspectable and that four defects in it were findable **because** it is inspectable. It has not
 > demonstrated that the topology helps.
+
+### 6.8 The scaffold is currently worth less than no scaffold
+
+The repairs of §6.5 worked, in the sense that they were aimed at: the floor came up from 14.16 to
+**23.57**, and the seven zeros became zero — every one of the forty runs now ships a report with
+methodology, results and figures in it. That is the last piece of good news in this section.
+
+Because the obvious control had never been run, and the batch above made it cheap to run. Same
+model, same machine, same forty tasks, same `gpt-5.1` judge, no AutoR at all — just Claude Code
+handed the benchmark's own task statement and told to produce `report/report.md`:
+
+| arm | mean | zero criteria, of 154 | tasks won, of 40 |
+|:---|---:|---:|---:|
+| bare Claude Code (Opus) | **29.24** | 25 (16%) | 25 |
+| AutoR (Opus), post-repair | 23.57 | 35 (23%) | 15 |
+
+Paired over the same forty tasks the difference is **−5.67 ± 1.84** (standard error of the paired
+delta), and AutoR wins fifteen of forty. Eight stages of preregistration, adjudication, provenance,
+reviewer gates, a rigour rubric and a champion ratchet make the same model, on the same hardware,
+measurably **worse** at the task than being handed the task.
+
+The composition of that deficit is not where the design's story predicted. AutoR is not shipping
+less: its median report is 37,068 bytes against bare Claude Code's 26,668, 39% *more* prose. It is
+not shipping fewer figures: both arms have ~5 images in front of the judge. It covers **less** —
+23% of criteria score zero against 16% — which means the extra 39% of prose is spent on criteria the
+task never asked about, and the missing 7 points are things the task did ask about and the report
+never mentioned.
+
+That is the diagnosis this whole document has been circling, and §2.4.1 is the first fix aimed
+directly at it: every surface allocating AutoR's attention was defined over the run's own record
+rather than over the task statement. Across the seven stage prompts, instructions that produce a
+*record about the work* outnumber instructions that *advance the work* 254 to 147. Two of the
+prompts that decide what gets written — Stage 05, which produces the numbers, and Stage 07, which
+publishes them — contained the word "task" zero times each. The demand list every stage was held to
+was 59.3% delivery contract: over the forty tasks, 200 of 337 "demands" were the same five lines
+present in all forty, of which two are *read the related work* and *save PNGs to `report/images/`*.
+A run told that five sixths of what it owed was process did all five superbly and scored zero.
+
+Three honest qualifications on the table above. It is one draw per task per arm, and single-task
+RCB noise is ~8.5 points, so no individual row means anything; only the 40-task means and the
+paired SE do. It compares one AutoR configuration, the benchmark default, and does not separate
+"the scaffold costs 5.7 points" from "this configuration of the scaffold costs 5.7 points". And
+nothing here isolates the graph: the adaptive-vs-linear ablation §6.7 owes is still unrun, so this
+is evidence against the *harness as shipped*, not against the topology thesis specifically.
+
+None of which changes the summary a reader should take from §6:
+
+> A research scaffold has to beat the unscaffolded model at the thing it scaffolds. This one does
+> not yet, by 5.7 points, and the reason it does not is that almost every mechanism in it was
+> measuring the run rather than the question.
 
 ---
 
@@ -1018,19 +1127,21 @@ any.
 - **The archive has not learned anything yet.** It records every run, and it proposes variants, but
   the shipped archive holds no paired trials and the sample-complexity tool exists precisely because
   the observation counts are not there yet.
-- **The benchmark number is 14.16, and it is last.** §6 is the full account. Three things travel
-  with it and none can be dropped: it is **single-attempt** where the public leaderboard aggregates
-  the *best* score per (task, agent) pair, so the two are not comparable in either direction; it is
-  a `gpt-5.1` number, and judge choice has been measured to move a score by up to 16.2; and it is
-  **cross-model** — all three comparison agents run GPT-5.4 where AutoR ran Claude Opus, so the
-  table is not a clean harness comparison and the same-model baseline the landscape study calls
-  mandatory has not been run; and it is the **pre-repair**
-  batch, so the effect of #180 and #181 is unmeasured. The landscape study's first conclusion also
-  stands: model choice dominates harness choice, and any result must be quoted against the
-  same-model bare-harness baseline.
-- **No mechanism in §6.5 has been measured.** The re-run is in flight. Until it lands, the correct
-  reading of this document is that a system with a stated topology found four topological defects in
-  itself and repaired them, and that the repair is unevaluated.
+- **The benchmark number is 23.57, and the same-model baseline beats it.** §6.8 is the full
+  account: bare Claude Code scores 29.24 on the same forty tasks with the same model, the same
+  machine and the same judge, so the paired deficit is −5.67 ± 1.84 and the scaffold is currently
+  net-negative. The cross-agent table in §6.1 is the **pre-repair** 14.16 batch and is also
+  **cross-model** — all three comparison agents run GPT-5.4 — so it is not a clean harness
+  comparison in either direction; it is **single-attempt** where the public leaderboard aggregates
+  the *best* score per (task, agent) pair; and both numbers are `gpt-5.1` numbers, where judge
+  choice has been measured to move a score by up to 16.2. The landscape study's first conclusion
+  stands and now has a local instance: model choice dominates harness choice.
+- **The §6.5 repairs are measured; the §2.4.1 change is not.** The repairs took the mean from 14.16
+  to 23.57 and removed all seven zeros, and that was still 5.67 points short of no scaffold at all.
+  `RUBRIC_VERSION` 6 and the Stage 01/05/07 prompt changes are aimed at the composition of that
+  remaining deficit and **have not been run on the benchmark**. Nothing in §2.4.1's numbers is a
+  benchmark result: they are replays of a new criterion over archived drafts, which say the
+  criterion has a gradient, not that following the gradient scores better.
 - **The rubric may not point at anything.** §6.3 is a two-point observation — internal rubric
   0.998–1.000 scoring 9.6, and 0.983–1.000 scoring 46.0 — against a benchmark none of whose 154
   criteria measures any of the eight. That is enough to refuse the claim that the ratchet improves a
