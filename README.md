@@ -130,9 +130,9 @@ naming them.
 | Required stage-summary headings | `REQUIRED_STAGE_HEADINGS` | 7 |
 | Rubric criteria (weighted, backend-free) | `CRITERIA`, [src/rubric.py](src/rubric.py) | 8 |
 | Flags on `main.py` / `rcb_agent.py` | `parse_args` | 61 / 37 |
-| Python modules / lines / tests | the tree | 170 / 75 k / 2282 |
+| Python modules / lines / tests | the tree | 183 / 82 k / 2497 |
 
-`python -m unittest discover -s tests -p "test_*.py"` runs **2282 tests** across 99 test
+`python -m unittest discover -s tests -p "test_*.py"` runs **2497 tests** across 109 test
 modules, with no third-party dependency.
 
 ## Quick start
@@ -725,6 +725,15 @@ cross-stage edge is a typed channel or a JSON artifact. `run_manifest.json` is t
 that resume, redo and rollback read; `prompt_cache/` holds the exact prompt of every attempt,
 repair, review, panel seat and crux voice.
 
+`evolution/artifact_provenance.json` records which stage wrote each workspace file and every
+version it has held; `evolution/effects/<slug>.jsonl` is that stage's accumulated inverses, moved
+to `<slug>.reverted.jsonl` once applied, and `evolution/effects/blobs/` is the content-addressed
+store the rewinds read from. A rollback is not only a manifest edit: it applies those inverses in
+reverse, deletes what the withdrawn stages created, rewinds what they amended back to the version
+the last surviving stage left, and drops the withheld emissions in
+`evolution/emissions.json`. Everything it moved is named in the run log under
+`rollback recovery`, and the preview says it before the operator confirms.
+
 Full file-by-file reference: **[docs/run-artifacts.md](docs/run-artifacts.md)**.
 
 ## Architecture
@@ -758,6 +767,9 @@ flowchart LR
 | [src/ideation_panel.py](src/ideation_panel.py) | Divergent Stage 02 proposers across five lenses, deduplicated into a candidate pool |
 | [src/evolution.py](src/evolution.py) | The champion ratchet: budgeted polish rounds, reverted when they do not improve, rejected on verdict drift |
 | [src/writing_manifest.py](src/writing_manifest.py) | The Stage 07 inventory plus the AutoR-owned triage artifact for each output format |
+| [src/provenance.py](src/provenance.py) | Which stage wrote each workspace file, every version it has held, and what a rollback withdraws or rewinds |
+| [src/effects.py](src/effects.py) | The inverse of each write, accumulated per stage and applied in reverse on a backward edge; commutative and ordered keys |
+| [src/emissions.py](src/emissions.py) | Acts that leave the run, withheld until the stage that asked for them is approved |
 | [src/approval_agent.py](src/approval_agent.py) | The solo approval gate, its six-choice vocabulary and its unreadable-verdict fallback |
 | [src/preregistration.py](src/preregistration.py) | Freeze, amend, adjudicate, trace |
 | [src/information_flow.py](src/information_flow.py) | Eighteen typed information channels, each with declared readers and a written rationale |

@@ -6,7 +6,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Sequence
 
-from .utils import RunPaths, TYPED_HYPOTHESIS_HEADINGS, extract_typed_hypothesis_sections
+from .utils import (
+    RunPaths,
+    StageSpec,
+    TYPED_HYPOTHESIS_HEADINGS,
+    extract_typed_hypothesis_sections,
+)
 
 
 @dataclass(frozen=True)
@@ -106,15 +111,35 @@ def build_hypothesis_manifest(stage_markdown: str) -> HypothesisManifest | None:
     )
 
 
-def write_hypothesis_manifest(paths: RunPaths, stage_markdown: str) -> HypothesisManifest | None:
+def write_hypothesis_manifest(
+    paths: RunPaths, stage_markdown: str, stage: StageSpec | None = None
+) -> HypothesisManifest | None:
+    """Derive the manifest from the stage's markdown and write it.
+
+    ``stage`` is what makes the write revertible. AutoR owns this file — it is derived
+    here rather than written by the agent — so the write can go through
+    :func:`src.effects.set_artifact`, which stores the previous bytes and accumulates the
+    inverse against the stage. A rollback past the stage that wrote it then rewinds this
+    file exactly, rather than depending on the next :func:`src.provenance.observe` having
+    happened to catch it at a boundary.
+
+    Omitting ``stage`` writes directly, which is what the tests and any caller with no
+    stage in hand do. The file is still attributed at the next stage boundary, so it is
+    still withdrawable; it is the exactness that needs the stage, not the coverage.
+    """
+
     manifest = build_hypothesis_manifest(stage_markdown)
     if manifest is None:
         return None
+    body = json.dumps(manifest.to_dict(), indent=2, ensure_ascii=True) + "\n"
+    if stage is not None:
+        from .effects import set_artifact
+
+        rel_path = paths.hypothesis_manifest.relative_to(paths.workspace_root).as_posix()
+        set_artifact(paths, stage, rel_path, body, key="hypotheses")
+        return manifest
     paths.hypothesis_manifest.parent.mkdir(parents=True, exist_ok=True)
-    paths.hypothesis_manifest.write_text(
-        json.dumps(manifest.to_dict(), indent=2, ensure_ascii=True) + "\n",
-        encoding="utf-8",
-    )
+    paths.hypothesis_manifest.write_text(body, encoding="utf-8")
     return manifest
 
 
