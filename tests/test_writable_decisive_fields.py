@@ -87,6 +87,21 @@ class Gate(NamedTuple):
 #: the scorecard, which publishes rather than refuses and is here because its assessors
 #: read the same writable surface.
 GATES: tuple[Gate, ...] = (
+    # ------------------------------------------------- skills a run leaves behind
+    Gate(
+        "skill_evolution.validate_note",
+        ("learned_notes.json",),
+        HARNESS,
+        "Refuses a note a finishing run tries to leave for the next run in its field, on its "
+        "way into `learned_notes.json`. The decisive field is the note's own text, and the check is a harness one because it "
+        "is about shape rather than truth: too short to be guidance, too long to be "
+        "anything but a stage summary, or carrying a measured value. That last is the one "
+        "that matters -- a note travels to a *different* task, so a finding that travels "
+        "invites the next run to expect an answer instead of measuring one, and no reading "
+        "of the note's prose can make that safe. Nothing here judges whether the advice is "
+        "good; a run cannot be stopped from recording a true lesson badly, only from "
+        "recording an answer.",
+    ),
     # ------------------------------------------------------------------ guards
     Gate(
         "guard:always",

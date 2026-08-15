@@ -25,7 +25,7 @@ place the product actually starts from, including ``studio.py``, without which t
 ``src/backend/`` package would read as dead.
 
 ``tests/`` and ``tools/`` are deliberately *not* roots. A test is the thing that keeps a
-dead symbol green -- nineteen of the thirty symbols listed below have one -- so counting
+dead symbol green -- twenty of the thirty-one symbols listed below have one -- so counting
 a test as wiring would make the gate assert nothing. An instrument is not evidence:
 ``archive_sample_complexity`` was importing ``RunRecord`` and crashing on it at the same
 time. A symbol that only ``tools/`` reaches is still exempt, but by a line somebody wrote,
@@ -169,6 +169,23 @@ ALLOWLIST: dict[str, Exempt] = {
     "src/rcb_trial.py::format_rcb_trial_report": Exempt(_DRIVER_ONLY, ("tools/rcb_trial.py",)),
     "src/rcb_trial.py::items_from_score_payloads": Exempt(_DRIVER_ONLY, ("tools/rcb_trial.py",)),
     "src/rcb_trial.py::next_action": Exempt(_DRIVER_ONLY, ("tools/rcb_trial.py",)),
+    # -- called by the operator, not by AutoR ---------------------------------------------
+    #
+    # `record_note` is the write half of the learned-skills layer, and the writer is the
+    # research agent rather than this codebase: the `record-what-you-learned` skill hands it
+    # a `python3 -c` line to run at the end of a run. AutoR cannot make the call itself --
+    # only the agent knows whether the run learned anything transferable, and a manager-side
+    # call would have to invent a note or file an empty one every time.
+    #
+    # Wiring it the way this gate means would take a stage artifact the agent writes and the
+    # manager reads, the shape `deliverables_coverage.json` already has. That is worth doing
+    # once the layer has earned its place; it has recorded nothing yet.
+    "src/skill_evolution.py::record_note": Exempt(
+        "invoked by the research agent through the record-what-you-learned skill, not by "
+        "AutoR. Wiring it here would mean a stage artifact the agent writes and the manager "
+        "reads; until the layer has produced a note worth keeping, that is machinery ahead "
+        "of evidence.",
+    ),
     # -- a prompt renderer with no channel to render into --------------------------------
     #
     # `format_protocol_for_prompt` was here until #212 gave it a channel, which is what

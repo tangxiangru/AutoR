@@ -17,6 +17,7 @@ import unittest
 from pathlib import Path
 
 from src.run_skills import (
+    discipline_of,
     install_run_skills,
     read_skill_pack,
     validate_skill_pack,
@@ -158,3 +159,64 @@ class SkillPackValidationTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DisciplineRoutingTest(unittest.TestCase):
+    """Twenty field-specific skills in one run is nineteen descriptions about other fields.
+
+    A skill reaches the operator through its `description`, and the model chooses from what
+    is installed. The pack is meant to grow one field at a time, so without routing it gets
+    less useful as it gets bigger -- the wrong direction for a pack designed to grow.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.paths = build_run_paths(Path(self._tmp.name) / "run_0001")
+        ensure_run_layout(self.paths)
+        self.pack = Path(__file__).resolve().parent.parent / "src" / "skills"
+
+    def test_a_field_run_gets_the_general_pack_plus_its_own_field(self) -> None:
+        installed = install_run_skills(self.paths, self.pack, discipline="earth")
+        fields = {discipline_of(name) for name in installed} - {""}
+        self.assertEqual(fields, {"earth"})
+        self.assertTrue(any(not discipline_of(name) for name in installed))
+
+    def test_an_unknown_field_still_gets_the_general_pack(self) -> None:
+        installed = install_run_skills(self.paths, self.pack, discipline="palaeography")
+        self.assertTrue(installed)
+        self.assertEqual({discipline_of(name) for name in installed} - {""}, set())
+
+    def test_no_field_installs_everything(self) -> None:
+        """An ordinary run does not know its field, and must not lose the pack over it."""
+        everything = install_run_skills(self.paths, self.pack)
+        narrowed = install_run_skills(self.paths, self.pack, discipline="earth")
+        self.assertGreater(len(everything), len(narrowed))
+
+    def test_routing_never_drops_a_general_skill(self) -> None:
+        general = {n for n in install_run_skills(self.paths, self.pack) if not discipline_of(n)}
+        for field in ("earth", "life", "physics"):
+            got = set(install_run_skills(self.paths, self.pack, discipline=field))
+            self.assertTrue(general <= got, field)
+
+    def test_the_installed_directory_matches_what_was_returned(self) -> None:
+        """A stale skill from a previous install must not linger and mislead the router.
+
+        This is the resume case and it is the one that matters: the first install writes
+        every field's skills, a later one narrows to eleven, and without a sweep the run
+        still offers the model all twenty-nine. The narrowing would be a no-op exactly where
+        it was needed.
+        """
+        install_run_skills(self.paths, self.pack)
+        installed = install_run_skills(self.paths, self.pack, discipline="earth")
+        on_disk = {p.name for p in self.paths.skills_dir.iterdir() if p.is_dir()}
+        self.assertEqual(on_disk, set(installed))
+
+    def test_the_sweep_leaves_skills_the_pack_does_not_own(self) -> None:
+        """The learned-notes layer writes into the same directory and is not ours to delete."""
+        install_run_skills(self.paths, self.pack, discipline="earth")
+        foreign = self.paths.skills_dir / "learned-from-earlier-runs"
+        foreign.mkdir(parents=True, exist_ok=True)
+        (foreign / "SKILL.md").write_text("---\nname: x\ndescription: y\n---\n", encoding="utf-8")
+        install_run_skills(self.paths, self.pack, discipline="life")
+        self.assertTrue(foreign.is_dir())

@@ -49,6 +49,10 @@ written result sees all of it. Write for that.
 - The figure ranked first in `report_plan.json` is discussed early. If it is only referenced
   in a late section, the argument for it lands where nobody is reading.
 - Long methodology belongs after the result it produced, not before it.
+- **Every quantity you declared in `headline_numbers` is stated, with its value and unit,
+  before the methodology.** Those are the results this run nominated as its headline findings
+  back at Stage 03, before any of them existed. A declared headline that first appears in a
+  table on page four was mis-ranked by its own author, and the stage gate now says so.
 
 This is the ordinary shape of a well-written paper; the grading only makes the cost of
 getting it wrong concrete.

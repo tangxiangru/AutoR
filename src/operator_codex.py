@@ -23,6 +23,7 @@ class CodexOperator(ClaudeOperator):
         output_stream: TextIO | None = None,
         ui: TerminalUI | None = None,
         stage_timeout: int = 14400,
+        web_search: bool = False,
     ) -> None:
         normalized_sandbox = codex_sandbox.strip() if codex_sandbox.strip() else DEFAULT_CODEX_SANDBOX
         if normalized_sandbox not in CODEX_SANDBOX_CHOICES:
@@ -39,6 +40,7 @@ class CodexOperator(ClaudeOperator):
             stage_timeout=stage_timeout,
         )
         self.codex_sandbox = normalized_sandbox
+        self.web_search = web_search
 
     def _prepare_invocation(
         self,
@@ -56,6 +58,20 @@ class CodexOperator(ClaudeOperator):
             self.command,
             "-C",
             str(workspace_alias),
+        ]
+        if self.web_search:
+            # Before `exec`, not after: `--search` is a top-level codex flag, and `codex
+            # exec --search` exits 2 with "unexpected argument". That mistake cost a full
+            # 40-task round -- every run died in 15 seconds, AutoR wrote its fallback
+            # report, and the arm scored 2.28 with 31 zeros, a number about argument order
+            # rather than about the model.
+            #
+            # Codex's own `web_search` tool, served by the Responses API rather than by a
+            # local subprocess. That distinction is why it is here: `workspace-write` blocks
+            # outbound network, so a search running locally cannot reach anything, while
+            # asking the provider to search leaves the sandbox exactly as strict.
+            command.append("--search")
+        command += [
             "exec",
             "--json",
             "--sandbox",

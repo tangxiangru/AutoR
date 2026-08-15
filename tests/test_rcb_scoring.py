@@ -242,8 +242,8 @@ class FigureBudgetTests(unittest.TestCase):
 
     def test_a_report_referencing_nothing_still_gets_figures(self) -> None:
         paths, workspace = self._run_and_workspace()
-        for index in range(8):
-            (paths.figures_dir / f"plot_{index}.png").write_bytes(b"\x89PNG " + str(index).encode())
+        for index in range(MAX_REPORT_FIGURES + 3):
+            (paths.figures_dir / f"plot_{index:03d}.png").write_bytes(b"\x89PNG " + str(index).encode())
         write_text(paths.stages_dir / "06_analysis.md", "# Stage 06\n\n## Key Results\n\n" + _PARAGRAPH * 40)
 
         result = export_run(paths=paths, workspace=workspace, pipeline_completed=False)
@@ -346,7 +346,13 @@ class FigureBudgetGateTests(unittest.TestCase):
         paths = self._paths()
         self._populate(paths, MAX_REPORT_FIGURES + 1)
         problems = validate_stage_artifacts(STAGE_07, paths)
-        self.assertTrue(any("only 5 reach the reviewer" in problem for problem in problems), problems)
+        # The message quotes the ceiling; pinning the literal made this a test of the
+        # constant's value rather than of the gate, and it broke when the benchmark raised
+        # its own cap from 5 to 15.
+        self.assertTrue(
+            any(f"only {MAX_REPORT_FIGURES} reach the reviewer" in problem for problem in problems),
+            problems,
+        )
 
     def test_the_review_artifact_names_the_overshoot(self) -> None:
         paths = self._paths()

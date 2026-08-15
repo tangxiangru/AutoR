@@ -250,6 +250,7 @@ class AutomatedReviewer:
         ui: TerminalUI | None = None,
         stage_timeout: int = 14400,
         unattended: bool = False,
+        codex_command: str = "codex",
     ) -> None:
         # Unattended runs cannot ask a human what the reviewer meant, and aborting a
         # multi-hour run because a verdict was unreadable throws away work the reviewer
@@ -257,7 +258,11 @@ class AutomatedReviewer:
         self.unattended = unattended
         normalized_backend = backend_name.strip().lower() if backend_name.strip() else "claude"
         if normalized_backend == "codex":
-            self._operator = CodexOperator(model=model, fake_mode=fake_mode, ui=ui, stage_timeout=stage_timeout)
+            # `codex_command` for the same reason the execution operator takes one: the
+            # binary is where a different backend is selected, and a reviewer left on the
+            # default would silently be a different model from the stages it is judging.
+            self._operator = CodexOperator(model=model, fake_mode=fake_mode, ui=ui,
+                                           stage_timeout=stage_timeout, command=codex_command)
         else:
             normalized_backend = "claude"
             self._operator = ClaudeOperator(model=model, fake_mode=fake_mode, ui=ui, stage_timeout=stage_timeout)

@@ -88,6 +88,7 @@ from .report_plan import (
     stamp_report_plan,
 )
 from .run_skills import install_run_skills
+from .skill_evolution import install_learned_skill
 from .manifest import (
     ensure_run_manifest,
     format_manifest_status,
@@ -249,6 +250,9 @@ class ResearchManager:
         self.reviewer = reviewer
         self.prompt_dir = self.project_root / "src" / "prompts"
         self.skills_dir = self.project_root / "src" / "skills"
+        #: Research field of this run, when the caller knows it. Narrows the field-specific
+        #: half of the skill pack; None installs all of it.
+        self.skill_discipline: str | None = None
         self.output_stream = output_stream
         self.ui = ui or TerminalUI(output_stream=output_stream)
         self.approval_mode = "agent" if reviewer is not None else "manual"
@@ -4086,7 +4090,20 @@ class ResearchManager:
         guidance and every stage has a complete prompt without them.
         """
         try:
-            installed = install_run_skills(paths, self.skills_dir)
+            installed = install_run_skills(
+                paths, self.skills_dir, discipline=self.skill_discipline
+            )
+            # The third layer: what earlier runs in this field wrote down for whoever came
+            # next. Installed after the fixed pack so a field with no history costs nothing,
+            # and best-effort like the rest -- guidance a run cannot read is guidance it does
+            # without, never a reason to fail.
+            if self.skill_discipline:
+                try:
+                    learned = install_learned_skill(paths, self.skill_discipline)
+                except OSError:
+                    learned = ""
+                if learned:
+                    installed.append(learned)
         except OSError as exc:
             append_log_entry(
                 paths.logs,
