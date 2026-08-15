@@ -1,17 +1,25 @@
-"""Gemini-backed web search for AutoR operators.
+"""Web search for AutoR operators, with Gemini or You.com backends.
 
 Some Claude Code deployments (notably Vertex AI) ship with the built-in ``WebSearch``
 tool disabled, which silently guts Stage 01 literature survey. This module provides a
 replacement that any operator backend can reach through a plain shell call, so the
 capability does not depend on which vendor tool happens to be enabled.
 
-The search itself is delegated to the Gemini API's Google Search grounding tool, which
-returns both a synthesised answer and the grounded source URLs.
+The search can be delegated to either:
+- Gemini API's Google Search grounding tool (returns synthesised answer + grounded source URLs)
+- You.com Search API (returns web search results with snippets)
 
 Command line usage::
 
     python3 tools/web_search.py "superradiance black hole constraints" --max-results 8
-    python3 tools/web_search.py "diffusion model scaling laws" --json
+    python3 tools/web_search.py "diffusion model scaling laws" --json --provider youcom
+    python3 tools/web_search.py "quantum computing progress" --provider gemini
+
+Environment variables::
+
+    YDC_API_KEY - You.com API key (optional, supports keyless access)
+    AUTOR_WEB_SEARCH_BACKEND - Force backend: "gemini", "youcom", or "auto"
+    GOOGLE_API_KEY / GEMINI_API_KEY - Gemini API key (for Gemini backend)
 """
 
 from __future__ import annotations
@@ -28,6 +36,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
 from urllib.parse import urlsplit
+import urllib.request
+import urllib.parse
+import urllib.error
 
 
 DEFAULT_SEARCH_MODEL = "gemini-2.5-flash"
@@ -74,8 +85,13 @@ VERTEX_PROJECT_ENV_VARS = (
 
 VERTEX_LOCATION_ENV_VARS = ("AUTOR_VERTEX_LOCATION", "GOOGLE_CLOUD_LOCATION")
 
-#: Forces a backend instead of auto-detecting: "vertex", "api_key", or "auto".
+#: Forces a backend instead of auto-detecting: "vertex", "api_key", "youcom", or "auto".
 BACKEND_ENV_VAR = "AUTOR_WEB_SEARCH_BACKEND"
+
+#: You.com API configuration
+YOUCOM_API_KEY_ENV_VAR = "YDC_API_KEY"
+YOUCOM_BASE_URL_ENV_VAR = "YOUCOM_BASE_URL"
+DEFAULT_YOUCOM_BASE_URL = "https://api.you.com"
 
 #: Vertex returns grounding citations as redirect stubs under this host rather than the
 #: source URL, so they have to be followed before they are usable as references.
@@ -283,7 +299,7 @@ class SearchBackend:
 
 
 def resolve_backend(model: str | None = None) -> SearchBackend | None:
-    """Pick a Gemini backend from the environment, or None if none is usable.
+    """Pick a search backend from the environment, or None if none is usable.
 
     An explicit API key wins over Vertex: setting one is a deliberate act, whereas the
     Vertex project may just be inherited from the host's Claude Code configuration.
@@ -312,11 +328,21 @@ def resolve_backend(model: str | None = None) -> SearchBackend | None:
             api_key=api_key,
         )
 
+    def _youcom() -> SearchBackend | None:
+        # You.com doesn't need credentials - it supports keyless API access
+        return SearchBackend(
+            kind="youcom", 
+            model="youcom-search-api"
+        )
+
     if requested == "vertex":
         return _vertex()
     if requested in {"api_key", "api-key", "apikey"}:
         return _api_key()
-    return _api_key() or _vertex()
+    if requested == "youcom":
+        return _youcom()
+    # Auto-selection: prefer Gemini backends but fall back to You.com
+    return _api_key() or _vertex() or _youcom()
 
 
 def _http_options(types):
@@ -502,6 +528,89 @@ def gemini_web_search(
         model=backend.model,
         backend=backend.kind,
         answer=(getattr(response, "text", "") or "").strip(),
+        results=results,
+    )
+
+
+def youcom_web_search(
+    query: str,
+    *,
+    api_key: str | None = None,
+    max_results: int = DEFAULT_MAX_RESULTS,
+    base_url: str | None = None,
+) -> WebSearchResponse:
+    """Run one web search through You.com Search API."""
+    query = query.strip()
+    if not query:
+        raise WebSearchError("Search query cannot be empty.")
+        
+    # Resolve API key and base URL
+    resolved_api_key = api_key or os.environ.get(YOUCOM_API_KEY_ENV_VAR, "").strip()
+    resolved_base_url = base_url or os.environ.get(YOUCOM_BASE_URL_ENV_VAR, DEFAULT_YOUCOM_BASE_URL)
+    
+    # Build the API request
+    params = {
+        "query": query,
+        "count": min(max_results, 20)  # You.com API accepts up to 20 results
+    }
+    
+    headers = {
+        "User-Agent": "youdotcom-integration/tangxiangru-AutoR (https://github.com/tangxiangru/AutoR)"
+    }
+    
+    if resolved_api_key:
+        headers["Authorization"] = f"Bearer {resolved_api_key}"
+    
+    # Make the API request
+    try:
+        url = f"{resolved_base_url}/v1/agents/search?" + urllib.parse.urlencode(params)
+        req = urllib.request.Request(url, headers=headers)
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            if response.status != 200:
+                raise WebSearchError(f"You.com API returned status {response.status}")
+            
+            data = json.loads(response.read().decode('utf-8'))
+            
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            raise WebSearchError("You.com API authentication failed. Check your YDC_API_KEY.") from e
+        elif e.code == 429:
+            raise WebSearchError("You.com API rate limit exceeded. Please try again later.") from e
+        else:
+            raise WebSearchError(f"You.com API request failed: HTTP {e.code}") from e
+    except urllib.error.URLError as e:
+        raise WebSearchError(f"You.com API request failed: {e}") from e
+    except json.JSONDecodeError as e:
+        raise WebSearchError("Failed to parse You.com API response") from e
+    except Exception as e:
+        raise WebSearchError(f"You.com web search failed: {e}") from e
+    
+    # Parse the response
+    results = []
+    web_results = data.get("results", {}).get("web", [])
+    
+    for item in web_results[:max_results]:
+        title = item.get("title", "").strip() or "Untitled"
+        url = item.get("url", "").strip()
+        snippet = item.get("snippet", "").strip()
+        
+        if url:
+            results.append(SearchResult(
+                title=title,
+                url=url,
+                supported_claims=[snippet] if snippet else []
+            ))
+    
+    # Generate a simple answer from the first few snippets
+    snippets = [r.supported_claims[0] for r in results[:3] if r.supported_claims]
+    answer = " ".join(snippets[:2]) if snippets else f"Search results for: {query}"
+    
+    return WebSearchResponse(
+        query=query,
+        model="youcom-search-api",
+        backend="youcom",
+        answer=answer,
         results=results,
     )
 
@@ -838,7 +947,7 @@ def build_web_search_prompt_section(
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="web_search",
-        description="Grounded web search backed by the Gemini API.",
+        description="Grounded web search backed by Gemini API or You.com Search API.",
     )
     parser.add_argument("query", nargs="+", help="The search query.")
     parser.add_argument(
@@ -848,15 +957,22 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Emit machine-readable JSON instead of markdown.",
     )
     parser.add_argument(
+        "--provider",
+        choices=["auto", "gemini", "youcom"],
+        default="auto",
+        help="Search provider to use. 'auto' selects based on available credentials. "
+             "Set AUTOR_WEB_SEARCH_BACKEND environment variable to override.",
+    )
+    parser.add_argument(
         "--model",
-        help=f"Gemini model to use. Defaults to {DEFAULT_SEARCH_MODEL} on the Gemini API "
-             f"and {DEFAULT_VERTEX_SEARCH_MODEL} on Vertex AI.",
+        help=f"Model to use. For Gemini: defaults to {DEFAULT_SEARCH_MODEL} on the Gemini API "
+             f"and {DEFAULT_VERTEX_SEARCH_MODEL} on Vertex AI. For You.com: fixed to youcom-search-api.",
     )
     parser.add_argument(
         "--no-resolve-urls",
         action="store_true",
         help="Leave Vertex grounding redirects unresolved. Faster, but the source URLs are "
-             "opaque redirect stubs that cannot be cited.",
+             "opaque redirect stubs that cannot be cited. (Gemini only)",
     )
     parser.add_argument(
         "--max-results",
@@ -872,12 +988,37 @@ def main(argv: list[str] | None = None) -> int:
     query = " ".join(args.query).strip()
 
     try:
-        response = gemini_web_search(
-            query,
-            model=args.model,
-            max_results=args.max_results,
-            resolve_urls=not args.no_resolve_urls,
-        )
+        # Determine which backend to use
+        if args.provider == "youcom":
+            # Force You.com provider
+            response = youcom_web_search(
+                query,
+                max_results=args.max_results,
+            )
+        elif args.provider == "gemini":
+            # Force Gemini provider
+            response = gemini_web_search(
+                query,
+                model=args.model,
+                max_results=args.max_results,
+                resolve_urls=not args.no_resolve_urls,
+            )
+        else:
+            # Auto-select based on available credentials
+            backend = resolve_backend(args.model)
+            
+            if backend and backend.kind == "youcom":
+                response = youcom_web_search(
+                    query,
+                    max_results=args.max_results,
+                )
+            else:
+                response = gemini_web_search(
+                    query,
+                    model=args.model,
+                    max_results=args.max_results,
+                    resolve_urls=not args.no_resolve_urls,
+                )
     except WebSearchError as exc:
         print(f"web_search error: {exc}", file=sys.stderr)
         return 1
