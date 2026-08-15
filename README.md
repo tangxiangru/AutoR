@@ -128,7 +128,7 @@ naming them.
 | Typed information channels | `CHANNELS`, [src/information_flow.py](src/information_flow.py) | 18 |
 | `validate_*` functions the stage gate calls | `validate_stage_artifacts`, [src/utils.py](src/utils.py) | 17 |
 | Required stage-summary headings | `REQUIRED_STAGE_HEADINGS` | 7 |
-| Rubric criteria (weighted, backend-free) | `CRITERIA`, [src/rubric.py](src/rubric.py) | 8 |
+| Rubric criteria (weighted, backend-free) | `CRITERIA`, [src/rubric.py](src/rubric.py) | 9 |
 | Flags on `main.py` / `rcb_agent.py` | `parse_args` | 61 / 37 |
 | Python modules / lines / tests | the tree | 183 / 82 k / 2497 |
 
@@ -356,13 +356,14 @@ included.
 Every valid stage draft is measured against a rigour rubric read off disk — do the paths it names
 resolve, do the numbers it reports appear in a results file, did it produce artifacts during *this*
 execution, is the decision ledger four different things rather than one sentence four times. Eight
-weighted criteria, `RUBRIC_VERSION = "5"`:
+weighted criteria, `RUBRIC_VERSION = "6"`:
 
 | Criterion | Weight | From | What it measures |
 | --- | ---: | :---: | --- |
 | `grounding` | 3.0 | 01 | References that resolve — every path the draft names exists on disk |
 | `numeric_fidelity` | 3.0 | 05 | Reported numbers trace to a results file |
 | `reproducibility` | 3.0 | 01 | The machine-readable validity chain is present and parses |
+| `deliverable_coverage` | 3.0 | 01 | The draft speaks to each thing the *task statement* asked for, with a number an artifact holds |
 | `contract` | 2.0 | 01 | Contract compliance in substance, not just in headings |
 | `artifact_breadth` | 2.0 | 01 | Artifacts produced *this* stage, in the directories this stage's prompt named |
 | `quantification` | 2.0 | 04 | Findings carrying numbers rather than adjectives |
@@ -846,11 +847,27 @@ comparison agents were re-scored from their public runs under that same judge:
 | **AutoR** | **14.16** | 11.50 | 47.70 | **7** |
 
 **AutoR is last**, below the bare Codex CLI it can be configured to run on top of. Eight of the
-forty runs shipped a 197-byte "incomplete run" stub, and the deficit is almost entirely those. Four
+forty runs shipped a 197-byte "incomplete run" stub, and the deficit is almost entirely those. Three
 caveats travel with the number and none can be dropped: it is **single-attempt** where the
 leaderboard aggregates the best score per (task, agent) pair; it is **cross-model**, since all three
-comparators run GPT-5.4; it is a `gpt-5.1` number; and it is **pre-repair** — #180 and #181 closed
-the routes that produced the stubs, and a re-run is in flight.
+comparators run GPT-5.4; and it is a `gpt-5.1` number.
+
+### The re-run, and the control that matters more
+
+#180 and #181 closed the routes that produced the stubs. Re-running all forty tasks on the repaired
+code took the mean to **23.57** with no run scoring zero. The same batch made the obvious control
+cheap, and it had never been run: the same model, on the same machine, handed the same forty task
+statements with no AutoR at all.
+
+| arm | mean | zero criteria, of 154 | tasks won, of 40 |
+|:---|---:|---:|---:|
+| bare Claude Code (Opus) | **29.24** | 25 (16%) | 25 |
+| AutoR (Opus), post-repair | 23.57 | 35 (23%) | 15 |
+
+Paired over the forty tasks that is **−5.67 ± 1.84**. The scaffold currently makes the model worse
+at the benchmark than not having it, and it does so while writing 39% more prose — it covers less,
+not less well. [§6.8](docs/framework.md#68-the-scaffold-is-currently-worth-less-than-no-scaffold) is
+the account of why, and `RUBRIC_VERSION` 6 is the first change aimed at it.
 
 [The framework document's §6](docs/framework.md#6-the-system-measured-against-itself) is the full
 account, including the part that is worse than the mean: the two highest scores came from runs that

@@ -55,6 +55,7 @@ from .utils import (
     _extract_path_references,
     _listed_file_exists,
     extract_markdown_section,
+    read_text,
     stage_execution_started_at,
     validate_stage_markdown,
 )
@@ -85,7 +86,20 @@ if TYPE_CHECKING:  # pragma: no cover - import cycle at runtime, type-only here
 #: score means: replayed against v4, a Stage 08 that produced its whole release bundle
 #: measures 0.333 on breadth, and 0.0 if none of that bundle went under ``writing/``.
 #: So a v4 total and a v5 total are not two measurements of one thing.
-RUBRIC_VERSION = "5"
+#: ``6`` adds ``deliverable_coverage``, the first criterion that reads a document the run
+#: did not write -- the task statement -- and asks whether the draft speaks to what was
+#: asked, with a number an artifact holds. Every criterion before it measured the run
+#: against its own record. Replayed over the 263 stage drafts of a 40-task benchmark
+#: pass, the existing eight read mean 0.964 / sd 0.043; the new one reads mean 0.746 /
+#: sd 0.329 and falls monotonically with stage number, 0.95 at Stage 01 to 0.51 at
+#: Stage 07, because a late stage owes more of the task than an early one. On the run
+#: that pass scored 0.0 externally the eight read 0.97 at Stage 06 and the new criterion
+#: reads 0.00 from Stage 05 on, which is the stage the run stopped producing the object
+#: the task named. ``6`` also stops ``numeric_fidelity`` treating an arXiv id or a "Fig. 3"
+#: as a reported measurement, which had made deleting the subject paper's name from a
+#: draft worth five times ``DEFAULT_MIN_GAIN``. Both change what an existing score means,
+#: so a v5 total and a v6 total are not two measurements of one thing.
+RUBRIC_VERSION = "6"
 
 #: The keys the rubric refuses to read out of an adjudication artifact.
 #:
@@ -164,6 +178,11 @@ CRITERIA: tuple[Criterion, ...] = (
     Criterion("traceability", "Decision ledger", weight=1.5),
     Criterion("commitment", "Reports work, not intentions", weight=1.5),
     Criterion("reproducibility", "Machine-readable validity chain", weight=3.0),
+    # min_stage=1 deliberately: a survey that never mentions what the task asked for is
+    # where the substitution starts, and `min_stage=3` would make an early draft's total
+    # a different measurement from a late one's. Below Stage 05 only the "spoken to"
+    # half is scored, since there are no results to carry a number yet.
+    Criterion("deliverable_coverage", "Answers the task's demands", weight=3.0),
 )
 
 CRITERIA_BY_KEY: dict[str, Criterion] = {item.key: item for item in CRITERIA}
@@ -777,13 +796,59 @@ def _artifact_numbers(paths: RunPaths) -> set[float]:
     return values
 
 
+#: Identifiers that carry a "." but measure nothing: arXiv ids, DOIs, version strings,
+#: equation and section references. Admitting them makes ``numeric_fidelity`` demand that
+#: the paper a task is *about* appear in a results file, so the cheapest way to raise the
+#: criterion is to delete the research subject's name from the prose. Measured on a
+#: controlled pair at Stage 06, everything else held fixed: a draft ending "on the
+#: 2111.01152 system" totals 0.7587, with ``numeric_fidelity`` 0.67 and the shortfall
+#: "These reported values appear in no results artifact: 2111.01152"; the same draft
+#: ending "on the target system" totals 0.8063. That +0.0476 is nearly ten times
+#: ``DEFAULT_MIN_GAIN``, so the ratchet records the deletion of the paper's identity as a
+#: new champion.
+_IDENTIFIER_PREFIX = re.compile(
+    r"(?:arxiv|doi|fig|figure|eq|eqn|equation|table|section|sec|ref|v|#)\s*[.:]?\s*$",
+    re.IGNORECASE,
+)
+
+#: An arXiv identifier written bare, as a task naming its subject paper writes it:
+#: `the 2111.01152 system`. Four digits, a dot, four or five digits. A real measurement
+#: of that exact shape is excluded from the check rather than failed by it, which costs a
+#: check and not a score.
+_ARXIV_ID = re.compile(r"^\d{4}\.\d{4,5}$")
+
+
 #: Reported values that are almost never measurements: seed counts, epoch counts,
 #: years, section numbers. Penalising a draft for saying "5 seeds" when no artifact
 #: happens to contain a bare 5 would make the criterion noise.
-def _is_measurement_like(raw: str, value: float) -> bool:
+def _is_measurement_like(raw: str, value: float, *, prefix: str = "") -> bool:
+    if _ARXIV_ID.match(raw):
+        return False
+    if prefix and _IDENTIFIER_PREFIX.search(prefix):
+        return False
     if "." in raw:
         return True
     return abs(value) >= 1000
+
+
+def _matches_artifact_number(value: float, raw: str, percent: bool, known: set[float]) -> bool:
+    """Whether a reported value is one an artifact on disk actually holds.
+
+    Tolerance is one half of the last reported decimal place, and a percentage is
+    matched against its fraction too, so `74.1%` is satisfied by `0.741` in a results
+    file. Anything looser would accept a number that merely resembles one that was
+    measured. Module-level because two criteria ask this question --
+    :func:`_score_numeric_fidelity` about every number in the draft, and
+    :func:`_score_deliverable_coverage` about the one number a demand's answer carries --
+    and two encodings of one rule drift.
+    """
+    decimals = len(raw.split(".")[1]) if "." in raw else 0
+    tolerance = max(0.5 * (10 ** -decimals), abs(value) * 1e-9)
+    for candidate in (value, value / 100.0) if percent else (value,):
+        scale = max(0.5 * (10 ** -decimals) / 100.0, tolerance) if candidate != value else tolerance
+        if any(abs(candidate - known_value) <= scale for known_value in known):
+            return True
+    return False
 
 
 def _score_numeric_fidelity(markdown: str, paths: RunPaths) -> CriterionScore:
@@ -796,10 +861,7 @@ def _score_numeric_fidelity(markdown: str, paths: RunPaths) -> CriterionScore:
     itself is simply invented, and only a comparison against the raw outputs sees
     it.
 
-    Tolerance is one half of the last reported decimal place, and a percentage is
-    matched against its fraction too, so `74.1%` is satisfied by `0.741` in a
-    results file. Anything looser would accept a number that merely resembles one
-    that was measured.
+    The tolerance rule lives in :func:`_matches_artifact_number`.
     """
     weight = CRITERIA_BY_KEY["numeric_fidelity"].weight
     section = "\n".join(
@@ -817,7 +879,7 @@ def _score_numeric_fidelity(markdown: str, paths: RunPaths) -> CriterionScore:
             value = float(raw)
         except ValueError:
             continue
-        if not _is_measurement_like(raw, value):
+        if not _is_measurement_like(raw, value, prefix=section[max(0, match.start() - 24):match.start()]):
             continue
         reported.append((raw, value, percent))
 
@@ -844,16 +906,9 @@ def _score_numeric_fidelity(markdown: str, paths: RunPaths) -> CriterionScore:
             "appears only in the summary cannot be verified by anyone, including the next stage.",
         )
 
-    def matches(value: float, raw: str, percent: bool) -> bool:
-        decimals = len(raw.split(".")[1]) if "." in raw else 0
-        tolerance = max(0.5 * (10 ** -decimals), abs(value) * 1e-9)
-        for candidate in (value, value / 100.0) if percent else (value,):
-            scale = max(0.5 * (10 ** -decimals) / 100.0, tolerance) if candidate != value else tolerance
-            if any(abs(candidate - known_value) <= scale for known_value in known):
-                return True
-        return False
-
-    unmatched = [raw for raw, value, percent in reported if not matches(value, raw, percent)]
+    unmatched = [
+        raw for raw, value, percent in reported if not _matches_artifact_number(value, raw, percent, known)
+    ]
     score = _clamp((len(reported) - len(unmatched)) / len(reported))
     observed = f"{len(reported) - len(unmatched)}/{len(reported)} reported values found in results artifacts"
     shortfall = (
@@ -868,6 +923,183 @@ def _score_numeric_fidelity(markdown: str, paths: RunPaths) -> CriterionScore:
     )
     return CriterionScore(
         "numeric_fidelity", CRITERIA_BY_KEY["numeric_fidelity"].title, weight, score, observed, shortfall
+    )
+
+
+#: Words a demand shares with every research report ever written. A demand's terms are
+#: what makes it *that* demand; "produce a report with figures" is not a subject.
+_PROCESS_WORDS = frozenset({
+    "report", "reports", "figure", "figures", "analysis", "analyses", "result", "results",
+    "study", "studies", "task", "tasks", "paper", "papers", "method", "methods",
+    "section", "sections", "output", "outputs", "input", "inputs", "file", "files",
+    "plot", "plots", "image", "images", "work", "run", "runs", "stage", "stages",
+    "model", "models", "code", "notebook", "workspace", "deliverable", "deliverables",
+    "data", "dataset", "datasets", "goal", "goals", "scientific", "research",
+})
+
+
+def _demand_terms(demands: Sequence[str]) -> list[set[str]]:
+    """The words that distinguish each demand from the others in the same task.
+
+    A term shared by more than half the demands is the task's own vocabulary -- every
+    demand in a protein task says "protein" -- and matching on it would score a report
+    that mentions the subject once as having answered everything.
+    """
+    from .deliverables import _content_words
+
+    per_demand = [_content_words(demand) - _PROCESS_WORDS for demand in demands]
+    frequency: dict[str, int] = {}
+    for words in per_demand:
+        for word in words:
+            frequency[word] = frequency.get(word, 0) + 1
+    ceiling = max(1, len(demands) // 2)
+    narrowed: list[set[str]] = []
+    for words in per_demand:
+        distinctive = {word for word in words if frequency[word] <= ceiling}
+        narrowed.append(distinctive or words)
+    return narrowed
+
+
+def _score_deliverable_coverage(
+    markdown: str,
+    paths: RunPaths,
+    stage: StageSpec,
+    artifact_roots: Sequence[Path] | None = None,
+) -> CriterionScore:
+    """Does the draft speak to what the task asked for, and with a number?
+
+    The gap this fills. Every other criterion here measures the run against its own
+    record: whether the references it wrote resolve, whether the ledger it wrote is
+    populated, whether the numbers it reported trace to the files it produced. A run
+    that studied the wrong question rigorously scores 1.000 on all eight -- measured, on
+    a draft whose `What I Did` says in its own words that it did not do the task. The
+    external judge scored that run 0.0.
+
+    So this criterion, alone among them, reads a document the run did not write: the
+    task statement. For each demand in it, the draft must have a sentence *about* that
+    demand, and from Stage 05 on that sentence must carry a number an artifact on disk
+    holds. Both halves matter -- without the second, the criterion is moved by
+    keyword-stuffing; without the first, it is `numeric_fidelity` again.
+
+    Verdict-blind, and structurally so: nothing here opens
+    ``paths.hypothesis_outcomes`` or reads an :data:`OUTCOME_BLIND_FIELDS` key. A
+    refuted answer with a traceable number scores exactly what a supported one does,
+    which is the property the module docstring exists to protect. The demand verbs on
+    the task side include `verify`, `validate` and `demonstrate`; they are read off the
+    *task*, never off the draft, so no phrasing of a result can reach them.
+
+    Not a gate, deliberately. #208 measured four mechanical task-completion gates against
+    twelve scored runs and every one of them would have blocked the best run in the set;
+    partial credit into the champion ratchet is the form that survives that finding.
+    """
+    from .deliverables import task_demands
+    from .utils import task_statement
+
+    weight = CRITERIA_BY_KEY["deliverable_coverage"].weight
+    key = "deliverable_coverage"
+    title = CRITERIA_BY_KEY[key].title
+
+    demands = task_demands(task_statement(read_text(paths.user_input)))
+    if not demands:
+        return CriterionScore(
+            key, title, weight, 1.0, "no demand sentence in the task statement", ""
+        )
+
+    body = "\n".join(
+        extract_markdown_section(markdown, heading) or ""
+        for heading in ("Objective", "What I Did", "Key Results")
+    )
+    # Backticked spans are kept, unlike in `numeric_fidelity`: a demand whose answer is
+    # an *object* rather than a statistic is answered by the file holding the object, and
+    # that reference is written in backticks.
+    sentences = [s for s in re.split(r"(?<=[.!?])\s+|\n+", body) if s.strip()]
+    known = _artifact_numbers(paths) if stage.number >= 5 else set()
+    want_number = stage.number >= 5
+
+    from .deliverables import _content_words
+
+    engaged: list[str] = []
+    answered: list[str] = []
+    for demand, terms in zip(demands, _demand_terms(demands)):
+        if not terms:
+            engaged.append(demand)
+            answered.append(demand)
+            continue
+        need = min(2, len(terms))
+        hit = False
+        with_number = False
+        for sentence in sentences:
+            if len(_content_words(sentence) & terms) < need:
+                continue
+            hit = True
+            if not want_number:
+                break
+            if _sentence_lands_on_disk(sentence, known, paths, artifact_roots):
+                with_number = True
+                break
+        if hit:
+            engaged.append(demand)
+        if with_number:
+            answered.append(demand)
+
+    total = len(demands)
+    if want_number:
+        score = _clamp((len(engaged) + len(answered)) / (2 * total))
+    else:
+        score = _clamp(len(engaged) / total)
+
+    missing = [demand for demand in demands if demand not in engaged]
+    unanswered = [demand for demand in engaged if demand not in answered]
+    observed = (
+        f"{len(engaged)}/{total} of the task's demands are spoken to"
+        + (f", {len(answered)}/{total} with a number from a results artifact" if want_number else "")
+    )
+    if score >= 1.0:
+        shortfall = ""
+    elif missing:
+        shortfall = (
+            f"Key Results does not speak to what the task asked: {missing[0][:110]!r}. "
+            "State the result for it, with its number, or state that it could not be "
+            "produced and why."
+        )
+    else:
+        shortfall = (
+            f"The task's demand {unanswered[0][:110]!r} is discussed without a measured "
+            "value. Give it the number the run produced for it, and write that number to "
+            "a file under workspace/results so it can be checked."
+        )
+    return CriterionScore(key, title, weight, score, observed, shortfall)
+
+
+def _sentence_lands_on_disk(
+    sentence: str,
+    known: set[float],
+    paths: RunPaths,
+    artifact_roots: Sequence[Path] | None = None,
+) -> bool:
+    """Whether a sentence's answer exists outside the sentence.
+
+    Either a measurement an artifact on disk also holds, or a reference to a file the run
+    produced. The second disjunct is not slack: a task that names an *object* as its
+    output -- a derivation, an equation set, a table, a sequence -- has no statistic to
+    report, and a criterion that only accepted numbers would cap exactly the deliverable
+    it exists to protect at half marks.
+    """
+    stripped = re.sub(r"`[^`\n]*`", " ", sentence)
+    for match in re.finditer(r"(?<![\w.])([-+]?\d+(?:\.\d+)?)\s*(%?)", stripped):
+        raw, percent = match.group(1), bool(match.group(2))
+        try:
+            value = float(raw)
+        except ValueError:
+            continue
+        prefix = stripped[max(0, match.start() - 24):match.start()]
+        if not _is_measurement_like(raw, value, prefix=prefix):
+            continue
+        if _matches_artifact_number(value, raw, percent, known):
+            return True
+    return any(
+        _listed_file_exists(paths.run_root, reference, artifact_roots)
+        for reference in _extract_path_references(sentence)
     )
 
 
@@ -1240,6 +1472,8 @@ def score_stage(
             scores.append(_score_commitment(markdown))
         elif criterion.key == "reproducibility":
             scores.append(_score_reproducibility(paths, stage, markdown))
+        elif criterion.key == "deliverable_coverage":
+            scores.append(_score_deliverable_coverage(markdown, paths, stage, artifact_roots))
 
     scores = _cap_quantification_by_fidelity(scores)
 

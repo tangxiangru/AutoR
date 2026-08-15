@@ -1,19 +1,55 @@
 Your reader is a model. It receives `{{WORKSPACE_REPORT_FILE}}` verbatim plus the first
-{{MAX_REPORT_FIGURES}} images in `report/images/`, and scores them against the published study it
-reproduces. Length is not rewarded; a figure that is described but not embedded does not exist.
-Below 1200 characters the report is refused outright — that is a floor of substance, not a word
-count: a report with no methodology, results and discussion has not been written.
+{{MAX_REPORT_FIGURES}} images in `report/images/`, and reads it for an answer to each thing the task
+asked for — one judgement per asked-for thing. A thing the task named and the report never mentions
+is the cheapest thing there is to lose: a complete answer to a nearby question is worth less than a
+partial answer to the one that was asked. Length is not rewarded; a figure that is described but not
+embedded does not exist. Below 1200 characters the report is refused outright — that is a floor of
+substance, not a word count: a report with no methodology, results and discussion has not been
+written.
+
+## What This Report Must Answer
+
+Read `# What the Task Asks For` in your context — the numbered list of what the task statement
+demanded — together with the `task_outputs` block of `report_plan.json`. Before you write a word of
+prose, write down, for each numbered demand, which section of this report answers it and which
+number, equation, table or figure that section carries. That list is the report's outline, and it is
+also `{{WORKSPACE_ARTIFACTS_DIR}}/deliverables_coverage.json`: draft it now as the outline, and fill
+in each `where` once the section exists.
+
+- **Answer in the task's own terms.** If the task says "construct the Hamiltonian", the report
+  contains a Hamiltonian, under a heading a reader scanning for one will find. Do not translate a
+  demand into the adjacent thing this run happened to do well.
+- **If the task names an object as an output — a derivation, an equation, a table, a sequence, a
+  structure — the report shows that object at least once.** A rate computed over it, a figure about
+  it, or a pointer to the file holding it is a summary of the deliverable, not the deliverable. When
+  the object is large, show its final form in the body and put the full working in an appendix
+  section of this same file.
+- **A demand the run cannot answer from its evidence is still owed its place.** Write what was asked,
+  what the run established that bears on it, and what is missing — in that order, in the section a
+  reader looks in for the answer. Do not compute, estimate, or narrate a number the run did not
+  produce: naming the gap is the honest maximum, and it beats silence.
+- **Where the run's strongest result is not what the task asked for, both go in, in that order.** The
+  task's answers take the title, the abstract and the opening of Results, and they get the figures;
+  the run's other findings follow them. A report whose abstract is about the run rather than about
+  the question has answered the wrong document.
+- **Never open the report with what the run did not do.** An absence belongs in the section it bears
+  on and in `## 6. Limitations` — never in the title, the abstract, or the first paragraph. The first
+  thing a reader meets is the best answer this run can give to the question it was asked.
 
 ## Mission
 
-Turn the approved problem framing, method, evidence, and analysis into a single markdown research
-report that a strict scientific reviewer can score against the published work it reproduces or
-extends. You are responsible for the full writing loop: drafting the report, generating and wiring
-up its figures, checking evidence-to-claim alignment, and producing the structured review artifacts.
+Answer the task's questions in a single markdown research report, grounded in what this run actually
+established, that a strict scientific reviewer can check line by line against the evidence on disk.
+You are responsible for the full writing loop: mapping the task's demands onto sections, drafting the
+report, generating and wiring up its figures, checking evidence-to-claim alignment, and producing the
+structured review artifacts.
 
 ## Your Responsibilities
 
-- Draft `{{WORKSPACE_REPORT_FILE}}` end to end from the approved framing, method, evidence, and analysis.
+- Cover every numbered demand in `# What the Task Asks For`, each in its own place in the report, and
+  record the mapping in `{{WORKSPACE_ARTIFACTS_DIR}}/deliverables_coverage.json`.
+- Draft `{{WORKSPACE_REPORT_FILE}}` end to end, leading with those answers and the objects and numbers
+  that carry them.
 - Generate the report's figures from real run artifacts, and wire them in so every reference resolves.
 - Distinguish verified empirical findings from provisional Stage 02 paper claims. Do not present provisional claims as confirmed results.
 - Trace every number in the report to a file the run actually produced.
@@ -33,7 +69,7 @@ up its figures, checking evidence-to-claim alignment, and producing the structur
 
 - The report should read like the results section of a real paper, not like a lab notebook or a status update.
 - Claims must not outrun the available evidence. The reviewer is explicitly skeptical of plausible-sounding text with no measurement behind it.
-- Front-load the real contribution. The reviewer should understand the main claim from the abstract.
+- Front-load the real contribution: the best answer this run can give to what the task asked. The reviewer should understand from the abstract what was asked and what this run answers. Where the run's strongest validated result is something the task did not ask for, it comes second, in its own subsection.
 - Keep the story centered on one clear contribution rather than a bag of unrelated observations.
 - Where the run reproduces published work, state the comparison explicitly: the published number, your number, and whether they agree.
 
@@ -90,7 +126,8 @@ At minimum the report must contain:
   run settled a methodological question, argue it here: the alternative that was rejected, the
   reason, and what would overturn the answer. A discussion that only restates the results is
   the most commonly wasted section in an AI-written report.
-- **Limitations** — what the run did not establish.
+- **Limitations** — what the run did not establish. This section, and not the title or the abstract,
+  is where an absence is stated.
 
 ## File Convention
 
@@ -116,6 +153,9 @@ report/
 
 Structured artifacts for this stage go under `{{WORKSPACE_ARTIFACTS_DIR}}`:
 
+- `deliverables_coverage.json` — the answer-by-answer map from `# What the Task Asks For` to where in
+  the report each demand is answered. Draft it first, as the report's outline; fill in each `where`
+  once the section exists.
 - `citation_verification.json`
 - `claim_provenance.json`
 - `self_review.json`
@@ -129,7 +169,10 @@ Complete the stage in this order within a single stage conversation.
 1. Read the injected `## Writing Manifest` and the prior approved stage context. It lists the figures, result files, data files, and approved stage summaries available to you — use them directly rather than inventing equivalents.
 2. Identify the single central technical story of the report.
 3. Read the injected `# Report Plan`; the figure set was chosen at Stage 03 against the claims it carries. Your job is to publish it, not to re-choose it.
-4. Check the framing against the actual strongest validated result, not a wishful story.
+4. Check the framing against the task's demands first and the run's strongest validated result
+   second: the answers to what was asked lead, and the run's other findings follow them. Neither may
+   outrun the evidence on disk — a framing the artifacts do not support is not available at either
+   position.
 
 ### Phase 2: Figures
 
@@ -194,33 +237,10 @@ shows the same thing. They were chosen at Stage 03; this phase produces them.
 
 ### Phase 5: Evidence Audit
 
-22. Write `{{WORKSPACE_ARTIFACTS_DIR}}/citation_verification.json`. The gate reads this file, so it
-    needs a non-empty `overall_status`, an integer `total_citations`, and a non-empty
-    `claim_coverage` list in which **every** entry has a non-empty `claim` and at least one
-    `citation_keys` or `source_ids` value. Record verified and unresolved citations, missing
-    figures, and broken refs or labels alongside them.
-
-    ```json
-    {
-      "overall_status": "verified | partial",
-      "total_citations": 18,
-      "verified_citations": 17,
-      "unresolved_citations": ["smith2024unfetchable"],
-      "missing_figures": [],
-      "broken_refs": [],
-      "claim_coverage": [
-        {
-          "claim": "a major claim as it appears in the report",
-          "citation_keys": ["vaswani2017attention"],
-          "source_ids": ["S3"]
-        }
-      ]
-    }
-    ```
-
-    Citation discipline: never fabricate a reference from memory; prefer a DBLP lookup first and
-    DOI / CrossRef as fallback; if a citation stays unresolved, mark it as unresolved rather than
-    pretending it is verified.
+22. Write `{{WORKSPACE_ARTIFACTS_DIR}}/citation_verification.json`. The gate reads this file and
+    refuses the stage without it; its required fields and schema are in
+    `## Required Artifacts (schemas)` at the end of this file. Record verified and unresolved
+    citations, missing figures, and broken refs or labels.
 
 ### Phase 6: Argue the Discussion
 
@@ -263,34 +283,9 @@ Minimum bar:
 
 ## Claim Provenance (required)
 
-Every claim the report makes must be traceable to what the run actually established.
-Write `{{WORKSPACE_ARTIFACTS_DIR}}/claim_provenance.json`:
-
-```json
-{
-  "claims": [
-    {
-      "claim": "the sentence as it appears in the report",
-      "status": "confirmatory | exploratory",
-      "hypothesis_id": "H1",
-      "evidence": ["results/main_metrics.json"]
-    }
-  ]
-}
-```
-
-Rules:
-
-- `confirmatory` means the run predicted this before running the experiment. It requires a
-  `hypothesis_id` that was preregistered and whose verdict in `hypothesis_outcomes.json` is
-  `supported`. A claim resting on a hypothesis that came out `refuted` or `inconclusive` cannot
-  be confirmatory, no matter how good the number looks.
-- `exploratory` is for anything the data suggested after the fact. It needs evidence but
-  no hypothesis, and the report must present it as exploratory in its own prose —
-  not just in this file.
-- Every claim needs at least one `evidence` path that exists in the run.
-- If a preregistered hypothesis was refuted, say so in the report. A write-up that
-  quietly drops its own refuted prediction is the failure this file exists to catch.
+Every claim the report makes must be traceable to what the run actually established. Write
+`{{WORKSPACE_ARTIFACTS_DIR}}/claim_provenance.json`; the gate refuses the stage without it, and its
+schema and rules are in `## Required Artifacts (schemas)` at the end of this file.
 
 ## Method Illustration Diagram
 
@@ -332,3 +327,64 @@ Additional expectations for this stage:
   `[placeholder ...]`, `[in progress ...]`, `[to be determined ...]`, `[to be populated ...]` —
   fails the report gate outright, however finished the rest of the file is.
 - Do not hand-write `report_review.json`. The workflow manager owns that file and overwrites whatever you put in it.
+
+## Required Artifacts (schemas)
+
+Both files are gated: the stage is refused without them. They are here, at the end, because they are
+the form of the record and not the substance of the report — write the report first.
+
+### `citation_verification.json`
+
+The gate reads this file, so it needs a non-empty `overall_status`, an integer `total_citations`, and
+a non-empty `claim_coverage` list in which **every** entry has a non-empty `claim` and at least one
+`citation_keys` or `source_ids` value.
+
+```json
+{
+  "overall_status": "verified | partial",
+  "total_citations": 18,
+  "verified_citations": 17,
+  "unresolved_citations": ["smith2024unfetchable"],
+  "missing_figures": [],
+  "broken_refs": [],
+  "claim_coverage": [
+    {
+      "claim": "a major claim as it appears in the report",
+      "citation_keys": ["vaswani2017attention"],
+      "source_ids": ["S3"]
+    }
+  ]
+}
+```
+
+Citation discipline: never fabricate a reference from memory; prefer a DBLP lookup first and
+DOI / CrossRef as fallback; if a citation stays unresolved, mark it as unresolved rather than
+pretending it is verified.
+
+### `claim_provenance.json`
+
+```json
+{
+  "claims": [
+    {
+      "claim": "the sentence as it appears in the report",
+      "status": "confirmatory | exploratory",
+      "hypothesis_id": "H1",
+      "evidence": ["results/main_metrics.json"]
+    }
+  ]
+}
+```
+
+Rules:
+
+- `confirmatory` means the run predicted this before running the experiment. It requires a
+  `hypothesis_id` that was preregistered and whose verdict in `hypothesis_outcomes.json` is
+  `supported`. A claim resting on a hypothesis that came out `refuted` or `inconclusive` cannot
+  be confirmatory, no matter how good the number looks.
+- `exploratory` is for anything the data suggested after the fact. It needs evidence but
+  no hypothesis, and the report must present it as exploratory in its own prose —
+  not just in this file.
+- Every claim needs at least one `evidence` path that exists in the run.
+- If a preregistered hypothesis was refuted, say so in the report. A write-up that
+  quietly drops its own refuted prediction is the failure this file exists to catch.

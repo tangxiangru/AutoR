@@ -53,4 +53,6 @@ Additional expectations for this stage:
 ## Important Constraints
 
 - Do not produce a shallow reading list in place of actual synthesis.
+- If your survey concludes that the task means something other than its literal named outputs, that is an entry for the Decision Ledger's **Open Questions**, not a Locked Decision. A reading of the task cannot be locked by this stage: no work has been done yet, so nothing has been learned that could justify narrowing what the run is for. Carry both readings forward with what each would cost, and let Stage 03 price them.
+- A named output you judge expensive, unglamorous or already-solved is still a named output. Ranking it last in a figure budget is a design decision, and this stage does not make design decisions.
 - Every survey claim a later stage could act on belongs in `claims.json` with its `source_ids`. Do not decide on your own that a claim is too minor to record — the gap claim and the "standard baseline is X" claim are exactly the ones that get skipped.

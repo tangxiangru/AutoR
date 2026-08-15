@@ -201,7 +201,14 @@ class HeadlineNumber:
 #: How a stated deliverable is accounted for. ``not_attempted`` is a real
 #: answer — a task can ask for something the data cannot support — but it has
 #: to be said rather than left out.
-COVERAGE_KINDS = ("figure", "number", "prose", "not_attempted")
+#:
+#: ``artifact`` exists because a task output is not always a statistic. When the task
+#: names an *object* — a derivation, an equation set, a table, a sequence, a structure —
+#: the other four kinds leave nowhere to point but at a figure *about* it, and a picture
+#: of a deliverable is not the deliverable. Observed: a run whose first named output was
+#: "correctly derived Hartree-Fock Hamiltonians" covered it with `figure:1`, a grid of
+#: pass/fail cells, and the plan validated, fifteen hours before the report existed.
+COVERAGE_KINDS = ("figure", "number", "artifact", "prose", "not_attempted")
 
 
 @dataclass(frozen=True)
@@ -572,7 +579,7 @@ def _allowed_figure_suffixes(output_format: str) -> set[str]:
     return set(FIGURE_SUFFIXES)
 
 
-def _task_output_problems(plan: "ReportPlan") -> list[str]:
+def _task_output_problems(plan: "ReportPlan", paths: RunPaths | None = None) -> list[str]:
     """Every deliverable the task states is answered by something in the plan.
 
     Structural only. Whether the agent read the task description correctly is a
@@ -617,6 +624,25 @@ def _task_output_problems(plan: "ReportPlan") -> list[str]:
                 problems.append(
                     f"report_plan.json task output {label!r} is covered by headline number "
                     f"{output.target!r}, which this plan does not declare."
+                )
+        elif output.kind == "artifact":
+            if not output.target:
+                problems.append(
+                    f"report_plan.json task output {label!r} is covered by `artifact:` with no "
+                    "path. Name the workspace-relative file that will hold the object."
+                )
+            elif (
+                paths is not None
+                and paths.report_file.exists()
+                and not (paths.workspace_root / output.target).exists()
+            ):
+                # Only once there is a report to check against. A Stage 03 plan names a
+                # file that does not exist yet — that is what a plan is.
+                problems.append(
+                    f"report_plan.json task output {label!r} is covered by artifact "
+                    f"{output.target!r}, which does not exist. An object the task names as an "
+                    "output has to be produced and then shown in the report, not summarised "
+                    "by a rate computed over it."
                 )
         elif output.kind == "not_attempted" and len(output.why_not.strip()) < MIN_BRANCH_CHARS:
             problems.append(
@@ -684,7 +710,7 @@ def validate_report_plan(
     #: that writes it, or a re-attempt of that stage.
     declared = recorded_report_plan_stamp(paths) is not None
 
-    problems.extend(_task_output_problems(plan))
+    problems.extend(_task_output_problems(plan, paths))
 
     if not figures:
         # A plan with no figures is unusual, not wrong. Measured over the 40

@@ -20,6 +20,8 @@ from src.deliverables import (
     COVERAGE_FILENAME,
     demanding_sentences,
     format_deliverables_for_prompt,
+    research_brief,
+    task_demands,
     validate_deliverables_coverage,
 )
 from src.utils import STAGES, build_prompt, build_run_paths, ensure_run_layout, write_text
@@ -95,6 +97,75 @@ class DemandsComeFromTheTaskNotTheWrapperTest(unittest.TestCase):
         from src.utils import task_statement
 
         self.assertEqual(task_statement(TASK), TASK)
+
+
+class TheDeliveryContractIsNotTheResearchQuestionTest(unittest.TestCase):
+    """`task_statement` stripped AutoR's wrapper and left the benchmark's inner one.
+
+    Measured over the 40 archived ResearchClawBench tasks: 337 demanding sentences, of
+    which 200 (59.3%) are five lines identical in all 40 -- "Read & Understand", "Code &
+    Execute", "Analyze & Report", "produce a high-quality report/report.md", "Figures are
+    mandatory". Information_002 was told, in every prompt from Stage 01 to Stage 08, that
+    five sixths of what it owed was to read the related work and save PNGs. It did all
+    five and scored 0, because the sixth was the physics.
+    """
+
+    #: The shape of a shipped task: a brief under headings, wrapped in a delivery contract.
+    BENCHMARK_SHAPED = (
+        "## Role\n\n"
+        "1. **Read & Understand** - Study the related work and data to build domain context.\n"
+        "2. **Code & Execute** - Implement the analysis, generate figures, and iterate.\n\n"
+        "## Research Task\n\n"
+        "### Task Description\n"
+        "Input posterior samples for two black holes; output statistically rigorous upper "
+        "limits on ULB masses and self-interaction coupling strengths.\n\n"
+        "## Execution Protocol\n\n"
+        "Your primary goal is to complete the research task and produce a high-quality "
+        "`report/report.md`.\n"
+        "**Figures are mandatory** - generate plots and save to `report/images/`.\n"
+    )
+
+    def test_the_contract_lines_are_not_counted_as_demands(self) -> None:
+        demands = task_demands(self.BENCHMARK_SHAPED)
+        joined = " ".join(demands)
+        self.assertNotIn("Figures are mandatory", joined)
+        self.assertNotIn("Read & Understand", joined)
+        self.assertNotIn("report/report.md", joined)
+
+    def test_a_semicolon_separates_two_named_outputs(self) -> None:
+        """Information_002's whole brief was one sentence with three outputs in it."""
+        demands = task_demands(self.BENCHMARK_SHAPED)
+        self.assertEqual(len(demands), 2)
+        self.assertTrue(demands[0].startswith("Input posterior samples"))
+        self.assertIn("coupling strengths", demands[1])
+
+    def test_the_contract_still_reaches_the_stage_unnumbered(self) -> None:
+        """Removed from the question, not from the prompt: the stage still owes figures."""
+        block = format_deliverables_for_prompt(self.BENCHMARK_SHAPED)
+        self.assertIn("How to deliver, which is not what to find", block)
+        self.assertIn("Figures are mandatory", block)
+        self.assertLess(block.index("coupling strengths"),
+                        block.index("How to deliver"))
+
+    def test_a_brief_with_no_demand_verb_still_yields_its_sentences(self) -> None:
+        """Some briefs are machine-concatenated ("features.Output:") and split badly."""
+        statement = (
+            "### Task Description\n"
+            "Input: Network traffic flow data with temporal and topological features."
+            "Output: Intrusion detection over known and few-shot attack scenarios.\n"
+        )
+        demands = task_demands(statement)
+        self.assertTrue(demands)
+        self.assertIn("Intrusion detection", " ".join(demands))
+
+    def test_a_free_form_goal_with_no_headings_is_unchanged(self) -> None:
+        self.assertEqual(task_demands(TASK), demanding_sentences(TASK))
+        self.assertEqual(task_demands("Some background prose about black holes."), [])
+
+    def test_the_brief_is_the_headed_part_only(self) -> None:
+        brief = research_brief(self.BENCHMARK_SHAPED)
+        self.assertIn("coupling strengths", brief)
+        self.assertNotIn("Figures are mandatory", brief)
 
 
 class CoverageGateTest(unittest.TestCase):
@@ -204,7 +275,20 @@ class PromptBlockTest(unittest.TestCase):
         self.assertIn("verbatim", format_deliverables_for_prompt(TASK))
 
     def test_it_says_an_unmet_requirement_must_be_reported(self) -> None:
-        self.assertIn("Omitting it is not", format_deliverables_for_prompt(TASK))
+        self.assertIn("Omitting a requirement is never an option",
+                      format_deliverables_for_prompt(TASK))
+
+    def test_an_unmet_requirement_must_first_be_checked_for_runnability(self) -> None:
+        """`addressed: false` is for what could not be done, not for what was re-scoped.
+
+        Information_002 declined its Task Description clause and its only named data
+        file, with reasons, and passed the gate at 0.0. The reviewer side already applies
+        this test (`src/approval_agent.py`: is the named work runnable from what is in
+        this workspace?); before this the executing side was not told about it.
+        """
+        block = format_deliverables_for_prompt(TASK)
+        self.assertIn("runnable from what is in this workspace", block)
+        self.assertIn("not a way to narrow the task", block)
 
     def test_a_statement_with_no_demands_yields_no_block(self) -> None:
         self.assertEqual(format_deliverables_for_prompt("Some background prose."), "")

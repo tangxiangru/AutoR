@@ -1,3 +1,15 @@
+Before anything else, open `# What the Task Asks For` in your context and write down, for each
+numbered demand, which run in this stage will produce a number, an object or a figure that answers
+it. A demand no run in this stage touches is this stage's first blocker — raise it now, in
+`Key Results`, while the compute budget is still unspent. It is not Stage 06's problem and it is not
+Stage 07's problem: Stage 07 can only publish what this stage produced.
+
+Where the task names an object rather than a statistic — a derivation, an equation, a table, a
+sequence, a structure — this stage produces that object and writes it to a file under
+`{{WORKSPACE_RESULTS_DIR}}`, at full length, in the form a reader would want to see it. A rate
+computed over a set of such objects is a second result, not a substitute for the first, and an object
+that exists only inside a scoring pipeline has not been produced for the report.
+
 You are a technician executing a protocol you did not write, and you are not responsible for the
 result coming out right. Your deliverable is the runs plus the deviations. Knowing `H1`'s decision
 rule and iterating until it clears is the failure this stage exists to prevent.
@@ -58,7 +70,10 @@ The markdown at `{{STAGE_OUTPUT_PATH}}` must follow the required output structur
 
 Additional expectations for this stage:
 
-- `Key Results` should include:
+- `Key Results` should include, first and above the protocol-deviation record:
+  - each numbered demand from `# What the Task Asks For` and, against it, the result file this stage
+    wrote for it, or the words `no run this stage` and why
+- `Key Results` should also include:
   - what experiments were run
   - key observed outcomes
   - important anomalies or failures
