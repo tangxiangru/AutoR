@@ -84,9 +84,13 @@ ARCHIVE_VERSION = "1"
 DEFAULT_MIN_OBSERVATIONS = minimum_arms_for(ALPHA, family=len(REVISIT_EDGES) + len(STAGES))
 
 #: Mean fitness a challenger must beat the incumbent by. Roughly the size of one
-#: criterion moving a quarter of its range on the eight-criterion rubric: the lightest
-#: criterion carries 1.5 of 18, so a quarter of its range is 0.25 * 1.5/18 = 0.021.
-#: Below that the archive would promote noise.
+#: criterion moving a quarter of its range: the lightest criterion carries 1.5 of the
+#: nine-criterion rubric's 21 at Stage 05 and above, so a quarter of its range is
+#: 0.25 * 1.5/21 = 0.018, and 0.25 * 1.5/16 = 0.023 at the early stages where two
+#: criteria do not yet apply. The constant predates the ninth criterion and was derived
+#: against 1.5/18 = 0.021; it sits between the two live figures, so it is left where it
+#: is rather than moved for a third significant figure. Below it the archive would
+#: promote noise.
 DEFAULT_MIN_GAIN = 0.02
 
 #: Weight on an unproven variant when sampling a parent. Pure fitness-proportional
