@@ -111,8 +111,11 @@ class GateTest(unittest.TestCase):
     def test_the_ceiling_still_bites_above_the_floor(self) -> None:
         self._configure(BENCHMARK_MIN_REPORT_FIGURES)
         self._report(MAX_REPORT_FIGURES + 2)
-        self.assertTrue(any("only" in p and "reach the reviewer" in p
-                            for p in validate_markdown_report(self.paths)))
+        problems = " ".join(validate_markdown_report(self.paths))
+        self.assertIn(f"above the ceiling of {MAX_REPORT_FIGURES}", problems)
+        # The grader's window is a different number from the ceiling, and the refusal has
+        # to name the one the agent can act on without misstating the other.
+        self.assertIn("reach the reviewer", problems)
 
 
 class ConfigPersistenceTest(unittest.TestCase):
