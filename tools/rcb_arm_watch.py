@@ -48,10 +48,19 @@ BENCH = Path("/home/robtang_google_com/RCB")
 SCORER = Path("/rmeng_data/robtang/autor-rcb-rerun/AutoR/tools/score_rcb_run.py")
 
 #: Where the arms this one is compared against already live.
+#: Both re-expressed under the grader's *current* 15-image window.
+#:
+#: `full40` is not re-scored and does not need to be: no run in it publishes more than
+#: five images by the bench's own `IMAGE_EXTENSIONS`, so `generated_images[:5]` and
+#: `[:15]` hand the judge an identical list. Its numbers are window-invariant, and
+#: re-scoring would only add a second draw of judge noise to one arm.
+#:
+#: `control_bare_cc` is re-scored, because 29 of its 44 runs publish more than five and
+#: the original pass could only ever show the judge five of them.
 OTHER_ARMS = {
     "AutoR (Opus), pre-fix": Path("/rmeng_data/robtang/autor-rcb-rerun/arm_scores/full40"),
     "bare Claude Code (Opus)": Path(
-        "/rmeng_data/robtang/autor-rcb-rerun/arm_scores/control_bare_cc"
+        "/rmeng_data/robtang/autor-rcb-rerun/arm_scores/control_bare_cc_w15"
     ),
 }
 
@@ -289,13 +298,17 @@ def write_table(unscored: list[str], no_report: list[str]) -> str:
         "| bare Claude Code | n/a — no stage concept | — | 43,200 s |",
         "",
         "A second difference between the AutoR arms, unrelated to the code under test:",
-        "`MAX_REPORT_FIGURES` was 5 for the pre-fix arm and is 15 here (#217). Every pre-fix",
-        "run shipped 4-5 figures; this arm's finished runs ship 8-13. The benchmark's grader",
-        "attaches only the first five images of an unsorted walk to each image criterion, and",
-        "image criteria carry 60.6% of the weight, so the two arms differ in *which* figures",
-        "a grader sees, not only in how many. Whether that costs anything is unmeasured and",
-        "the only relevant data points the other way: on the uncapped bare-agent arm, the 26",
-        "runs publishing more than five averaged 30.74 against 26.47 for the 14 that did not.",
+        "`MAX_REPORT_FIGURES` was 5 for the pre-fix arm and is 15 here, following",
+        "ResearchClawBench raising its own judge cap from 5 to 15 (`bfffc48`, 2026-08-14).",
+        "Every pre-fix run shipped 4-5 figures; this arm's finished runs ship 8-13. Under the",
+        "current 15-image window that is no longer a difference in *which* figures a grader",
+        "sees -- it sees all of them in both arms -- but it is still a difference in how many,",
+        "and image criteria carry 60.6% of the weight.",
+        "",
+        "Everything in this table is scored under that current window. `full40` needed no",
+        "re-score (no run in it publishes more than five images, so the two windows hand the",
+        "judge an identical list); the bare-agent arm was re-scored, because 29 of its 44 runs",
+        "publish more than five and the original pass could only show the judge five.",
         "",
         "28 of the 40 pre-fix runs logged `Stage timed out`, and those 28 average **22.08**",
         "against **27.06** for the 12 that did not — a 4.99-point gap inside that one arm,",

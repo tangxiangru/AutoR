@@ -363,20 +363,27 @@ MIN_REPORT_CHARS = 1200
 #: its sign turns out to be.
 MAX_REPORT_FIGURES = 15
 
-#: How many figures actually reach the grader, which is not the same number.
+#: How many figures actually reach the grader. **This tracks someone else's repository.**
 #:
-#: `evaluation/score.py:88` walks ``outputs/`` and then ``report/`` with an unsorted
-#: ``rglob`` and attaches ``generated_images[:5]`` to *every* image checklist item.
-#: Filesystem order is not alphabetical, so past the fifth figure it is directory order,
-#: not the report, that decides which of them a grader sees.
+#: `evaluation/score.py` walks ``outputs/`` and then ``report/`` with an unsorted ``rglob``
+#: and attaches ``generated_images[:N]`` to *every* image checklist item, and N is not
+#: ours. It was 5 for as long as anyone here had looked, and ResearchClawBench raised it to
+#: 15 in ``bfffc48`` on 2026-08-14, "Increase judge generated image cap". A checkout taken
+#: before that date says 5 and is simply stale -- which is how this constant came to be
+#: written as 5 a day *after* upstream changed it, off a clone last pulled on 2026-07-28,
+#: and how a prompt "correction" shipped asserting the opposite of the truth.
 #:
-#: These two were one number until the ceiling moved to 15, and for a while every Stage 07
-#: prompt carried the sentence "the reviewer is shown only the first 15 images", which is
-#: false, followed by "a sixth figure does not add a sixth chance to be credited", which
-#: still counted from the old value. A prompt that misdescribes the grading is worse than
-#: one that says nothing about it, so the ceiling and the window are separate constants
-#: now and the prompt states both.
-JUDGE_VISIBLE_FIGURES = 5
+#: Filesystem order is not alphabetical, so past the Nth figure it is directory order, not
+#: the report, that decides which of them a grader sees. That is why the number matters,
+#: and why it is worth a test rather than a memory:
+#: `tests/test_the_ceiling_is_not_the_window.py` reads the bench's own source when a
+#: checkout is available and fails when this drifts from it again.
+#:
+#: It equals :data:`MAX_REPORT_FIGURES` today. They remain two different ideas -- one is
+#: what a report may publish, the other is what a grader reads -- and they have now
+#: coincided twice. Keeping them separate makes the next upstream move a one-line change
+#: instead of an archaeology exercise.
+JUDGE_VISIBLE_FIGURES = 15
 
 #: Distinct figures a markdown report must carry. One is the floor for an ordinary research
 #: run, where how much the question needs illustrating is the researcher's call.
