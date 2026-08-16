@@ -145,12 +145,13 @@ report/
   the ceiling adds nothing and costs the reader. What decides the score is whether the key
   quantities were produced and shown, not how many panels surround them.
 - **Only the first {{JUDGE_VISIBLE_FIGURES}} images reach the reviewer**, found in filesystem
-  order — not in the order you wrote them, and not by importance. So the {{JUDGE_VISIBLE_FIGURES}}
-  that matter most should be the only ones there, or the ones there should all matter. Past
-  {{JUDGE_VISIBLE_FIGURES}} it is directory order, not your report, that chooses what is seen: a
-  further figure does not add a further chance to be credited, it makes it arbitrary which of
-  yours are. Fewer, denser figures are strictly better, and a composite panel that carries three
-  claims beats three figures that carry one each.
+  order — not in the order you wrote them, and not by importance. Past
+  {{JUDGE_VISIBLE_FIGURES}} it is directory order, not your report, that chooses what is seen, so
+  a figure beyond that does not add a further chance to be credited: it makes it arbitrary which
+  of yours are. Well inside the limit this costs you nothing, which is the normal case and the
+  one to aim for. Fewer, denser figures are still better on their own merits — a composite panel
+  carrying three claims beats three panels carrying one each, because the reader forms a verdict
+  from what is in front of them, not from how many files you wrote.
 - Save **every** figure under `{{WORKSPACE_REPORT_IMAGES_DIR}}` as a **PNG**. PDF, EPS, SVG, TIFF,
   and BMP cannot be rendered by the report viewer and count as no figure at all.
 - Put nothing but figures in `report/images/`, and leave no plot behind in

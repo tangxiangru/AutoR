@@ -256,8 +256,10 @@ The markdown gates are not "a file exists". `validate_markdown_report` fails Sta
 retries it, if `report.md` is missing, is shorter than `MIN_REPORT_CHARS` (1,200) characters,
 references no figures, still holds placeholder text, or carries a figure reference that is
 absolute, remote, unrenderable, or points at a file that is not there — or if
-`report/images/` holds more than `MAX_REPORT_FIGURES` (15, a ceiling — only
-`JUDGE_VISIBLE_FIGURES` = 5 of them reach the grader) rendered figures, or fewer than the
+`report/images/` holds more than `MAX_REPORT_FIGURES` (15, a ceiling and not a target;
+`JUDGE_VISIBLE_FIGURES` is what the grader actually reads and tracks
+`evaluation/score.py`, which upstream raised from 5 to 15 on 2026-08-14) rendered figures,
+or fewer than the
 run's floor. `validate_report_plan_coverage` adds the plan gates listed above. A broken figure
 link is the expensive defect here: the judge reads the prose promising a figure and is shown
 nothing.
