@@ -337,6 +337,30 @@ MIN_REPORT_CHARS = 1200
 #: This is a ceiling on what *reaches* the judge, never a target. Nothing in AutoR asks for
 #: more figures than the study needs; `report_plan` still requires each slot to settle a
 #: distinct claim, and a run with four questions publishes four figures.
+#:
+#: **This value is contested and the experiment that would settle it has not been run.**
+#: It was 5 until #217 raised it to 15, and #217 deleted the argument for 5 along with it.
+#: That argument, restored here because it is a fact about the grader and not an opinion:
+#: `evaluation/score.py:88` walks ``outputs/`` then ``report/`` with an unsorted ``rglob``
+#: and attaches ``generated_images[:5]`` to *every* image checklist item -- not five chosen
+#: per item, and not the five the report argues from. Filesystem order is not alphabetical,
+#: so the only way to choose which five a grader sees is to publish five. Image items carry
+#: ~61% of the benchmark's weight.
+#:
+#: The counter-evidence, which is why this is still 15. On the bare-agent control arm, which
+#: had no ceiling at all, 26 of 40 runs published more than five figures -- up to thirteen --
+#: and those 26 averaged **30.74** against **26.47** for the 14 that published five or fewer.
+#: If a sixth figure randomised the majority of the weight, that difference should not have
+#: that sign. It is observational: figure count also tracks how far a run got, so the
+#: comparison is confounded by completeness and settles nothing on its own.
+#:
+#: So the mechanism says five and the only data anyone has says the opposite, and neither is
+#: an experiment. What would settle it: one task set, two arms, this constant the only
+#: difference. Until that runs, do not "fix" this in either direction on the strength of the
+#: mechanism story -- and record it as a difference between any two arms that do not share
+#: it. The arm at `2ffaeb4` ran with 15 and finished runs shipped 8 to 13 figures where every
+#: run under the 5 ceiling shipped 4 or 5; that is a difference between those arms whatever
+#: its sign turns out to be.
 MAX_REPORT_FIGURES = 15
 
 #: Distinct figures a markdown report must carry. One is the floor for an ordinary research
