@@ -29,6 +29,12 @@ class StageManifestEntry:
     invalidated_by_stage: str | None = None
     updated_at: str = ""
     approved_at: str | None = None
+    #: A digest per declared input channel, taken when the stage was approved. What the
+    #: stage read, so that "is this approval still good" can be answered by comparing
+    #: rather than by arithmetic on the stage number. Empty for a stage approved before
+    #: this field existed, which :func:`src.coeffects.drifted_channels` reads as "no
+    #: claim" rather than as "everything changed".
+    committed_view: dict[str, str] = field(default_factory=dict)
 
     @property
     def settled(self) -> bool:
@@ -63,6 +69,7 @@ class StageManifestEntry:
             "invalidated_by_stage": self.invalidated_by_stage,
             "updated_at": self.updated_at,
             "approved_at": self.approved_at,
+            "committed_view": dict(self.committed_view),
         }
 
     @classmethod
@@ -88,6 +95,10 @@ class StageManifestEntry:
             invalidated_by_stage=str(payload["invalidated_by_stage"]) if payload.get("invalidated_by_stage") is not None else None,
             updated_at=str(payload.get("updated_at") or ""),
             approved_at=str(payload["approved_at"]) if payload.get("approved_at") is not None else None,
+            committed_view={
+                str(key): str(value)
+                for key, value in dict(payload.get("committed_view") or {}).items()
+            },
         )
 
 
@@ -359,6 +370,17 @@ def mark_stage_approved_manifest(
     attempt_no: int,
     artifact_paths: list[str],
 ) -> RunManifest:
+    """Record the approval, and what the stage was reading when it was given.
+
+    An approval is a claim about a state: *given these inputs, this output was accepted*.
+    Only the second half was written down, so "is this approval still good" had to be
+    answered by arithmetic on the stage number. The committed view is the first half, and
+    it is taken here rather than at the three call sites so that no path can record an
+    approval without it — the same reason recovery is wired inside ``rollback_to_stage``.
+    """
+
+    from .coeffects import current_view
+
     update_manifest_run_status(
         paths,
         run_status="pending",
@@ -378,6 +400,7 @@ def mark_stage_approved_manifest(
         attempt_count=attempt_no,
         artifact_paths=artifact_paths,
         approved_at=_now(),
+        committed_view=current_view(paths, stage),
     )
 
 
@@ -464,6 +487,7 @@ def rollback_to_stage(paths: RunPaths, rollback_stage: StageSpec, reason: str | 
     run record.
     """
 
+    from .coeffects import drift_across_run, format_drift
     from .effects import recover_to_stage
     from .utils import append_log_entry
 
@@ -473,12 +497,50 @@ def rollback_to_stage(paths: RunPaths, rollback_stage: StageSpec, reason: str | 
     recovery = recover_to_stage(paths, rollback_stage, invalidated_reason)
     if recovery.touched:
         append_log_entry(paths.logs, "rollback recovery", recovery.render())
+
+    # Which approvals below the target no longer hold, asked of the declared topology
+    # rather than of the numbering. Information does flow backwards here: ``research_rounds``
+    # is produced at Stage 06 and read from Stage 02 on, because Stages 03 to 06 repeat as a
+    # round. A stage-number rule leaves those approvals standing after the thing they were
+    # given against has been withdrawn, and no arithmetic on 2 and 6 can see it.
+    #
+    # Computed after the recovery, so the comparison is against the workspace the rollback
+    # leaves rather than the one it found.
+    drifts = drift_across_run(paths, manifest.stages)
+    drifted_below = {
+        drift.stage_slug
+        for drift in drifts
+        if any(
+            entry.slug == drift.stage_slug and entry.number < rollback_stage.number
+            for entry in manifest.stages
+        )
+    }
+    if drifts:
+        append_log_entry(paths.logs, "rollback drift", format_drift(drifts))
+
     updated_stages: list[StageManifestEntry] = []
 
     for entry in manifest.stages:
         payload = entry.to_dict()
         if entry.number < rollback_stage.number:
-            updated_stages.append(entry)
+            if entry.slug not in drifted_below:
+                updated_stages.append(entry)
+                continue
+            payload.update(
+                {
+                    "status": "stale",
+                    "approved": False,
+                    "dirty": True,
+                    "stale": True,
+                    "approved_at": None,
+                    "invalidated_reason": (
+                        f"{invalidated_reason} (this stage reads a channel the rollback moved)"
+                    ),
+                    "invalidated_by_stage": rollback_stage.slug,
+                }
+            )
+            payload["updated_at"] = _now()
+            updated_stages.append(StageManifestEntry.from_dict(payload))
             continue
         if entry.number == rollback_stage.number:
             payload.update(
