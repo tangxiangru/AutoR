@@ -363,6 +363,21 @@ MIN_REPORT_CHARS = 1200
 #: its sign turns out to be.
 MAX_REPORT_FIGURES = 15
 
+#: How many figures actually reach the grader, which is not the same number.
+#:
+#: `evaluation/score.py:88` walks ``outputs/`` and then ``report/`` with an unsorted
+#: ``rglob`` and attaches ``generated_images[:5]`` to *every* image checklist item.
+#: Filesystem order is not alphabetical, so past the fifth figure it is directory order,
+#: not the report, that decides which of them a grader sees.
+#:
+#: These two were one number until the ceiling moved to 15, and for a while every Stage 07
+#: prompt carried the sentence "the reviewer is shown only the first 15 images", which is
+#: false, followed by "a sixth figure does not add a sixth chance to be credited", which
+#: still counted from the old value. A prompt that misdescribes the grading is worse than
+#: one that says nothing about it, so the ceiling and the window are separate constants
+#: now and the prompt states both.
+JUDGE_VISIBLE_FIGURES = 5
+
 #: Distinct figures a markdown report must carry. One is the floor for an ordinary research
 #: run, where how much the question needs illustrating is the researcher's call.
 #:
@@ -934,6 +949,7 @@ def format_stage_template(template: str, stage: StageSpec, paths: RunPaths) -> s
         "{{WORKSPACE_REPORT_IMAGES_DIR}}": str(paths.report_images_dir.resolve()),
         "{{OUTPUT_FORMAT}}": selected_output_format(paths),
         "{{MAX_REPORT_FIGURES}}": str(MAX_REPORT_FIGURES),
+        "{{JUDGE_VISIBLE_FIGURES}}": str(JUDGE_VISIBLE_FIGURES),
         "{{WORKSPACE_FIGURES_DIR}}": str(paths.figures_dir.resolve()),
         "{{WORKSPACE_ARTIFACTS_DIR}}": str(paths.artifacts_dir.resolve()),
         "{{WORKSPACE_NOTES_DIR}}": str(paths.notes_dir.resolve()),
@@ -1520,10 +1536,10 @@ def validate_markdown_report(paths: RunPaths) -> list[str]:
         )
     elif published > MAX_REPORT_FIGURES:
         problems.append(
-            f"report/images/ holds {published} figures but only {MAX_REPORT_FIGURES} reach the "
-            "reviewer, chosen in filesystem order rather than by importance. Merge related panels "
-            f"into one composite figure or delete the weakest, until at most {MAX_REPORT_FIGURES} "
-            "remain."
+            f"report/images/ holds {published} figures, above the ceiling of "
+            f"{MAX_REPORT_FIGURES}. Only {JUDGE_VISIBLE_FIGURES} of them reach the reviewer, "
+            "chosen in filesystem order rather than by importance. Merge related panels into one "
+            f"composite figure or delete the weakest, until at most {MAX_REPORT_FIGURES} remain."
         )
 
     return problems

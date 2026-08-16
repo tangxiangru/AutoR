@@ -27,6 +27,7 @@ from src.rcb import (
 from src.utils import (
     read_text,
     FIXED_STAGE_OPTIONS,
+    JUDGE_VISIBLE_FIGURES,
     MAX_REPORT_FIGURES,
     STAGES,
     build_run_paths,
@@ -346,13 +347,14 @@ class FigureBudgetGateTests(unittest.TestCase):
         paths = self._paths()
         self._populate(paths, MAX_REPORT_FIGURES + 1)
         problems = validate_stage_artifacts(STAGE_07, paths)
-        # The message quotes the ceiling; pinning the literal made this a test of the
-        # constant's value rather than of the gate, and it broke when the benchmark raised
-        # its own cap from 5 to 15.
-        self.assertTrue(
-            any(f"only {MAX_REPORT_FIGURES} reach the reviewer" in problem for problem in problems),
-            problems,
-        )
+        # The message quotes both numbers, and they are different numbers: the ceiling is
+        # what a report may publish, and the window is what the grader reads. This used to
+        # assert "only {ceiling} reach the reviewer", which was true while the two were one
+        # constant and became a false claim the gate was printing when the ceiling moved to
+        # 15. Pin the distinction, not either literal.
+        joined = " ".join(problems)
+        self.assertIn(f"above the ceiling of {MAX_REPORT_FIGURES}", joined, problems)
+        self.assertIn(f"Only {JUDGE_VISIBLE_FIGURES} of them reach the reviewer", joined, problems)
 
     def test_the_review_artifact_names_the_overshoot(self) -> None:
         paths = self._paths()

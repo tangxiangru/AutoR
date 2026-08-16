@@ -1,5 +1,5 @@
 Your reader is a model. It receives `{{WORKSPACE_REPORT_FILE}}` verbatim plus the first
-{{MAX_REPORT_FIGURES}} images in `report/images/`, and reads it for an answer to each thing the task
+{{JUDGE_VISIBLE_FIGURES}} images in `report/images/`, and reads it for an answer to each thing the task
 asked for — one judgement per asked-for thing. A thing the task named and the report never mentions
 is the cheapest thing there is to lose: a complete answer to a nearby question is worth less than a
 partial answer to the one that was asked. Length is not rewarded; a figure that is described but not
@@ -140,10 +140,17 @@ report/
     └── validation.png
 ```
 
-- **Publish at most {{MAX_REPORT_FIGURES}} figures.** The reviewer is shown only the first
-  {{MAX_REPORT_FIGURES}} images found in the report directory, in filesystem order — not in the
-  order you wrote them, and not by importance. A sixth figure does not add a sixth chance to be
-  credited; it makes it random which of yours are seen. Fewer, denser figures are strictly better.
+- **{{MAX_REPORT_FIGURES}} figures is a ceiling, and it is not a target.** Publish the figures the
+  report argues from and stop. A study that settles three questions publishes three; padding to
+  the ceiling adds nothing and costs the reader. What decides the score is whether the key
+  quantities were produced and shown, not how many panels surround them.
+- **Only the first {{JUDGE_VISIBLE_FIGURES}} images reach the reviewer**, found in filesystem
+  order — not in the order you wrote them, and not by importance. So the {{JUDGE_VISIBLE_FIGURES}}
+  that matter most should be the only ones there, or the ones there should all matter. Past
+  {{JUDGE_VISIBLE_FIGURES}} it is directory order, not your report, that chooses what is seen: a
+  further figure does not add a further chance to be credited, it makes it arbitrary which of
+  yours are. Fewer, denser figures are strictly better, and a composite panel that carries three
+  claims beats three figures that carry one each.
 - Save **every** figure under `{{WORKSPACE_REPORT_IMAGES_DIR}}` as a **PNG**. PDF, EPS, SVG, TIFF,
   and BMP cannot be rendered by the report viewer and count as no figure at all.
 - Put nothing but figures in `report/images/`, and leave no plot behind in
@@ -180,7 +187,8 @@ Figures are the highest-value part of this deliverable. The reviewer grades them
 image side by side with the corresponding figure from the published study and asking whether yours
 shows the same thing. They were chosen at Stage 03; this phase produces them.
 
-5. **Publish the planned figures in slot order, at most {{MAX_REPORT_FIGURES}}.** Every slot you
+5. **Publish the planned figures in slot order, at most {{MAX_REPORT_FIGURES}} and preferably far
+   fewer — the first {{JUDGE_VISIBLE_FIGURES}} are what a reviewer sees.** Every slot you
    do not publish needs `dropped_because` in `report_plan.json` and a sentence in `Key Results`;
    a slot you publish that the plan does not name will be flagged in `report_review.json`.
    Dropping is for a figure the results made impossible, not for one you ran out of time for:
@@ -206,8 +214,9 @@ shows the same thing. They were chosen at Stage 03; this phase produces them.
    needs a label **and a unit**; every series needs a legend entry; every panel needs a title.
    Assume the reviewer sees the image on its own, without the caption.
 9. Do not generate decorative figures, and do not publish a figure the report does not discuss.
-   An unreferenced image spends one of your {{MAX_REPORT_FIGURES}} slots on something no caption
-   defends.
+   An unreferenced image can take one of the {{JUDGE_VISIBLE_FIGURES}} places a reviewer looks at,
+   and spend it on something no caption defends. Time spent on a figure nobody asked for is time
+   not spent producing the quantity the task did ask for.
 
 ### Phase 3: Drafting
 
