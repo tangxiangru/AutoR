@@ -1101,6 +1101,28 @@ delta), and AutoR wins fifteen of forty. Eight stages of preregistration, adjudi
 reviewer gates, a rigour rubric and a champion ratchet make the same model, on the same hardware,
 measurably **worse** at the task than being handed the task.
 
+**That number has a confound in it of roughly its own size, found while building the harness for
+the next arm and not before publishing this one.** The two arms were not given the same budget.
+Read off each run's own `_meta.json`: the AutoR arm ran with `--stage-timeout 1800`, the bare arm
+under a single `timeout 43200` wall clock with no per-stage cap at all. **28 of the 40 AutoR runs
+logged `Stage timed out`.** Inside that arm, the 28 that hit the cap average **22.08** and the 12
+that did not average **27.06** — a 4.99-point gap, which is the same size as the between-arm
+difference the table is about. Paired against bare Claude Code the deficit is **−6.42** on the
+timed-out tasks and **−3.93** on the twelve that were not.
+
+Three things follow, and the third is the one that matters most.
+
+1. The deficit does not disappear when the cap does. On the twelve unconstrained tasks AutoR is
+   still 3.93 points behind, so "the scaffold is behind" survives; "by 5.67" does not.
+2. The 12-task figure is a **post-hoc subgroup**, and the tasks that exhaust a stage budget are
+   plausibly the harder ones, so it is not a corrected value. It bounds the confound; it does not
+   remove it.
+3. §2.5 exists because a mechanism has to carry its own control arm, and this is that principle
+   failing on the measurement the whole section is built from. The two arms were compared on
+   mean, zero-criteria, prose length and figure count, and nobody diffed the *command lines*
+   until a review of the next arm's tooling did it. A benchmark comparison is a claim about two
+   configurations, and the configuration is part of the claim.
+
 The composition of that deficit is not where the design's story predicted. AutoR is not shipping
 less: its median report is 36,330 bytes against bare Claude Code's 26,669, 36% *more* prose. It is
 not shipping fewer figures: both arms have ~5 images in front of the judge. It covers **less** —
@@ -1201,7 +1223,9 @@ any.
 - **The benchmark number is 23.57, and the same-model baseline beats it.** §6.8 is the full
   account: bare Claude Code scores 29.24 on the same forty tasks with the same model, the same
   machine and the same judge, so the paired deficit is −5.67 ± 1.84 and the scaffold is currently
-  net-negative. The cross-agent table in §6.1 is the **pre-repair** 14.16 batch and is also
+  net-negative — with the caveat §6.8 now carries, that the AutoR arm ran under an eight-fold
+  tighter stage timeout than the control and that 28 of its 40 runs hit it, which puts a confound
+  of about the effect's own size inside that margin. The cross-agent table in §6.1 is the **pre-repair** 14.16 batch and is also
   **cross-model** — all three comparison agents run GPT-5.4 — so it is not a clean harness
   comparison in either direction; it is **single-attempt** where the public leaderboard aggregates
   the *best* score per (task, agent) pair; and both numbers are `gpt-5.1` numbers, where judge
