@@ -110,7 +110,8 @@ if TYPE_CHECKING:  # pragma: no cover - import cycle at runtime, type-only here
 #: ``deliverable_coverage`` score. Three ways to raise the criterion without doing any
 #: work were open in v6 and are closed here -- restating a demand in its own words,
 #: quoting the task statement, and pasting back the shortfall the ratchet had just
-#: printed (the last raised the total on 89 of 89 drafts). The on-disk half now applies
+#: printed (the last raised the total on 88 of the 118 drafts that carried one). The
+#: on-disk half now applies
 #: at every stage rather than from Stage 05, so a v6 early-stage score and a v7 one are
 #: not comparable either. ``_IDENTIFIER_PREFIX`` also gains the left word boundary it
 #: shipped without: ``v`` was matching the tail of CV, HIV, dev and MeV, so writing
@@ -869,14 +870,34 @@ def _matches_artifact_number(value: float, raw: str, percent: bool, known: set[f
     :func:`_score_numeric_fidelity` about every number in the draft, and
     :func:`_score_deliverable_coverage` about the one number a demand's answer carries --
     and two encodings of one rule drift.
+
+    The fraction branch had that backwards for as long as it existed:
+    ``max(0.5 * 10**-decimals / 100, tolerance)`` is ``tolerance``, always, because the
+    first term is a hundredth of the second. So `74.1%` was matched against every
+    artifact value within **+/-0.05** rather than +/-0.0005 -- five percentage points --
+    and `74.1%` was satisfied by a file holding `0.700`. Verified before and after: it
+    now accepts `0.741` and refuses `0.700` and `0.79`.
+
+    What this does not fix, and what the docstring should not pretend it fixes: the
+    *population* is large. ``_artifact_numbers`` pools every number in every JSON, CSV
+    and text file under ``results/`` and ``data/`` -- a median of 5,400 per archived run
+    and 126,413 on one of them, most of them in [0, 1]. Against a bag that size a
+    plausible three-significant-figure metric matches by coincidence, and tightening the
+    tolerance narrows the window without shrinking the bag. This is the weakest link in
+    both criteria that use it, it predates them both, and it is measured in
+    :func:`_score_deliverable_coverage`'s docstring rather than asserted away.
     """
     decimals = len(raw.split(".")[1]) if "." in raw else 0
     tolerance = max(0.5 * (10 ** -decimals), abs(value) * 1e-9)
-    for candidate in (value, value / 100.0) if percent else (value,):
-        scale = max(0.5 * (10 ** -decimals) / 100.0, tolerance) if candidate != value else tolerance
-        if any(abs(candidate - known_value) <= scale for known_value in known):
-            return True
-    return False
+    candidates: list[tuple[float, float]] = [(value, tolerance)]
+    if percent:
+        fraction = value / 100.0
+        candidates.append((fraction, max(tolerance / 100.0, abs(fraction) * 1e-9)))
+    return any(
+        abs(candidate - known_value) <= scale
+        for candidate, scale in candidates
+        for known_value in known
+    )
 
 
 def _score_numeric_fidelity(markdown: str, paths: RunPaths) -> CriterionScore:
@@ -1034,15 +1055,34 @@ def _score_deliverable_coverage(
       the same archive. :func:`_result_file_cited` asks who wrote the file, and the same
       injection now scores exactly what the same sentences score with no citation at all.
 
-    **What remains, stated rather than closed.** Adding one sentence per demand that
-    merely *mentions* it still gains up to **+0.094** of the stage total, on 88 of 263
-    drafts. That is the free half doing what it is for, and it is the largest gradient
-    left; a criterion where mentioning earned nothing would also refuse the honest report
-    that says a requirement could not be met and why, which the rest of this design
-    requires to stay valid. A fitness function whose own feedback is a recipe for beating
-    it is the failure this module exists to prevent, reached twice from directions the
-    design did not consider -- after :func:`_cap_quantification_by_fidelity` and again
-    here -- so the number is published rather than the claim that there is none.
+    **What remains, and what the last version of this docstring got wrong about it.**
+    It said the free half -- +0.094 on 88 of 263 drafts -- was the largest gradient left.
+    A third adversarial replay found two larger ones, both of them in the on-disk half
+    this docstring had just called "the whole defence":
+
+    * **cite a file the run did not earn.** The benchmark's reference papers are copied
+      into ``workspace/literature/`` before the agent starts, and
+      ``results/experiment_manifest.json`` is AutoR's own record. Both sat inside the
+      directory whitelist. Median +0.0625 on the stage total, coverage 1.000 on 263 of
+      263 drafts. Closed above, by asking when the file was written and who wrote it
+      rather than which directory it is in.
+    * **invent a number.** Median +0.0625, maximum +0.3810, past the archive's gate on
+      173 of 263 drafts, and it moves three criteria at once -- this one, then
+      ``quantification``, then ``numeric_fidelity`` through the cap. Two causes. The
+      tolerance bug in :func:`_matches_artifact_number` is fixed. The other is not
+      fixable here: ``_artifact_numbers`` is a bag of every number in every result and
+      data file, a median of **5,400** per archived run and **126,413** on one of them,
+      most of them in [0, 1]. Against a bag that size an invented three-significant-figure
+      metric matches something by coincidence. That weakness predates this criterion --
+      it is ``numeric_fidelity``'s oracle too -- and adding a second consumer made it
+      worth more, which is this criterion's fault and is recorded here rather than
+      anywhere it would be easier to miss.
+
+    So the honest statement is not that the class is closed. It is that four routes are
+    closed, one is bounded at half by design, and one -- a number nobody measured, in a
+    draft whose other numbers are real -- is still worth more than doing the work.
+    ``tools/rubric_replay.py`` prices every one of them on the archive, and the next
+    change to this criterion should start by running it.
 
     Verdict-blind, and structurally so: nothing here opens
     ``paths.hypothesis_outcomes`` or reads an :data:`OUTCOME_BLIND_FIELDS` key. A
@@ -1170,8 +1210,9 @@ _QUOTE_RUN_WORDS = 8
 
 #: Fixed spans of this criterion's own shortfall templates. The ratchet prints the
 #: shortfall into the polish prompt, so anything the shortfall says is text the next
-#: draft has in front of it -- and pasting it back used to raise the *total* on every
-#: draft it was tried on, median +0.069, all of them past ``DEFAULT_MIN_GAIN``. A fitness
+#: draft has in front of it -- and pasting it back used to raise the *total* on 88 of the
+#: 118 drafts that carried one, median +0.036, all of them past ``DEFAULT_MIN_GAIN``. A
+#: fitness
 #: function whose own feedback is a recipe for beating it is the failure this module's
 #: docstring exists to prevent, arrived at from a direction the design did not consider.
 _SHORTFALL_MARKERS = (
@@ -1240,14 +1281,25 @@ def _result_file_cited(
 ) -> bool:
     """Whether a sentence names a file this run wrote *as a result*.
 
-    Three narrowings against "the path resolves", each closing a measured route to a free
-    score. An absolute path is refused outright -- ``/etc/hostname`` is on every machine.
-    The path must land under one of the run's own output directories, so a benchmark's
-    read-only input under ``data/`` is not an answer the run produced. And AutoR's own
-    record files are excluded: ``stages/``, ``artifacts/``, ``notes/`` and ``reviews/``
-    exist on every run by construction, so citing them would price bookkeeping as
-    evidence -- the substitution this whole criterion exists to catch, arrived at through
-    the criterion itself.
+    Four narrowings against "the path resolves", each closing a measured route to a free
+    score, and the fourth is the one the first three missed.
+
+    An absolute path is refused outright -- ``/etc/hostname`` is on every machine. The
+    path must land under one of the run's own output directories, so a benchmark's
+    read-only input under ``data/`` is not an answer. AutoR's own record files are
+    excluded through :func:`is_autor_own_record` and :func:`_harness_written_records`,
+    the same pair :func:`_fresh_artifact_kinds` uses -- ``stages/``, ``artifacts/``,
+    ``notes/``, ``reviews/`` and ``results/experiment_manifest.json`` exist on every run
+    by construction, and pricing bookkeeping as evidence is the substitution this
+    criterion exists to catch, arrived at through the criterion itself.
+
+    And the file has to have been written **during this run**. A directory whitelist
+    alone was not enough: the benchmark's reference papers are copied into
+    ``workspace/literature/`` before the agent starts -- md5-identical to
+    ``<task>/related_work/``, mtime before the run's own first write -- so a sentence
+    citing ``literature/paper_000.pdf`` bought the on-disk half at every stage, on 263
+    of 263 archived drafts, for a median total gain of +0.0625. Being handed a paper is
+    not having produced a result.
     """
     roots = [paths.results_dir, paths.figures_dir, paths.report_dir, paths.literature_dir]
     for extra in artifact_roots or ():
@@ -1255,6 +1307,8 @@ def _result_file_cited(
             extra / name for name in ("results", "figures", "report", "outputs", "literature")
         )
     resolved_roots = [root.resolve() for root in roots]
+    harness_written = _harness_written_records(paths)
+    started = _run_started_at(paths)
 
     for reference in _extract_path_references(sentence):
         candidate = PurePosixPath(reference.strip())
@@ -1264,12 +1318,29 @@ def _result_file_cited(
             target = (base / reference).resolve()
             if not target.is_file():
                 continue
-            if any(
-                target == root or root in target.parents
-                for root in resolved_roots
-            ):
-                return True
+            if not any(target == root or root in target.parents for root in resolved_roots):
+                continue
+            if is_autor_own_record(paths, target) or harness_written.covers(target):
+                continue
+            try:
+                if started is not None and target.stat().st_mtime < started:
+                    continue
+            except OSError:
+                continue
+            return True
     return False
+
+
+def _run_started_at(paths: RunPaths) -> float | None:
+    """When this run first wrote anything, as an mtime floor for "the run produced it".
+
+    ``user_input.txt`` is written once, at the top of the run, before any stage executes,
+    so it dates the run without needing a clock the agent could move.
+    """
+    try:
+        return paths.user_input.stat().st_mtime
+    except OSError:
+        return None
 
 
 def _score_traceability(markdown: str) -> CriterionScore:

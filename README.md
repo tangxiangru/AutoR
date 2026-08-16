@@ -865,8 +865,14 @@ statements with no AutoR at all.
 | bare Claude Code (Opus) | **29.24** | 25 (16%) | 25 |
 | AutoR (Opus), post-repair | 23.57 | 35 (23%) | 15 |
 
-Paired over the forty tasks that is **−5.67 ± 1.84**. The scaffold currently makes the model worse
-at the benchmark than not having it, and it does so while writing 36% more prose — it covers less,
+Paired over the forty tasks that is **−5.67 ± 1.84** — but the two arms were not given the same
+budget, and the confound is about as large as the effect: the AutoR arm ran with
+`--stage-timeout 1800` and 28 of its 40 runs logged `Stage timed out`, while the bare arm had no
+per-stage cap. On the twelve AutoR runs that never hit the cap the paired deficit is **−3.93**
+rather than −6.42. That is a post-hoc subgroup and not a corrected value, so the honest reading is
+that the scaffold is behind and the published margin is unreliable
+([§6.8](docs/framework.md#68-the-scaffold-is-currently-worth-less-than-no-scaffold)).
+It is behind while writing 36% more prose — it covers less,
 not less well. [§6.8](docs/framework.md#68-the-scaffold-is-currently-worth-less-than-no-scaffold) is
 the account of why, and `RUBRIC_VERSION` 7 is the first change aimed at it.
 
