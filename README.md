@@ -635,7 +635,7 @@ Alongside the prompt, AutoR installs an agent skill pack from [src/skills/](src/
 `runs/<run_id>/.claude/skills/` — the operator's working directory — so the agent can *pull*
 long-form craft guidance when it needs it. A skill costs nothing in the prompts that do not use it.
 
-121 skills ship today: 66 general ones and 55 field-specific ones. Seventy-five of them were written against a scored arm's per-criterion losses on the
+125 skills ship today: 66 general ones and 59 field-specific ones. Seventy-five of them were written against a scored arm's per-criterion losses on the
 twenty-five ResearchClawBench tasks that lost, three per task. **A run is not offered all of
 them.** Two filters narrow the pack, and a skill has to survive both:
 
@@ -643,9 +643,9 @@ them.** Two filters narrow the pack, and a skill has to survive both:
    become two. A materials run does not benefit from being offered advice about observational
    astronomy, it just has one more description to read past.
 2. **Shape.** A skill may carry an `applies_when` regex, matched against this run's own research
-   brief and data manifest. Four skills are scoped this way today; measured over the forty
-   ResearchClawBench briefs they select 3, 4, 6 and 8 tasks each, twenty-five tasks receive none of
-   them, and no task receives more than three. `tools/skill_selectivity.py` prints the selection set
+   brief and data manifest. Eight skills are scoped this way today; measured over the forty
+   ResearchClawBench briefs they select between one and seven tasks each, twenty-six tasks receive
+   none of them, and no task receives more than four. `tools/skill_selectivity.py` prints the selection set
    for a corpus and `--expect` turns it into an assertion, because a predicate is a claim about a
    kind of research problem and it should be checkable.
 
