@@ -1,0 +1,24 @@
+---
+name: neuroscience-noise-ladder-not-a-null-band
+description: Use at study design and experimentation when the method's selling point is surviving noise, dropout, shallow sampling or unwanted technical variation, and you are deciding how to test that on a matrix somebody already normalised and batch-corrected. Covers measuring how much nuisance survived the preprocessing, building the corruption levels yourself, and what a degradation curve carries that a single-condition null band does not.
+applies_when: dynamically expressed molecular features
+stages: 03_study_design, 05_experimentation
+---
+
+# A robustness claim is a curve, and you have to build the x axis
+
+A method sold as surviving noise — low signal-to-noise, shallow libraries, dropout, unwanted technical variation — is making a claim about a *curve*: how performance moves as the amount of the nuisance rises. The matrix you were handed sits at one point on that curve, and almost always the cleanest one, because whoever released it already filtered, normalised and batch-corrected it. Everything measured at that one point is a statement about a dataset nobody is worried about.
+
+So measure the range of the nuisance before designing the test, and put the number in the report. Per feature, the association with the technical column the file ships — batch, replicate, plate, donor, run — as an AUROC or a two-sample statistic, plus the count of features past a stated effect size. Per cell, the spread of depth and the fraction of zeros. If those numbers sit at the floor, that is neither a robustness result nor a clean bill of health: it means every arm will pass, no two methods can be separated, and the section you were about to write is empty before it runs. A floor reading is the trigger to build the levels yourself.
+
+Build them in the units the assay actually degrades in, one axis at a time with everything else held fixed. Subsample counts per cell down a depth ladder. Zero entries at a rising Bernoulli rate for dropout. Lower the signal-to-noise by adding features resampled or permuted from the same assay, or by scaling the informative block down against a nuisance block driven by one latent factor. Whichever axes you pick, each needs the untouched control plus at least three non-zero levels, because a slope needs three points and two points plus a control fit anything. Fix the seed, repeat each level, and keep the level values in the artifact so the axis is reproducible.
+
+Re-run the **whole** comparator ladder at every level, not only the method you like. The competitors are what make the claim mean anything: methods degrade at different rates, and the difference in rate is the finding, not the value at any single level. One figure carries it — metric on y, corruption level on x, one line per method, shared axes, spread over the repeats. In the prose, name the decay rate, the level where each method crosses a usability threshold you fixed in advance, and which competitor breaks first, by name. If a method stops returning an answer at some level — no module survives its own significance test, no features selected — that is an outcome, and it belongs in the figure as a labelled abstention rather than a blank cell.
+
+A size-matched random null band is a different instrument and it is easy to mistake for this one. It answers "is this arm better than a random subset of the same size, here", at one condition, with no nuisance axis at all. Keep it as a sanity control if it earns its place; it cannot be the robustness section. The test is blunt: if the section has no x axis with a quantity of nuisance on it, the robustness experiment was not run. Close by stating which degradation axes you did *not* corrupt, so a reader knows the curve's scope instead of assuming it.
+
+Where the method comes from a published study, the axes that study swept are the first rows of this plan — see `run-the-conditions-the-source-ran` for building that list before adding an axis of your own.
+
+## Why this is here
+
+On this task the run replaced the noise experiment with an observational audit: it tested "unwanted variation" as k-nearest-neighbour batch purity on the shipped ComBat-corrected matrix, each arm against a size-matched random null band, one condition per arm and no level axis anywhere. Its own data-overview panel reports 0 of 241 features past an |AUROC - 0.5| = 0.10 batch association on that matrix — the floor reading above — and the audit ran regardless. The strings `dropout`, `library size` and `signal-to-noise` occur zero times across all sixteen of the run's stage files and zero times in its 56,830-character report. The comparator that swept injected nuisance at j = 100/300/500 features, structured confounders at j = 30/60/120/240 and an amplitude ladder scored 75.0 on the robustness criterion against this run's 15.0: 0.25 of the task's weight, and 15.0 of the 20.2 points the run lost overall.
