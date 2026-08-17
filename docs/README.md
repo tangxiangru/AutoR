@@ -12,6 +12,7 @@ detail behind it.
 | Install AutoR and run your first project end to end | [English Guide](tutorial_en.md) · [中文教程](tutorial_zh.md) |
 | Look up a command-line flag | [CLI Reference](cli-reference.md) |
 | Run AutoR unattended, or benchmark it on ResearchClawBench | [ResearchClawBench](researchclawbench.md) |
+| Answer and score a written science exam question | [FrontierScience-Research](frontierscience.md) |
 | Understand what a run leaves on disk | [Run Artifacts](run-artifacts.md) |
 | Know exactly what a stage must produce to be accepted | [Stage Contract](stage-contract.md) |
 | Choose how much optional machinery a run uses | [Rigor](rigor.md) |
@@ -47,8 +48,8 @@ detail behind it.
 ### Reference
 
 - **[cli-reference.md](cli-reference.md)** — every flag on `main.py`,
-  `rcb_agent.py` and `studio.py`, what each one defaults to, what is persisted
-  on resume, and which flags are mutually exclusive.
+  `rcb_agent.py`, `fs_agent.py` and `studio.py`, what each one defaults to, what
+  is persisted on resume, and which flags are mutually exclusive.
 - **[configuration.md](configuration.md)** — `run_config.json`, the venue
   registry, the optional Gemini diagram config, environment variables, and
   which settings survive a resume.
@@ -68,6 +69,13 @@ detail behind it.
   other agents on the ResearchClawBench leaderboard score, which of their
   published numbers reproduce from the public data, and the same-model baseline
   any AutoR result has to be quoted against.
+- **[frontierscience.md](frontierscience.md)** — the second benchmark: sixty
+  written science examination questions graded against a ten-point rubric by a
+  judge model, with no data, no reference paper and no reference answer. The
+  pinned dataset and its strict rubric parser, the prompt contract and its word
+  gate, the `direct` and `ideate` profiles, the judge's measured sampling noise
+  and refusal rules, the paired trial's ten admission clauses, and the two
+  numbers about AutoR itself that are **not** measured.
 
 ### Internals
 

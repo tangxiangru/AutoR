@@ -9,6 +9,12 @@ AutoR runs it through `rcb_agent.py`. No human is involved at any point — the 
 is a reviewer agent (a second Claude Code instance), and every remaining terminal prompt is
 a hard error rather than a hang.
 
+This is one of two benchmarks AutoR is wired to. The other,
+[FrontierScience-Research](frontierscience.md), hands the agent a written examination
+question and grades the text of the answer against a rubric: no data, no reference paper, no
+figure and no reference answer. They measure different halves of the same system, which is
+the reason for having both.
+
 ---
 
 ## Quick start
