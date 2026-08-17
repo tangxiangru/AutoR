@@ -540,23 +540,62 @@ The corollary is worth keeping in view: the finest grain at which this design ca
 withdraw is one stage, and the finest grain at which it can withdraw *exactly* is one
 instrumented write. Between those two lies everything an uninterruptible stage does.
 
-### An open question this surfaced
+### Three states, not two
 
-A stage that exhausts its attempts is skipped. If its final draft validates it is kept and
-recorded as unreviewed; otherwise a stub replaces it, saying the work was not done. **Either
-way, the partial artifacts it wrote stay on disk, attributed to it, and count toward every
-forward gate** — the same shape as the defect in §1.1, at a site where the stage was never
-approved at all: the skip summary says the work is missing and the files say it is not.
+The open question the previous section left — a skipped stage's artifacts counting toward
+the forward gates while its own summary said the work was never done — turned on a fact that
+had to be measured rather than reasoned about.
 
-It is left open deliberately. The obvious fix is to withdraw the stage's contribution, and
-withdrawal here is destructive in a way the rest of this design is not: the artifacts may be
-real measurements that simply arrived without an accepted write-up. This repository already
-carries a scar from that exact trade — a skip once replaced a complete draft and thirteen
-figures with a 301-word stub, and the figure the task was scored on never reached the report.
-The non-destructive variant, marking them withdrawn in the ledger so the gates stop counting
-them while the files stay, has the opposite cost: the next stage stops being able to see
-partial work that might be worth using.
+**How often a stage is skipped.** On 135 archived run manifests, 53 — about two in five —
+contain at least one auto-skip, spread over every stage from the survey to the writing. Of
+those 53, 34 went on to advance past the skipped stage. Skipping is not the failure path; it
+is how a run survives a stage that exhausts its attempts.
 
-Which of those is right is a question about research practice rather than about composition,
-and the mechanism supports either. It is recorded here as a decision waiting to be made, not
-as an oversight.
+That reverses the obvious fix. Withdrawing a skipped stage's artifacts would close the
+forward gate out of it — the code gate after a skipped implementation, the results gate after
+a skipped experiment — on those 34 runs, converting *this stage did not finish* into *the run
+stops*, which is the outcome the skip exists to avoid.
+
+Two caveats on the number, because it is the number the decision rests on. The sample is 135
+of 476 archived manifests, taken as the scan reached them rather than drawn deliberately. And
+the rate is not stable across arms: a 50-manifest subset of the same archive gave 64% rather
+than 39%. What survives both readings is the only thing the decision needs — an auto-skip is
+common enough that treating its residue as repudiated would fire on a large fraction of runs,
+not on an unlucky few.
+
+**The two cases look identical and are not.** From the artifact's point of view a rollback
+and a skip leave the same thing behind: files on disk from a stage that was never approved.
+They differ in the intent of the transition, which no mechanism can see:
+
+| | Intent | Its residue |
+| --- | --- | --- |
+| **Withdrawal** | abandon this path | repudiated — nothing should rest on it |
+| **Skip** | continue despite the failure | not repudiated — often the only thing the run has |
+
+So two states were doing the work of three. `live` meant *the run stands behind this* and its
+negation meant *a rollback repudiated this*, and a skipped stage's output is neither.
+
+| State | Counts toward gates | Meaning |
+| --- | --- | --- |
+| accepted | yes | an approved stage wrote it |
+| **unreviewed** | **yes** | the last stage to write it was skipped, not approved |
+| withdrawn | no | a rollback repudiated it |
+
+**The state is derived, not stored.** A stored flag would have to be set where a skip
+happens, cleared where the stage is later approved, and kept in step with a manifest that
+already knows the answer — three places to drift from one authority. Reading it from the
+manifest means it clears by itself the moment the stage is genuinely re-run and accepted.
+It keys on the *last writer* rather than the creator, because whether content was accepted
+is a question about whoever produced that content.
+
+**And the record stops contradicting the disk.** The other half of the problem was never in
+the files. A skipped stage published a summary saying its work "was never done", under a
+heading reading *Files Produced* that listed only the summary itself — while three result
+files sat on disk being counted by every gate. Both sentences were false at once. They now
+say the work was not *accepted*, and name what it left.
+
+What this is an instance of, and why it belongs in the design rather than in a changelog:
+**a mechanism cannot infer the intent of a transition from its effect.** The composition
+model sees a stage that wrote files and was not approved, and that is the same picture in
+both cases. Distinguishing them required going to the record of what actually happens in
+runs, and the answer was not the one the model's own symmetry suggested.

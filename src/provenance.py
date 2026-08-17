@@ -781,6 +781,76 @@ def is_live(ledger: ProvenanceLedger, rel_path: str) -> bool:
     return entry.live
 
 
+def unreviewed_stage_slugs(paths: RunPaths) -> set[str]:
+    """Stages the manifest records as skipped and not approved.
+
+    Derived rather than stored, and that is the whole design of this state. A stored flag
+    would have to be set where a skip happens, cleared where the stage is later approved,
+    and kept in step with a manifest that already knows the answer -- three places to drift
+    where the manifest is the authority. Reading it means the flag clears by itself the
+    moment the stage is genuinely re-run and accepted.
+
+    Both kinds of skip count, and so does the rescued-draft case. ``_skip_stage`` records
+    every one of them as ``skipped`` with ``approved`` false, and says of the rescue that
+    "it is promoted but was never reviewed" -- which is exactly the claim this set makes.
+    """
+
+    from .manifest import load_run_manifest
+
+    manifest = load_run_manifest(paths.run_manifest)
+    if manifest is None:
+        return set()
+    return {
+        entry.slug
+        for entry in manifest.stages
+        if entry.skipped and not entry.approved and entry.slug
+    }
+
+
+def unreviewed_paths(paths: RunPaths) -> set[str]:
+    """Files whose most recent writer is a stage nobody accepted.
+
+    Keyed on the *last* writer rather than the creator. A file Stage 03 created and a
+    skipped Stage 05 rewrote holds Stage 05's content, and whether that content was
+    accepted is the question this answers; the creator only decides who owns the file for
+    a withdrawal.
+
+    This is deliberately not a withdrawal. These files still count toward the forward
+    gates, because an auto-skip is a decision to *continue* past a failure rather than to
+    repudiate the work -- measured across the run archive, skipping is how a majority of
+    runs get past a stage that ran out of attempts, and closing their forward edge would
+    turn "this stage did not finish" into "the run stops". What the flag buys is that a
+    reader can tell accepted work from residue, which is the thing that was missing.
+    """
+
+    ledger = load_ledger(paths)
+    unreviewed = unreviewed_stage_slugs(paths)
+    if not unreviewed:
+        return set()
+    return {
+        rel_path
+        for rel_path, entry in ledger.entries.items()
+        if entry.live and entry.last_written_by_stage in unreviewed
+    }
+
+
+def paths_written_by(paths: RunPaths, stage: StageSpec) -> list[str]:
+    """Every live workspace file this stage wrote most recently, in path order.
+
+    What a stage's own record should be able to name. ``_build_skipped_stage_markdown``
+    heads a section "Files Produced" and lists only the stage's summary, so a skipped
+    stage that left three result files on disk published a record saying it produced one
+    file and did no work.
+    """
+
+    ledger = load_ledger(paths)
+    return sorted(
+        rel_path
+        for rel_path, entry in ledger.entries.items()
+        if entry.live and entry.last_written_by_stage == stage.slug
+    )
+
+
 def path_is_live(paths: RunPaths, path: Path) -> bool:
     """Whether one named file counts, for a guard that checks existence rather than count.
 
