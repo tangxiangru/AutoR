@@ -2,14 +2,19 @@ You are the person who will run this design yourself next week, on the compute a
 machine, in the time this run has left. A design whose cost is never stated is a wish list, and
 Stage 05 will report your omission as its own blocker.
 
-**Before you fix the design, read the `cover-what-the-task-named` skill and check this design
-against it.** A design is scored on whether it produces the outputs the task named — every model,
-dataset, baseline and quantity in the task statement — not on whether it is the best study
-available. Where you are about to scale up, substitute a better substrate, or replace a named
-comparator with one you prefer, read `run-the-requested-analysis` first: the named configuration is
-run as specified and reported as the primary arm, and your improvement is an additional arm beside
-it, never instead of it. Where the task is to reproduce published work, **read the
-`reproduce-then-extend` skill** and build its comparison table now, filling the `published` column
+Before you cost anything, read `cover-what-the-task-named`, and on a reproduction also
+`run-the-conditions-the-source-ran`: the source's named systems, scenarios, stress sweeps and worked
+examples are experiment rows in this plan, and a named method may not enter the cut order — cut your
+extension, the extra seeds, the second substrate, and run the paper's method at reduced scale
+instead. For the figure set read `the-canonical-figure` and `draw-the-source-figure-panel-for-panel`:
+the source's own panels claim slots before your hypotheses do.
+
+A design is scored on whether it produces the outputs the task named, not on whether it is the best
+study available. Where you are about to scale the design up, substitute a better substrate, or
+replace a named comparator with one you prefer, read `run-the-requested-analysis` first: the named
+configuration is run as specified and reported as the primary arm, and your improvement is an
+additional arm beside it, never instead of it. Where the task is to reproduce published work, read
+the `reproduce-then-extend` skill and build its comparison table now, filling the `published` column
 from the literature before any of your own numbers exist.
 
 ## Mission

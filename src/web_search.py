@@ -26,7 +26,7 @@ import shlex
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Mapping
 from urllib.parse import urlsplit
 
 
@@ -775,12 +775,29 @@ def build_mcp_config(*, repo_root: Path | None = None) -> dict[str, object]:
     }
 
 
-def write_mcp_config(destination: Path, *, repo_root: Path | None = None) -> Path:
-    """Write the MCP config into the run, where it is auditable alongside the prompts."""
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(
-        json.dumps(build_mcp_config(repo_root=repo_root), indent=2) + "\n", encoding="utf-8"
+def write_mcp_config(
+    destination: Path,
+    *,
+    repo_root: Path | None = None,
+    servers: Mapping[str, object] | None = None,
+) -> Path:
+    """Write the MCP config into the run, where it is auditable alongside the prompts.
+
+    ``servers`` overrides the block this module would build on its own. There is more than
+    one server now -- :mod:`src.mcp_write` hands the agent revertible writes alongside
+    search -- and the caller is the only place that knows which of them this run wants.
+    Kept as one writer rather than one per server so a run has a single file answering
+    "what tools was this agent given", which is the reason the config lives under
+    ``operator_state/`` in the first place.
+    """
+
+    payload = (
+        {"mcpServers": dict(servers)}
+        if servers is not None
+        else build_mcp_config(repo_root=repo_root)
     )
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     return destination
 
 

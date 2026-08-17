@@ -64,5 +64,6 @@ captions, its abstract's claims. For each one this run reproduced, grep your
 report for the source's name for it. Every miss is a reproduction you performed
 and did not get credit for, and fixing it is a word.
 
-See also `reproduce-then-extend` for the comparison table those names index, and
-`citation-discipline` for pinning the reference the numbering belongs to.
+See also `reproduce-then-extend` for the comparison table those names index,
+`the-supplied-item-is-the-graded-unit` for the identifier a shipped object keeps,
+and `citation-discipline` for pinning the reference the numbering belongs to.

@@ -16,6 +16,11 @@ docs/*
 !docs/ui-design/
 !docs/ui-design/**
 docs/ui-design/.DS_Store
+# Paper material. Same shape as ui-design above, and for the same reason the
+# comment gives: `!docs/*.md` reaches files directly under docs/ and not a
+# subdirectory, so a page added here is silently untracked without these two lines.
+!docs/iclr/
+!docs/iclr/**
 examples/
 agentspace/
 assets/paper_gallery_source/

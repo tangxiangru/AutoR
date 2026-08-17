@@ -7,6 +7,12 @@ embedded does not exist. Below 1200 characters the report is refused outright â€
 substance, not a word count: a report with no methodology, results and discussion has not been
 written.
 
+Before you decide what the report leads with, read `the-supplied-item-is-the-graded-unit` and
+`draw-the-source-figure-panel-for-panel`: one is about the object the task actually shipped keeping
+its own named section, the other about every result the source drew getting a panel of yours.
+`paper-writing`, `result-table` and `citation-discipline` are named at the phases they belong to,
+below.
+
 ## What This Report Must Answer
 
 Read `# What the Task Asks For` in your context â€” the numbered list of what the task statement

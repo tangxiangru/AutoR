@@ -627,7 +627,7 @@ Alongside the prompt, AutoR installs an agent skill pack from [src/skills/](src/
 `runs/<run_id>/.claude/skills/` — the operator's working directory — so the agent can *pull*
 long-form craft guidance when it needs it. A skill costs nothing in the prompts that do not use it.
 
-Thirty-nine skills ship today: nineteen general ones and twenty field-specific ones, of which the
+Forty-two skills ship today: twenty-two general ones and twenty field-specific ones, of which the
 installer copies only the two belonging to the run's own discipline — a materials run does not
 benefit from being offered advice about observational astronomy, it just has one more description to
 read past. Pull-based is not the same as discoverable: measured over a 40-task ResearchClawBench arm,

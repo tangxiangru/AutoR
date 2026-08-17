@@ -612,7 +612,7 @@ An explicit `--flag`/`--no-flag` always beats the level. The validity chain is n
 | [`web_search.py`](../src/web_search.py) · [`mcp_web_search.py`](../src/mcp_web_search.py) | Gemini-backed search, readiness assessment, and a stdlib JSON-RPC MCP stdio server exposing it as a tool. |
 | [`backend_health.py`](../src/backend_health.py) | Telling "the model was unreachable" apart from "the research failed". |
 | [`prompt_fragments.py`](../src/prompt_fragments.py) | Shared prompt blocks generated from the validators' own constants, so a limit cannot drift between the gate and the instruction. |
-| [`run_skills.py`](../src/run_skills.py) · [`skills/`](../src/skills) | Thirty-nine craft skills installed into the run's working directory: nineteen general, plus the two of twenty field skills belonging to the run's discipline. Pulled on demand, and named imperatively by the stage whose decision each one covers. |
+| [`run_skills.py`](../src/run_skills.py) · [`skills/`](../src/skills) | Forty-two craft skills installed into the run's working directory: twenty-two general, plus the two of twenty field skills belonging to the run's discipline. Pulled on demand, and named imperatively by the stage whose decision each one covers. |
 
 ### Output and adapters
 

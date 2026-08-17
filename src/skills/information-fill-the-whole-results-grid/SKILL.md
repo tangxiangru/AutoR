@@ -7,7 +7,14 @@ description: Use when the research task is in information — machine learning, 
 
 The contribution of an AI/ML systems paper is a grid: method variants x backbones or base models x datasets x metric families, plus one ablation per named component and the qualitative demonstrations. Completeness of the grid is audited; nothing pays for extra depth in one cell. At design time, write the grid out as a table of empty cells and schedule the cheapest run that fills each one.
 
-Treat a single supplied example file as a smoke-test fixture, not the evaluation set: obtain the released implementation, the pretrained weights, the full benchmark suite and the baseline systems from the public release. When a cell cannot be run at full scale, run it at reduced N or one seed and label it as such. A crude arm counts; a Limitations sentence declaring the arm out of scope reads as the experiment never having been attempted.
+Widening is additive, not a substitution: the item the task actually ships keeps its own named
+subsection with its own values, in the source's units, even when the full grid gives a tighter
+interval. A run that priced the two scopes honestly, chose the fifteen-paper corpus, and left the
+one shipped paper as an appendix row scored 5/15/5 where an agent that simply printed the shipped
+paper's own result scored 32/25/45. See `the-supplied-item-is-the-graded-unit`.
+
+Treat a single supplied example file as a smoke-test fixture for the *grid*, not as the evaluation
+set and not as something the report may drop: obtain the released implementation, the pretrained weights, the full benchmark suite and the baseline systems from the public release. When a cell cannot be run at full scale, run it at reduced N or one seed and label it as such. A crude arm counts; a Limitations sentence declaring the arm out of scope reads as the experiment never having been attempted.
 
 Ablate each named component one at a time and report its metric delta; report every algorithmic variant of the same component side by side; use the source's own names and abbreviations throughout.
 

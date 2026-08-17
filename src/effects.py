@@ -26,24 +26,33 @@ stage runs, so a crash mid-stage leaves a partial accumulator that still withdra
 everything the stage had done up to the crash.
 
 **Undo is unconditional.** No inverse here has a precondition it can fail: deleting a path
-that is already gone succeeds, and restoring bytes creates the parent directories it needs.
-An undo that can refuse is not an undo — it turns a rollback into a state the run has no
+that is already gone succeeds, restoring bytes creates the parent directories it needs, and
+removing a collection entry that is not there succeeds. An undo that can refuse is not an
+undo — it turns a rollback into a state the run has no
 rule for, and the recovery it was supposed to perform into a partial one nobody records.
 
-**What the primitives cover, and what they do not.** A stage's real work is done by an
-agent CLI writing files directly, and those writes do not come through here; they are
-picked up by :func:`src.provenance.observe` at the stage boundary, which stores the bytes
-it can and marks the rest ``restorable=False``. So the recovery this module offers is
-layered: writes made through a primitive are withdrawn exactly, observed writes are
-withdrawn to the previous bytes when the ledger holds them and deleted when it does not,
-and a file too large for the ledger is deleted with the fact recorded rather than silently
-half-restored.
+**Two grains, because two kinds of write reach here.** A whole-file write inverts to a
+delete or to the bytes that were there. An entry appended to a collection inverts to the
+removal of *that entry by identifier*, which is the finer grain and the one that matters:
+two stages appending sources to the same table are independent exactly because either
+append can be taken back while the other stands, and an inverse that restored the whole
+file would take back both.
+
+**What the primitives cover, and what they do not.** A stage's work is done by an agent CLI,
+which reaches these through the MCP server in :mod:`src.mcp_write` when it uses them and
+writes files directly when it does not. What does not come through here is picked up by
+:func:`src.provenance.observe` at the stage boundary, which stores the bytes it can and
+marks the rest ``restorable=False``. So the recovery this module offers is layered: writes
+made through a primitive are withdrawn exactly and at the grain they were made, observed
+writes are withdrawn to the previous bytes when the ledger holds them and deleted when it
+does not, and a file too large for the ledger is deleted with the fact recorded rather than
+silently half-restored.
 """
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
@@ -216,6 +225,94 @@ def _invert_restore_blob(paths: RunPaths, payload: Mapping[str, Any]) -> str:
     return f"restored {rel_path}"
 
 
+def _read_collection(path: Path, collection: str) -> tuple[Any, list[Any]]:
+    """The document and the list inside it, tolerating both shapes these files take.
+
+    ``sources.json`` and the hypothesis manifest wrap their entries in an object; a
+    hand-written one may be a bare list. Reading both here keeps the two shapes out of the
+    inverse handlers, which have to work on whatever is on disk at recovery time rather
+    than on whatever was there when the effect was applied.
+    """
+
+    if not path.exists():
+        return {collection: []}, []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+        return {collection: []}, []
+    if isinstance(payload, list):
+        return payload, list(payload)
+    if isinstance(payload, dict):
+        entries = payload.get(collection)
+        return payload, list(entries) if isinstance(entries, list) else []
+    return {collection: []}, []
+
+
+def _write_collection(path: Path, payload: Any, collection: str, entries: list[Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(payload, list):
+        body: Any = entries
+    else:
+        body = dict(payload) if isinstance(payload, dict) else {}
+        body[collection] = entries
+    path.write_text(json.dumps(body, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+
+
+def _invert_remove_entry(paths: RunPaths, payload: Mapping[str, Any]) -> str:
+    """Take one entry back out of a collection, by identifier.
+
+    By identifier rather than by position, because the entries around it may have moved
+    since: another stage appends to the same table, and an inverse that removed "the third
+    one" would take back somebody else's work.
+    """
+
+    rel_path = str(payload.get("rel_path", "")).strip()
+    collection = str(payload.get("collection", "")).strip()
+    id_field = str(payload.get("id_field", "id")).strip() or "id"
+    entry_id = str(payload.get("entry_id", "")).strip()
+    target = _resolve(paths, rel_path)
+    document, entries = _read_collection(target, collection)
+    kept = [
+        entry
+        for entry in entries
+        if not (isinstance(entry, dict) and str(entry.get(id_field, "")).strip() == entry_id)
+    ]
+    if len(kept) == len(entries):
+        return f"{collection}[{entry_id}] was already absent"
+    _write_collection(target, document, collection, kept)
+    return f"removed {collection}[{entry_id}] from {rel_path}"
+
+
+def _invert_restore_entry(paths: RunPaths, payload: Mapping[str, Any]) -> str:
+    """Put back the entry an overwrite replaced, at the identifier it had."""
+
+    rel_path = str(payload.get("rel_path", "")).strip()
+    collection = str(payload.get("collection", "")).strip()
+    id_field = str(payload.get("id_field", "id")).strip() or "id"
+    entry_id = str(payload.get("entry_id", "")).strip()
+    blob = load_blob(paths, str(payload.get("blob_hash", "")).strip())
+    if blob is None:
+        return _invert_remove_entry(paths, payload) + " (no stored entry to restore)"
+    try:
+        prior = json.loads(blob.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return _invert_remove_entry(paths, payload) + " (stored entry unreadable)"
+    target = _resolve(paths, rel_path)
+    document, entries = _read_collection(target, collection)
+    rebuilt: list[Any] = []
+    replaced = False
+    for entry in entries:
+        if isinstance(entry, dict) and str(entry.get(id_field, "")).strip() == entry_id:
+            rebuilt.append(prior)
+            replaced = True
+        else:
+            rebuilt.append(entry)
+    if not replaced:
+        rebuilt.append(prior)
+    _write_collection(target, document, collection, rebuilt)
+    return f"restored {collection}[{entry_id}] in {rel_path}"
+
+
 def _invert_noop(paths: RunPaths, payload: Mapping[str, Any]) -> str:
     return str(payload.get("note", "")).strip() or "nothing to undo"
 
@@ -226,6 +323,8 @@ def _invert_noop(paths: RunPaths, payload: Mapping[str, Any]) -> str:
 INVERSE_HANDLERS: dict[str, Callable[[RunPaths, Mapping[str, Any]], str]] = {
     "delete_path": _invert_delete_path,
     "restore_blob": _invert_restore_blob,
+    "remove_entry": _invert_remove_entry,
+    "restore_entry": _invert_restore_entry,
     "noop": _invert_noop,
 }
 
@@ -487,6 +586,12 @@ class RecoveryReport:
     accumulated: RevertReport = field(default_factory=RevertReport)
     observed: RevertReport = field(default_factory=RevertReport)
     emissions_discarded: int = 0
+    #: True when only this stage was withdrawn and the stages after it were left standing.
+    #: False for a reverse-order withdrawal, which is every rollback and a redo that could
+    #: not be selective.
+    selective: bool = False
+    #: Why a selective withdrawal was not available, when one was asked for.
+    refusal: str = ""
     #: Files whose creator was inside the withdrawn range. Counted from the plan rather
     #: than from the applied list, so a file the recovery could not remove is still
     #: reported as one the withdrawal was owed.
@@ -507,7 +612,15 @@ class RecoveryReport:
     def render(self) -> str:
         if not self.touched:
             return f"Rollback to {self.stage} withdrew nothing: the workspace held no attributed change."
-        lines = [f"Rollback to {self.stage} withdrew the workspace, not only the manifest."]
+        opening = (
+            f"Withdrew {self.stage} alone; the stages after it are independent of it and "
+            "still stand."
+            if self.selective
+            else f"Rollback to {self.stage} withdrew the workspace, not only the manifest."
+        )
+        lines = [opening]
+        if self.refusal:
+            lines.append(f"A selective withdrawal was not available: {self.refusal}")
         if self.accumulated.applied or self.accumulated.skipped:
             lines.append(self.accumulated.render())
         if self.observed.applied or self.observed.skipped:
@@ -609,4 +722,206 @@ def set_artifact(
             inverse=inverse,
             at=_now(),
         ),
+    )
+
+
+def _append_to_collection(
+    paths: RunPaths,
+    stage: StageSpec,
+    rel_path: str,
+    collection: str,
+    entry: Mapping[str, Any],
+    key: str,
+    id_field: str = "id",
+) -> EffectRecord:
+    target = _resolve(paths, rel_path)
+    entry_id = str(entry.get(id_field, "")).strip()
+    if not entry_id:
+        raise ValueError(
+            f"an entry appended to {collection} needs a non-empty {id_field!r}: the inverse "
+            "removes it by that identifier, and an entry without one cannot be withdrawn "
+            "on its own"
+        )
+
+    document, entries = _read_collection(target, collection)
+    prior = next(
+        (
+            item
+            for item in entries
+            if isinstance(item, dict) and str(item.get(id_field, "")).strip() == entry_id
+        ),
+        None,
+    )
+
+    if prior is None:
+        inverse = Inverse(
+            "remove_entry",
+            {
+                "rel_path": rel_path,
+                "collection": collection,
+                "id_field": id_field,
+                "entry_id": entry_id,
+            },
+        )
+        entries.append(dict(entry))
+    else:
+        inverse = Inverse(
+            "restore_entry",
+            {
+                "rel_path": rel_path,
+                "collection": collection,
+                "id_field": id_field,
+                "entry_id": entry_id,
+                "blob_hash": store_blob(paths, json.dumps(prior, ensure_ascii=True).encode("utf-8")),
+            },
+        )
+        entries = [
+            dict(entry)
+            if isinstance(item, dict) and str(item.get(id_field, "")).strip() == entry_id
+            else item
+            for item in entries
+        ]
+
+    _write_collection(target, document, collection, entries)
+    return record_effect(
+        paths,
+        EffectRecord(
+            stage=stage.slug,
+            key=key,
+            action="append" if prior is None else "replace",
+            rel_path=rel_path,
+            inverse=inverse,
+            at=_now(),
+        ),
+    )
+
+
+def append_source(paths: RunPaths, stage: StageSpec, source: Mapping[str, Any]) -> EffectRecord:
+    """Add one literature source, withdrawable on its own."""
+
+    rel_path = paths.literature_dir.relative_to(paths.workspace_root).as_posix() + "/sources.json"
+    return _append_to_collection(paths, stage, rel_path, "sources", source, key="literature.sources")
+
+
+def append_claim(paths: RunPaths, stage: StageSpec, claim: Mapping[str, Any]) -> EffectRecord:
+    """Add one literature claim, withdrawable on its own."""
+
+    rel_path = paths.literature_dir.relative_to(paths.workspace_root).as_posix() + "/claims.json"
+    return _append_to_collection(paths, stage, rel_path, "claims", claim, key="literature.claims")
+
+
+def register_hypothesis(
+    paths: RunPaths, stage: StageSpec, hypothesis: Mapping[str, Any]
+) -> EffectRecord:
+    """Add one empirical hypothesis to the manifest, withdrawable on its own."""
+
+    rel_path = paths.hypothesis_manifest.relative_to(paths.workspace_root).as_posix()
+    return _append_to_collection(
+        paths, stage, rel_path, "empirical_hypotheses", hypothesis, key="hypotheses"
+    )
+
+
+def record_result(
+    paths: RunPaths, stage: StageSpec, rel_path: str, content: str | bytes
+) -> EffectRecord:
+    """Write a result artifact under ``workspace/results`` with its inverse.
+
+    The path is forced under the results directory rather than trusted: this is reached
+    from a tool the stage's agent calls, and a write that escaped the directory would land
+    outside the family the gates count and the withdrawal plan reaches.
+    """
+
+    results_root = paths.results_dir.relative_to(paths.workspace_root).as_posix()
+    normalised = str(rel_path).strip().replace("\\", "/").lstrip("/")
+    normalised = "/".join(part for part in normalised.split("/") if part not in ("", ".", ".."))
+    if not normalised:
+        raise ValueError("record_result needs a file name under workspace/results")
+    if not normalised.startswith(f"{results_root}/"):
+        normalised = f"{results_root}/{normalised}"
+    return set_artifact(paths, stage, normalised, content, key="results")
+
+
+def revert_only(paths: RunPaths, stage: StageSpec, stages: Iterable[StageSpec]) -> RevertReport:
+    """Withdraw one stage's accumulated writes and leave the stages after it standing.
+
+    Refuses unless the later stages are independent of this one, and says which key
+    obstructed. This is what a graph buys over a pipeline: a design that turned out wrong
+    need not also discard the measurement that revealed it.
+    """
+
+    later: list[EffectRecord] = []
+    for item in stages:
+        if item.number > stage.number:
+            later.extend(load_accumulator(paths, item))
+
+    records = load_accumulator(paths, stage)
+    if not records:
+        return RevertReport()
+
+    obstruction = independence_obstruction(records, later)
+    if obstruction is not None:
+        return RevertReport(
+            skipped=[f"{stage.slug} cannot be withdrawn on its own: {obstruction}"]
+        )
+
+    applied, skipped = _apply_records(paths, records)
+    _retire_accumulator(paths, stage, records)
+    return RevertReport(stages=[stage.slug], applied=applied, skipped=skipped)
+
+
+def withdraw_one_stage(paths: RunPaths, stage: StageSpec) -> RecoveryReport:
+    """Take back a single stage's contribution, keeping the later stages where possible.
+
+    What ``--redo-stage`` needs and never had. Re-running a stage used to leave its previous
+    contribution on disk for the new attempt to write on top of -- the same defect as a
+    rollback that only edited the manifest, at the grain of one stage instead of a range.
+
+    Selective when it can be. Two conditions, checked separately because they cover
+    different writes: no later stage may have written a key this stage wrote
+    (:func:`independence_obstruction`, over the accumulators), and no later stage may have
+    rewritten a file this stage wrote (the contested list from
+    :func:`src.provenance.plan_single_stage_withdrawal`, over the observed versions).
+
+    Where either fails, the honest move is the reverse-order withdrawal of this stage and
+    everything after it, and to say why rather than silently doing less. Leaving a contested
+    file alone would keep this stage's work standing; rewinding it would discard the later
+    stage's. Neither is "withdrew this stage".
+    """
+
+    from . import emissions
+    from .provenance import (
+        invalidate_from,
+        plan_single_stage_withdrawal,
+        trim_stage_versions,
+    )
+
+    plan, contested = plan_single_stage_withdrawal(paths, stage)
+    accumulated = revert_only(paths, stage, STAGES)
+    blocked = bool(contested) or bool(accumulated.skipped and not accumulated.applied)
+
+    if blocked:
+        detail = []
+        if contested:
+            detail.append(
+                "a later stage has rewritten " + ", ".join(sorted(contested)[:5])
+            )
+        detail.extend(accumulated.skipped)
+        report = recover_to_stage(
+            paths,
+            stage,
+            f"redo of {stage.stage_title} could not be selective: {'; '.join(detail)}",
+        )
+        return replace(report, selective=False, refusal="; ".join(detail))
+
+    observed = apply_withdrawal(paths, plan)
+    trim_stage_versions(paths, stage, [item.rel_path for item in plan])
+    invalidate_from(paths, stage, f"Redoing {stage.stage_title}")
+    discarded = emissions.discard_from(paths, stage, f"Redoing {stage.stage_title}")
+
+    return RecoveryReport(
+        stage=stage.stage_title,
+        accumulated=accumulated,
+        observed=observed,
+        emissions_discarded=len(discarded),
+        selective=True,
     )

@@ -1,35 +1,34 @@
 ---
 name: publish-what-the-run-already-computed
-description: Use at Stage 06 and before finalising the report, when deciding which of the run's results enter the deliverable. Covers the sweep that finds objects and numbers the run computed and never published, why the report's contents get chosen by the run's own hypotheses instead of by the task, and what to promote out of an appendix.
+description: Use at Stage 06 and again before the report is finalised, when deciding which of the run's results enter the deliverable. Sweeps the run's own outputs for quantities it computed and never published, and covers the three shapes that sweep finds — the diagnostic never persisted, the column requested and dropped, the feasibility measurement discarded — and what to promote out of an appendix.
 ---
 
 # The most expensive result is the one you computed and did not show
 
-There is a failure that costs more than any experiment that went wrong, and it
-leaves no trace in the logs: the run produces exactly the object the task asked
-for, writes it to a file, and then does not put it in the report. The work was
-done. The compute was spent. The deliverable is on disk. The reader is told a
-summary statistic about it instead.
+The work was done. The compute was spent. The number is on disk. And the report
+does not contain it — because the report's contents were chosen by the run's own
+hypothesis structure, and a quantity produced in service of a hypothesis but not
+adjudicating one has no section to live in.
 
-It happens because the report gets its contents from the run's own hypothesis
-structure — the questions the run decided to ask — rather than from the task's
-list of outputs. Every section then answers a hypothesis, and an object that was
-produced in service of a hypothesis but is not itself a hypothesis has no section
-to live in. It ends in `outputs/`, or in an appendix table nobody analyses.
+This skill is the sweep that finds those. It is about the run's *outputs*;
+`the-supplied-item-is-the-graded-unit` is about the *inputs* — the named objects
+in `data/` — and covers printing those objects rather than pointing at them. Run
+both. This one catches what that one cannot: a quantity nothing shipped and
+nothing asked for by name, which the run computed anyway because the analysis
+needed it.
 
 ## The sweep
 
 Before you fix a section order or polish a sentence, do this once:
 
 1. List every file the run wrote under the results and outputs directories, with
-   what it holds — not the path, the *content*: "the final derived Hamiltonian for
-   the shipped system", "per-epoch pre-training loss", "sequence identity per
-   aligned chain pair", "the 497-row permutation-importance table".
-2. Against each, write the section of the report where it appears. Grep the report
-   for a number out of the file; if no number from it is in the report, the entry
-   is empty.
-3. For every empty entry, answer one question: **is this one of the objects the
-   task named as an output?** If yes, it goes in the body, in its own subsection,
+   what it *holds* — not the path, the content: "per-epoch pre-training loss",
+   "sequence identity per aligned chain pair", "the 497-row permutation-importance
+   table", "seconds per optimiser step for the long-range and short-range heads".
+2. Against each, write the section of the report where it appears. Grep the
+   report for a number out of the file; if none is there, the entry is empty.
+3. For every empty entry, ask: **would a reader checking the task's outputs, or
+   the source study's own results, look for this?** If yes, it goes in the body
    before you do anything else. If no, it may stay unpublished.
 
 The sweep takes minutes and it is the highest-yield thing available at this point
@@ -37,37 +36,38 @@ in the run, because everything it finds is already paid for.
 
 ## The three shapes it finds
 
-**The object reduced to a statistic.** The task asks for derived Hamiltonians;
-the run derives one hundred and sixty-nine of them and reports the fraction that
-graded correct. The percentage is a measurement *about* the deliverable. It is not
-the deliverable. Show at least one instance of the object in full, in the body, in
-the form the task named — the equation, the table, the sequence, the structure —
-and put the aggregate next to it.
-
-**The diagnostic that was never drawn.** A training routine accumulates loss per
-epoch, returns it, and writes it nowhere; the convergence curve the source paper
-made its case with is then absent from a run that had the data in memory. Any
-quantity the source study plots is a quantity worth persisting the moment it is
-computed, even when your own argument does not need it.
+**The diagnostic that was never persisted.** A training routine accumulates loss
+per epoch, returns it, and writes it to no artifact — so the convergence curve the
+source study made its case with is absent from a run that had the numbers in
+memory. Any quantity the source plots is worth persisting the moment it is
+computed, even when your own argument does not need it. This one is the most
+expensive because it is unrecoverable by Stage 07: there is nothing on disk to
+promote.
 
 **The column that was requested and dropped.** A tool is asked for an extra field,
 the field lands in a CSV, and the report quotes everything from that CSV except
-that column. If you asked a tool for it, some part of the run thought it mattered.
+that column. If some part of the run thought to ask for it, some part of the run
+thought it mattered.
+
+**The measurement taken for a feasibility check.** Cost, timing and scaling
+numbers get produced to decide whether something is affordable, then discarded
+once the decision is made — on a report that trained a hundred models and says
+nothing about what any of them cost.
 
 ## Promote out of the appendix
 
-An object tabulated in an appendix and never analysed is half-published. If it is
-a named deliverable, it gets a body subsection, a sentence of interpretation and,
-where the shape allows, a figure. Where a table has structure worth a statistic —
-nine superposition vectors have a dispersion; a set of per-pair scores has a
-distribution — computing it is a handful of lines and turns a dump into a result.
+An object tabulated in an appendix and never analysed is half-published. Where a
+table has structure worth a statistic — nine superposition vectors have a
+dispersion, a set of per-pair scores has a distribution — computing it is a
+handful of lines and turns a dump into a result.
 
 ## What this is not
 
-This is not a licence to publish everything. Bulk arrays, intermediate caches, and
-per-row dumps belong exactly where they are. The test is the task's own list of
-outputs: an object the task named belongs in the body; everything else is judged
-on whether it carries an argument.
+Not a licence to publish everything. Bulk arrays, intermediate caches and per-row
+dumps belong exactly where they are. The test is whether a reader would look for
+it: an object the task named, or a quantity the source study reports, belongs in
+the body; everything else is judged on whether it carries an argument.
 
 See also `cover-what-the-task-named` for building the list this sweep checks
-against, and `result-table` for the shape an object takes once it is in the body.
+against, `the-supplied-item-is-the-graded-unit` for the shipped objects, and
+`result-table` for the shape a promoted object takes in the body.

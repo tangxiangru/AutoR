@@ -52,13 +52,19 @@ from .intake import (
     save_intake_context
 )
 from .artifact_index import write_artifact_index
-from .effects import independence_obstruction, load_accumulator
+from .effects import independence_obstruction, load_accumulator, withdraw_one_stage
 from .emissions import (
     pending as pending_emissions,
     release as release_emissions,
     withhold as withhold_emission,
 )
 from .provenance import format_withdrawal_plan, observe as observe_artifacts, plan_withdrawal
+from .walk_ratchet import (
+    begin as ratchet_begin,
+    settle as ratchet_settle,
+    outcomes,
+    summarise as summarise_excursions,
+)
 from .withdrawal_ledger import load_withdrawals, summarise as summarise_withdrawals
 from .experiment_manifest import write_experiment_manifest
 from .hypothesis_manifest import write_hypothesis_manifest
@@ -495,6 +501,22 @@ class ResearchManager:
             self._print(self._format_rollback_preview(paths, rollback_stage))
             rollback_to_stage(paths, rollback_stage)
             start_stage = rollback_stage
+        elif start_stage is not None:
+            # `--redo-stage` re-ran a stage on top of its own previous contribution.
+            # Nothing withdrew it: the artifacts of the attempt being replaced stayed on
+            # disk, counted by the same guards a rollback used to leave satisfied, and the
+            # new attempt wrote over whichever of them it happened to touch. The same
+            # defect as a rollback that only edited the manifest, at the grain of one stage.
+            #
+            # Selective where it can be, which is the point of redoing one stage rather
+            # than rolling back to it: a design that turned out wrong need not discard the
+            # measurement that revealed it. Where a later stage has written the same key or
+            # the same file, that is not available and the withdrawal falls back to the
+            # reverse-order one, saying so.
+            recovery = withdraw_one_stage(paths, start_stage)
+            if recovery.touched:
+                self._print(recovery.render())
+                append_log_entry(paths.logs, "redo withdrawal", recovery.render())
 
         append_log_entry(
             paths.logs,
@@ -597,11 +619,25 @@ class ResearchManager:
             # `REVISIT_EDGES` has no such edge to attribute it to.
             if self._jump_target_stage is not None:
                 target = self._jump_target_stage
+                backwards = target.number <= stage.number
+                # Settle before opening. A departure both closes the excursion the run was
+                # already on -- if it has climbed back to where that one started -- and may
+                # open a new one, and doing them in the other order would judge the new
+                # excursion against its own opening state.
+                self._settle_excursion(paths, state, stage, None)
+                if backwards:
+                    ratchet_begin(
+                        paths,
+                        state,
+                        stage,
+                        target,
+                        self._jump_reason or "The run was redirected to an earlier stage.",
+                    )
                 graph_leave(
                     paths,
                     state,
                     chose=target.slug,
-                    kind="revisit" if target.number <= stage.number else "advance",
+                    kind="revisit" if backwards else "advance",
                     reason=self._jump_reason or "The run was redirected to an earlier stage.",
                     default_choice="",
                     agent_directed=False,
@@ -668,6 +704,18 @@ class ResearchManager:
     def _complete_run(self, paths: RunPaths, state: "GraphState | None" = None) -> bool:
         route = format_route(state) if state is not None else ""
         self._record_block_census(paths, state)
+
+        # What every backward move bought, in one block. The count a graph-versus-pipeline
+        # comparison needs is not how many backward edges were taken -- `format_route`
+        # already carries that -- but how many of them ended better than they started.
+        # Written on every way out, because a halted run's excursions are as informative
+        # as a finished one's -- but only when there were any. A run that took no backward
+        # move has nothing to say here, and an entry saying so is noise in a log other
+        # readers scan by position: it displaced the disclosure
+        # `test_the_run_banner_names_a_stage_that_was_never_attacked` reads out of that
+        # test's window, on a run with no excursions at all.
+        if outcomes(paths):
+            append_log_entry(paths.logs, "excursions", summarise_excursions(paths))
 
         # Written on every way out, not only the clean one: a halted or abandoned run
         # still publishes the stage files whose validity reviews never ran, and "no
@@ -851,6 +899,11 @@ class ResearchManager:
                     f"not: {decision.refusal or 'the move was not available'}.",
                     level="warn",
                 )
+        self._settle_excursion(paths, state, stage, score.total if score is not None else None)
+        if decision.kind == "revisit":
+            target_stage = stage_for_slug(decision.target)
+            if target_stage is not None:
+                ratchet_begin(paths, state, stage, target_stage, decision.reason)
         graph_leave(
             paths,
             state,
@@ -3770,6 +3823,44 @@ class ResearchManager:
             + "\n".join(FIXED_STAGE_OPTIONS)
             + "\n"
         )
+
+    def _settle_excursion(
+        self,
+        paths: RunPaths,
+        state: "GraphState",
+        stage: StageSpec,
+        score: float | None,
+    ) -> None:
+        """Judge the backward move the run is on, if this departure closes it.
+
+        Called at both departure seams rather than at one, because the two are where the
+        walk leaves a stage and an excursion closes when the run has climbed back to where
+        it started going backwards -- which can happen on either path. Best-effort: a
+        ratchet that raised would turn a scoring question into a run-ending one, and the
+        walk's job is to keep going.
+        """
+
+        try:
+            outcome = ratchet_settle(paths, state, stage, score)
+        except OSError as error:
+            append_log_entry(paths.logs, "walk_ratchet_failed", str(error))
+            return
+        if outcome is None:
+            return
+        append_log_entry(paths.logs, f"{stage.slug} excursion_closed", outcome.render())
+        if outcome.verdict == "rewound":
+            self.ui.show_status(
+                f"The move back to {outcome.to_stage} left {outcome.from_stage} worse than "
+                f"it found it ({outcome.baseline} -> {outcome.closed_at_score}); the "
+                "workspace has been returned to where the move started.",
+                level="warn",
+            )
+        elif outcome.verdict == "worse_but_capped":
+            self.ui.show_status(
+                f"The move back to {outcome.to_stage} left {outcome.from_stage} worse "
+                "again, and it has already been rewound once. Recorded, and left standing.",
+                level="warn",
+            )
 
     def _format_rollback_preview(self, paths: RunPaths, rollback_stage: StageSpec) -> str:
         manifest = ensure_run_manifest(paths)
