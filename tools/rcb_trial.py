@@ -736,22 +736,14 @@ def fake_score(plan: TrialPlan, workspace: Path, out: Path, *, draws: int = 1) -
     columns that would let a broken seam pass.
 
     ``draws`` is folded by :func:`tools.score_rcb_run.aggregate_draws`, the function the
-    real scorer folds with, and the fabricated score moves with the draw index — that is
-    what ``|{draw_no}`` in the seed below is for. Both halves are the point. A fake judge
-    that ignored ``draws`` would write ``"draws": 1`` into every dry run, so the seam this
-    branch exists to exercise — a declared replicate count arriving at the process that
-    talks to the judge — would be exercised on the one path no test can afford to take.
-    And a fake judge that repeated an identical draw would report a spread of exactly 0.0
-    over three of them, which is the reading ``resolution_is_measured`` exists to keep off
-    the page: a stochastic judge that resolved every item perfectly.
-
-    That second half is a claim about this function, so it is held by a test of this
-    function: ``tests.test_rcb_trial_driver.FakeJudgeDrawsAreDistinctTests`` pins the
-    workspace and output names — the two seed inputs the driver randomises — and asserts
-    the three totals, the spread and every item's per-draw vector against the fold this
-    seed actually produces. Delete ``|{draw_no}`` and three of its five tests fail; the
-    two that survive are the ones about a *single* draw and about reproducibility, which
-    an identical-draws judge really does still satisfy.
+    real scorer folds with, and the fabricated score moves with the draw index. Both
+    halves are the point. A fake judge that ignored ``draws`` would write ``"draws": 1``
+    into every dry run, so the seam this branch exists to exercise — a declared replicate
+    count arriving at the process that talks to the judge — would be exercised on the one
+    path no test can afford to take. And a fake judge that repeated an identical draw
+    would report a spread of exactly 0.0 over three of them, which is the reading
+    ``resolution_is_measured`` exists to keep off the page: a stochastic judge that
+    resolved every item perfectly.
     """
     from tools.score_rcb_run import aggregate_draws
 
