@@ -13,12 +13,15 @@ been loaded.
 from __future__ import annotations
 
 import re
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
 from src.run_skills import (
     discipline_of,
+    DEFAULT_PINS_FILENAME,
+    MAX_PINS_PER_TASK,
     format_skills_for_prompt,
     load_task_pins,
     pinned_skills_note,
@@ -421,6 +424,100 @@ class SkillsNamedInThePromptTest(unittest.TestCase):
         entries = self._entries()
         for slug in ("03_study_design", "06_analysis", "07_writing"):
             self.assertNotIn("always", format_skills_for_prompt(entries, slug))
+
+    def test_a_table_over_the_cap_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack = Path(tmp)
+            names = []
+            for index in range(MAX_PINS_PER_TASK + 1):
+                name = f"skill-{index:02d}"
+                names.append(name)
+                (pack / name).mkdir(parents=True)
+                (pack / name / "SKILL.md").write_text(
+                    f"---\nname: {name}\ndescription: Use when.\nstages: 03_study_design\n---\n\nb\n",
+                    encoding="utf-8",
+                )
+            problems = validate_task_pins({"Physics_000": names}, pack)
+            self.assertTrue(any("over the maximum" in p for p in problems))
+            self.assertEqual(validate_task_pins({"Physics_000": names[:-1]}, pack), [])
+
+    def test_a_big_table_of_stageless_pins_is_refused(self) -> None:
+        """The cap was raised on the assumption that pins are routed. A stageless pin is
+        announced in every prompt, so a table of them spends the budget the routing was
+        supposed to save -- silently, because the run still works."""
+        with tempfile.TemporaryDirectory() as tmp:
+            pack = Path(tmp)
+            names = []
+            for index in range(4):
+                name = f"loose-{index}"
+                names.append(name)
+                (pack / name).mkdir(parents=True)
+                (pack / name / "SKILL.md").write_text(
+                    f"---\nname: {name}\ndescription: Use when.\n---\n\nb\n", encoding="utf-8"
+                )
+            problems = validate_task_pins({"Physics_000": names}, pack)
+            self.assertTrue(any("name no stage" in p for p in problems))
+            # Three is still allowed without stages: that was the whole table before.
+            self.assertEqual(validate_task_pins({"Physics_000": names[:3]}, pack), [])
+
+    def test_the_constant_and_the_tables_own_prose_agree(self) -> None:
+        """`_maximum` is the argument for the number and the constant is the number. A
+        change to either alone leaves a table whose stated reasoning is for a different
+        cap than the one enforced, and the prose is the half a reader believes."""
+        import re
+
+        table = json.loads(
+            (REPO_ROOT / "configs" / DEFAULT_PINS_FILENAME).read_text(encoding="utf-8")
+        )
+        words = {
+            "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
+            "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14,
+            "fifteen": 15, "sixteen": 16, "eighteen": 18, "twenty": 20,
+        }
+        head = table["_maximum"].split(" per task", 1)[0].strip().lower()
+        self.assertIn(head, words, f"`_maximum` opens with {head!r}, which is not a count")
+        self.assertEqual(words[head], MAX_PINS_PER_TASK)
+
+    def test_the_shipped_table_passes_its_own_rules(self) -> None:
+        self.assertEqual(
+            validate_task_pins(
+                load_task_pins(REPO_ROOT / "configs" / DEFAULT_PINS_FILENAME),
+                REPO_ROOT / "src" / "skills",
+            ),
+            [],
+        )
+
+    def test_a_pin_is_announced_at_the_stage_it_names(self) -> None:
+        """Unconditional announcement was affordable at a cap of three pins per task and
+        is not at fifteen: a description competes against every other description in the
+        prompt, so fifteen pins announced seven times over is the listing problem the cap
+        existed to avoid, reintroduced by the mechanism meant to solve it."""
+        entries = self._entries()
+        pinned = frozenset({"scoped-design", "scoped-analysis"})
+        design = format_skills_for_prompt(entries, "03_study_design", pinned)
+        self.assertIn("scoped-design", design)
+        self.assertNotIn("scoped-analysis", design)
+        analysis = format_skills_for_prompt(entries, "06_analysis", pinned)
+        self.assertIn("scoped-analysis", analysis)
+        self.assertNotIn("scoped-design", analysis)
+
+    def test_a_pin_that_names_no_stage_is_announced_everywhere(self) -> None:
+        """The fallback has to hold, or routing turns a pin the table asserts into a pin
+        nobody is ever told about -- a silent regression of the strongest signal here."""
+        entries = self._entries()
+        pinned = frozenset({"always"})
+        for slug in ("01_literature_survey", "03_study_design", "07_writing"):
+            self.assertIn("always", format_skills_for_prompt(entries, slug, pinned))
+
+    def test_a_pin_still_outranks_a_shape_match_at_the_same_stage(self) -> None:
+        """Routing changes where a pin appears, not what it is worth: a pin is a record
+        of what this task lost, and a shape match is an inference about tasks like it."""
+        entries = self._entries()
+        block = format_skills_for_prompt(entries, "03_study_design", frozenset({"scoped-design"}))
+        self.assertIn("pinned to this task by name", block)
+        self.assertLess(
+            block.index("pinned to this task by name"), block.index("scoped-design")
+        )
 
     def test_a_stage_with_no_selected_skill_gets_no_block(self) -> None:
         self.assertEqual(format_skills_for_prompt(self._entries(), "01_literature_survey"), "")

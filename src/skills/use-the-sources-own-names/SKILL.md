@@ -1,6 +1,7 @@
 ---
 name: use-the-sources-own-names
 description: Use at Stage 06 and Stage 07 when writing up a reproduction, and any time you have given a reproduced quantity, equation, figure or sequence a name of your own. Covers why a correct reproduction under private names reads as a missing one, which names have to be carried, and where they have to appear.
+stages: 06_analysis, 07_writing
 ---
 
 # A reproduction nobody can recognise is scored as one that did not happen

@@ -1,6 +1,7 @@
 ---
 name: energy-canonical-configuration-before-the-enhanced-variant
 description: Use at study design when you are about to run an improved variant of a system before its default configuration, or fold several claims into one panel. Covers running the default recipe with its conventional diagnostics first, and giving each claim its own plain panel.
+stages: 03_study_design, 05_experimentation, 06_analysis
 ---
 
 # Run the default recipe with its conventional diagnostics, and give each claim its own plain panel

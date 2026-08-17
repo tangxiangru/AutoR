@@ -1,6 +1,7 @@
 ---
 name: material-landmark-scalars-in-physical-units
 description: Use at analysis when a materials result exists as a curve, a distribution or a trajectory and is about to be reported as one. Covers extracting the landmark scalar a reader compares — peak position, transition temperature, barrier height — in the property's physical unit, against a reference value.
+stages: 03_study_design, 06_analysis, 07_writing
 ---
 
 # Extract the landmark scalar, report it in the property's physical unit, and anchor it to a reference

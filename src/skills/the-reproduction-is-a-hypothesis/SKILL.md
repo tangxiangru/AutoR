@@ -1,6 +1,7 @@
 ---
 name: the-reproduction-is-a-hypothesis
 description: Use at Stage 02 and Stage 03 whenever the task is to reproduce, re-implement or verify a published study and the hypotheses you are drafting are all about something else. Covers how to write the reproduction itself as a falsifiable frozen commitment, why a self-invented question crowds it out, and how to budget between the two.
+stages: 02_hypothesis_generation, 03_study_design
 ---
 
 # "This reproduces" is falsifiable, and it is usually the hypothesis that matters

@@ -439,9 +439,17 @@ def format_skills_for_prompt(
     * **shape** -- a predicate over this run's brief matched, and the skill named this
       stage. An inference, and it can be wrong about this task.
     * **pinned** -- this run's identifier is in the pin table. Not an inference: a
-      record of what a previous run of the same task lost. Announced at every stage,
-      because a pin is short by construction and the stage that needed it is usually
-      the one that had already gone wrong before anyone looked.
+      record of what a previous run of the same task lost.
+
+    A pin is announced at the stages it names, and at every stage only when it names
+    none. That used to be unconditional, and it was affordable because the table capped
+    a task at three: three lines in each of seven prompts. It stops being affordable at
+    the size the table is now, and in the direction that matters -- a description
+    competes against every other description in the prompt, so fifteen pins announced
+    seven times over is the listing problem the cap existed to avoid, reintroduced by
+    the mechanism meant to solve it. Routing them costs nothing: a pin that says which
+    stage it is for is announced there, and the stage that needed it is the stage it
+    names.
 
     Named imperatively, because that is the form measured to work: over a 40-task arm
     the one skill a rendered prompt told the operator to *read* fired in 31 of 40 runs,
@@ -456,7 +464,12 @@ def format_skills_for_prompt(
         key=lambda entry: entry.name,
     )
     by_pin = sorted(
-        (entry for entry in entries if entry.name in pinned), key=lambda entry: entry.name
+        (
+            entry
+            for entry in entries
+            if entry.name in pinned and (not entry.stages or stage_slug in entry.stages)
+        ),
+        key=lambda entry: entry.name,
     )
     if not by_shape and not by_pin:
         return ""
@@ -479,11 +492,20 @@ def format_skills_for_prompt(
             "a stronger reason than any of the others in your context: it is not advice about "
             "tasks like this one, it is a record of this one. **Read every one of them before "
             "you plan this stage**, and treat what they describe as the failure most likely to "
-            "be repeated here.",
+            "be repeated here. This is the subset of the task's pins that names this stage; "
+            "others are announced at the stages they name.",
             "",
         ]
         lines += [f"- `{entry.name}` — {entry.description}" for entry in by_pin]
     return "\n".join(lines)
+
+
+#: Pins one task may carry. See the table's own ``_maximum`` for the arithmetic; the
+#: short version is that a pin is announced imperatively at the stages it names, the
+#: pack averages 3.2 stages per skill, and fifteen pins is seven announcements per stage
+#: prompt against twenty's nine. Enforced rather than written down, because the previous
+#: cap was written down and the only thing stopping a sixteenth pin was whoever noticed.
+MAX_PINS_PER_TASK = 15
 
 
 def validate_task_pins(table: dict[str, list[str]], source_dir: Path) -> list[str]:
@@ -493,8 +515,14 @@ def validate_task_pins(table: dict[str, list[str]], source_dir: Path) -> list[st
     is silent otherwise: `select_run_skills` filters the pack, so an unknown name
     simply selects nothing and the task runs with the pack it would have had anyway.
     A renamed skill breaks every pin that names it.
+
+    The two size rules are here for the same reason: both are silent at run time. A task
+    over :data:`MAX_PINS_PER_TASK` still runs, and so does one whose pins name no stage
+    -- the second one just quietly spends the whole per-prompt budget the routing exists
+    to save, which is the failure the cap was raised on the assumption of avoiding.
     """
     known = {entry.name for entry in read_skill_pack(source_dir)}
+    stages_by_name = {entry.name: entry.stages for entry in read_skill_pack(source_dir)}
     problems: list[str] = []
     for task_id, names in sorted(table.items()):
         if not names:
@@ -504,6 +532,18 @@ def validate_task_pins(table: dict[str, list[str]], source_dir: Path) -> list[st
                 problems.append(f"{task_id} is pinned to {name!r}, which is not in {source_dir}.")
         if len(set(names)) != len(names):
             problems.append(f"{task_id} names the same skill twice.")
+        if len(names) > MAX_PINS_PER_TASK:
+            problems.append(
+                f"{task_id} carries {len(names)} pins, over the maximum of "
+                f"{MAX_PINS_PER_TASK}. See the table's `_maximum`."
+            )
+        stageless = sorted(n for n in names if n in known and not stages_by_name.get(n))
+        if len(names) > 3 and stageless:
+            problems.append(
+                f"{task_id} carries {len(names)} pins and {len(stageless)} of them name no "
+                f"stage, so they are announced in every stage prompt: {', '.join(stageless)}. "
+                f"A table this size is only affordable because pins are routed."
+            )
     return problems
 
 

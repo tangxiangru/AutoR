@@ -1,6 +1,7 @@
 ---
 name: evidence-not-assertion
 description: Use whenever a number, a comparison or a claim is about to enter a stage summary or the report — at analysis and writing, and any time you are tempted to state a value you have not computed in this run. Covers where a number must come from, what to do when the experiment did not run, and why an honest gap outscores a plausible sentence.
+stages: 06_analysis, 07_writing
 ---
 
 # Every number comes from a file this run wrote

@@ -1,6 +1,7 @@
 ---
 name: answer-the-why-not-only-the-what
 description: Use when writing results and discussion, and when a task or a reviewer asks why an effect happens rather than whether it does. Covers the difference between reporting an effect and accounting for it, and what a mechanism claim needs behind it.
+stages: 05_experimentation, 06_analysis, 07_writing
 ---
 
 # A measured effect is half the result

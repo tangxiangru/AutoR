@@ -1,6 +1,7 @@
 ---
 name: physics-two-estimators-propagation-and-a-forward-model
 description: Use at study design and analysis when a physical quantity is about to be reported from one estimator, or an uncertainty quoted without propagation. Covers measuring it a second independent way, propagating the error through the chain, and generating the observable forward from the fitted model to check it.
+stages: 03_study_design, 05_experimentation, 06_analysis
 ---
 
 # Physics: measure it twice, propagate it, and generate it
