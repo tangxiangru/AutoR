@@ -12,7 +12,7 @@
       "pins": 12
     },
     "Chemistry_000": {
-      "pins": 7
+      "pins": 10
     },
     "Chemistry_001": {
       "pins": 10
@@ -114,6 +114,9 @@
     "price-the-grid-in-wall-clock-and-fill-it-breadth-first",
     "rebuild-the-sources-headline-table-row-for-row",
     "chemistry-group-attribution-over-the-split-and-the-baseline-model",
+    "chemistry-accuracy-and-cost-for-every-module-you-swap-in",
+    "chemistry-a-cut-variant-takes-its-analyses-with-it",
+    "chemistry-reproduce-the-scoring-path-before-you-replace-it",
     "the-attribution-is-the-deliverable",
     "result-table",
     "information-fill-the-whole-results-grid",
