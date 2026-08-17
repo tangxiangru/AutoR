@@ -417,7 +417,43 @@ class ResearchManager:
         paper_corpus: Path | None = None,
         output_format: str | None = None,
         final_stage: StageSpec | None = None,
+        start_stage: StageSpec | None = None,
     ) -> bool:
+        """Create a run and walk it.
+
+        ``start_stage`` skips the stages before it on a *fresh* run, the way
+        ``resume_run`` already skips them on an existing one. Both go through the same
+        ``_select_stages_for_run``, so a caller that enters above Stage 01 gets exactly
+        the population a resume would.
+
+        What that population costs is worth stating rather than discovering: the skipped
+        stages stay ``pending`` in the manifest and the run still ends ``completed``,
+        because it did everything it was asked to do -- the same arrangement
+        ``--final-stage`` already has at the other end of the walk. They are *not* added
+        to ``auto_skipped_stages``; that list is the run's record of gates it gave up on,
+        and a stage the caller chose not to run is not one of those. So the manifest is
+        where the absence is legible, and a reader who wants "did this run survey the
+        literature" has to ask the manifest rather than the run status.
+
+        The caller that wants it is a benchmark whose published protocol forbids
+        browsing: Stage 01 is a literature survey, its evidence ledger can only be
+        satisfied by citations, and the only citations available to a run that cannot
+        search are invented ones. Not running the stage is honest; running it without a
+        search tool is not.
+
+        ``start_stage`` and ``project_root`` are refused together. ``--project-root``
+        runs a bootstrap scan whose whole output is a recommended entry stage, so passing
+        both states two answers to one question, and the silent resolution -- whichever
+        assignment happens to come last in this method -- would be a coin flip decided by
+        source order. The refusal is raised before anything is created, so a rejected
+        call leaves no half-built run directory behind.
+        """
+        if start_stage is not None and project_root is not None:
+            raise ValueError(
+                "start_stage and project_root both decide where the walk begins: "
+                f"start_stage says {start_stage.slug}, and --project-root runs a bootstrap "
+                "scan whose recommended entry stage would say something else. Pass one."
+            )
         self._research_diagram = research_diagram
         self._final_stage = final_stage
         paths = self._create_run(
@@ -440,15 +476,19 @@ class ResearchManager:
                 self.ui.show_status("Run aborted.", level="warn")
                 return False
 
+        # Where the walk begins. Two sources, never both: the caller's `start_stage`, or
+        # the entry stage a `--project-root` bootstrap scan recommends. The guard at the
+        # top of this method is what makes the second assignment safe to write here.
+        entry_stage: StageSpec | None = start_stage
+
         # Run project repo bootstrap if provided
-        bootstrap_start_stage: StageSpec | None = None
         if project_root is not None:
             bootstrap_result = self._run_project_bootstrap(paths, project_root)
             if bootstrap_result is None:
                 append_log_entry(paths.logs, "run_aborted", "Run aborted during project bootstrap.")
                 self.ui.show_status("Run aborted.", level="warn")
                 return False
-            bootstrap_start_stage = bootstrap_result
+            entry_stage = bootstrap_result
 
         # Run bootstrap from paper corpus if provided
         if paper_corpus is not None:
@@ -458,7 +498,17 @@ class ResearchManager:
                 self.ui.show_status("Run aborted.", level="warn")
                 return False
 
-        return self._run_from_paths(paths, start_stage=bootstrap_start_stage)
+        if start_stage is not None:
+            # Said out loud, and as a warning. `resume_run` announces its restart point
+            # for the same reason: a run that produced no literature survey because it
+            # was told not to and a run that produced none because the stage failed look
+            # identical on disk, and only one of them is what the operator asked for.
+            self.ui.show_status(
+                f"Starting at {start_stage.stage_title}; the stages before it will not run "
+                "and stay unsettled in the manifest.",
+                level="warn",
+            )
+        return self._run_from_paths(paths, start_stage=entry_stage)
 
     def resume_run(
         self,

@@ -138,7 +138,7 @@ The settings the run was started with, so a resume reproduces them.
 | `evolve_measure` | Whether every valid draft is scored and the champion ratchet runs. `true` by default; costs no backend call. |
 | `evolve_rounds` | Improvement rounds per stage; `2` by default, `0` measures without polishing. |
 | `archive_steer` | Whether the cross-run archive may choose this run's topology, as opposed to only recording what it did. `false` by default. |
-| `web_search` | `auto`, `gemini`, or `native`. The mode, not the resolved backend. Absent in runs created before it existed, and read as `auto`. |
+| `web_search` | `auto`, `gemini`, `native`, or `off`. The mode, not the resolved backend. Absent in runs created before it existed, and read as `auto`. |
 | `min_report_figures` | Distinct rendered figures `workspace/report/images/` must hold before Stage 07 can be approved in `markdown` mode. `MIN_REPORT_FIGURES` = 1 for an ordinary run; `rcb_agent.py` sets `BENCHMARK_MIN_REPORT_FIGURES` = 3. `resolve_min_report_figures` clamps whatever it reads into `[1, MAX_REPORT_FIGURES]`, so a value of `0`, `99` or `"three"` becomes 1, 5 and 1 respectively rather than failing the run. Read as a hard gate by `validate_markdown_report`. |
 | `created_at` | ISO-8601 to the second. Preserved across rewrites. |
 

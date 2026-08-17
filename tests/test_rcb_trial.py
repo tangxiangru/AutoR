@@ -325,6 +325,40 @@ class EnvironmentTests(unittest.TestCase):
         self.assertEqual(len(result.excluded), 1)
         self.assertIn("web_search_level", result.excluded[0][1])
 
+    def test_a_deliberate_off_and_a_working_search_are_not_the_same_environment(self) -> None:
+        """The resolved level stopped separating the two things it was added to separate.
+
+        ``--web-search off`` announces itself at ``level: info`` -- the right level for a
+        deliberate choice -- and so does an ``auto`` that found a working backend. Since
+        `rcb_agent.py` began accepting ``off``, an arm told not to browse and an arm that
+        browsed freely could carry the identical ``web_search_level`` and hash the same,
+        which is the confound the field exists to catch arriving from the other side. The
+        requested mode is recorded next to it.
+        """
+        browsing = env(web_search_mode="auto", web_search_level="info")
+        not_browsing = env(web_search_mode="off", web_search_level="info")
+
+        self.assertNotEqual(browsing.digest, not_browsing.digest)
+        self.assertTrue(
+            any("web_search_mode" in reason
+                for reason in browsing.describe_difference(not_browsing)),
+            browsing.describe_difference(not_browsing),
+        )
+        self.assertEqual(trial(arm(), arm(label="47f3fbf", environment=not_browsing)).result.n, 0)
+
+    def test_two_arms_that_asked_for_the_same_search_still_pair(self) -> None:
+        """Control: the digest above differs because the mode differs, not because two
+        environments built the same way now differ."""
+        both = dict(web_search_mode="auto", web_search_level="info")
+        self.assertEqual(env(**both).digest, env(**both).digest)
+        self.assertEqual(
+            trial(
+                arm(environment=env(**both)),
+                arm(label="47f3fbf", environment=env(**both)),
+            ).result.n,
+            1,
+        )
+
     def test_a_different_judge_in_the_two_arms_is_not_a_comparison(self) -> None:
         """Judge choice is worth about sixteen points on identical artifacts."""
         control = arm()

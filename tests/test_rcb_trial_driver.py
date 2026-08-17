@@ -210,6 +210,41 @@ class StateTests(unittest.TestCase):
         )
         self.assertEqual(self.tool.search_level(log), "warn")
 
+    def test_the_requested_web_search_mode_is_harvested_beside_the_resolved_level(self) -> None:
+        """``off`` and a working ``auto`` both announce themselves at ``level: info``.
+
+        The level is the resolved answer and the only thing the progress event carries,
+        so once `rcb_agent.py` began accepting ``--web-search off`` an arm told not to
+        browse and an arm that browsed freely produced the same one. The request is in
+        ``run_config.json``, and reading it is what keeps the two apart in the digest.
+        """
+        workspace = self.root / "asked_for_off"
+        root = workspace / ".autor" / "r1"
+        root.mkdir(parents=True)
+        (root / "run_config.json").write_text(
+            json.dumps({"model": "opus", "web_search": "off"}), encoding="utf-8"
+        )
+        log = self.root / "off.log"
+        log.write_text(
+            '{"type":"progress","stage":"web_search","level":"info"}\n', encoding="utf-8"
+        )
+
+        facts = self.tool.harvest(workspace, log)
+        self.assertEqual(facts["web_search_mode"], "off")
+        self.assertEqual(facts["web_search_level"], "info")
+
+    def test_a_run_whose_config_never_named_a_mode_reports_no_mode(self) -> None:
+        """Control, and the shape of the field on every run recorded before this.
+
+        A missing key must read as unknown rather than as the default: an arm harvested
+        from a workspace with no ``run_config.json`` has not been observed to have asked
+        for ``auto``, and writing ``auto`` in would let it pair with an arm that did.
+        """
+        workspace = self.root / "no_config"
+        (workspace / ".autor" / "r1").mkdir(parents=True)
+
+        self.assertEqual(self.tool.harvest(workspace)["web_search_mode"], "")
+
     def test_a_log_with_no_progress_event_yields_no_level_rather_than_a_guess(self) -> None:
         log = self.root / "out.log"
         log.write_text("nothing here\n", encoding="utf-8")
@@ -643,7 +678,8 @@ class EvidenceTests(unittest.TestCase):
             "task_id": "Energy_001", "arm": arm, "attempt": 1, "phase": "finished",
             "workspace": f"/ws/{arm}", "run_id": f"run-{arm}",
             "agent_model": "claude-opus-4-5", "review_model": "claude-sonnet-4-5",
-            "web_search_level": "warn", "instructions_digest": "ins-digest",
+            "web_search_level": "warn", "web_search_mode": "auto",
+            "instructions_digest": "ins-digest",
             "meta_status": "completed", "meta_pipeline_completed": True,
             "meta_report_source": "agent", "autor_run_count": 1,
             "images_under_outputs": 0, "report_md_count": 1,
@@ -711,6 +747,7 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(evidence.env.agent_model, "claude-opus-4-5")
         self.assertEqual(evidence.env.review_model, "claude-sonnet-4-5")
         self.assertEqual(evidence.env.web_search_level, "warn")
+        self.assertEqual(evidence.env.web_search_mode, "auto")
         self.assertEqual(evidence.env.instructions_digest, "ins-digest")
         self.assertEqual(evidence.env.judge_model, "gpt-5.1")
         self.assertEqual(evidence.env.bench_revision, "bench-sha")
