@@ -1,0 +1,756 @@
+#!/usr/bin/env python3
+"""Answer one FrontierScience-Research question, in one of two ways, and say which.
+
+`FrontierScience-Research <https://arxiv.org/abs/2601.21165>`_ is sixty written science
+examination questions. There is no dataset to load, no experiment to run, no reference
+paper to read and nobody to ask: an examiner is handed the problem and the text of the
+answer, and grades it against a rubric of independently weighted specifics. That is a
+different shape from every other benchmark this repository has been pointed at, and the
+front end has to be a different shape too.
+
+Two profiles, which are the two arms of the comparison this adapter exists to make.
+
+``--profile direct``
+    One operator call. The problem, the task instruction, the browsing tools denied, and
+    the reply is the answer. No stages, no gates, no reviewer, nothing else. This is the
+    control: the same underlying model, the same words, the same denied tools, so that a
+    paired difference is a statement about the pipeline rather than about the model.
+
+``--profile ideate``
+    AutoR, entered at Stage 02 and stopped there. One stage, its reviewer, and the
+    ideation panel if it is asked for. Everything else -- routing, evolution rounds, the
+    archive, the cross-reviewer, rounds past the first -- is off, because each of them is
+    a second thing changing at the same time as the thing being measured.
+
+**Why the walk starts above Stage 01.** The published protocol forbids browsing. Stage 01
+is a literature survey whose evidence ledger can only be satisfied by citations, the gate
+never checks that a URL resolves, and the rubric awards points for named literature
+values -- so a run that cannot search does not merely fail to cite, it writes an invented
+value into the place a real one belonged. Not running the stage is honest. Running it
+without a search tool is not. Stopping at Stage 02 has a second effect worth naming: the
+writing stage's figure floor is never consulted, so nothing in :mod:`src.utils` has to
+move for this benchmark to run at all.
+
+**What the exit code means, and why it is not "the pipeline said completed".** On the
+sibling benchmark, forty of forty real runs wrote ``status: "completed"``. Seventy-seven
+and a half per cent of them had auto-skipped at least one stage; seventeen and a half per
+cent had auto-skipped *the stage being scored*; and ``auto_skipped_stages`` appeared only
+in the stdout event stream and never in ``_meta.json``. Every downstream that read the
+metadata therefore recorded those runs as successes, and nothing surfaced it until a human
+read the transcripts thirteen hours later. So this adapter writes the fields that decide
+the verdict into ``_meta.json``, computes the exit code from that same dictionary through
+:func:`src.frontierscience.fs_exit_code`, and refuses six separate ways rather than one:
+the answer file has to exist, be inside the length band, have come from a model rather than
+from the deterministic assembly, follow a procedure that ran to completion, follow a walk
+that auto-skipped nothing, and be an answer rather than a plan for one.
+
+Nothing here reads stdin, and every prompt that would block raises instead of hanging.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import sys
+import time
+import traceback
+from pathlib import Path
+from typing import Sequence
+
+REPO_ROOT = Path(__file__).resolve().parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from src.approval_agent import AutomatedReviewer  # noqa: E402
+from src.cross_reviewer import resolve_cross_reviewer  # noqa: E402
+from src.evolution import EvolutionConfig  # noqa: E402
+from src.frontierscience import (  # noqa: E402
+    DEFAULT_FS_ANSWER_GUIDANCE,
+    DEFAULT_FS_PROFILE,
+    FS_ANSWER_GUIDANCE_CHOICES,
+    FS_IDEATE_STAGE,
+    FS_PROFILE_CHOICES,
+    AnswerSynthesizer,
+    DatasetRefused,
+    DirectAnswerWriter,
+    FsRow,
+    FsRunResult,
+    build_fs_goal,
+    build_fs_meta,
+    ensure_fs_workspace,
+    export_answer,
+    fs_runs_dir_for,
+    fs_workspace_name,
+    infer_fs_task_key,
+    load_dataset,
+    resolve_answer_guidance,
+    resolve_dataset_path,
+    resolve_task_keys,
+    rows_by_key,
+    stages_approved_in,
+    write_fs_meta,
+)
+from src.manager import ResearchManager  # noqa: E402
+from src.operator import ClaudeOperator  # noqa: E402
+from src.operator_codex import CodexOperator  # noqa: E402
+from src.rcb import emit_event  # noqa: E402
+from src.stage_graph import StageGraph  # noqa: E402
+from src.terminal_ui import TerminalUI  # noqa: E402
+from src.utils import (  # noqa: E402
+    DEFAULT_OUTPUT_FORMAT,
+    OUTPUT_FORMAT_CLI_CHOICES,
+    WEB_SEARCH_MODE_CHOICES,
+    build_run_paths,
+    create_run_root,
+    ensure_run_layout,
+    resolve_output_format,
+    resolve_stage,
+    write_text,
+)
+from src.web_search import (  # noqa: E402
+    assess_search_readiness,
+    disallowed_tools_for,
+    resolve_web_search_context,
+    web_search_notice,
+)
+
+
+#: Seconds allowed per stage attempt in the ``ideate`` arm.
+#:
+#: Load-bearing, and three times the interactive default for a measured reason: the only
+#: per-stage wall clock ever recorded on this box for a comparable configuration was
+#: 2,100 seconds, and a trial run at 1,800 had twenty-eight of forty arms hit the ceiling.
+#: A timeout below the distribution does not slow a treatment arm down, it converts it
+#: into a refusal, and a refusal rate that differs between the arms is not a difference
+#: anybody can interpret.
+DEFAULT_FS_STAGE_TIMEOUT = 3600
+
+#: Seconds allowed for the ``direct`` arm's single call. Measured mean answer latency for
+#: a direct model call on this benchmark is 134.5 seconds, and the longest observed answer
+#: spent 34,313 output tokens, so this is an order of magnitude of headroom. It is not the
+#: stage timeout: there is no stage, and reusing one number for two things is how a knob
+#: ends up tuned for the wrong one.
+DEFAULT_FS_ANSWER_TIMEOUT = 1800
+
+#: Attempts per stage before the stage is auto-skipped. Two, where the interactive default
+#: is unbounded: ``is_stuck`` only fires when three consecutive validation errors are
+#: *identical*, and artifact errors carry filenames and counts, so an unbounded budget is
+#: an unbounded budget. A real run on the sibling benchmark reached attempt nine on one
+#: stage, and that run's seven stages cost sixty-five backend calls between them.
+DEFAULT_FS_MAX_ATTEMPTS = 2
+
+#: How many stages may be auto-skipped. **Zero, and this is the point of the adapter.**
+#: An auto-skipped Stage 02 in a run whose only stage is Stage 02 is a run that produced
+#: nothing while reporting that it finished. There is no budget here to spend.
+DEFAULT_FS_MAX_AUTO_SKIPS = 0
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="fs_agent",
+        description="Answer one FrontierScience-Research question with AutoR or with one "
+                    "direct model call.",
+    )
+    parser.add_argument(
+        "--workspace",
+        metavar="PATH",
+        help="Directory to run in. Created if it does not exist. Defaults to a fresh "
+             "directory named <task>_<profile>_<timestamp with microseconds> under the "
+             "current directory, so two arms of one task launched in the same second "
+             "cannot land in the same place.",
+    )
+    parser.add_argument(
+        "--dataset",
+        metavar="PATH",
+        help="Path to research_test.jsonl. Falls back to $FRONTIERSCIENCE_DATASET and "
+             "then to ~/.cache/frontierscience/research_test.jsonl. The file is checked "
+             "against a pinned digest and refused if it does not match; it is never "
+             "downloaded.",
+    )
+    parser.add_argument(
+        "--task",
+        metavar="KEY",
+        help="Which question to answer, as a row index (43) or a task key (fs:043). "
+             "Exactly one: this front end answers one question per run, and a set is the "
+             "trial driver's job. Defaults to the key the workspace directory name "
+             "carries (fs043_...), which is what a trial driver relies on; with neither, "
+             "the run is refused rather than defaulted to row zero.",
+    )
+    parser.add_argument(
+        "--profile",
+        choices=list(FS_PROFILE_CHOICES),
+        default=DEFAULT_FS_PROFILE,
+        help="Which arm to run. 'direct' makes one operator call and keeps the reply. "
+             "'ideate' runs AutoR entered at Stage 02 and stopped there. "
+             f"Defaults to {DEFAULT_FS_PROFILE}.",
+    )
+    parser.add_argument(
+        "--answer-guidance",
+        choices=list(FS_ANSWER_GUIDANCE_CHOICES),
+        default=DEFAULT_FS_ANSWER_GUIDANCE,
+        help="How much the agent is told about what an answer is. 'paper' gives the "
+             "fenced problem and nothing else, which is the published setup. 'minimal' "
+             "adds the task instruction. 'coverage' additionally describes the rubric's "
+             "shape, which is a declared experimental intervention and must be applied to "
+             f"both arms or to neither. Defaults to {DEFAULT_FS_ANSWER_GUIDANCE}.",
+    )
+    parser.add_argument(
+        "--model",
+        help="Model for the execution backend. Defaults to the backend default. Always "
+             "pass it together with --review-model: an arm is the pair.",
+    )
+    parser.add_argument(
+        "--review-model",
+        help="Model for the reviewer agent that replaces the human approval gate. "
+             "Defaults to the backend default.",
+    )
+    parser.add_argument(
+        "--operator",
+        choices=["claude", "codex"],
+        default="claude",
+        help="Execution backend. Defaults to claude.",
+    )
+    parser.add_argument(
+        "--review-operator",
+        choices=["claude", "codex"],
+        help="Backend for the reviewer agent. Defaults to the execution backend.",
+    )
+    parser.add_argument(
+        "--codex-command",
+        default="codex",
+        metavar="BIN",
+        help="Executable to invoke as the Codex CLI, used only with --operator codex. "
+             "Defaults to `codex`.",
+    )
+    parser.add_argument(
+        "--codex-sandbox",
+        default="workspace-write",
+        help="Codex CLI sandbox mode, used only with --operator codex. Defaults to "
+             "workspace-write.",
+    )
+    parser.add_argument(
+        "--answer-timeout",
+        type=int,
+        default=DEFAULT_FS_ANSWER_TIMEOUT,
+        help="Seconds allowed for the direct arm's single call. Defaults to "
+             f"{DEFAULT_FS_ANSWER_TIMEOUT}.",
+    )
+    parser.add_argument(
+        "--first-stage",
+        default=FS_IDEATE_STAGE,
+        metavar="STAGE",
+        help="Where the ideate arm's walk begins. Defaults to "
+             f"{FS_IDEATE_STAGE}: under a no-browsing protocol the literature survey's "
+             "evidence ledger can only be satisfied by invented citations, and the rubric "
+             "awards points for named literature values, so a fabricated one displaces a "
+             "real one.",
+    )
+    parser.add_argument(
+        "--final-stage",
+        default=FS_IDEATE_STAGE,
+        metavar="STAGE",
+        help="Where the ideate arm's walk stops. Defaults to "
+             f"{FS_IDEATE_STAGE}. Nothing after it produces anything the examiner reads.",
+    )
+    parser.add_argument(
+        "--ideation-panel",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Widen Stage 02's hypotheses with a panel of proposers working from distinct "
+             "lenses. On by default here, unlike everywhere else in this repository: the "
+             "coverage hypothesis this adapter exists to test is a hypothesis about the "
+             "panel, so a run without it is the control arm with extra steps.",
+    )
+    parser.add_argument(
+        "--ideation-lenses",
+        nargs="+",
+        metavar="LENS",
+        help="Seat only these ideation lenses. Defaults to all five.",
+    )
+    parser.add_argument(
+        "--ideation-models",
+        nargs="+",
+        metavar="LENS=MODEL",
+        help="Assign a model per ideation lens, as lens=model or lens=backend:model.",
+    )
+    parser.add_argument(
+        "--ideas-per-proposer",
+        type=int,
+        default=2,
+        help="Candidate hypotheses each proposer may return. Defaults to 2.",
+    )
+    parser.add_argument(
+        "--max-attempts",
+        type=int,
+        default=DEFAULT_FS_MAX_ATTEMPTS,
+        help="Attempts allowed per stage before it is auto-skipped. Defaults to "
+             f"{DEFAULT_FS_MAX_ATTEMPTS}.",
+    )
+    parser.add_argument(
+        "--stage-timeout",
+        type=int,
+        default=DEFAULT_FS_STAGE_TIMEOUT,
+        help="Seconds allowed per stage attempt in the ideate arm. Defaults to "
+             f"{DEFAULT_FS_STAGE_TIMEOUT}, which is above the only per-stage duration ever "
+             "measured for a comparable configuration on this machine.",
+    )
+    parser.add_argument(
+        "--max-auto-skips",
+        type=int,
+        default=DEFAULT_FS_MAX_AUTO_SKIPS,
+        help="How many stages may be auto-skipped after exhausting retries. Defaults to "
+             f"{DEFAULT_FS_MAX_AUTO_SKIPS}: the run has one stage, and skipping it "
+             "produces a workspace that looks finished and holds nothing.",
+    )
+    parser.add_argument(
+        "--web-search",
+        choices=list(WEB_SEARCH_MODE_CHOICES),
+        default="off",
+        help="Search provider for the operators. Defaults to off here, unlike everywhere "
+             "else in this repository: the published protocol for this benchmark forbids "
+             "browsing, and 'off' both offers no search tool and denies WebSearch and "
+             "WebFetch to the CLI.",
+    )
+    parser.add_argument(
+        "--disallowed-tools",
+        nargs="+",
+        metavar="TOOL",
+        help="Tool names to deny the agent, overriding what --web-search implies. Both "
+             "arms must be given the same list for a paired comparison to mean anything, "
+             "so it is recorded in the run's metadata rather than left implicit.",
+    )
+    parser.add_argument(
+        "--cross-review",
+        choices=["auto", "gemini", "off"],
+        default="off",
+        help="Independent second opinion on each approval from a different model family. "
+             "Defaults to off here: it is a second thing changing beside the thing being "
+             "measured, and it is not part of either arm's description.",
+    )
+    parser.add_argument(
+        "--cross-review-model",
+        help="Model for the cross-model reviewer. Defaults to the cross reviewer's own "
+             "default.",
+    )
+    parser.add_argument(
+        "--runs-dir",
+        metavar="PATH",
+        help="Where the AutoR run tree goes. Defaults to <workspace>/.autor, which keeps "
+             "a run self-contained so a trial can archive or delete one directory.",
+    )
+    parser.add_argument(
+        "--output-format",
+        choices=list(OUTPUT_FORMAT_CLI_CHOICES),
+        default=DEFAULT_OUTPUT_FORMAT,
+        help="Deliverable format recorded on the run. The examiner reads answer.md either "
+             f"way; this only reaches the run config. Defaults to {DEFAULT_OUTPUT_FORMAT}.",
+    )
+    parser.add_argument(
+        "--attempt-index",
+        type=int,
+        default=0,
+        help="Which repeat of this (task, arm) this run is, recorded in the metadata so "
+             "that between-attempt variance can be estimated instead of assumed. "
+             "Defaults to 0.",
+    )
+    parser.add_argument(
+        "--print-goal",
+        action="store_true",
+        help="Print the goal the agent would be given and exit, without running anything. "
+             "The prompt is the instrument, so it has to be readable without spending a "
+             "run to see it.",
+    )
+    parser.add_argument(
+        "--export-only",
+        action="store_true",
+        help="Skip the answer-producing step and only re-export the most recent run in "
+             "the workspace. Useful after an interrupted run.",
+    )
+    parser.add_argument(
+        "--fake-operator",
+        action="store_true",
+        help="Use the fake operator instead of a real backend. For smoke-testing the "
+             "adapter. The answer it produces is marked in its first line and in "
+             "_meta.json, because a smoke artifact clears every length check.",
+    )
+    return parser.parse_args(argv)
+
+
+def default_model_for(backend: str) -> str:
+    return "default" if backend == "codex" else "sonnet"
+
+
+def create_operator(
+    backend: str,
+    *,
+    model: str,
+    codex_sandbox: str,
+    fake_mode: bool,
+    ui: TerminalUI,
+    stage_timeout: int,
+    codex_command: str = "codex",
+    disallowed_tools: Sequence[str] = (),
+):
+    """Build the execution backend.
+
+    No ``web_search_mcp`` parameter and no ``codex_web_search``: this benchmark's protocol
+    forbids browsing, so handing either operator a search tool is not a configuration this
+    front end offers. ``--web-search`` still exists because it is what computes the denied
+    tool list and because a run that wanted to measure the protocol's cost could set it --
+    but the default is ``off`` and the search-tool wiring is deliberately absent rather
+    than merely unset.
+    """
+    if backend == "codex":
+        return CodexOperator(
+            model=model,
+            codex_sandbox=codex_sandbox,
+            fake_mode=fake_mode,
+            ui=ui,
+            stage_timeout=stage_timeout,
+            command=codex_command,
+            web_search=False,
+        )
+    return ClaudeOperator(
+        model=model,
+        fake_mode=fake_mode,
+        ui=ui,
+        stage_timeout=stage_timeout,
+        web_search_mcp=False,
+        disallowed_tools=disallowed_tools,
+    )
+
+
+def resolve_task_row(
+    *, dataset: str | None, task: str | None, workspace: Path | None
+) -> FsRow:
+    """The one row this run answers, or a refusal naming what was missing.
+
+    Three sources for the key, in order: ``--task``, the workspace directory name, and
+    nothing. The third is a refusal rather than a default, because there is no defensible
+    default -- answering row zero because nobody said otherwise produces a result file
+    that names a task the operator never chose, and every digest in it would agree with
+    itself.
+    """
+    # The key is resolved before the file is opened. Reading sixty rows to discover
+    # that nobody said which one is wasted work, and it makes the refusal depend on
+    # whether a dataset happens to be on the machine: the message a user needs is
+    # "name a task", not "no dataset at ~/.cache/...".
+    key = task.strip() if task and task.strip() else None
+    if key is None and workspace is not None:
+        key = infer_fs_task_key(workspace)
+    if key is None:
+        raise DatasetRefused(
+            "No task selected. Pass --task (a row index like 43, or a key like fs:043), "
+            "or name the workspace directory fs043_<anything> so the key can be read off "
+            "it. There is no default: answering an unnamed question would produce a "
+            "result file whose digests all agree with each other and with nothing else."
+        )
+    rows = load_dataset(dataset)
+    selected = resolve_task_keys(rows, tasks=key)
+    if len(selected) != 1:
+        raise DatasetRefused(
+            f"--task {key!r} selects {len(selected)} rows; this front end answers exactly "
+            "one question per run. Use the trial driver to run a set."
+        )
+    return rows_by_key(rows)[selected[0]]
+
+
+def resolve_workspace(args: argparse.Namespace, key: str) -> Path:
+    """Where this run happens: the flag, or a fresh timestamped directory."""
+    if args.workspace:
+        return Path(args.workspace).expanduser().resolve()
+    return (Path.cwd() / fs_workspace_name(key, args.profile)).resolve()
+
+
+def build_manager(
+    args: argparse.Namespace,
+    *,
+    workspace: Path,
+    runs_dir: Path,
+    operator,
+    ui: TerminalUI,
+    review_backend: str,
+    review_model: str,
+    web_search_context: str | None = None,
+) -> ResearchManager:
+    """Assemble the ``ideate`` arm: one stage, its reviewer, and nothing else.
+
+    Every argument that is off is off for the same reason: it is a second thing changing
+    beside the thing being measured. Routing chooses a different next stage, which there
+    is not one of; evolution rounds buy further attempts at a stage that already passed,
+    which doubles the arm's cost without being part of its description; the archive stores
+    a fitness in [0, 1] and this benchmark's score is a rubric total out of ten; the
+    cross-reviewer adds a second model family to a comparison whose whole claim is that
+    only one thing differs.
+
+    The ideation panel is assigned after construction because it is an attribute of the
+    manager and not a constructor keyword. That is a real distinction rather than a
+    stylistic one -- passing it as a keyword raises ``TypeError`` -- and it is the shape
+    ``rcb_agent.py`` already uses.
+    """
+    reviewer = AutomatedReviewer(
+        review_backend,
+        codex_command=args.codex_command,
+        model=review_model,
+        fake_mode=args.fake_operator,
+        ui=ui,
+        stage_timeout=args.stage_timeout,
+        # There is no human on this run, and aborting at the approval gate forfeits the
+        # question outright.
+        unattended=True,
+    )
+    manager = ResearchManager(
+        project_root=REPO_ROOT,
+        runs_dir=runs_dir,
+        operator=operator,
+        ui=ui,
+        reviewer=reviewer,
+        approval_mode="agent",
+        review_operator=review_backend,
+        review_model=review_model,
+        unattended=True,
+        max_auto_skips=args.max_auto_skips,
+        max_stage_attempts=args.max_attempts,
+        max_rounds=1,
+        # Passed in rather than resolved here. `resolve_web_search_context` needs the
+        # readiness assessment, `run` has already made it, and making it twice is how the
+        # manager ends up describing a search setup the operator was not built with.
+        web_search_context=web_search_context,
+        web_search_mode=args.web_search,
+        artifact_roots=[workspace],
+        stage_graph=StageGraph.linear(),
+        routing_mode="off",
+        evolution=EvolutionConfig(rounds=0),
+        archive=None,
+        cross_reviewer=resolve_cross_reviewer(args.cross_review, args.cross_review_model),
+    )
+    if args.ideation_panel:
+        from src.ideation_panel import IdeationPanel, apply_lens_models, resolve_lenses
+
+        manager.ideation_panel = IdeationPanel(
+            apply_lens_models(resolve_lenses(args.ideation_lenses), args.ideation_models),
+            backend_name=review_backend,
+            model=review_model,
+            fake_mode=args.fake_operator,
+            ui=ui,
+            stage_timeout=args.stage_timeout,
+            ideas_per_proposer=args.ideas_per_proposer,
+        )
+    return manager
+
+
+def run(args: argparse.Namespace) -> FsRunResult:
+    started_at = time.monotonic()
+    guidance = resolve_answer_guidance(args.answer_guidance)
+    dataset_path = resolve_dataset_path(args.dataset)
+    workspace_hint = Path(args.workspace).expanduser().resolve() if args.workspace else None
+    row = resolve_task_row(dataset=args.dataset, task=args.task, workspace=workspace_hint)
+    workspace = resolve_workspace(args, row.key)
+
+    ideate = args.profile == "ideate"
+    goal = build_fs_goal(
+        row.problem,
+        workspace=workspace if ideate else None,
+        answer_guidance=guidance,
+    )
+    # Before the workspace is created, so that reading the contract leaves nothing behind.
+    # A directory a `--print-goal` produced is a directory a trial driver's sweep would
+    # later find and count as a run that was started.
+    if args.print_goal:
+        print(goal)
+        return FsRunResult(workspace=workspace, meta={"printed_goal": True, "status": "printed"})
+
+    ensure_fs_workspace(workspace)
+    # Measured, not copied from the pin. `load_dataset` refuses a file whose digest is not
+    # `FS_DATASET_SHA256`, so today the two agree by construction -- and a field that
+    # agrees by construction is not the one the contract names. What a result file has to
+    # say is which bytes were answered, which stays true if the pin is ever relaxed.
+    dataset_sha256 = hashlib.sha256(dataset_path.read_bytes()).hexdigest()
+
+    operator_backend = args.operator
+    model = args.model or default_model_for(operator_backend)
+    review_backend = args.review_operator or operator_backend
+    review_model = args.review_model or default_model_for(review_backend)
+    runs_dir = Path(args.runs_dir).expanduser().resolve() if args.runs_dir else fs_runs_dir_for(workspace)
+
+    # stdout carries the run log, so the UI must never try to read from stdin. The stream
+    # is passed explicitly rather than defaulted: `TerminalUI`'s default is bound to
+    # `sys.stdout` at import time, so a caller that redirects stdout -- a test, or a
+    # driver capturing one arm's log -- gets the frames on the real terminal anyway.
+    ui = TerminalUI(output_stream=sys.stdout, interactive=False)
+    emit_event(
+        {
+            "type": "system",
+            "subtype": "init",
+            "agent": "autor-frontierscience",
+            "profile": args.profile,
+            "task": row.key,
+            "subject": row.subject,
+            "model": model,
+            "review_model": review_model,
+            "answer_guidance": guidance,
+            "workspace": str(workspace),
+        }
+    )
+
+    # Not assessed under `off`, which is this front end's default: the assessment exists
+    # to say what a run that is going to search can search with, and this one is not.
+    readiness = (
+        None if args.web_search == "off"
+        else assess_search_readiness(operator=operator_backend, codex_sandbox=args.codex_sandbox)
+    )
+    notice, level = web_search_notice(args.web_search, readiness=readiness)
+    emit_event({"type": "progress", "stage": "web_search", "level": level, "message": notice})
+    ui.show_status(notice, level=level)
+    web_search_context = (
+        None if args.web_search == "off"
+        else resolve_web_search_context(args.web_search, readiness=readiness)
+    )
+
+    disallowed_tools = (
+        tuple(args.disallowed_tools)
+        if args.disallowed_tools
+        else disallowed_tools_for(args.web_search)
+    )
+    operator = create_operator(
+        operator_backend,
+        model=model,
+        codex_sandbox=args.codex_sandbox,
+        fake_mode=args.fake_operator,
+        ui=ui,
+        stage_timeout=args.stage_timeout if ideate else args.answer_timeout,
+        codex_command=args.codex_command,
+        disallowed_tools=disallowed_tools,
+    )
+
+    pipeline_completed = False
+    auto_skipped_stages: list[str] = []
+    stages_approved: list[str] = []
+    direct_answer: str | None = None
+    paths = None
+
+    if args.export_only:
+        run_root = _latest_run_root(runs_dir)
+        if run_root is None:
+            raise FileNotFoundError(f"No AutoR run found under {runs_dir}; nothing to export.")
+        paths = build_run_paths(run_root)
+        stages_approved = stages_approved_in(paths)
+    elif ideate:
+        manager = build_manager(
+            args,
+            workspace=workspace,
+            runs_dir=runs_dir,
+            operator=operator,
+            ui=ui,
+            review_backend=review_backend,
+            review_model=review_model,
+            web_search_context=web_search_context,
+        )
+        try:
+            pipeline_completed = manager.run(
+                goal,
+                skip_intake=True,
+                output_format=resolve_output_format(args.output_format),
+                resources=None,
+                start_stage=resolve_stage(args.first_stage),
+                final_stage=resolve_stage(args.final_stage),
+            )
+        except Exception:  # noqa: BLE001 - a crashed pipeline must still export what it produced
+            emit_event({"type": "error", "where": "pipeline", "traceback": traceback.format_exc()})
+        auto_skipped_stages = list(manager.auto_skipped_stages)
+        run_root = manager.last_run_paths.run_root if manager.last_run_paths else _latest_run_root(runs_dir)
+        if run_root is not None:
+            paths = build_run_paths(run_root)
+            stages_approved = stages_approved_in(paths)
+    else:
+        paths = _fresh_run_tree(runs_dir, goal)
+        direct_answer = DirectAnswerWriter(operator)(paths=paths, goal=goal)
+        # There is no pipeline in this arm, so "completed" is the honest name for the one
+        # thing that had to happen: the single call came back with usable text. Recorded
+        # under the same key the other arm uses because the exit code reads one field, and
+        # two names for one clause is how a downstream ends up checking neither.
+        pipeline_completed = direct_answer is not None
+
+    answer = export_answer(
+        workspace=workspace,
+        paths=paths,
+        direct_answer=direct_answer,
+        stages_approved=stages_approved,
+        synthesize=AnswerSynthesizer(operator) if ideate else None,
+        problem=row.problem,
+    )
+    if args.export_only:
+        # A re-export cannot observe the walk that produced the run tree, so it must not
+        # claim anything about it. Saying `pipeline_completed: false` is the honest record
+        # and it makes the exit code non-zero, which is correct: a recovered workspace is
+        # evidence to look at, not a scored result.
+        pipeline_completed = False
+
+    meta = build_fs_meta(
+        workspace=workspace,
+        task=row.key,
+        profile=args.profile,
+        answer_guidance=guidance,
+        model=model,
+        review_model=review_model,
+        operator=operator_backend,
+        answer=answer,
+        pipeline_completed=pipeline_completed,
+        auto_skipped_stages=auto_skipped_stages,
+        stages_approved=stages_approved,
+        disallowed_tools=disallowed_tools,
+        dataset_path=dataset_path,
+        dataset_sha256=dataset_sha256,
+        run_id=paths.run_root.name if paths is not None else "",
+        duration_seconds=round(time.monotonic() - started_at),
+        attempt_index=args.attempt_index,
+        fake_operator=args.fake_operator,
+        extra={
+            "subject": row.subject,
+            "export_only": bool(args.export_only),
+            "task_block": row.task_block(),
+        },
+    )
+    write_fs_meta(workspace, meta)
+    return FsRunResult(workspace=workspace, meta=meta)
+
+
+def _latest_run_root(runs_dir: Path) -> Path | None:
+    if not runs_dir.exists():
+        return None
+    candidates = sorted(path for path in runs_dir.iterdir() if path.is_dir())
+    return candidates[-1] if candidates else None
+
+
+def _fresh_run_tree(runs_dir: Path, goal: str):
+    """A run directory for the direct arm's single call.
+
+    The direct arm has no pipeline, but the operator seam it uses writes prompts, session
+    ids and the raw JSONL transcript into a run tree, and the transcript is the only
+    witness for whether the agent reached for a browsing tool. A call with nowhere to log
+    is a call nobody can audit afterwards, which on a benchmark whose protocol is "no
+    browsing" is the one thing that must not be true.
+    """
+    paths = build_run_paths(create_run_root(runs_dir))
+    ensure_run_layout(paths)
+    write_text(paths.user_input, goal)
+    return paths
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    try:
+        result = run(args)
+    except Exception as exc:  # noqa: BLE001 - the caller only sees stdout and the exit code
+        emit_event({"type": "result", "status": "failed", "error": str(exc)})
+        print(traceback.format_exc(), file=sys.stderr)
+        return 1
+
+    if result.meta.get("printed_goal"):
+        return 0
+    emit_event({"type": "result", **result.to_dict()})
+    return result.exit_code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

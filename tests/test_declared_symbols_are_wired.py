@@ -25,13 +25,13 @@ place the product actually starts from, including ``studio.py``, without which t
 ``src/backend/`` package would read as dead.
 
 ``tests/`` and ``tools/`` are deliberately *not* roots. A test is the thing that keeps a
-dead symbol green -- twenty-five of the thirty-six symbols listed below have one -- so
+dead symbol green -- twenty-three of the thirty-four symbols listed below have one -- so
 counting a test as wiring would make the gate assert nothing. An instrument is not evidence:
 ``archive_sample_complexity`` was importing ``RunRecord`` and crashing on it at the same
 time. A symbol that only ``tools/`` reaches is still exempt, but by a line somebody wrote,
 and :attr:`Exempt.reached_from` makes that line checkable.
 
-That twenty-five is :func:`allowlisted_symbols_with_a_test`, printed by the census and pinned
+That twenty-three is :func:`allowlisted_symbols_with_a_test`, printed by the census and pinned
 against this sentence by
 :meth:`AllowlistIsHonestTests.test_the_stated_count_of_tested_symbols_is_the_measured_one`,
 because the first version of the sentence said twenty-one and no instrument could
@@ -64,14 +64,17 @@ the answer, when it happens, is an allowlist entry naming the framework that cal
 
 Measured precision
 ------------------
-1364 public definitions over 1225 distinct names in ``src/``, and 36 referenced by nothing
-outside ``tests/`` and ``tools/``. Six of the thirty-six arrived with FrontierScience, whose
-front end is not in the tree yet, so its dataset reader and its scorer are reached only
-from ``tools/score_fs_run.py``; the entry that names that is :data:`_FS_SCORER_ONLY`.
+1417 public definitions over 1275 distinct names in ``src/``, and 34 referenced by nothing
+outside ``tests/`` and ``tools/``. Four of the thirty-four are FrontierScience's *scorer*,
+which is a separate program from the agent that answers the questions and is reached only
+from ``tools/score_fs_run.py``; the entry that names that is :data:`_FS_SCORER_ONLY`. Its
+dataset reader is no longer among them: ``fs_agent.py`` landed, it is in
+:data:`ENTRY_POINTS`, and ``load_dataset`` and ``resolve_task_keys`` came off the list --
+which is what that exemption said would happen and the reason it was written that way.
 
-Each of those 36 has exactly one *executable* occurrence of its name across ``main.py``,
-``studio.py``, ``rcb_agent.py`` and ``src/`` -- its own definition -- and every other
-textual hit is a comment or a docstring. **False-positive rate 0/36.** That is not the scan
+Each of those 34 has exactly one *executable* occurrence of its name across ``main.py``,
+``studio.py``, ``rcb_agent.py``, ``fs_agent.py`` and ``src/`` -- its own definition -- and
+every other textual hit is a comment or a docstring. **False-positive rate 0/34.** That is not the scan
 marking its own homework. :func:`code_lines_naming` re-reads the roots with ``tokenize``,
 which cannot see inside a string or a comment and knows nothing about reference units;
 :func:`accusations_with_a_second_code_line` is where the two readers are made to agree, and
@@ -83,10 +86,10 @@ The census prints the rate and the evidence under it, every occurrence labelled 
 
     python3 -m tests.test_declared_symbols_are_wired --census
 
-Its header carries 1364, 1225, 36, 25 and the rate, so those drift with the tree and none of
+Its header carries 1417, 1275, 34, 23 and the rate, so those drift with the tree and none of
 them has to be believed.
 :meth:`AllowlistIsHonestTests.test_the_allowlist_is_exactly_what_the_scan_finds` keeps the
-36 honest.
+34 honest.
 """
 
 from __future__ import annotations
@@ -109,10 +112,14 @@ REPO = Path(__file__).resolve().parent.parent
 #: Where the product starts, alongside every module under ``src/``.
 #:
 #: ``studio.py`` is a two-line launcher and is here because it is the only thing that
-#: reaches ``src/backend/``; without it that package reads as dead. ``rcb_agent.py`` is here
-#: because the benchmark front end has diverged from ``main.py`` before -- that divergence
-#: is what ``tests/test_cli_flags_are_read.py`` exists for.
-ENTRY_POINTS = ("main.py", "studio.py", "rcb_agent.py")
+#: reaches ``src/backend/``; without it that package reads as dead. ``rcb_agent.py`` and
+#: ``fs_agent.py`` are here because a benchmark front end has diverged from ``main.py``
+#: before -- that divergence is what ``tests/test_cli_flags_are_read.py`` exists for -- and
+#: because each is the only thing that reaches its own benchmark's adapter module. Adding
+#: ``fs_agent.py`` is the decision :data:`_FS_SCORER_ONLY` said would have to be made when
+#: the FrontierScience front end landed: it is a product entry point, a way this repository
+#: is actually started, and not an instrument reading the library from outside.
+ENTRY_POINTS = ("main.py", "studio.py", "rcb_agent.py", "fs_agent.py")
 
 _FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
 
@@ -163,12 +170,13 @@ _FS_SCORER_ONLY = (
     "does not count as a reference root -- and is right not to: "
     "`tools/archive_sample_complexity.py` was importing `RunRecord` and crashing on it at "
     "the same time, so being imported by an instrument is not evidence that a symbol still "
-    "works. Nothing a run executes touches this, because FrontierScience has no front end "
-    "in this tree yet: the benchmark arrived as a dataset reader, a scorer and their tests, "
-    "and the agent that answers the questions is a separate piece of work. Wiring it means "
-    "landing that front end and deciding whether it belongs in `ENTRY_POINTS`, which is a "
-    "statement about what counts as a product entry point rather than a reference; until "
-    "then `reached_from` is what keeps this claim checkable."
+    "works. Nothing a run executes touches this, and that is the design rather than a gap: "
+    "the agent answers the question and a judge grades it afterwards, in a separate process, "
+    "against a rubric no stage was ever shown. `fs_agent.py` must not import the scorer -- a "
+    "front end that could reach the grading code is a front end that could be made to read "
+    "the rubric. Wiring it would mean deciding that the answering run may see how it is "
+    "marked, which is the one thing this benchmark's prompt contract forbids; until someone "
+    "argues for that, `reached_from` is what keeps this claim checkable."
 )
 
 #: The symbols this repository knowingly declares and does not reach, each with the reason.
@@ -184,10 +192,6 @@ ALLOWLIST: dict[str, Exempt] = {
     "src/rcb_trial.py::format_rcb_trial_report": Exempt(_DRIVER_ONLY, ("tools/rcb_trial.py",)),
     "src/rcb_trial.py::items_from_score_payloads": Exempt(_DRIVER_ONLY, ("tools/rcb_trial.py",)),
     "src/rcb_trial.py::next_action": Exempt(_DRIVER_ONLY, ("tools/rcb_trial.py",)),
-    "src/frontierscience.py::load_dataset": Exempt(_FS_SCORER_ONLY, ("tools/score_fs_run.py",)),
-    "src/frontierscience.py::resolve_task_keys": Exempt(
-        _FS_SCORER_ONLY, ("tools/score_fs_run.py",)
-    ),
     "src/fs_scoring.py::ScoringRefused": Exempt(_FS_SCORER_ONLY, ("tools/score_fs_run.py",)),
     "src/fs_scoring.py::build_result": Exempt(_FS_SCORER_ONLY, ("tools/score_fs_run.py",)),
     "src/fs_scoring.py::draw_record": Exempt(_FS_SCORER_ONLY, ("tools/score_fs_run.py",)),
