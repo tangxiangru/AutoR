@@ -1,8 +1,17 @@
-"""The `offered and declined` estimator, and the four states it stops pooling.
+"""The `offered and declined` estimator, and the states it stops pooling.
 
-The old control arm was "runs that reached this node and did not take the edge",
-which is four different things at once. Only one of them — the run was offered the
-move and passed — is evidence about the move. The rest say the move was unavailable,
+The argument for it, and the count of what the old control arm conflated, live in
+`src/decisions.py` and are pinned across their copies by
+`tests/test_doc_counts.py::TheBlockedValueSetIsWrittenDownOnceTests`. This module
+deliberately states neither: it carried a fifth, paraphrased copy — "the four states it
+stops pooling" — which the group pin's regex could not see, so the pin certified four
+copies as agreeing while a fifth disagreed in different words. A summary with no number
+in it cannot go stale, and reducing the copies from five to four is worth more than
+maintaining the fifth.
+
+The old control arm was "runs that reached this node and did not take the edge". Only
+one of the states it pooled — the run was offered the move and passed — is evidence
+about the move. The rest say the move was unavailable,
 and since five of the seven guards read the same disk predicates the rubric scores,
 "unavailable" is correlated with "the run was weak". Pooling them makes the guard a
 selection mechanism on the outcome.
