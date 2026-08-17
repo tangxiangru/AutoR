@@ -87,10 +87,19 @@ class LockTests(unittest.TestCase):
 
     def test_the_lock_is_taken_with_link_and_not_with_exclusive_create(self) -> None:
         """``O_CREAT|O_EXCL`` is not reliably atomic on NFS; ``os.link`` is, and the
-        state directory sits on shared NFS by design."""
-        body = TOOL.read_text(encoding="utf-8")
-        self.assertIn("os.link(", body)
-        self.assertNotIn("os.open(", body)
+        state directory sits on shared NFS by design.
+
+        Two files, because the lock moved to :mod:`src.trial_driver` when a second
+        benchmark needed the same driver and the shared kernel is now where the
+        primitive has to be right. ``TOOL`` stays in the population rather than being
+        swapped out: a driver that grows its own second lock -- the obvious thing to
+        write on the day a trial is stuck -- is exactly what this refuses, and dropping
+        the file from the scan would stop refusing it.
+        """
+        kernel = (REPO_ROOT / "src" / "trial_driver.py").read_text(encoding="utf-8")
+        self.assertIn("os.link(", kernel)
+        for body in (kernel, TOOL.read_text(encoding="utf-8")):
+            self.assertNotIn("os.open(", body)
 
     def test_a_second_driver_is_refused_while_the_first_is_alive(self) -> None:
         # A real live process whose command line looks like a driver. A synthetic pid

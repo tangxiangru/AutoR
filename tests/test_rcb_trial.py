@@ -223,11 +223,16 @@ class SeamTests(unittest.TestCase):
 
         A benchmark row is not an AutoR rubric row, and the version it must carry to be
         ``usable`` is a claim it cannot support. Prose in a docstring is not a guard: the
-        guard is that no archive is constructible from either file. Pooled into
+        guard is that no archive is constructible from any of these files. Pooled into
         ``Archive.variant_fitness`` these 0-100 totals would sit beside [0, 1] rubric
         means and steer topology promotion off a unit error.
+
+        ``src/trial_driver.py`` is in the population because the fence has to cover the
+        seam, not the file it was written against. The kernel is imported by every
+        driver, so an archive write added there would reach every benchmark at once --
+        and FrontierScience's totals are 0-10, a third unit in the same bucket.
         """
-        for name in ("src/rcb_trial.py", "tools/rcb_trial.py"):
+        for name in ("src/rcb_trial.py", "tools/rcb_trial.py", "src/trial_driver.py"):
             body = (REPO_ROOT / name).read_text(encoding="utf-8")
             for forbidden in ("Archive(", "record_run", "runs.jsonl"):
                 self.assertNotIn(forbidden, body, f"{name} can reach the archive via {forbidden}")

@@ -49,7 +49,6 @@ import argparse
 import hashlib
 import json
 import os
-import signal
 import subprocess
 import sys
 import time
@@ -75,38 +74,44 @@ from src.rcb_trial import (  # noqa: E402
     next_action,
 )
 
+# The benchmark-agnostic half of this driver, which FrontierScience needs verbatim and
+# which is therefore one module rather than two copies -- see :mod:`src.trial_driver` for
+# why, and for the three defects each of these functions is the scar tissue of.
+#
+# Imported into this module's own namespace on purpose, not reached through the package.
+# `tests/test_rcb_trial_driver.py` loads this file with `exec_module` and then rebinds
+# `tool.foreign_runs` to keep the preflight refusal out of a test about something else;
+# the call sites below resolve the name in *these* globals, so the substitution keeps
+# working exactly as it did when the function was defined here. A `trial_driver.foreign_runs()`
+# call would silently ignore it and every dry run would refuse on whatever else this box
+# happens to be running.
+from src.trial_driver import (  # noqa: E402,F401
+    acquire_lock,
+    autor_pids,
+    boot_id,
+    claim_stale_lock,
+    contrast_log,
+    digest_bytes,
+    foreign_runs,
+    git_dirty,
+    git_head,
+    heartbeat,
+    is_backed_run,
+    kill_group,
+    lock_is_live,
+    process_argv,
+    process_cmdline,
+    read_json,
+    release_lock,
+    watch,
+    write_json,
+)
+
 #: Extensions the benchmark's image sweep recognises. Duplicated here on purpose: the
 #: admission clause has to count what the scorer would show the judge, and importing
 #: the bench's config at gate time would make the gate depend on a checkout being
 #: present when the gate is exactly what runs when things have gone wrong.
 IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg")
-
-
-# ---------------------------------------------------------------------------
-# Atomic state
-# ---------------------------------------------------------------------------
-
-
-def write_json(path: Path, payload: Mapping[str, Any]) -> None:
-    """Replace, never truncate-and-write. ``/home`` here is shared NFS."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + f".tmp.{os.getpid()}")
-    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-    os.replace(tmp, path)
-
-
-def read_json(path: Path) -> dict[str, Any]:
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return {}
-
-
-def digest_bytes(path: Path) -> str:
-    try:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
-    except OSError:
-        return ""
 
 
 def instructions_digest(workspace: Path) -> str:
@@ -128,197 +133,6 @@ def instructions_digest(workspace: Path) -> str:
     return hashlib.sha256(
         text.replace(str(workspace), "<WORKSPACE>").encode("utf-8")
     ).hexdigest()
-
-
-# ---------------------------------------------------------------------------
-# The lock
-# ---------------------------------------------------------------------------
-
-
-def boot_id() -> str:
-    try:
-        return Path("/proc/sys/kernel/random/boot_id").read_text(encoding="utf-8").strip()
-    except OSError:  # pragma: no cover - not Linux
-        return ""
-
-
-def process_cmdline(pid: int) -> str:
-    try:
-        raw = Path(f"/proc/{pid}/cmdline").read_bytes()
-    except OSError:
-        return ""
-    return raw.replace(b"\0", b" ").decode("utf-8", "replace")
-
-
-def process_argv(pid: int) -> list[str]:
-    """The real argument vector, not the joined string.
-
-    ``/proc/pid/cmdline`` is NUL-separated, and joining it before matching is what
-    turns *mentioning* a script into *running* one. A shell running
-    ``grep rcb_agent.py`` -- or the diagnostic one-liner someone types to check
-    whether a run is up -- has ``rcb_agent.py`` in its joined command line and is
-    not a run.
-    """
-    try:
-        raw = Path(f"/proc/{pid}/cmdline").read_bytes()
-    except OSError:
-        return []
-    return [part.decode("utf-8", "replace") for part in raw.split(b"\0") if part]
-
-
-def lock_is_live(payload: Mapping[str, Any], *, marker: str = "rcb_trial.py") -> bool:
-    """Three conditions, all required. Any one alone gives a false answer.
-
-    The pid alone is reused; the cmdline alone cannot be read for a pid that is gone;
-    and after a reboot a pid *and* a matching cmdline can both be somebody else's
-    process entirely, which is why the boot id is in the lock file.
-    """
-    pid = int(payload.get("pid") or 0)
-    if pid <= 0 or not Path(f"/proc/{pid}").exists():
-        return False
-    if marker not in process_cmdline(pid):
-        return False
-    recorded = str(payload.get("boot_id") or "")
-    return not recorded or recorded == boot_id()
-
-
-def claim_stale_lock(
-    state_dir: Path, existing: Mapping[str, Any], tmp: Path, lock: Path
-) -> bool:
-    """Take a dead driver's lock over — atomically, or not at all.
-
-    The bare ``os.replace`` this replaces threw away everything the ``os.link`` on the
-    create path was for: two drivers that both read the same stale lock both replaced it
-    and both proceeded, which is precisely the two-drivers-on-one-state-directory case
-    the lock exists to prevent. And a stale lock is not the exotic entry point to it — it
-    is what ``kill -9`` on a driver leaves behind, i.e. the documented "I killed it and
-    relaunched" case. Reproduced at two of five races on a ~1 ms window.
-
-    So the takeover is decided by the same primitive as the creation: a token named after
-    the *particular* stale lock being taken over, created with ``os.link``, which exactly
-    one process can win. The token is deliberately never deleted — deleting it after the
-    replace reopens a window of the same shape, because a driver that read the stale lock
-    before the replace would find the token gone, create it, and take the lock in turn.
-    """
-    token = state_dir / (
-        f"driver.lock.taken.{existing.get('pid', 'unknown')}."
-        f"{existing.get('started_at', 'unknown')}"
-    )
-    try:
-        os.link(tmp, token)
-    except FileExistsError:
-        return False
-    os.replace(tmp, lock)
-    return True
-
-
-def acquire_lock(state_dir: Path) -> Path:
-    """``os.link``, because ``O_CREAT|O_EXCL`` is not reliably atomic on NFS."""
-    state_dir.mkdir(parents=True, exist_ok=True)
-    lock = state_dir / "driver.lock"
-    payload = {
-        "pid": os.getpid(),
-        "pgid": os.getpgid(0),
-        "boot_id": boot_id(),
-        "argv": sys.argv,
-        "started_at": time.time(),
-    }
-    tmp = state_dir / f"driver.lock.{os.getpid()}"
-    tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    try:
-        os.link(tmp, lock)
-    except FileExistsError:
-        existing = read_json(lock)
-        if lock_is_live(existing):
-            tmp.unlink(missing_ok=True)
-            raise SystemExit(
-                f"another driver holds {lock} (pid {existing.get('pid')}). Two drivers "
-                "racing is the concurrency that exhausts the quota. Wait for it, or kill "
-                f"that pid and re-run."
-            )
-        if not claim_stale_lock(state_dir, existing, tmp, lock):
-            tmp.unlink(missing_ok=True)
-            raise SystemExit(
-                f"another driver is taking over the stale lock at {lock} (it was pid "
-                f"{existing.get('pid')}). Two near-simultaneous relaunches after a "
-                "`kill -9` is exactly how this box came to be running three AutoR "
-                "processes against one Vertex project; this one is standing down."
-            )
-        return lock
-    tmp.unlink(missing_ok=True)
-    return lock
-
-
-def release_lock(lock: Path) -> None:
-    if read_json(lock).get("pid") == os.getpid():
-        lock.unlink(missing_ok=True)
-
-
-def autor_pids() -> frozenset[int]:
-    """Live pids whose command line is an agent run — ours or anybody's."""
-    found: set[int] = set()
-    for entry in Path("/proc").iterdir():
-        if not entry.name.isdigit():
-            continue
-        line = process_cmdline(int(entry.name))
-        if "rcb_agent.py" in line or "rcb_trial.py fake-run" in line:
-            found.add(int(entry.name))
-    return frozenset(found)
-
-
-#: Scripts whose execution is a run competing for the same per-base-model quota.
-_RUN_SCRIPTS = ("rcb_agent.py", "main.py")
-
-
-def is_backed_run(argv: Sequence[str]) -> bool:
-    """True only for a process that will actually call a model.
-
-    Two false positives cost a live trial ten minutes each, and on a busy box they
-    cost it forever:
-
-    * **A mention is not an execution.** The first version joined ``cmdline`` and
-      substring-matched it, so a shell scanning ``/proc`` for ``rcb_agent.py``
-      refused the driver by existing. The script has to be an *argument*, and after
-      the interpreter -- ``argv[0]`` is the python binary.
-    * **A fake operator makes no backend calls at all.** ``--fake-operator`` is what
-      the test suite runs, constantly, and a driver that stands down for the unit
-      tests never starts on a machine anybody is developing on. It contends for
-      nothing, so it is not contention.
-    """
-    if not argv or "--fake-operator" in argv:
-        return False
-    # argv[0] must be the interpreter. Without this, ``grep -rn rcb_agent.py .``
-    # reads as a run: the script name is a bare argument there too. A shebang
-    # execution still shows the interpreter first -- the kernel rewrites argv --
-    # so requiring it costs nothing real.
-    binary = argv[0].rsplit("/", 1)[-1]
-    if not binary.startswith("python"):
-        return False
-    script_args = argv[1:]
-    for arg in script_args:
-        if arg.startswith("-"):
-            continue
-        name = arg.rsplit("/", 1)[-1]
-        if name == "rcb_agent.py":
-            return True
-        if name == "main.py":
-            return any(a == "--goal" or a.startswith("--goal") for a in script_args)
-    return False
-
-
-def foreign_runs() -> list[str]:
-    """Any AutoR process that is not ours. Refuse to start alongside one."""
-    found: list[str] = []
-    for entry in Path("/proc").iterdir():
-        if not entry.name.isdigit():
-            continue
-        pid = int(entry.name)
-        if pid == os.getpid():
-            continue
-        argv = process_argv(pid)
-        if is_backed_run(argv):
-            found.append(f"{pid} {' '.join(argv).strip()[:110]}")
-    return found
 
 
 # ---------------------------------------------------------------------------
@@ -462,30 +276,6 @@ def harvest(
     }
 
 
-def git_head(worktree: Path) -> str:
-    out = subprocess.run(
-        ["git", "-C", str(worktree), "rev-parse", "HEAD"],
-        capture_output=True, text=True, check=False,
-    )
-    return out.stdout.strip() if out.returncode == 0 else ""
-
-
-def git_dirty(worktree: Path) -> bool:
-    out = subprocess.run(
-        ["git", "-C", str(worktree), "status", "--porcelain"],
-        capture_output=True, text=True, check=False,
-    )
-    return out.returncode != 0 or bool(out.stdout.strip())
-
-
-def contrast_log(worktree: Path, control: str, treatment: str) -> str:
-    out = subprocess.run(
-        ["git", "-C", str(worktree), "log", "--oneline", f"{control}..{treatment}"],
-        capture_output=True, text=True, check=False,
-    )
-    return out.stdout if out.returncode == 0 else "(git log unavailable)"
-
-
 # ---------------------------------------------------------------------------
 # Launching one run
 # ---------------------------------------------------------------------------
@@ -625,58 +415,6 @@ def launch(plan: TrialPlan, task: str, arm: str, attempt: int) -> dict[str, Any]
     finish.pop("run_log_text", None)
     write_json(path, finish)
     return finish
-
-
-def watch(child: subprocess.Popen, workspace: Path, stall_seconds: int) -> bool:
-    """Wait, killing only on a stalled heartbeat. No per-run wall clock."""
-    last_seen = time.time()
-    while child.poll() is None:
-        # A second. The run takes hours, so the polling cost is nothing, and the
-        # alternative — a long poll — is a driver that notices a stall late and a dry
-        # run that spends its whole wall clock inside `sleep`.
-        time.sleep(1)
-        beat = heartbeat(workspace)
-        if beat > last_seen:
-            last_seen = beat
-        if time.time() - last_seen > stall_seconds:
-            kill_group(child)
-            return True
-    return False
-
-
-def heartbeat(workspace: Path) -> float:
-    """``logs_raw.jsonl``'s mtime, and nothing else.
-
-    ``run_manifest.json`` updates on stage transitions — one measured run was eight
-    minutes stale while healthy — and ``_meta.json`` is written once, at the end.
-    """
-    latest = 0.0
-    for path in (workspace / ".autor").glob("*/logs_raw.jsonl"):
-        try:
-            latest = max(latest, path.stat().st_mtime)
-        except OSError:  # pragma: no cover
-            continue
-    return latest
-
-
-def kill_group(child: subprocess.Popen) -> None:
-    """Kill the child's group, then give up loudly rather than use ``pkill -f``.
-
-    Grandchildren survive: the operator's Bash tool puts each command in its own
-    process group, so ``killpg`` on the driver's group does not reach them. A workspace
-    whose long-running python may still be writing is marked void rather than trusted.
-    """
-    try:
-        os.killpg(os.getpgid(child.pid), signal.SIGTERM)
-    except (ProcessLookupError, PermissionError):  # pragma: no cover
-        return
-    try:
-        child.wait(timeout=60)
-    except subprocess.TimeoutExpired:  # pragma: no cover
-        try:
-            os.killpg(os.getpgid(child.pid), signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            pass
 
 
 # ---------------------------------------------------------------------------
