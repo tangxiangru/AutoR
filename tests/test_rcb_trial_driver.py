@@ -113,7 +113,7 @@ class LockTests(unittest.TestCase):
             json.dumps({"pid": holder.pid, "boot_id": self.tool.boot_id()}), encoding="utf-8"
         )
         with self.assertRaises(SystemExit) as caught:
-            self.tool.acquire_lock(self.state)
+            self.tool.acquire_lock(self.state, marker="rcb_trial.py")
         self.assertIn(str(holder.pid), str(caught.exception))
 
     def test_a_stale_lock_is_taken_over(self) -> None:
@@ -121,7 +121,7 @@ class LockTests(unittest.TestCase):
         (self.state / "driver.lock").write_text(
             json.dumps({"pid": 999999, "boot_id": self.tool.boot_id()}), encoding="utf-8"
         )
-        self.tool.acquire_lock(self.state)
+        self.tool.acquire_lock(self.state, marker="rcb_trial.py")
         self.assertEqual(
             json.loads((self.state / "driver.lock").read_text(encoding="utf-8"))["pid"],
             os.getpid(),
@@ -160,7 +160,7 @@ class LockTests(unittest.TestCase):
         # The token a rival driver leaves behind when it wins the takeover.
         (self.state / "driver.lock.taken.999999.1.0").write_text("{}", encoding="utf-8")
         with self.assertRaises(SystemExit) as caught:
-            self.tool.acquire_lock(self.state)
+            self.tool.acquire_lock(self.state, marker="rcb_trial.py")
         self.assertIn("standing down", str(caught.exception))
         self.assertEqual(
             json.loads((self.state / "driver.lock").read_text(encoding="utf-8"))["pid"], 999999
@@ -182,7 +182,7 @@ class LockTests(unittest.TestCase):
         )
 
     def test_the_lock_is_only_released_by_its_owner(self) -> None:
-        lock = self.tool.acquire_lock(self.state)
+        lock = self.tool.acquire_lock(self.state, marker="rcb_trial.py")
         payload = json.loads(lock.read_text(encoding="utf-8"))
         payload["pid"] = 999999
         lock.write_text(json.dumps(payload), encoding="utf-8")

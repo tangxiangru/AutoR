@@ -835,7 +835,10 @@ def cmd_run(plan: TrialPlan) -> int:
         )
         return 2
 
-    lock = acquire_lock(Path(plan.state_dir))
+    # Named, because the kernel refuses to guess. A driver that let the marker default
+    # would ask whether a process of *somebody else's* kind holds the lock, be told no,
+    # and take over a lock a live sibling is holding.
+    lock = acquire_lock(Path(plan.state_dir), marker="rcb_trial.py")
     try:
         while True:
             states = all_states(plan)

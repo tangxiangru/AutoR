@@ -45,6 +45,31 @@ a field or a score that only one benchmark has" -- and the line is a test, not a
 convention: ``tests/test_trial_driver.py`` reads this file and refuses either
 benchmark's vocabulary in it.
 
+**Two hazards that only exist once there are two drivers**, and neither of them is
+reachable by anything in ``tests/test_rcb_trial_driver.py``, because that file has only
+ever run one driver. Both are why ``marker`` and :data:`AGENT_SCRIPT_NAMES` are the way
+they are, and both are stated as what goes wrong rather than as a principle:
+
+1. **A driver that does not say what it is called reads its own live lock as stale.**
+   ``lock_is_live`` decides liveness partly by looking for a marker string in the
+   holder's ``/proc`` command line, and that marker used to default to ``rcb_trial.py``.
+   A driver named ``fs_trial.py`` therefore asks "is a process called ``rcb_trial.py``
+   holding this?", gets no, concludes the lock was abandoned, takes it over, and runs
+   beside the driver that is still holding it -- two FrontierScience drivers on one
+   state directory, which is precisely the concurrency the lock exists to prevent and
+   which this box has already been observed doing with three AutoR processes against one
+   Vertex project. So ``marker`` is keyword-only and *required*: a default is not a
+   smaller version of this bug, it is this bug, because omission is the only way it was
+   ever got wrong.
+2. **A census that has never heard of the other agent reports a clean box.**
+   ``is_backed_run`` answers "will this process spend the quota I am about to spend",
+   and ``foreign_runs`` asks it about every pid before a driver will start. Recognising
+   only ``rcb_agent.py`` and ``main.py --goal``, the ResearchClawBench driver walks past
+   six live ``fs_agent.py`` children, finds nothing, and starts a seventh opus run. The
+   script names are therefore one table, :data:`AGENT_SCRIPT_NAMES`, covering both front
+   ends and the goal entry point -- and read by the function, which the constant it
+   replaced was not.
+
 ``autor_pids`` sits closest to that line and is on this side of it by a hair, so the
 hair is written down: it answers "is a pid I launched still alive", which is a different
 question from ``is_backed_run``'s "is somebody else spending the quota", and it answers
@@ -131,12 +156,18 @@ def process_argv(pid: int) -> list[str]:
     return [part.decode("utf-8", "replace") for part in raw.split(b"\0") if part]
 
 
-def lock_is_live(payload: Mapping[str, Any], *, marker: str = "rcb_trial.py") -> bool:
+def lock_is_live(payload: Mapping[str, Any], *, marker: str) -> bool:
     """Three conditions, all required. Any one alone gives a false answer.
 
     The pid alone is reused; the cmdline alone cannot be read for a pid that is gone;
     and after a reboot a pid *and* a matching cmdline can both be somebody else's
     process entirely, which is why the boot id is in the lock file.
+
+    *marker* is what the holder's command line has to contain, and it has no default on
+    purpose. It used to default to ``rcb_trial.py``, which was invisibly correct while
+    one driver existed and silently catastrophic the moment a second one did: a driver
+    called ``fs_trial.py`` asked whether an ``rcb_trial.py`` held the lock, was told no,
+    and took over a lock a live sibling was holding. Every caller now names itself.
     """
     pid = int(payload.get("pid") or 0)
     if pid <= 0 or not Path(f"/proc/{pid}").exists():
@@ -177,14 +208,22 @@ def claim_stale_lock(
     return True
 
 
-def acquire_lock(state_dir: Path) -> Path:
-    """``os.link``, because ``O_CREAT|O_EXCL`` is not reliably atomic on NFS."""
+def acquire_lock(state_dir: Path, *, marker: str) -> Path:
+    """``os.link``, because ``O_CREAT|O_EXCL`` is not reliably atomic on NFS.
+
+    *marker* names the calling driver -- ``"rcb_trial.py"``, ``"fs_trial.py"`` -- and is
+    required for the reason :func:`lock_is_live` gives: the liveness question is "is a
+    process of my kind still holding this", and a driver that lets the answer default
+    asks it about somebody else's kind. It is recorded in the lock file too, so an
+    operator reading a lock can see which driver wrote it without decoding ``argv``.
+    """
     state_dir.mkdir(parents=True, exist_ok=True)
     lock = state_dir / "driver.lock"
     payload = {
         "pid": os.getpid(),
         "pgid": os.getpgid(0),
         "boot_id": boot_id(),
+        "marker": marker,
         "argv": sys.argv,
         "started_at": time.time(),
     }
@@ -194,7 +233,7 @@ def acquire_lock(state_dir: Path) -> Path:
         os.link(tmp, lock)
     except FileExistsError:
         existing = read_json(lock)
-        if lock_is_live(existing):
+        if lock_is_live(existing, marker=marker):
             tmp.unlink(missing_ok=True)
             raise SystemExit(
                 f"another driver holds {lock} (pid {existing.get('pid')}). Two drivers "
@@ -231,8 +270,29 @@ def autor_pids() -> frozenset[int]:
     return frozenset(found)
 
 
-#: Scripts whose execution is a run competing for the same per-base-model quota.
-_RUN_SCRIPTS = ("rcb_agent.py", "main.py")
+#: Scripts whose execution is a run competing for the same per-base-model quota, each
+#: mapped to the argument prefixes that must also be present before it counts as one.
+#:
+#: One table rather than a chain of ``if name ==`` branches, because the chain was the
+#: hazard: it named ``rcb_agent.py`` and ``main.py`` and nothing else, so an RCB driver
+#: could walk past six live ``fs_agent.py`` children and report a clean box. A benchmark
+#: front end that is missing from here is invisible to every driver at once, which is
+#: worse than the duplication but at least is one place to look.
+#:
+#: ``main.py`` carries a condition and the two front ends do not: ``main.py
+#: --trial-report`` reads artifacts and calls nothing, while ``rcb_agent.py`` and
+#: ``fs_agent.py`` exist only to run a benchmark task. An empty tuple means
+#: unconditional.
+#:
+#: This replaces ``_RUN_SCRIPTS``, which held the same two names, was correct, and was
+#: read by nothing for the whole life of the driver -- the predicate had the list
+#: inlined. ``tests/test_trial_driver.py`` iterates this table rather than hard-coding
+#: the names, so a name added here without being wired fails.
+AGENT_SCRIPT_NAMES: dict[str, tuple[str, ...]] = {
+    "rcb_agent.py": (),
+    "fs_agent.py": (),
+    "main.py": ("--goal",),
+}
 
 
 def is_backed_run(argv: Sequence[str]) -> bool:
@@ -249,6 +309,11 @@ def is_backed_run(argv: Sequence[str]) -> bool:
       the test suite runs, constantly, and a driver that stands down for the unit
       tests never starts on a machine anybody is developing on. It contends for
       nothing, so it is not contention.
+
+    And one false *negative*, which is the expensive direction: the scripts it knows are
+    :data:`AGENT_SCRIPT_NAMES`, not a literal list written here. A front end missing from
+    that table is a live opus run this returns ``False`` for, and the caller's next move
+    is to start another one.
     """
     if not argv or "--fake-operator" in argv:
         return False
@@ -264,10 +329,12 @@ def is_backed_run(argv: Sequence[str]) -> bool:
         if arg.startswith("-"):
             continue
         name = arg.rsplit("/", 1)[-1]
-        if name == "rcb_agent.py":
+        if name not in AGENT_SCRIPT_NAMES:
+            continue
+        required = AGENT_SCRIPT_NAMES[name]
+        if not required:
             return True
-        if name == "main.py":
-            return any(a == "--goal" or a.startswith("--goal") for a in script_args)
+        return any(a.startswith(prefix) for prefix in required for a in script_args)
     return False
 
 

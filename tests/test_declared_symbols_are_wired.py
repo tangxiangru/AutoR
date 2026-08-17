@@ -69,7 +69,7 @@ the answer, when it happens, is an allowlist entry naming the framework that cal
 
 Measured precision
 ------------------
-1383 public definitions over 1244 distinct names in ``src/``, and 45 referenced by nothing
+1384 public definitions over 1245 distinct names in ``src/``, and 45 referenced by nothing
 outside ``tests/`` and ``tools/``. Fifteen of the forty-five arrived with FrontierScience:
 six because its front end is not in the tree yet, so its dataset reader and its scorer are
 reached only from ``tools/score_fs_run.py`` (:data:`_FS_SCORER_ONLY`), and nine because the
@@ -90,7 +90,7 @@ The census prints the rate and the evidence under it, every occurrence labelled 
 
     python3 -m tests.test_declared_symbols_are_wired --census
 
-Its header carries 1383, 1244, 45, 34 and the rate, so those drift with the tree and none of
+Its header carries 1384, 1245, 45, 34 and the rate, so those drift with the tree and none of
 them has to be believed.
 :meth:`AllowlistIsHonestTests.test_the_allowlist_is_exactly_what_the_scan_finds` keeps the
 45 honest.
