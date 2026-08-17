@@ -14,6 +14,7 @@ judge's bill are fake.
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 import os
@@ -541,7 +542,7 @@ class RealScorerArgvTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.addCleanup(self.tmp.cleanup)
 
-    def _capture(self, plan, out: Path) -> dict:
+    def _capture(self, plan, out: Path, *, draws: int = 1) -> dict:
         seen: dict = {}
         real = self.tool.subprocess.run
 
@@ -555,21 +556,23 @@ class RealScorerArgvTests(unittest.TestCase):
         self.tool.subprocess.run = spy
         try:
             seen["ok"] = self.tool.score_once(
-                plan, {"workspace": str(self.root / "ws")}, out
+                plan, {"workspace": str(self.root / "ws")}, out, draws=draws
             )
         finally:
             self.tool.subprocess.run = real
         return seen
 
-    def plan(self):
+    def plan(self, **overrides):
         from src.rcb_trial import ArmSpec, TrialPlan
 
-        return TrialPlan(
+        base = dict(
             capability="pr175", bench=str(self.root / "bench"), tasks=("Energy_001",),
             control=ArmSpec("c", "/wt/c", "c"), treatment=ArmSpec("t", "/wt/t", "t"),
             judge_kind="reference", judge_model="gpt-5.1",
             state_dir=str(self.root / "state"),
         )
+        base.update(overrides)
+        return TrialPlan(**base)
 
     def test_the_scorer_is_told_which_judge_to_use(self) -> None:
         """Without it ``score_rcb_run.py`` falls back to its own default model, and the
@@ -603,10 +606,104 @@ class RealScorerArgvTests(unittest.TestCase):
         try:
             self.assertFalse(
                 self.tool.score_once(plan, {"workspace": str(self.root / "ws")},
-                                     self.root / "state" / "scores" / "s.json")
+                                     self.root / "state" / "scores" / "s.json",
+                                     draws=1)
             )
         finally:
             self.tool.subprocess.run = real
+
+    def test_the_draw_count_reaches_the_scorers_argv(self) -> None:
+        """The knob that did not arrive, at the one boundary that spends the money.
+
+        ``score_rcb_run.py`` declares ``--draws`` and defaults it to 1, and the driver
+        built a command line that never mentioned it, so the plan's ``replicates`` could
+        say anything and the judge was asked once. Every score file the live stage-graph
+        trial has produced records ``"draws": 1`` and ``"total_spread": null``; the pair
+        those files carry is 35.1 against 26.6.
+        """
+        seen = self._capture(self.plan(), self.root / "state" / "scores" / "s.json", draws=3)
+        argv = seen["argv"]
+        self.assertIn("--draws", argv)
+        self.assertEqual(argv[argv.index("--draws") + 1], "3")
+
+
+class DeclaredDrawCountArrivesTests(unittest.TestCase):
+    """A knob declared in the plan and not passed at the boundary that spends it.
+
+    ``replicates: 3`` sat in the frozen plan of the live stage-graph trial and every
+    score file it produced records ``"draws": 1`` and ``"total_spread": null``. The
+    count was plumbed as far as :func:`final_pass`'s file loop and no further, so the
+    only path that trial actually took — the in-loop early score — asked the judge once
+    and published a total whose sampling band it then declined to state.
+
+    The shape of the defect is a call site that says nothing and a callee that has a
+    default to say it with. Both halves are refused here, off the driver's own syntax,
+    because the behavioural test below can only cover the call sites a test reaches.
+    """
+
+    SOURCE = ast.parse(TOOL.read_text(encoding="utf-8"))
+
+    def _def(self, name: str) -> ast.FunctionDef:
+        for node in ast.walk(self.SOURCE):
+            if isinstance(node, ast.FunctionDef) and node.name == name:
+                return node
+        raise AssertionError(f"tools/rcb_trial.py no longer defines {name}()")
+
+    def _calls_in(self, node: ast.AST, name: str) -> list[ast.Call]:
+        return [
+            child
+            for child in ast.walk(node)
+            if isinstance(child, ast.Call)
+            and isinstance(child.func, ast.Name)
+            and child.func.id == name
+        ]
+
+    def test_score_once_gives_the_draw_count_no_default_to_hide_behind(self) -> None:
+        """A default is what let a silent call site look complete.
+
+        ``draws`` is keyword-only with no default, so a call that does not name it is a
+        ``TypeError`` at import-adjacent time rather than a judge asked once.
+        """
+        signature = self._def("score_once").args
+        self.assertIn("draws", [arg.arg for arg in signature.kwonlyargs])
+        index = [arg.arg for arg in signature.kwonlyargs].index("draws")
+        self.assertIsNone(
+            signature.kw_defaults[index],
+            "score_once(draws=...) has a default again; a call site that says nothing "
+            "about how many times to pay the judge would compile",
+        )
+
+    def test_every_call_site_of_score_once_names_the_draw_count(self) -> None:
+        calls = self._calls_in(self.SOURCE, "score_once")
+        self.assertGreaterEqual(len(calls), 2, "the two scoring paths are one call each")
+        for call in calls:
+            with self.subTest(line=call.lineno):
+                self.assertIn(
+                    "draws",
+                    [keyword.arg for keyword in call.keywords],
+                    "a score_once call that does not say how many draws it is buying",
+                )
+
+    def test_the_two_scoring_paths_spend_the_budget_the_two_declared_ways(self) -> None:
+        """One file of ``replicates`` draws in the loop, ``replicates`` files of one after.
+
+        Not interchangeable, and the split is the reason each is what it is. The final
+        pass checkpoints per file, so one draw per file makes a judge flake cost one
+        draw instead of the arm's whole replication. The in-loop score is thrown away by
+        the final pass and has nothing to salvage, so it buys the plan's whole count at
+        once — and it is the number an operator reads for days.
+        """
+        in_loop = self._calls_in(self._def("cmd_run"), "score_once")
+        self.assertEqual(len(in_loop), 1)
+        drawn = next(kw.value for kw in in_loop[0].keywords if kw.arg == "draws")
+        self.assertIsInstance(drawn, ast.Attribute)
+        self.assertEqual(drawn.attr, "replicates")
+
+        final = self._calls_in(self._def("final_pass"), "score_once")
+        self.assertEqual(len(final), 1)
+        per_file = next(kw.value for kw in final[0].keywords if kw.arg == "draws")
+        self.assertIsInstance(per_file, ast.Constant)
+        self.assertEqual(per_file.value, 1)
 
 
 class EvidenceTests(unittest.TestCase):
@@ -718,6 +815,50 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(evidence.env.judge_replicates, 2)
         self.assertEqual(evidence.replicates_requested, 2)
         self.assertEqual((evidence.images_shown, evidence.images_available), (1, 1))
+
+    def test_the_recorded_draw_count_counts_draws_and_not_files(self) -> None:
+        """``len(payloads)`` and the draw count are the same number on one layout only.
+
+        The final pass writes one draw per file, so counting files was right for as long
+        as that was the only writer. The in-loop score asks the scorer for the plan's
+        whole count in one invocation, and ``aggregate_draws`` records it as ``draws``
+        inside that file — so a reader that counts files reports two where the judge was
+        paid six times. The disagreement runs in the direction that publishes: an arm the
+        report calls single-draw is an arm whose measured band the report then declines
+        to state.
+        """
+        plan = self.plan()
+        self.write_scores(
+            plan, "621566b", 20,
+            draws=3,
+            total_scores=[18.0, 20.0, 22.0],
+            items=[
+                {"index": index, "type": entry["type"], "weight": entry["weight"],
+                 "content": entry["content"], "score": 20, "scores": [18, 20, 22]}
+                for index, entry in enumerate(CHECKLIST)
+            ],
+        )
+        evidence = self.tool.evidence_for(plan, self.state("621566b"))
+        self.assertEqual(evidence.env.judge_replicates, 6)
+        self.assertEqual(evidence.items[0].scores, (18, 20, 22, 18, 20, 22))
+
+    def test_a_cancelled_run_carries_its_status_into_the_evidence(self) -> None:
+        """The producer half of the truncation report: ``run_manifest.run_status``.
+
+        ``harvest`` already read the field and ``evidence_for`` dropped it, so the whole
+        reporting path could be correct and have nothing to report. Two of the three
+        finished runs of the live stage-graph trial read ``cancelled`` here.
+        """
+        from src.rcb_trial import run_status_of, truncated
+
+        plan = self.plan()
+        self.write_scores(plan, "621566b", 20)
+        cut = self.tool.evidence_for(plan, self.state("621566b", run_status="cancelled"))
+        clean = self.tool.evidence_for(plan, self.state("621566b", run_status="completed"))
+
+        self.assertEqual(run_status_of(cut), "cancelled")
+        self.assertTrue(truncated(cut))
+        self.assertFalse(truncated(clean))
 
     def test_two_arms_run_on_different_models_are_not_a_pair(self) -> None:
         """Fact one's exact confound, through the real producer.
@@ -837,6 +978,56 @@ class EndToEndDryRunTests(unittest.TestCase):
         # must show a signed, non-zero, correctly-directed difference. Two identical
         # columns would let a broken seam pass.
         self.assertIn("won 1, lost 0", report)
+
+    def test_the_plans_replicate_count_reaches_the_judge_on_both_paths(self) -> None:
+        """The knob that did not arrive, from the frozen plan to the file on disk.
+
+        This is the test the live stage-graph trial needed and did not have. Its plan
+        declares ``replicates: 3``; the driver's in-loop score built a scorer command
+        line with no ``--draws`` on it, so the judge was asked once and every score file
+        in that trial's ``scores/`` records ``"draws": 1`` and ``"total_spread": null``.
+        Nothing was red, because the count was checked where it was *declared* and never
+        where it was *spent*.
+
+        Both paths are asserted from the plan rather than from a hand-passed argument,
+        because "the knob is forwarded when you pass it" is the assertion that was
+        already true.
+        """
+        from src.rcb_trial import judge_draws_in
+
+        plan_path = self._plan(replicates=3)
+        self.assertEqual(self.tool.main(["plan", "--plan", str(plan_path)]), 0)
+        self.assertEqual(self.tool.main(["run", "--plan", str(plan_path)]), 0)
+        scores = self.root / "state" / "scores"
+
+        # The in-loop score: one file, the plan's whole count inside it, and a spread
+        # the file states rather than reports as `null`.
+        early = sorted(scores.glob("*.early.*.json"))
+        self.assertEqual(len(early), 2, [p.name for p in early])
+        for path in early:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            with self.subTest(score=path.name):
+                self.assertEqual(payload["draws"], 3)
+                self.assertEqual(len(payload["total_scores"]), 3)
+                self.assertIsNotNone(
+                    payload["total_spread"],
+                    "three draws of a stochastic judge that resolved every item "
+                    "identically is the reading the spread exists to keep off the page",
+                )
+                self.assertEqual(judge_draws_in([payload]), 3)
+
+        # The final pass: the same count spent as separately checkpointed files, so a
+        # judge flake costs one draw rather than the arm's whole replication.
+        for label in (self.control_arm, self.treatment_arm):
+            final = sorted(scores.glob(f"*.{label}.*.final.*.json"))
+            with self.subTest(arm=label):
+                self.assertEqual(len(final), 3, [p.name for p in final])
+                payloads = [json.loads(p.read_text(encoding="utf-8")) for p in final]
+                self.assertEqual([p["draws"] for p in payloads], [1, 1, 1])
+                self.assertEqual(judge_draws_in(payloads), 3)
+
+        report = (self.root / "state" / "report.md").read_text(encoding="utf-8")
+        self.assertIn("judge draws: control **3**, treatment **3**, of 3 planned", report)
 
     def test_the_recovered_difference_is_the_benchmark_total_difference(self) -> None:
         plan_path = self._plan()

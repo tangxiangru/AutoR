@@ -30,11 +30,14 @@ from src.rcb_trial import (
     count_quota_hits,
     format_rcb_trial_report,
     items_from_score_payloads,
+    judge_draws_in,
     next_action,
     pair_resolution,
     resolution_is_measured,
+    run_status_of,
     stratum_rollup,
     to_run_record,
+    truncated,
 )
 
 # Private on purpose — it is one rule shared by the classifier and the admission clause,
@@ -752,18 +755,44 @@ class ReportTests(unittest.TestCase):
         self.assertIn("ran **once**", text)
         self.assertIn("zero observations", text)
 
-    def test_a_stage_composition_difference_is_reported_outside_the_score(self) -> None:
-        """``shape_changes`` is structurally zero here, so it is re-armed by hand.
+    def test_a_stage_composition_difference_is_set_aside_from_the_score(self) -> None:
+        """``shape_changes`` used to be structurally zero here. It is not any more.
 
         Both arms are scored against the same checklist whatever their internal
-        composition, so the strongest refusal in :mod:`src.trials` is true and empty on
-        this outcome measure.
+        composition, so ``stage_fitness`` carries one key each and the strongest refusal
+        in :mod:`src.trials` was true and empty on this outcome measure — over exactly
+        the pair it was written for. The first live pair is four stages against seven,
+        one arm cancelled and one completed, and its totals were averaged as if they
+        were two configurations of the same depth of run.
         """
-        control = arm(stages=("01_s", "02_s"))
-        treatment = arm(label="47f3fbf", stages=tuple(f"0{n}_s" for n in range(1, 9)))
+        control = arm(stages=("01_s", "02_s", "03_s", "04_s"), scores=(40, 30, 20))
+        treatment = arm(
+            label="47f3fbf",
+            stages=tuple(f"0{n}_s" for n in range(1, 8)),
+            scores=(20, 30, 20),
+        )
+        outcome = trial(control, treatment)
         text = self.report(control, treatment)
+
         self.assertIn("did not score the same stages", text)
-        self.assertEqual(trial(control, treatment).result.shape_changes, 0)
+        self.assertEqual((outcome.result.n, outcome.result.shape_changes), (0, 1))
+        self.assertIn("set aside: 1 shape-differing pair(s)", text)
+        self.assertIn("there is no same-shape pair yet", text)
+        # The delta is real and is reported as a set-aside, not as the result.
+        self.assertAlmostEqual(outcome.result.shape_changed_mean, -10.0, places=6)
+        self.assertAlmostEqual(outcome.result.mean_difference, 0.0, places=9)
+
+    def test_two_arms_that_got_equally_far_are_still_one_pair(self) -> None:
+        """The control on the change above: only the composition may move the verdict.
+
+        A declaration that set every pair aside would look identical from the report's
+        one shape-differing line, and would silently empty the trial.
+        """
+        outcome = trial(arm(stages=("01_s", "02_s")), arm(label="47f3fbf", stages=("01_s", "02_s")))
+        self.assertEqual((outcome.result.n, outcome.result.shape_changes), (1, 0))
+        self.assertNotIn(
+            "set aside", format_rcb_trial_report(outcome)
+        )
 
     def test_the_contrast_is_printed_verbatim(self) -> None:
         text = self.report(arm(), arm(label="47f3fbf"), contrast_log="47f3fbf one commit (#175)")
@@ -1074,6 +1103,176 @@ class ReplicateTests(unittest.TestCase):
         with self.assertRaises(ValueError) as caught:
             items_from_score_payloads(payloads)
         self.assertIn("item identity", str(caught.exception))
+
+
+class DrawsInsideOneFileTests(unittest.TestCase):
+    """A file is a checkpoint. A draw is a judge pass. They were the same number once.
+
+    ``final_pass`` writes one draw per file, so ``len(payloads)`` was the draw count and
+    reading ``item["score"]`` was reading the draw. Both stop being true the moment the
+    scorer is asked for ``--draws N``, which is what the in-loop score now does — and
+    they stop being true silently and in the direction that publishes: an arm the report
+    calls single-draw is an arm whose measured spread the report then declines to state.
+    """
+
+    def folded(self, *draws: tuple[int, ...]) -> dict:
+        """One score file as ``score_rcb_run.aggregate_draws`` actually writes it."""
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "score_rcb_run", REPO_ROOT / "tools" / "score_rcb_run.py"
+        )
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+        return module.aggregate_draws(
+            [
+                {
+                    "items": [
+                        {"index": i, "type": "text", "weight": 0.5, "content": f"c{i}", "score": s}
+                        for i, s in enumerate(scores)
+                    ],
+                    "total_score": sum(0.5 * s for s in scores),
+                    "judge_calls": len(scores),
+                    "judge_failures": [],
+                }
+                for scores in draws
+            ]
+        )
+
+    def test_one_file_of_three_draws_counts_as_three(self) -> None:
+        payload = self.folded((40, 20), (60, 20), (50, 20))
+        self.assertEqual(payload["draws"], 3)
+        self.assertEqual(judge_draws_in([payload]), 3)
+
+    def test_three_files_of_one_draw_still_count_as_three(self) -> None:
+        """The two ways the driver spends the same budget have to agree."""
+        payloads = [self.folded((40, 20)), self.folded((60, 20)), self.folded((50, 20))]
+        self.assertEqual([p["draws"] for p in payloads], [1, 1, 1])
+        self.assertEqual(judge_draws_in(payloads), 3)
+
+    def test_a_file_written_before_the_field_existed_reads_as_one_draw(self) -> None:
+        self.assertEqual(judge_draws_in([{"items": []}]), 1)
+        self.assertEqual(judge_draws_in([{"draws": None}]), 1)
+
+    def test_the_spread_inside_one_file_survives_into_the_item_vector(self) -> None:
+        """The half that made the count wrong in the direction that publishes.
+
+        ``aggregate_draws`` leaves the per-draw list on each item and the mean in
+        ``score``. Reading ``score`` alone gave a one-element ``ScoredItem.scores``, so
+        ``spread`` was 0 over a first item the judge had actually moved 20 points on —
+        and ``pair_resolution`` then reported ±0.00, which reads as a judge that
+        resolved every item exactly, off the one file where the judge's noise *was*
+        observed.
+        """
+        payload = self.folded((40, 20), (60, 20), (50, 20))
+        scored = items_from_score_payloads([payload])
+        self.assertEqual(scored[0].scores, (40, 60, 50))
+        self.assertEqual(scored[0].spread, 20)
+        self.assertEqual(scored[1].spread, 0)
+
+    def test_a_replicated_arm_in_one_file_can_state_its_resolution(self) -> None:
+        """End to end: one file of three draws is a pair with a measured band."""
+        payload = self.folded((40, 20), (60, 20), (50, 20))
+        scored = items_from_score_payloads([payload])
+        both = ArmEvidence(
+            task_id="Energy_001",
+            arm="621566b",
+            run_id="r",
+            workspace="/ws",
+            env=env(judge_replicates=judge_draws_in([payload])),
+            items=scored,
+            published_total=float(payload["total_score"]),
+            replicates_requested=3,
+            checklist_items_expected=len(scored),
+            facts=dict(GOOD_FACTS),
+        )
+        self.assertEqual(both.replicates, 3)
+        self.assertTrue(resolution_is_measured(both, both))
+        self.assertAlmostEqual(pair_resolution(both, both), 0.5 * 20, places=9)
+
+
+class RunStatusIsVisibleTests(unittest.TestCase):
+    """A truncated deliverable is a different object from a finished one.
+
+    ``run_status: cancelled`` is what the manifest records when a stage burned its
+    attempts, the auto-skip budget ran out, and the next failure landed at the stage
+    that writes the deliverable. Two of the three finished runs of the live stage-graph
+    trial ended that way and the report said so nowhere: a reader had to open
+    ``runs/<task>.<arm>.a1.json``.
+    """
+
+    def report(self, *evidences, **kwargs) -> str:
+        return format_rcb_trial_report(trial(*evidences, **kwargs))
+
+    def cut(self, **kwargs):
+        return arm(facts={"run_status": "cancelled"}, **kwargs)
+
+    def test_a_cancelled_run_is_named_in_the_sample_table(self) -> None:
+        text = self.report(self.cut(), arm(label="47f3fbf", facts={"run_status": "completed"}))
+        self.assertIn("Runs scored, and how they ended", text)
+        self.assertIn("1 of 2 scored runs did not end `completed`", text)
+        self.assertIn("| `Energy_001` | `621566b` | **cancelled** | 2 |", text)
+        self.assertIn("| `Energy_001` | `47f3fbf` | completed | 2 |", text)
+
+    def test_the_sample_table_sits_above_the_difference(self) -> None:
+        """Same argument as the refusal ledger: the composition of a sample is not a
+        footnote to the number the sample produced."""
+        text = self.report(self.cut(), arm(label="47f3fbf", facts={"run_status": "completed"}))
+        self.assertLess(text.index("Runs scored, and how they ended"), text.index("## The difference"))
+
+    def test_the_truncation_is_named_beside_the_pair_delta(self) -> None:
+        text = self.report(self.cut(), arm(label="47f3fbf", facts={"run_status": "completed"}))
+        self.assertIn("- run status: control **cancelled**, treatment **completed**", text)
+        self.assertIn("The control arm's deliverable was truncated", text)
+
+    def test_both_arms_truncated_are_both_named(self) -> None:
+        text = self.report(self.cut(), self.cut(label="47f3fbf"))
+        self.assertIn("2 of 2 scored runs did not end `completed`", text)
+        self.assertIn("The control and treatment arm's deliverable was truncated", text)
+
+    def test_a_finished_pair_is_not_disclaimed(self) -> None:
+        text = self.report(
+            arm(facts={"run_status": "completed"}),
+            arm(label="47f3fbf", facts={"run_status": "completed"}),
+        )
+        self.assertIn("all 2 scored runs ended `completed`", text)
+        self.assertNotIn("was truncated", text)
+
+    def test_an_unrecorded_status_is_printed_as_unrecorded_and_not_as_truncated(self) -> None:
+        """Silence is not evidence of truncation, and it is not evidence of completion.
+
+        A state file written before the driver carried the field says nothing, and
+        inventing either reading from it would put a claim on runs nobody measured.
+        Folding it into the clean branch is the tempting half: "all 2 scored runs ended
+        `completed`" over two runs whose ending nothing observed is a fabrication with
+        the report's own voice behind it.
+        """
+        control, treatment = arm(), arm(label="47f3fbf")
+        self.assertEqual((run_status_of(control), truncated(control)), ("", False))
+        text = self.report(control, treatment)
+        self.assertIn("2 of 2 scored runs recorded no run status at all", text)
+        self.assertNotIn("all 2 scored runs ended `completed`", text)
+        self.assertNotIn("was truncated", text)
+        self.assertIn("| <unrecorded> |", text)
+        self.assertIn("- run status: control **<unrecorded>**", text)
+
+    def test_one_silent_run_beside_one_clean_one_is_not_reported_as_two_clean(self) -> None:
+        """The mixed case, which the two-branch version got wrong in the same direction."""
+        text = self.report(arm(), arm(label="47f3fbf", facts={"run_status": "completed"}))
+        self.assertIn("1 of 2 scored runs recorded no run status at all", text)
+        self.assertNotIn("all 2 scored runs ended `completed`", text)
+
+    def test_no_admission_clause_reads_the_run_status(self) -> None:
+        """It comes off the run's own manifest inside the run root, which the operator
+        writes with `bypassPermissions`. A gate on it would be a gate the party it
+        constrains can clear with one word."""
+        for status in ("cancelled", "completed", "failed", "halted", ""):
+            with self.subTest(status=status):
+                self.assertEqual(
+                    admit_arm(arm(facts={"run_status": status})),
+                    admit_arm(arm()),
+                )
 
 
 if __name__ == "__main__":
