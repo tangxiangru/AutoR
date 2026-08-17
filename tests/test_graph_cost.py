@@ -9,7 +9,9 @@ ordering*: a per-edge constant sitting beside a derivable one is where drift
 starts, and this repo has already been bitten by hand-copied constants that were
 stale. Second, cost is shown as information, not as a reason to be thrifty — a
 correct expensive correction beats a wrong cheap one, and a router that shops on
-price writes up around the flaw it should have gone back for.
+price writes up around the flaw it should have gone back for. The second property
+grew a balance to weigh the price against; ``tests/test_router_budget.py`` holds
+that half, and the two assertions here keep both halves of the sentence at once.
 """
 
 from __future__ import annotations
@@ -19,7 +21,9 @@ import unittest
 from src.stage_graph import (
     FINISH,
     REVISIT_EDGES,
+    GraphState,
     StageGraph,
+    WalkBudget,
     _advance_edges,
     replay_cost,
 )
@@ -76,7 +80,7 @@ class ReplayCostTest(unittest.TestCase):
 class CostOnTheMenuTest(unittest.TestCase):
     def test_the_move_table_has_a_discards_column(self) -> None:
         graph = StageGraph.named("adaptive")
-        rendered = graph.describe_for_prompt([])
+        rendered = graph.describe_for_prompt([], WalkBudget.of(GraphState(), "06_analysis"))
         self.assertIn("Discards", rendered)
 
     def test_the_router_says_cost_is_not_a_reason_to_be_cheap(self) -> None:
@@ -87,6 +91,24 @@ class CostOnTheMenuTest(unittest.TestCase):
         self.assertIn("**Discards**", text, "the router never explains the column")
         self.assertIn("correct expensive", text)
         self.assertIn("break a tie", text)
+
+    def test_it_no_longer_says_that_without_saying_what_is_left(self) -> None:
+        """The other half of the same sentence, and the half that was false.
+
+        "A correct expensive correction beats a wrong cheap one" was addressed to an
+        agent with no idea what it had left to spend, and the paragraph went on to tell
+        it not to look. Keeping only the first assertion above would let the paragraph
+        revert to that: it is the sentence the reverted version also contains.
+        """
+        from pathlib import Path
+
+        text = (Path(__file__).resolve().parent.parent / "src" / "router.py").read_text(encoding="utf-8")
+        self.assertIn("afford to finish", text, "cost is weighed against nothing")
+        self.assertNotIn(
+            "Use it only to break a tie",
+            text,
+            "the column is still presented as tie-break-only, with no balance beside it",
+        )
 
 
 class NewBackwardEdgesTest(unittest.TestCase):

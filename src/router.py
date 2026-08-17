@@ -20,6 +20,26 @@ would be the more obvious design and it is the wrong one: an agent that can see
 that would fix it, while an agent shown only the open moves picks the best of them
 without ever learning what it was missing.
 
+**And what the run has left to spend.** The same argument reaches one step further
+than it used to. The prompt showed every move and what each one discards, and then
+told the agent in as many words not to weigh the cost — right in the abstract, and
+wrong under a budget the agent could not see. Measured on every finished run of the
+first live paired trial — the population and the figures are pinned in the module
+docstring of ``tests/test_router_budget.py`` — the step budget never bound and the
+auto-skip allowance did. On `Astronomy_000_20260814_175426` three skips went, the
+next exhaustion landed at the stage that writes the deliverable, and the run ended
+`cancelled`: its manifest has `07_writing` as `failed`, its `stages/` holds a
+`07_writing.tmp.md` and no `07_writing.md`, and one stage of the eight is `approved`.
+A backward move re-runs stages and a re-run stage can exhaust its attempts like any
+other, so revisiting and reaching the deliverable were drawing on one allowance while
+the routing prompt named neither. :class:`src.stage_graph.WalkBudget` now puts all
+three pools next to the menu — the graph's own two off
+:class:`~src.stage_graph.GraphState`, and the
+auto-skip pool from ``skip_budget``, the counters the manager enforces it with — so
+"an expensive correction is worth it" has a denominator. It is still not a price
+list: what changed is that "cost is not the criterion" is now said to an agent that
+can tell whether it can afford to finish.
+
 **The refusal that carries the weight.** A revisit whose justification repeats one
 already on the path is refused. Returning to Stage 05 a third time because "more
 repeats are needed" is not iteration; the run has been there twice with that exact
@@ -32,6 +52,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -40,7 +61,15 @@ from .approval_agent import extract_json_payload
 from .obligations import load_ledger
 from .preregistration import load_hypothesis_outcomes
 from .rubric import StageScore, format_score_for_prompt
-from .stage_graph import FINISH, GraphState, Move, StageGraph, block_census
+from .stage_graph import (
+    FINISH,
+    GraphState,
+    Move,
+    StageGraph,
+    WalkBudget,
+    block_census,
+    describe_budget_for_prompt,
+)
 from .utils import (
     RunPaths,
     StageSpec,
@@ -58,6 +87,12 @@ from .utils import (
 #: ``auto`` asks only where the answer can differ, which is any node with more than
 #: one live move; on a linear graph that is never, so ``auto`` costs nothing there.
 ROUTING_MODES = ("off", "auto", "agent")
+
+
+#: Auto-skips spent and allowed, supplied by whoever enforces them. ``None`` for the
+#: allowance means "nobody declared one", which the prompt says in those words rather
+#: than filling in a default — see :func:`src.stage_graph.describe_budget_for_prompt`.
+SkipBudget = Callable[[], tuple[int, int | None]]
 
 
 @dataclass(frozen=True)
@@ -94,6 +129,7 @@ class StageRouter:
         mode: str = "auto",
         fake_mode: bool = False,
         archive: Any | None = None,
+        skip_budget: SkipBudget | None = None,
     ) -> None:
         if mode not in ROUTING_MODES:
             raise ValueError(f"Unknown routing mode: {mode!r}. Expected one of {', '.join(ROUTING_MODES)}.")
@@ -105,6 +141,23 @@ class StageRouter:
         # not `default_move`, not a guard, not a recommendation. The archive knows
         # about other research questions; the agent can see this one.
         self.archive = archive
+        # The auto-skip pool, from the party that spends it. The router cannot compute
+        # it: the allowance is a `ResearchManager` setting that reaches no file and no
+        # `RunPaths` field, and the tally lives in memory beside it.
+        #
+        # Reading it back out of `logs.txt` was the other candidate and is wrong twice
+        # over. `logs.txt` sits at the run root and the operator runs at `cwd=run_root`
+        # with `bypassPermissions`, so it is a file the displayed party can write; and
+        # it is incomplete — `_route_to_deliverable` extends the tally the budget test
+        # reads without writing an `auto_skip_used:` line, so a run routed off the
+        # approval gate reports every stage from the aborting one up to the deliverable
+        # as consumed in memory — four when it aborts at Stage 03, six at Stage 01 —
+        # and none of them on the record.
+        # A provider asks the enforcer, which cannot disagree with itself.
+        #
+        # Optional because the router runs without a manager in tests and in
+        # `tools/`; absent, the prompt says the pool was never declared.
+        self.skip_budget = skip_budget
 
     def choose(
         self,
@@ -429,6 +482,10 @@ class StageRouter:
         score: StageScore | None,
     ) -> str:
         graph = StageGraph(tuple(move.edge for move in moves))
+        skips_spent, max_skips = self.skip_budget() if self.skip_budget else (0, None)
+        budget = WalkBudget.of(
+            state, stage.slug, skips_spent=skips_spent, max_skips=max_skips
+        )
         route = " → ".join(f"{visit.stage}" for visit in state.path) or "(this is the first stage)"
         revisits = [
             f"- went back to `{visit.chose}` after `{visit.stage}`: {visit.reason}"
@@ -449,17 +506,30 @@ class StageRouter:
             "",
             "## Moves out of this node",
             "",
-            graph.describe_for_prompt(moves),
+            graph.describe_for_prompt(moves, budget),
             "",
             "A move marked unavailable cannot be chosen. The reason it is unavailable is usually "
             "actionable — if the writing stage is closed because a hypothesis has no verdict, the "
             "move that opens it is the one to take.",
             "",
-            "**Discards** is how many stages the move throws away and the run has to redo. It is "
-            "there so the choice is informed, not so you make the cheap one: a correct expensive "
-            "correction beats a wrong cheap one every time, and a run that shops on price writes "
-            "up around the flaw it should have gone back for. Use it only to break a tie between "
-            "two moves that would fix the same thing.",
+            "**Discards** is how many stages the move throws away and the run has to redo. "
+            "**Worst case** is what that comes to against what is left: one stage execution per "
+            "discarded stage, and — because a re-run stage can exhaust its attempts like any "
+            "other — up to one auto-skip each. Both are ceilings; a re-run stage that passes "
+            "first time costs a step and no skip.",
+            "",
+            "## What this run has left",
+            "",
+            describe_budget_for_prompt(budget),
+            "",
+            "Cost is not the criterion. A correct expensive correction beats a wrong cheap one, "
+            "and a run that shops on price writes up around the flaw it should have gone back "
+            "for. But a correction the run cannot afford to finish is not a correction: if the "
+            "worst case of the move you want does not fit in the numbers above, the run does not "
+            "come back from it — it stops part-way and writes up from wherever it stopped, which "
+            "is the outcome going back was supposed to prevent. So spend on the move that fixes "
+            "the research, and where two moves would fix the same thing, break a tie with the "
+            "one the run can finish.",
             "",
             "## Route so far",
             "",
