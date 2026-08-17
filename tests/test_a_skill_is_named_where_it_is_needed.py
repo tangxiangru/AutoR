@@ -40,7 +40,7 @@ This file makes it loud. It asserts four things:
 3. Every *general* skill in the pack is named by a rendered prompt, or is
    task-scoped and declares the stages the `task_shaped_skills` channel should
    announce it at. Field skills are exempt: the discipline installer already
-   narrows them to two per run, and 14 of the 20 field skills did launch at least
+   narrows them to two per run, and 15 of the 20 field skills did launch at least
    once in the arm, so pull-based routing demonstrably works once the field of
    candidates is small.
 4. The unreachable-by-construction allowlist has not outlived its cause.

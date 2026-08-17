@@ -89,4 +89,9 @@ real comparison is worth far more than a missing arm.
 
 See also `run-the-conditions-the-source-ran` for the experiment list this model
 has to be run through, and `publish-what-the-run-already-computed` for the sweep
-that catches a training log you kept and did not plot.
+that catches a training log you kept and did not plot. On a materials run,
+`material-as-specified-run-and-stage-diagnostics` covers the "run the named method
+family" and "leave the stage diagnostics behind you" halves of this from the field
+side; what is here and not there is the trade against a released checkpoint, the
+component-versus-input ablation distinction, and what to do when the supplied data
+turns out to be degenerate.
