@@ -488,6 +488,13 @@ POOLED_CONTROL_ARM = (
     "src/archive.py",
 )
 
+#: There was a fifth. ``tests/test_decisions.py`` carried the same argument in different
+#: words -- "the four states it stops pooling" -- so the regex below could not see it, and
+#: this group certified four copies as agreeing while a fifth disagreed. It was retired
+#: rather than added: its docstring now states no count and points here. A pin over a
+#: hand-listed population is only as exhaustive as the phrasing it greps for, and the
+#: cheapest way to keep that true is to have fewer copies rather than a better regex.
+
 
 class TheBlockedValueSetIsWrittenDownOnceTests(unittest.TestCase):
     """Prose that enumerates ``BLOCK_KINDS``, checked against ``BLOCK_KINDS``.

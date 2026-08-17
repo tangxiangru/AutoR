@@ -606,13 +606,62 @@ class TheBudgetIsShownAndNotEnforcedTest(unittest.TestCase):
         self.assertEqual(decision.target, "02_hypothesis_generation")
         self.assertEqual(decision.refusal, "")
 
-    def test_the_router_source_records_no_refusal_on_a_budget_it_only_displays(self) -> None:
-        """A grep, deliberately. The reader after the supervisor lands will be looking
-        for whether this module ever learned to say no, and the answer has to be no."""
-        text = (Path(__file__).resolve().parent.parent / "src" / "router.py").read_text(encoding="utf-8")
-        body = text.split("def choose(", 1)[1].split("def _refuse(", 1)[0]
-        for symbol in ("skips_left", "steps_left", "skip_budget", "WalkBudget"):
-            self.assertNotIn(symbol, body, f"`choose` reads {symbol}; a display became a gate")
+    def test_choose_never_branches_on_a_budget_it_only_passes_it_on(self) -> None:
+        """The reader after the supervisor lands will be looking for whether this module
+        ever learned to say no, and the answer has to be no.
+
+        Asserted over the syntax rather than as a grep for the symbol. The grep version
+        of this test failed the moment `graph/revisit-budget-reserve` gave `choose` a
+        `skips_left` parameter to hand to `StageGraph.moves` — which is the design this
+        test exists to protect, not a violation of it. Whether a backward edge is open
+        under a nearly-spent recovery budget is a refusal in code, and it is made in the
+        graph; passing the number to the component that decides is how it gets there.
+
+        So the rule is: the budget may appear in `choose` as a parameter and as a call
+        argument, and never in a condition. A `if skips_left ...`, a comprehension filter
+        or a boolean operator over one is a display that became a gate.
+        """
+        import ast
+
+        source = (Path(__file__).resolve().parent.parent / "src" / "router.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        choose = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "choose"
+        )
+        budget_names = {"skips_left", "steps_left", "skip_budget", "WalkBudget"}
+
+        def names_in(node: ast.AST) -> set[str]:
+            return {
+                child.id
+                for child in ast.walk(node)
+                if isinstance(child, ast.Name)
+            } | {
+                child.attr
+                for child in ast.walk(node)
+                if isinstance(child, ast.Attribute)
+            }
+
+        deciding: list[str] = []
+        for node in ast.walk(choose):
+            tests: list[ast.AST] = []
+            if isinstance(node, (ast.If, ast.While)):
+                tests.append(node.test)
+            elif isinstance(node, ast.IfExp):
+                tests.append(node.test)
+            elif isinstance(node, (ast.BoolOp, ast.Compare)):
+                tests.append(node)
+            elif isinstance(node, ast.comprehension):
+                tests.extend(node.ifs)
+            for test in tests:
+                for name in sorted(budget_names & names_in(test)):
+                    deciding.append(f"{name} in a {type(node).__name__}")
+        self.assertEqual(
+            deciding,
+            [],
+            "`choose` branches on the budget; a display became a gate: " + "; ".join(deciding),
+        )
 
 
 class WritingStageHasNowhereToRouteTest(unittest.TestCase):

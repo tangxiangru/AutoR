@@ -877,11 +877,15 @@ BLOCK_KINDS = ("guard", "visits", "steps", "concluded", "pruned", "budget")
 #: while this was being written and a denominator that moves under the reader is not
 #: a measurement. It changes no cell above and could not: it is a ``linear`` arm, so
 #: it declares no backward edge and can never offer, withdraw or take one. What it
-#: does move is the decision count, which is the one figure here that is not a cell:
-#: replayed over all four today it reads 24, and that run's ``stage_graph.json`` has
-#: an open visit at ``05_experimentation`` with no ``left_at``, so tomorrow it reads
-#: more. The pinned population is the two ``Astronomy_000`` runs and
-#: ``Chemistry_000_20260816_011751``.
+#: does move is the decision count, which is the one figure here that is not a cell.
+#: No figure is quoted for the four-run replay, because the reason to exclude the fourth
+#: run does not depend on one: it was being written while the population was chosen, and
+#: a denominator that moves under the reader is not a measurement. It has since stopped —
+#: its ``stage_graph.json`` still has an open visit at ``05_experimentation`` with no
+#: ``left_at``, its driver and child are gone, and its log's last write is hours old — so
+#: it is now a permanently unfinished run rather than a growing one, which is a second
+#: reason to leave it out and not a reason to fold it in. The pinned population is the two
+#: ``Astronomy_000`` runs and ``Chemistry_000_20260816_011751``.
 #:
 #: That refutes the top of the range outright: reserve 3 takes every backward move the
 #: corpus ever offered, including the one that was taken — a return from writing to

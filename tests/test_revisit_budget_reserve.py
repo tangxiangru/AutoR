@@ -45,6 +45,7 @@ from src.router import StageRouter
 from src.stage_graph import (
     BLOCK_KINDS,
     DELIVERY_RESERVE,
+    WalkBudget,
     FINISH,
     Edge,
     GraphState,
@@ -405,9 +406,18 @@ class TheRefusalIsRecorded(unittest.TestCase):
         self.assertIn(str(DELIVERY_RESERVE), blocked[0].blocked_because)
 
     def test_it_reaches_the_move_table_the_agent_is_shown(self) -> None:
+        """The refusal has to be visible where the choice is made, not only in the census.
+
+        `describe_for_prompt` gained a `budget` argument when the routing branch landed,
+        which is the same change from the other side: the menu now shows what is left as
+        well as what is blocked. Built here from the same state the moves came from, so
+        the table and the block agree by construction.
+        """
         graph = StageGraph.adaptive()
-        moves = graph.moves(self.paths, "06_analysis", GraphState(), skips_left=0)
-        table = graph.describe_for_prompt(moves)
+        state = GraphState()
+        moves = graph.moves(self.paths, "06_analysis", state, skips_left=0)
+        budget = WalkBudget.of(state, "06_analysis", skips_spent=3, max_skips=3)
+        table = graph.describe_for_prompt(moves, budget)
         self.assertIn("auto-skip", table)
 
     def test_it_reaches_the_run_census(self) -> None:
