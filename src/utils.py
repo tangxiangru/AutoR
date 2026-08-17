@@ -124,6 +124,59 @@ STUCK_AFTER_IDENTICAL_FAILURES = 3
 MAX_AUTOMATED_SENDBACKS = 3
 
 
+#: Operator calls one stage may cost, across every visit, before the run stops buying it
+#: rounds and settles for what it has.
+#:
+#: The one ceiling on the thing that costs money. AutoR had seven budgets before this and
+#: none of them bounded operator calls: ``MAX_STAGE_ATTEMPTS`` counts loop iterations net
+#: of polish rounds, ``EvolutionConfig.rounds`` counts polish rounds only,
+#: ``DEFAULT_PATIENCE`` counts flat rounds only, :data:`MAX_AUTOMATED_SENDBACKS` counts one
+#: party's refusals, and ``--max-auto-skips`` counts whole stages given up on. Each governs
+#: a tributary. This is the trunk, and every *operator* call charges against it -- a first
+#: attempt, a reviewer-directed retry, one of AutoR's own polish rounds, a repair pass --
+#: because they all spend the same money.
+#:
+#: **It counts operator calls, not every call the stage makes.** Reviews are counted
+#: separately by ``_note_review_call`` and are not charged here, and over a measured
+#: 40-run batch they were 34 of the 84 calls a median stage made and 5.79 of its 14.08
+#: hours -- 41% of the spend, outside this ceiling's own arithmetic. It bounds them anyway,
+#: because a review rides on a loop iteration and an iteration needs an operator call to
+#: exist: across 275 (run, stage) pairs the two counts correlate at r = +0.80 with a median
+#: of 0.70 reviews per operator call, so refusing 686 operator calls takes roughly 480
+#: reviews with them. Indirect, and worth saying plainly rather than calling this a ceiling
+#: on everything. Two things it does not reach at all: the crux panel, which launches per
+#: voice from a path with no notifier, and the validity review, which consumed 0.00 h in
+#: both measured arms because it never ran.
+#:
+#: **It does not reset when the stage is re-entered.** That is the property the others lack
+#: and the reason the tail existed: through a 40-run ResearchClawBench batch that ran with
+#: ``--max-attempts 8``, the worst stage still reached 28 operator calls, because it reached
+#: them across several visits of seven and every visit reopened a full window.
+#:
+#: **Six, measured.** Over that batch's 274 (run, stage) pairs the median stage cost 7
+#: operator calls and the mean 6.7, so six bites into the middle of the distribution rather
+#: than trimming the tail: it binds on 50% of stages and refuses 27% of all calls. That is a
+#: real intervention and it is chosen deliberately -- every judgement layer those calls buy
+#: has been measured, and none of them pays. 71% of the reviewer's directed revisions moved
+#: the rubric by exactly 0.000; the polish ratchet's champion saturates at 0.999 with a
+#: variance of 0.031 across 40 tasks and correlates -0.04 with the benchmark score.
+#:
+#: **It promotes, it never skips.** Exhaustion forces the next reviewer verdict to approve,
+#: so the stage settles through the ordinary approval block with its validation, its
+#: obligations and cross-review's veto intact. Contrast ``MAX_STAGE_ATTEMPTS``, whose own
+#: comment records a run that auto-skipped its literature survey and wrote a report standing
+#: on nothing. Nothing here is discarded.
+#:
+#: **It overshoots by up to one round**, and that is the price of promoting safely. The stop
+#: is checked where the next round is decided, and reaching the approval block costs the
+#: call already in flight plus its review. A ceiling enforced closer than that would have to
+#: promote an unvalidated draft, which is the failure it exists to prevent.
+#:
+#: ``None`` disables it, matching ``MAX_STAGE_ATTEMPTS``'s sentinel. Zero is a real value
+#: meaning "settle for the first draft".
+MAX_OPERATOR_CALLS_PER_STAGE: int | None = 6
+
+
 def is_stuck(recent_failures: Sequence[Sequence[str]]) -> bool:
     """Whether the last :data:`STUCK_AFTER_IDENTICAL_FAILURES` attempts failed identically.
 

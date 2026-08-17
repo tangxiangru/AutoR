@@ -108,6 +108,7 @@ from src.evolution import EvolutionConfig
 from src.manager import ResearchManager
 from src.operator import ClaudeOperator
 from src.stage_cost import (
+    operator_calls_spent,
     BACKEND_CRASHED,
     BACKEND_UNREADABLE,
     BACKEND_UNSUPPORTED,
@@ -2145,3 +2146,61 @@ if __name__ == "__main__":
     if "--mutations" in sys.argv:
         raise SystemExit(1 if run_mutations() else 0)
     unittest.main()
+
+
+class OperatorCallsSpentTest(unittest.TestCase):
+    """Summing the ledger is the whole point: every other budget resets on re-entry."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.paths = build_run_paths(Path(self._tmp.name) / "run")
+        ensure_run_layout(self.paths)
+
+    def write(self, *rows: dict) -> None:
+        self.paths.stage_cost_ledger.parent.mkdir(parents=True, exist_ok=True)
+        self.paths.stage_cost_ledger.write_text(
+            json.dumps({"version": 2, "rows": list(rows)}), encoding="utf-8"
+        )
+
+    def test_visits_of_one_stage_add_up(self) -> None:
+        self.write(
+            {"stage": "01_literature_survey", "visit": 1, "operator_invocations": 7},
+            {"stage": "01_literature_survey", "visit": 2, "operator_invocations": 7},
+        )
+        self.assertEqual(operator_calls_spent(self.paths, "01_literature_survey"), 14)
+
+    def test_another_stage_is_not_charged(self) -> None:
+        self.write(
+            {"stage": "01_literature_survey", "visit": 1, "operator_invocations": 7},
+            {"stage": "06_analysis", "visit": 1, "operator_invocations": 9},
+        )
+        self.assertEqual(operator_calls_spent(self.paths, "06_analysis"), 9)
+
+    def test_no_ledger_is_zero_not_an_error(self) -> None:
+        self.assertEqual(operator_calls_spent(self.paths, "01_literature_survey"), 0)
+
+    def test_a_corrupt_ledger_is_zero_not_an_error(self) -> None:
+        """A spend reader usually runs because something already went wrong."""
+        self.paths.stage_cost_ledger.parent.mkdir(parents=True, exist_ok=True)
+        self.paths.stage_cost_ledger.write_text("{not json", encoding="utf-8")
+        self.assertEqual(operator_calls_spent(self.paths, "01_literature_survey"), 0)
+
+    def test_a_row_predating_the_field_contributes_nothing(self) -> None:
+        """Under-counting spends the budget more slowly, which is the safe direction for
+        a stop whose job is to settle work rather than discard it."""
+        self.write(
+            {"stage": "01_literature_survey", "visit": 1},
+            {"stage": "01_literature_survey", "visit": 2, "operator_invocations": 4},
+        )
+        self.assertEqual(operator_calls_spent(self.paths, "01_literature_survey"), 4)
+
+    def test_a_non_integer_count_is_refused(self) -> None:
+        self.write(
+            {"stage": "01_literature_survey", "visit": 1, "operator_invocations": "many"},
+            {"stage": "01_literature_survey", "visit": 2, "operator_invocations": -3},
+            {"stage": "01_literature_survey", "visit": 3, "operator_invocations": True},
+            {"stage": "01_literature_survey", "visit": 4, "operator_invocations": 2},
+        )
+        self.assertEqual(operator_calls_spent(self.paths, "01_literature_survey"), 2)
+

@@ -299,6 +299,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              f"{DEFAULT_MAX_ATTEMPTS}.",
     )
     parser.add_argument(
+        "--max-operator-calls-per-stage",
+        type=int,
+        default=6,
+        help="Operator calls one stage may cost across every visit -- first attempt, "
+             "reviewer-directed retries, polish rounds and repairs alike -- before the run "
+             "settles for what it has. Unlike --max-attempts this does not reset when the "
+             "stage is re-entered, and exhausting it promotes the stage rather than skipping "
+             "it. Defaults to 6.",
+    )
+    parser.add_argument(
         "--max-auto-skips",
         type=int,
         default=3,
@@ -584,6 +594,7 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
         unattended=True,
         max_auto_skips=args.max_auto_skips,
         max_stage_attempts=args.max_attempts,
+        max_operator_calls_per_stage=args.max_operator_calls_per_stage,
         web_search_context=web_search_context,
         web_search_mode=args.web_search,
         # Stages are told to keep code/, outputs/ and report/images/ up to date in the

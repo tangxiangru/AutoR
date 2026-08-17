@@ -175,6 +175,7 @@ from .stage_cost import (
     OUTCOME_ROUTED_TO_DELIVERABLE,
     VALIDATORS_REFUSED,
     StageCostMeter,
+    operator_calls_spent,
     append_stage_cost_row,
     bypassed_row,
     classify_refusal,
@@ -227,6 +228,7 @@ from .utils import (
     FIXED_STAGE_OPTIONS,
     INTAKE_STAGE,
     MAX_AUTOMATED_SENDBACKS,
+    MAX_OPERATOR_CALLS_PER_STAGE,
     MAX_STAGE_ATTEMPTS,
     REVISION_CHOICES,
     STUCK_AFTER_IDENTICAL_FAILURES,
@@ -293,6 +295,8 @@ class ResearchManager:
         max_auto_skips: int = 3,
         max_rounds: int = 1,
         max_stage_attempts: int | None = MAX_STAGE_ATTEMPTS,
+        max_operator_calls_per_stage: int | None = MAX_OPERATOR_CALLS_PER_STAGE,
+        max_automated_sendbacks: int = MAX_AUTOMATED_SENDBACKS,
         web_search_context: str | None = None,
         min_report_figures: int | None = None,
         web_search_mode: str | None = None,
@@ -395,6 +399,11 @@ class ResearchManager:
         # previous attempt's validation errors attached. The ceiling exists to bound a runaway
         # loop, not to save money, so callers with time to spend should raise it.
         self.max_stage_attempts = max_stage_attempts
+        self.max_operator_calls_per_stage = max_operator_calls_per_stage
+        # Injectable for the same reason the ceiling is: two bounds that cannot be
+        # varied independently cannot be tested independently, and a test that sets
+        # them to the same number passes with either one deleted.
+        self.max_automated_sendbacks = max_automated_sendbacks
         self.auto_skipped_stages: list[str] = []
         #: Which stages the adversarial pass never actually judged, and how it ended:
         #: stage slug -> `crashed` or `unreadable`. Kept on the harness rather than read
@@ -3007,7 +3016,23 @@ class ResearchManager:
                 )
                 # Measuring happened above regardless; the *rounds* are what a
                 # routine tier withholds.
-                if self._evolution_polishes(stage) and self.evolution.should_continue(paths, stage):
+                out_of_calls = self._stage_is_out_of_operator_calls(paths, stage)
+                if out_of_calls is not None and self._evolution_polishes(stage):
+                    # A pure stop, with nothing to promote: declining the round drops
+                    # through to the review below, which settles the stage the ordinary
+                    # way. Logged because a budget that binds silently reads, in the
+                    # ledger, exactly like a stage that had nothing left to improve.
+                    append_log_entry(
+                        paths.logs,
+                        f"{stage.slug} attempt {attempt_no} polish_out_of_budget",
+                        f"{out_of_calls}. The improvement round it would have bought was "
+                        f"not started.",
+                    )
+                if (
+                    out_of_calls is None
+                    and self._evolution_polishes(stage)
+                    and self.evolution.should_continue(paths, stage)
+                ):
                     directive = self.evolution.next_directive(paths, stage)
                     if directive:
                         self.evolution.begin_round(paths, stage)
@@ -3546,6 +3571,34 @@ class ResearchManager:
         self._pending_comments = list(decision.comments or [])
         return decision.choice, decision.feedback or None
 
+    def _operator_calls_spent(self, paths: RunPaths, stage: StageSpec) -> int:
+        """What this stage has cost in operator calls, closed visits plus the open one.
+
+        The ledger holds the visits that ended; the meter holds the one in progress, and
+        it is the meter that has just been incremented by the call being paid for. Reading
+        only the ledger would let a single visit run forever, and reading only the meter
+        would reset the budget on every re-entry -- which is the defect
+        :data:`MAX_OPERATOR_CALLS_PER_STAGE` exists to close.
+        """
+        spent = operator_calls_spent(paths, stage.slug)
+        meter = self._stage_cost
+        if meter is not None and meter.stage.slug == stage.slug:
+            spent += meter.operator_invocations
+        return spent
+
+    def _stage_is_out_of_operator_calls(self, paths: RunPaths, stage: StageSpec) -> str | None:
+        """Why this stage may not buy another round, or None while it still can."""
+        ceiling = self.max_operator_calls_per_stage
+        if ceiling is None:
+            return None
+        spent = self._operator_calls_spent(paths, stage)
+        if spent < ceiling:
+            return None
+        return (
+            f"this stage has cost {spent} operator call(s) across every visit, which is "
+            f"its ceiling of {ceiling}"
+        )
+
     def _sendback_is_out_of_budget(
         self, *, paths: RunPaths, stage: StageSpec, choice: str
     ) -> str | None:
@@ -3579,11 +3632,19 @@ class ResearchManager:
         """
         if self.reviewer is None or choice not in REVISION_CHOICES:
             return None
+        # The trunk before the tributaries. This stop is not about who asked or what the
+        # rubric says -- the stage has spent its money, and the only thing another round
+        # can do is spend more of it. Refusing here rather than closer to the call is what
+        # lets the promotion go through the ordinary approval block: validated draft,
+        # obligations settled, cross-review still holding its veto.
+        exhausted = self._stage_is_out_of_operator_calls(paths, stage)
+        if exhausted is not None:
+            return exhausted
         spent = read_sendback_count(paths, stage)
-        if spent >= MAX_AUTOMATED_SENDBACKS:
+        if spent >= self.max_automated_sendbacks:
             return (
                 f"the automated reviewer has already sent this stage back "
-                f"{spent} time(s), which is its budget of {MAX_AUTOMATED_SENDBACKS}"
+                f"{spent} time(s), which is its budget of {self.max_automated_sendbacks}"
             )
         if spent >= 1 and self.evolution is not None and self._evolution_measures(stage):
             champion = self.evolution.state(paths, stage).champion

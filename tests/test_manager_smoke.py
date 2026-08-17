@@ -24,6 +24,7 @@ from src.utils import (
     approved_stage_summaries,
     build_run_paths,
     load_run_config,
+    read_polish_count,
     read_sendback_count,
     write_sendback_count,
     read_text,
@@ -920,6 +921,7 @@ class ManagerSmokeTests(unittest.TestCase):
             review_operator="claude",
             review_model="sonnet",
             evolution=kwargs.pop("evolution_override", EvolutionConfig(rounds=0)),
+            max_operator_calls_per_stage=kwargs.pop("max_operator_calls_per_stage", None),
             **kwargs,
         )
         return manager, manager._create_run("Smoke-test send-back budget.", venue="neurips_2025")
@@ -1085,6 +1087,165 @@ class ManagerSmokeTests(unittest.TestCase):
                 self.assertIsNone(
                     manager._sendback_is_out_of_budget(paths=paths, stage=STAGE_01, choice=choice)
                 )
+
+    def _spent_manager(self, tmp_dir: str, ceiling, *, refusals: int = 30, **kw):
+        """A manager whose *only* live bound is the operator ceiling.
+
+        `MAX_AUTOMATED_SENDBACKS` is raised out of the way on purpose. Left at its default
+        of 3 it reaches the same verdict as a ceiling of 3 by a different route, and every
+        assertion below would hold with the ceiling deleted -- which is exactly what a
+        mutation run showed before this helper existed.
+        """
+        manager, paths = self._reviewer_manager(
+            tmp_dir, ScriptedReviewer(self._refusals(refusals)),
+            max_operator_calls_per_stage=ceiling, **kw,
+        )
+        manager.max_automated_sendbacks = 999
+        return manager, paths
+
+    def test_the_predicate_binds_exactly_at_the_ceiling(self) -> None:
+        """One below is still affordable; at it is not. Pinned at the boundary because a
+        budget that is off by one is a budget nobody can reason about."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            manager, paths = self._spent_manager(tmp_dir, 5)
+            with patch.object(manager, "_operator_calls_spent", return_value=4):
+                self.assertIsNone(
+                    manager._stage_is_out_of_operator_calls(paths, STAGE_01)
+                )
+            with patch.object(manager, "_operator_calls_spent", return_value=5):
+                refusal = manager._stage_is_out_of_operator_calls(paths, STAGE_01)
+            self.assertIsNotNone(refusal)
+            assert refusal is not None
+            self.assertIn("ceiling of 5", refusal)
+
+    def test_a_ceiling_of_none_is_no_ceiling(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            manager, paths = self._spent_manager(tmp_dir, None)
+            with patch.object(manager, "_operator_calls_spent", return_value=10_000):
+                self.assertIsNone(
+                    manager._stage_is_out_of_operator_calls(paths, STAGE_01)
+                )
+
+    def test_the_open_visit_counts_toward_the_ceiling(self) -> None:
+        """Reading only the closed ledger would let one visit run forever."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            manager, paths = self._spent_manager(tmp_dir, 6)
+            from src.stage_cost import StageCostMeter, operator_calls_spent
+
+            self.assertEqual(operator_calls_spent(paths, STAGE_01.slug), 0)
+            meter = StageCostMeter(STAGE_01)
+            manager._stage_cost = meter
+            for _ in range(6):
+                meter.note_operator_call()
+            self.assertEqual(manager._operator_calls_spent(paths, STAGE_01), 6)
+            self.assertIsNotNone(
+                manager._stage_is_out_of_operator_calls(paths, STAGE_01)
+            )
+
+    def test_closed_visits_count_toward_the_ceiling(self) -> None:
+        """Reading only the open meter would reset the budget on every re-entry, which is
+        the defect the ceiling exists to close."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            manager, paths = self._spent_manager(tmp_dir, 6)
+            paths.stage_cost_ledger.parent.mkdir(parents=True, exist_ok=True)
+            paths.stage_cost_ledger.write_text(
+                json.dumps({"version": 2, "rows": [
+                    {"stage": STAGE_01.slug, "visit": 1, "operator_invocations": 4},
+                    {"stage": STAGE_01.slug, "visit": 2, "operator_invocations": 3},
+                ]}), encoding="utf-8",
+            )
+            manager._stage_cost = None
+            self.assertEqual(manager._operator_calls_spent(paths, STAGE_01), 7)
+            self.assertIsNotNone(
+                manager._stage_is_out_of_operator_calls(paths, STAGE_01)
+            )
+
+    def test_the_send_back_path_consults_the_ceiling(self) -> None:
+        """The seam that turns exhaustion into a promotion. With the send-back budget out
+        of the way, this refusal can only come from the trunk."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            manager, paths = self._spent_manager(tmp_dir, 6)
+            with patch.object(manager, "_operator_calls_spent", return_value=6):
+                refusal = manager._sendback_is_out_of_budget(
+                    paths=paths, stage=STAGE_01, choice="4"
+                )
+            self.assertIsNotNone(refusal)
+            assert refusal is not None
+            self.assertIn("operator call", refusal)
+
+    def test_an_exhausted_stage_is_promoted_not_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            manager, paths = self._spent_manager(tmp_dir, 2)
+
+            self.assertTrue(manager._run_stage(paths, STAGE_01))
+
+            log = read_text(paths.logs)
+            self.assertIn("its ceiling of 2", log)
+            manifest = load_run_manifest(paths.run_manifest)
+            assert manifest is not None
+            entry = next(item for item in manifest.stages if item.slug == STAGE_01.slug)
+            self.assertTrue(entry.approved)
+            self.assertFalse(entry.skipped)
+            self.assertTrue(paths.stage_file(STAGE_01).exists())
+            self.assertEqual(manager.auto_skipped_stages, [])
+
+    def test_the_ceiling_does_not_reset_on_re_entry(self) -> None:
+        """That batch ran with `--max-attempts 8` and still reached 28 calls on one stage,
+        across several visits of seven."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            manager, paths = self._spent_manager(tmp_dir, 2)
+            manager._run_stage(paths, STAGE_01)
+            after_first = manager._operator_calls_spent(paths, STAGE_01)
+            self.assertGreaterEqual(after_first, 2)
+
+            manager._run_stage(paths, STAGE_01)
+
+            second_visit = manager._operator_calls_spent(paths, STAGE_01) - after_first
+            self.assertLessEqual(second_visit, 2)
+
+    def test_a_generous_ceiling_never_binds(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            manager, paths = self._spent_manager(tmp_dir, 99, refusals=0)
+            self.assertTrue(manager._run_stage(paths, STAGE_01))
+            self.assertNotIn("its ceiling of 99", read_text(paths.logs))
+            self.assertNotIn("polish_out_of_budget", read_text(paths.logs))
+
+    def test_an_exhausted_stage_buys_no_polish_round(self) -> None:
+        """The other seam. A polish round has nothing to promote, so exhaustion just
+        declines it and drops through to the review that settles the stage.
+
+        Asserting the round did not happen, not merely that a line was logged: a log with
+        the round still running behind it is the mutation this test exists to kill.
+        """
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            manager, paths = self._spent_manager(
+                tmp_dir, 1, refusals=0, evolution_override=EvolutionConfig(rounds=3),
+            )
+
+            with patch.object(
+                manager.evolution, "begin_round", wraps=manager.evolution.begin_round
+            ) as begin:
+                manager._run_stage(paths, STAGE_01)
+
+            self.assertIn("polish_out_of_budget", read_text(paths.logs))
+            begin.assert_not_called()
+            self.assertEqual(read_polish_count(paths, STAGE_01), 0)
+
+    def test_a_stage_within_budget_still_buys_its_polish_rounds(self) -> None:
+        """The control for the test above: without it, a gate that refused every round
+        would pass both."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            manager, paths = self._spent_manager(
+                tmp_dir, 99, refusals=0, evolution_override=EvolutionConfig(rounds=3),
+            )
+
+            with patch.object(
+                manager.evolution, "begin_round", wraps=manager.evolution.begin_round
+            ) as begin:
+                manager._run_stage(paths, STAGE_01)
+
+            self.assertGreater(begin.call_count, 0)
+            self.assertNotIn("polish_out_of_budget", read_text(paths.logs))
 
     def test_stage_can_be_skipped_after_exhausted_retries(self) -> None:
         class DummyTTY:

@@ -727,6 +727,35 @@ def read_stage_cost_ledger(paths: RunPaths) -> list[dict[str, Any]]:
     return [row for row in rows if isinstance(row, dict)]
 
 
+def operator_calls_spent(paths: RunPaths, stage_slug: str) -> int:
+    """Operator calls this stage has cost across every visit the ledger has closed.
+
+    The open visit is not in here -- the meter holds that, and only the manager has it.
+    A caller enforcing a ceiling has to add ``meter.operator_invocations`` itself; see
+    :meth:`src.manager.ResearchManager._operator_calls_spent`, which is the one caller.
+
+    Summing rather than taking the last row is the whole point. Every existing per-stage
+    budget in AutoR resets when the stage is re-entered -- a graph revisit, a rollback, a
+    resume -- so ``--max-attempts 8`` was in force through a 40-run batch whose worst
+    stage still reached 28 operator calls, because it reached them across four visits of
+    seven. A ceiling that resets is a ceiling on visits, not on spend.
+
+    Rows whose ``operator_invocations`` is missing or not an integer contribute nothing
+    rather than raising: a ledger written by an older version of this module must not be
+    able to stop a run, and under-counting an old row spends the budget more slowly,
+    which is the safe direction for a stop that promotes work rather than discarding it.
+    """
+    total = 0
+    for row in read_stage_cost_ledger(paths):
+        if row.get("stage") != stage_slug:
+            continue
+        value = row.get("operator_invocations")
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            continue
+        total += value
+    return total
+
+
 def append_stage_cost_row(paths: RunPaths, row: StageCostRow) -> bool:
     """Add one row. Returns whether it landed, and never raises.
 

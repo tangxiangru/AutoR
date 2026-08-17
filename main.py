@@ -289,6 +289,16 @@ def parse_args() -> argparse.Namespace:
              "Omit it for no limit; pass an integer to cap.",
     )
     parser.add_argument(
+        "--max-operator-calls-per-stage",
+        type=int,
+        default=6,
+        help="Operator calls one stage may cost across every visit -- first attempt, "
+             "reviewer-directed retries, polish rounds and repairs alike -- before the run "
+             "settles for what it has. Unlike --max-attempts this does not reset when the "
+             "stage is re-entered, and exhausting it promotes the stage rather than skipping "
+             "it. Defaults to 6.",
+    )
+    parser.add_argument(
         "--review-operator",
         choices=["claude", "codex"],
         help="Backend used by the automated reviewer. Defaults to the execution backend.",
@@ -1127,6 +1137,7 @@ def main() -> int:
             max_auto_skips=args.max_auto_skips,
             max_rounds=args.max_rounds,
             max_stage_attempts=args.max_attempts,
+            max_operator_calls_per_stage=args.max_operator_calls_per_stage,
             web_search_context=web_search_context,
             stage_graph=graph,
             routing_mode=walk["routing_mode"],
@@ -1219,6 +1230,7 @@ def main() -> int:
         max_auto_skips=args.max_auto_skips,
         max_rounds=args.max_rounds,
         max_stage_attempts=args.max_attempts,
+        max_operator_calls_per_stage=args.max_operator_calls_per_stage,
         web_search_context=web_search_context,
         stage_graph=graph,
         routing_mode=walk["routing_mode"],
