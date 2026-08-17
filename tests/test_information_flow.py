@@ -16,6 +16,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from src.run_skills import read_skill_pack
 from src.information_flow import (
     ALL_STAGES,
     CHANNELS,
@@ -338,3 +339,90 @@ class NoRelayTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TaskShapedSkillsChannelTest(unittest.TestCase):
+    """The router's decision reaches the stage, or the routing bought nothing.
+
+    Installing a skill only for the runs it suits is half a mechanism. The other
+    half is telling the run: the operator sees an undifferentiated listing of about
+    thirty skills — sixteen from AutoR plus Claude Code's own — and cannot tell that
+    two of them were chosen against this brief. Measured over a 40-task arm, the
+    pack drew 78 `Skill` calls in 789 hours; the one skill a prompt named in the
+    imperative accounted for 31 of them, and the three a prompt said were "installed
+    for this stage" accounted for none.
+
+    So this channel is the router speaking, and these tests hold that it speaks only
+    where it should: at the stages a selected skill asked for, and nowhere else.
+    """
+
+    class _FakeManager:
+        def __init__(self, entries):
+            self._installed_skills = entries
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        root = Path(self._tmp.name)
+        self.paths = build_run_paths(root / "run_0001")
+        ensure_run_layout(self.paths)
+        pack = root / "pack"
+        for name, extra in (
+            ("scoped-design", "applies_when: widget\nstages: 03_study_design"),
+            ("always-on", ""),
+        ):
+            (pack / name).mkdir(parents=True)
+            (pack / name / "SKILL.md").write_text(
+                f"---\nname: {name}\ndescription: Use when a widget appears, at design time.\n"
+                f"{extra}\n---\n\nbody\n",
+                encoding="utf-8",
+            )
+        self.entries = read_skill_pack(pack)
+
+    def _channel(self) -> Channel:
+        (channel,) = [c for c in CHANNELS if c.key == "task_shaped_skills"]
+        return channel
+
+    def _render(self, slug: str, entries) -> str:
+        text, _ = render_inbound(
+            ChannelContext(
+                paths=self.paths,
+                stage=STAGE[slug],
+                attempt_no=1,
+                manager=self._FakeManager(entries),
+            ),
+            (self._channel(),),
+        )
+        return text
+
+    def test_the_channel_is_in_the_shipped_topology(self) -> None:
+        self.assertIn("task_shaped_skills", {channel.key for channel in CHANNELS})
+
+    def test_a_selected_skill_reaches_the_stage_it_asked_for(self) -> None:
+        text = self._render("03_study_design", self.entries)
+        self.assertIn("scoped-design", text)
+        self.assertIn("Skills Selected For This Task", text)
+
+    def test_it_reaches_no_other_stage(self) -> None:
+        for slug in ("01_literature_survey", "05_experimentation", "07_writing"):
+            with self.subTest(stage=slug):
+                self.assertEqual(self._render(slug, self.entries), "")
+
+    def test_an_unconditional_skill_is_never_announced(self) -> None:
+        """The pull mechanism's whole trade is not paying for the pack in every prompt."""
+        for slug in STAGE:
+            with self.subTest(stage=slug):
+                self.assertNotIn("always-on", self._render(slug, self.entries))
+
+    def test_a_run_that_matched_nothing_gets_no_block(self) -> None:
+        for slug in STAGE:
+            with self.subTest(stage=slug):
+                self.assertEqual(self._render(slug, []), "")
+
+    def test_a_manager_without_the_attribute_does_not_raise(self) -> None:
+        """A channel builder that throws takes the whole prompt down with it."""
+        text, _ = render_inbound(
+            ChannelContext(paths=self.paths, stage=STAGE["03_study_design"], attempt_no=1),
+            (self._channel(),),
+        )
+        self.assertEqual(text, "")

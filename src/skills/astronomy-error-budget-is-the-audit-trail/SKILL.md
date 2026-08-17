@@ -1,6 +1,6 @@
 ---
 name: astronomy-error-budget-is-the-audit-trail
-description: Use when the research task is in astronomy — observational astronomy, surveys, photometry and astrophysical inference — at study design, analysis or writing. Astronomy: the error budget and fit bookkeeping are the audit trail
+description: Use at analysis and writing when a result rests on a fit or a calibration chain and you are about to quote it with a single uncertainty. Covers itemising the error budget term by term, keeping the fit's own bookkeeping visible, and why the audit trail is the result a referee checks first.
 ---
 
 # Astronomy: the error budget and fit bookkeeping are the audit trail

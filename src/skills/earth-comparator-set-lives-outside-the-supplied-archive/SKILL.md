@@ -1,6 +1,6 @@
 ---
 name: earth-comparator-set-lives-outside-the-supplied-archive
-description: Use when the research task is in earth — weather, climate, hydrology and geoscience data analysis — at study design, analysis or writing. Earth: the supplied archive is an input, never the comparison set
+description: Use at study design when the supplied archive is about to become both the input and the thing you compare against. Covers where the comparison set has to come from, what a self-comparison cannot establish, and how to build a comparator from outside the shipped data.
 ---
 
 # Earth: the supplied archive is an input, never the comparison set

@@ -1,6 +1,6 @@
 ---
 name: neuroscience-comparator-ladder-and-per-unit-predictions
-description: Use when the research task is in neuroscience — neural recording, decoding and brain-model comparison — at study design, analysis or writing. Two-sided comparator ladder, the negative-control representation panel, and per-unit predictions
+description: Use at study design and analysis when a model is about to be compared against one alternative, or a fit reported without a negative control. Covers the two-sided comparator ladder, the control representation panel, and splitting per-unit predictions into the ones a measurement validates and the ones that stay predictions.
 ---
 
 # Two-sided comparator ladder, the negative-control representation panel, and per-unit predictions

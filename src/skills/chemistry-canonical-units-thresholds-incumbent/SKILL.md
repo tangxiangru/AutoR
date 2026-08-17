@@ -1,6 +1,6 @@
 ---
 name: chemistry-canonical-units-thresholds-incumbent
-description: Use when the research task is in chemistry — molecular simulation, docking, reaction energetics and chemical ML — at study design, analysis or writing. Anchor to the incumbent program, report in the canonical unit, convert error into a threshold success rate
+description: Use at study design and analysis when a chemistry result is about to be reported in the units your code happens to produce, or without the program the field already uses. Covers anchoring to the incumbent, converting to the canonical unit, and turning an error distribution into a threshold success rate.
 ---
 
 # Anchor to the incumbent program, report in the canonical unit, convert error into a threshold success rate

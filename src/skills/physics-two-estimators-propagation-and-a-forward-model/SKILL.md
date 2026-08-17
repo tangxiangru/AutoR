@@ -1,6 +1,6 @@
 ---
 name: physics-two-estimators-propagation-and-a-forward-model
-description: Use when the research task is in physics — condensed matter, many-body theory, simulation and physical modelling — at study design, analysis or writing. Physics: measure it twice, propagate it, and generate it
+description: Use at study design and analysis when a physical quantity is about to be reported from one estimator, or an uncertainty quoted without propagation. Covers measuring it a second independent way, propagating the error through the chain, and generating the observable forward from the fitted model to check it.
 ---
 
 # Physics: measure it twice, propagate it, and generate it
