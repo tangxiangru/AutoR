@@ -706,6 +706,106 @@ class DeclaredDrawCountArrivesTests(unittest.TestCase):
         self.assertEqual(per_file.value, 1)
 
 
+class FakeJudgeDrawsAreDistinctTests(unittest.TestCase):
+    """``fake_score``'s N draws are N draws, asserted on a seed that cannot drift.
+
+    The fake judge's jitter is ``sha256(task|index|workspace|out|draw)[0] % 5``, so with
+    the workspace directory name and the output file name pinned the whole fold is a
+    fixed function of this file's ``CHECKLIST`` and ``FAKE_QUALITY``. That is the point
+    of doing it here rather than only through the driver, whose workspace name carries a
+    wall-clock second: the property "these are three draws and not one draw three times"
+    is the thing the end-to-end test could not assert without a failure rate that depends
+    on when the suite ran.
+
+    The defect this replaces was an ``assertIsNotNone`` on ``total_spread``. Removing
+    ``|{draw_no}`` from the seed makes every draw identical, ``aggregate_draws`` folds
+    them to ``total_spread == 0.0``, and ``0.0 is not None`` — so the assertion that
+    existed to refuse "a stochastic judge that resolved every item perfectly" passed on
+    exactly that. Every assertion below is one the identical-draws fold fails.
+    """
+
+    QUALITY = 20.0
+    #: Pinned, because it is a seed input. Any other value is a different measurement.
+    WORKSPACE = "Energy_001_20260101_000000"
+    OUT = "Energy_001.621566b.a1.early.r0.json"
+
+    def setUp(self) -> None:
+        self.tool = load_tool()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.addCleanup(self.tmp.cleanup)
+        self.bench = make_bench(self.root)
+
+    def fold(self, draws: int) -> dict:
+        from src.rcb_trial import ArmSpec, TrialPlan
+
+        plan = TrialPlan(
+            capability="pr175",
+            bench=str(self.bench),
+            tasks=("Energy_001",),
+            control=ArmSpec("621566b", "/wt/c", "621566b"),
+            treatment=ArmSpec("47f3fbf", "/wt/t", "47f3fbf"),
+            state_dir=str(self.root / "state"),
+            judge_kind="fake",
+            judge_model="fake-judge",
+            replicates=draws,
+        )
+        workspace = self.root / "workspaces" / self.WORKSPACE
+        (workspace / "report").mkdir(parents=True, exist_ok=True)
+        (workspace / "_meta.json").write_text(
+            json.dumps({"task_id": "Energy_001", "run_id": "20260101_000000"}),
+            encoding="utf-8",
+        )
+        (workspace / "report" / "report.md").write_text(
+            f"FAKE_QUALITY: {self.QUALITY}\n", encoding="utf-8"
+        )
+        out = self.root / "state" / "scores" / self.OUT
+        out.parent.mkdir(parents=True, exist_ok=True)
+        self.assertTrue(self.tool.fake_score(plan, workspace, out, draws=draws))
+        return json.loads(out.read_text(encoding="utf-8"))
+
+    def test_three_draws_are_three_different_readings_of_one_workspace(self) -> None:
+        """The assertion the reviewer's mutation has to fail, and the reason it is safe
+        to state it as an equality: the seed is pinned, so ``[42.2, 41.8, 42.6]`` is a
+        fact about sha256 and this file's checklist, not about the wall clock."""
+        payload = self.fold(3)
+        self.assertEqual(payload["draws"], 3)
+        self.assertEqual(payload["total_scores"], [42.2, 41.8, 42.6])
+        self.assertEqual(len(set(payload["total_scores"])), 3)
+
+    def test_the_fold_states_a_spread_a_repeated_draw_could_not_produce(self) -> None:
+        payload = self.fold(3)
+        self.assertAlmostEqual(payload["total_spread"], 0.8, places=9)
+        self.assertGreater(
+            payload["total_spread"],
+            0.0,
+            "0.0 is the identical-draws reading and it is not None, which is how an "
+            "assertIsNotNone here held nothing",
+        )
+
+    def test_no_item_carries_the_same_score_on_every_draw(self) -> None:
+        """Per item, not only in the total: ``pair_resolution`` sums per-item spreads, so
+        a fold whose items never move publishes ±0.00 over a judge nobody varied."""
+        payload = self.fold(3)
+        for item in payload["items"]:
+            with self.subTest(index=item["index"]):
+                self.assertEqual(len(item["scores"]), 3)
+                self.assertGreater(len(set(item["scores"])), 1, item["scores"])
+                self.assertGreater(item["spread"], 0.0)
+
+    def test_one_draw_still_states_an_unmeasured_spread_and_not_zero(self) -> None:
+        """The other direction, and the reason ``None`` cannot simply be banned: one draw
+        has measured no dispersion at all, and ``0.0`` there would claim it measured
+        perfect agreement."""
+        payload = self.fold(1)
+        self.assertEqual(payload["draws"], 1)
+        self.assertIsNone(payload["total_spread"])
+
+    def test_the_fold_is_reproducible_from_the_pinned_seed(self) -> None:
+        """What makes the equalities above assertions rather than a sample."""
+        self.assertEqual(self.fold(3)["total_scores"], self.fold(3)["total_scores"])
+
+
 class EvidenceTests(unittest.TestCase):
     """That the environment is *read off the run*, which nothing tested.
 
@@ -1022,6 +1122,18 @@ class EndToEndDryRunTests(unittest.TestCase):
         Both paths are asserted from the plan rather than from a hand-passed argument,
         because "the knob is forwarded when you pass it" is the assertion that was
         already true.
+
+        What the draw assertions have to distinguish is *three draws that agreed* from
+        *one draw written down three times*, and ``assertIsNotNone(total_spread)`` — what
+        was here — cannot: ``aggregate_draws`` writes ``0.0`` for the first and ``None``
+        only for a genuinely single-draw file, so deleting ``|{draw_no}`` from
+        ``fake_score``'s seed made every draw identical and left this green. The
+        distinctness check below is pooled over both arms' files and every item in them,
+        because the fake judge's jitter is a hash of the workspace name and the driver's
+        workspace name carries a wall-clock second: whether one file's three draws happen
+        to land on one number is a property of when the suite ran, and over six item
+        vectors it is not. :class:`FakeJudgeDrawsAreDistinctTests` is the same property
+        with the seed pinned, where the spread itself can be asserted exactly.
         """
         from src.rcb_trial import judge_draws_in
 
@@ -1034,17 +1146,32 @@ class EndToEndDryRunTests(unittest.TestCase):
         # the file states rather than reports as `null`.
         early = sorted(scores.glob("*.early.*.json"))
         self.assertEqual(len(early), 2, [p.name for p in early])
+        varied: list[bool] = []
         for path in early:
             payload = json.loads(path.read_text(encoding="utf-8"))
             with self.subTest(score=path.name):
                 self.assertEqual(payload["draws"], 3)
                 self.assertEqual(len(payload["total_scores"]), 3)
-                self.assertIsNotNone(
+                # `float` and not `is not None`: `None` is the single-draw reading and
+                # `0.0` is the identical-draws reading, and only the first of the two is
+                # what a missing `--draws` produces. Both have to be excluded here.
+                self.assertIsInstance(
                     payload["total_spread"],
-                    "three draws of a stochastic judge that resolved every item "
-                    "identically is the reading the spread exists to keep off the page",
+                    float,
+                    "a fold of three draws states a spread; `None` is what one draw "
+                    "states, which is the knob not having arrived",
                 )
                 self.assertEqual(judge_draws_in([payload]), 3)
+                for item in payload["items"]:
+                    self.assertEqual(len(item["scores"]), 3, item)
+                    varied.append(len(set(item["scores"])) > 1)
+        self.assertTrue(
+            any(varied),
+            "every item of both arms carries the same score on all three draws: that is "
+            "one draw recorded three times, and a spread of 0.0 over it reads as a judge "
+            "that resolved every item exactly — the one reading `aggregate_draws` and "
+            "`resolution_is_measured` exist to keep off the page",
+        )
 
         # The final pass: the same count spent as separately checkpointed files, so a
         # judge flake costs one draw rather than the arm's whole replication.

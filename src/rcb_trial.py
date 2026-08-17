@@ -584,14 +584,40 @@ class RcbTrial:
     """A finished (or interrupted) paired trial and everything a reader needs to argue."""
 
     result: TrialResult
-    #: Admitted evidence, keyed ``(task_id, arm)``.
+    #: Admitted evidence, keyed ``(task_id, arm)``. The population *under* the number:
+    #: every arm here is in a pair or in ``result.excluded``, and nothing else is.
     evidence: Mapping[tuple[str, str], ArmEvidence]
+    #: Every arm a judge produced a score for, keyed the same way — admitted *and*
+    #: refused by :func:`admit_arm`. A separate field and not a filter over ``evidence``,
+    #: because refusing an arm is the one operation that removes it from ``evidence``,
+    #: and the sample-composition section is the reader's only view of what was removed.
+    #: Reporting the composition of a sample off the survivors is the shape this branch
+    #: was sent back for: ``_run_status_lines`` read ``evidence``, so on the live
+    #: stage-graph trial — three scored runs, two of them ``cancelled`` and both refused
+    #: by ``pipeline_completed`` — it printed "all 1 scored runs ended `completed`", a
+    #: positive clean-sample claim over a sample that was two thirds truncated.
+    #:
+    #: Driver refusals are *not* here and cannot be: a run killed by quota, by the
+    #: watchdog or by the scorer never became an :class:`ArmEvidence` and has no score
+    #: for the section to be about. They are in ``refusals`` and in the ledger above it.
+    scored: Mapping[tuple[str, str], ArmEvidence]
     refusals: tuple[Refusal, ...]
     planned_pairs: int
 
     @property
     def interim(self) -> bool:
         return self.result.n != self.planned_pairs
+
+    def refused_clauses_by_arm(self) -> dict[tuple[str, str], tuple[str, ...]]:
+        """``(task, arm) -> the clauses that refused it``, for the arms that were refused.
+
+        Both refusal populations at once, because the caller asking is asking whether a
+        given arm is in the difference, and an arm refused by the driver and an arm
+        refused by a clause are equally out of it.
+        """
+        return {
+            (refusal.task_id, refusal.arm): refusal.clauses for refusal in self.refusals
+        }
 
     def refusals_by_clause(self) -> dict[str, int]:
         """Every admission clause at its count, then every driver refusal that happened.
@@ -656,8 +682,13 @@ def collect_rcb_pairs(
     measure that is not in ``trials.DECLARED_OUTCOMES``.
     """
     admitted: dict[tuple[str, str], ArmEvidence] = {}
+    # Every arm that reached the gate, whichever way it came out. `admitted` is what the
+    # difference is computed over; this is what the difference's *sample* is, and the two
+    # differ by exactly the runs a reader most needs told about.
+    scored: dict[tuple[str, str], ArmEvidence] = {}
     refusals: list[Refusal] = []
     for evidence in evidences:
+        scored[(evidence.task_id, evidence.arm)] = evidence
         ok, failed = admit_arm(evidence)
         if ok:
             admitted[(evidence.task_id, evidence.arm)] = evidence
@@ -728,6 +759,7 @@ def collect_rcb_pairs(
     return RcbTrial(
         result=replace(result, excluded=tuple(sorted(excluded.items()))),
         evidence=admitted,
+        scored=scored,
         refusals=tuple(refusals),
         planned_pairs=planned_pairs,
     )
@@ -997,26 +1029,43 @@ def _run_status_lines(trial: RcbTrial) -> list[str]:
     """How each scored run ended, above the difference rather than inside it.
 
     Every number in this report is a judge's reading of a deliverable, and a truncated
-    deliverable is a different object from a finished one. Two of the three finished runs
+    deliverable is a different object from a finished one. Two of the three scored runs
     of the live stage-graph trial ended ``cancelled`` — auto-skip budget spent, routed to
     the writing stage to produce what it had — and neither said so anywhere in the
     report: a reader had to open ``runs/<task>.<arm>.a1.json`` to find out that the
-    majority of the finished sample was truncated.
+    majority of the scored sample was truncated.
 
-    Not a refusal and not a caveat under the total. The runs are scored on purpose, so
-    what a reader needs is the composition of the sample, in the same voice as the
-    refusal ledger above it.
+    The population is :attr:`RcbTrial.scored` and not :attr:`RcbTrial.evidence`, and that
+    is the whole of this function's history. Both of those live ``cancelled`` runs also
+    carry ``_meta.pipeline_completed: false``, so the ``pipeline_completed`` clause
+    refuses them and they are absent from ``evidence`` — the first version of this
+    section read ``evidence``, saw the one surviving run, and printed "all 1 scored runs
+    ended ``completed``" over a sample two thirds of which was cut off. A disclosure
+    computed over the survivors of the thing it is disclosing states the opposite of the
+    truth exactly when the truth is worst, and reads as an all-clear while doing it.
+    ``tests.test_rcb_trial.RunStatusSeesRefusedRunsTests`` is that sample as a fixture.
+
+    Refused rows are marked and counted separately rather than dropped, because "the
+    sample the difference is over" and "the sample the judge scored" are two different
+    populations and a reader needs both: a trial that refused its way to a clean-looking
+    mean has produced a result, and it is not the mean.
+
+    Not a refusal and not a caveat under the total. The admitted runs are scored on
+    purpose, so what a reader needs is the composition of the sample, in the same voice
+    as the refusal ledger above it.
 
     Three headlines and not two, because a run that recorded no status at all is neither
     truncated nor clean. Folding silence into the clean branch would print "all N scored
     runs ended `completed`" over a sample nothing had measured the ending of, which is
     the same fabrication in the other direction.
     """
-    rows = sorted(trial.evidence.items())
+    rows = sorted(trial.scored.items())
     if not rows:
         return ["- no run was scored."]
+    refused = trial.refused_clauses_by_arm()
     cut = [key for key, evidence in rows if truncated(evidence)]
     silent = [key for key, evidence in rows if not run_status_of(evidence)]
+    out = [key for key, _ in rows if key in refused]
     if cut:
         headline = f"- **{len(cut)} of {len(rows)} scored runs did not end `{RUN_COMPLETED}`.**"
     elif silent:
@@ -1027,12 +1076,31 @@ def _run_status_lines(trial: RcbTrial) -> list[str]:
     else:
         headline = f"- all {len(rows)} scored runs ended `{RUN_COMPLETED}`."
     lines = [headline]
-    lines += ["", "| task | arm | run status | stages the run scored |", "| --- | --- | --- | --- |"]
-    for (task, arm_label), evidence in rows:
+    # The split, always, and above the table. Every count in the headline is over runs a
+    # judge scored; the difference below is over a subset of them, and how big a subset
+    # is the number that decides whether the difference is about the code under test.
+    lines.append(
+        f"- of those {len(rows)}, **{len(rows) - len(out)} reached the difference below** "
+        f"and **{len(out)} were refused** by the gate above. Driver refusals are not "
+        "counted here: a run that died before the judge has no score for this section to "
+        "be about, and is in the ledger above."
+    )
+    lines += [
+        "",
+        "| task | arm | run status | in the difference | stages the run scored |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for key, evidence in rows:
+        task, arm_label = key
         status = run_status_of(evidence) or "<unrecorded>"
         mark = f"**{status}**" if truncated(evidence) else status
+        clauses = refused.get(key)
+        seat = "yes"
+        if clauses:
+            seat = "no — refused (" + ", ".join(f"`{name}`" for name in clauses) + ")"
         lines.append(
-            f"| `{task}` | `{arm_label}` | {mark} | {len(evidence.autor_stages_scored)} |"
+            f"| `{task}` | `{arm_label}` | {mark} | {seat} | "
+            f"{len(evidence.autor_stages_scored)} |"
         )
     if cut:
         lines += [
@@ -1040,10 +1108,21 @@ def _run_status_lines(trial: RcbTrial) -> list[str]:
             "A run reads `cancelled` when a stage burned its attempts, the unattended "
             "auto-skip fired, the auto-skip budget ran out, and the next failure landed at "
             "the stage that writes the deliverable, where there is nowhere left to route. "
-            "The report it produced is the report it managed to write, and it is scored as "
-            "one: the alternative is a sample of only the runs that finished, which is a "
-            "sample of the runs that had the easier time. `run_status` comes off the run's "
-            "own manifest inside the run root, so it is reported here and read by no gate.",
+            "The report it produced is the report it managed to write, and an admitted one "
+            "is scored as one: the alternative is a sample of only the runs that finished, "
+            "which is a sample of the runs that had the easier time. `run_status` comes off "
+            "the run's own manifest inside the run root, so it is reported here and read by "
+            "no gate.",
+        ]
+    if cut and out:
+        lines += [
+            "",
+            "**A truncated run and a refused run are not the same event and they arrive "
+            "together.** A run that spends its auto-skip budget tends to leave the "
+            "workspace marks the gate refuses — `_meta.pipeline_completed` is false on a "
+            "run the writing stage was routed to rather than reached — so the runs most "
+            "worth disclosing are the ones the difference no longer contains. That is why "
+            "this table is over every scored run and not over the admitted ones.",
         ]
     return lines
 

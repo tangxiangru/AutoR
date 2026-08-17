@@ -64,7 +64,7 @@ the answer, when it happens, is an allowlist entry naming the framework that cal
 
 Measured precision
 ------------------
-1260 public definitions over 1142 distinct names in ``src/``, and 31 referenced by nothing
+1319 public definitions over 1184 distinct names in ``src/``, and 31 referenced by nothing
 outside ``tests/`` and ``tools/``. It was 32 before this landed: ``DATA_DIRNAME`` had a
 one-line wiring fix and got it, so reverting that one line in ``src/rcb.py`` is how the 32
 comes back.
@@ -83,7 +83,7 @@ The census prints the rate and the evidence under it, every occurrence labelled 
 
     python3 -m tests.test_declared_symbols_are_wired --census
 
-Its header carries 1260, 1142, 31, 20 and the rate, so those drift with the tree and none of
+Its header carries 1319, 1184, 31, 20 and the rate, so those drift with the tree and none of
 them has to be believed. The 32 is the only figure here that is not in the header, because
 it is the population before the fix in ``src/rcb.py``.
 :meth:`AllowlistIsHonestTests.test_the_allowlist_is_exactly_what_the_scan_finds` keeps the
