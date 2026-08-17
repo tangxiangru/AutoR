@@ -332,6 +332,55 @@ LITERAL_EXEMPTIONS: dict[str, str] = {
 }
 
 
+#: Modules allowed to import the cost *vocabulary* -- the collections, not the values.
+#:
+#: The field-name scan below catches every direct way to decide on cost, including a string
+#: subscript and a `getattr` with a literal. It does not catch laundering the collection
+#: through a parameter:
+#:
+#:     def _greedy(row, fields):
+#:         return any(getattr(row, f, 0) > 10.0 for f in fields)
+#:
+#: which names no field and no collection, and decides on cost the moment a caller passes
+#: `COST_FIELDS`. Measured: that shape passes the scan. It is closed from the other end
+#: instead -- the collection cannot reach a module that would launder it, because importing
+#: it is what this list gates. Satisfiable because nothing outside `src/call_cost.py`
+#: imports the collections today; the modules below import the *types* and the helpers, and
+#: `CallCost` carries values whose field names the scan already covers.
+MAY_IMPORT_THE_COST_VOCABULARY = ("src/call_cost.py",)
+
+COST_COLLECTIONS = ("COST_FIELDS", "TOKEN_FIELDS", "INERT_NAMES", "COUNTER_FIELDS")
+
+
+class TheVocabularyCannotBeLaunderedTests(unittest.TestCase):
+    """The other end of the field-name scan, and why it is needed.
+
+    Attacked by hand before it existed. A comparison on `row.total_cost_usd`, on
+    `row["total_cost_usd"]`, on `getattr(row, "total_cost_usd")`, and on a local copied out
+    of any of them all die on the scan. Iterating a collection handed in as an argument does
+    not, because the deciding function then names nothing this file knows about. So the
+    collection is kept where it cannot be handed anywhere.
+    """
+
+    def test_only_call_cost_imports_the_collections(self) -> None:
+        offenders: list[str] = []
+        for path, tree in parsed_src():
+            relative = path.relative_to(REPO).as_posix()
+            if relative in MAY_IMPORT_THE_COST_VOCABULARY:
+                continue
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom):
+                    for alias in node.names:
+                        if alias.name in COST_COLLECTIONS:
+                            offenders.append(f"{relative} imports {alias.name}")
+        self.assertEqual(
+            offenders,
+            [],
+            "a module outside the recorder imports the cost vocabulary, which is how a "
+            "decision reads cost without naming a field: " + "; ".join(offenders),
+        )
+
+
 class TheFieldsAreNamedInOnePlaceTests(unittest.TestCase):
     def test_the_literals_live_in_src_call_cost_and_one_declared_exception(self) -> None:
         elsewhere: dict[str, set[str]] = {}
