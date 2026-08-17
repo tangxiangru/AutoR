@@ -511,31 +511,76 @@ standard error of it *and* reproduce its subject ordering by accident.
 
 ---
 
-## What is not measured
+## What AutoR actually costs here, and what it scored
 
-Two blanks, and they have one cause.
+The two rows this page carried as UNMEASURED were filled on 2026-08-17 by a three-task
+calibration: `fs:010`, `fs:024` and `fs:043`, one per subject, both arms, real operator, `opus`
+answering and reviewing, `--stage-timeout 3600 --max-attempts 2 --max-auto-skips 0`, judged by
+`gpt-5.1`. Six runs. It is the first real AutoR run of this benchmark that has ever happened.
 
-| | |
-| --- | --- |
-| AutoR's score on FrontierScience-Research | **UNMEASURED** |
-| AutoR's wall clock on FrontierScience-Research | **UNMEASURED** |
+| task | arm | wall | backend calls | output tokens | answer chars | source | points |
+| --- | --- | ---: | ---: | ---: | ---: | --- | ---: |
+| `fs:010` | `direct` | 266 s | 1 | 23,719 | 43,075 | `agent` | **9.375** |
+| `fs:010` | `ideate` | 1,962 s | 9 | 153,848 | 3,731 | `synthesized` | **2.500** |
+| `fs:024` | `direct` | 609 s | 2 | 0 | 198 | `fallback` | refused |
+| `fs:024` | `ideate` | 4,597 s | 16 | 335,157 | 236 | `fallback` | refused |
+| `fs:043` | `direct` | 607 s | 2 | 0 | 198 | `fallback` | refused |
+| `fs:043` | `ideate` | 4,333 s | 20 | 307,352 | 70,606 | `synthesized` | **4.000** |
 
-No real — non-`--fake-operator` — AutoR run of this benchmark exists. The mechanics are known to
-work: handed a real FrontierScience problem as its goal file, `main.py` walked all eight stages
-under the fake operator and exited 0 in 9.6 s, and `rcb_agent.py` pointed at a workspace holding
-nothing but an instructions file exited 0 in 7.8 s (auto-skipping Stage 07, whose figure floor a
-text answer cannot clear — which is the observation the `ideate` profile is built around).
-Everything in this document that is not those two rows was reachable without spending a real
-pipeline run.
+**The `ideate` arm costs 33 to 77 minutes a task**, median 72 minutes, at 9 to 20 backend calls
+and 154,000 to 335,000 output tokens. Sixty tasks by two arms at a concurrency of six is
+therefore about a day of wall clock plus 2.4 hours of judging, which makes a full paired
+campaign affordable — and is the fact the sixty-task plan could not be frozen without.
 
-The cause is one part of AutoR's own long-standing code: `ClaudeOperator._build_cli_command`
-always renders the pair `--permission-mode bypassPermissions` and
-`--dangerously-skip-permissions`, and the agent harness this work was done under refuses to
-launch a process carrying them. Nothing was added for this benchmark and nothing about the
-adapter can route around it — it is the only thing standing between this page and the two rows
-above.
+### No paired difference is published from this, and the harness is the reason
 
-**The exact command that fills the blank**, run by a human with the authority to run it:
+Both arms refused above the plan's ceiling: the `direct` arm on two of three tasks, the `ideate`
+arm on one of three, against a `max_refusal_rate_for_publication` of 0.20. Refusals are not
+distributed at random across arms, so the surviving pairs are the subset where each arm happened
+to run cleanly, and a difference over them is biased by an amount nobody can estimate. The report
+withholds it and so does this page.
+
+What can be said is the single observation. On `fs:010` the pipeline arm scored **6.875 points
+below** the single call, at 7.4 times the wall clock and 6.5 times the tokens, having written an
+answer one eleventh as long. One task is one task — but the gap is twenty times the judge's
+sampling noise, it points the same way as the sibling benchmark, where AutoR also lands below the
+bare CLI it can be configured to run on top of, and the mechanism is legible: this rubric awards
+points for enumerated specifics, and the synthesizer compresses.
+
+### Why the arms refused, which is two different stories
+
+**The `direct` arm did not fail at AutoR.** Both refusals are the Claude CLI's own byte-stream
+idle timeout — `API Error: Stream idle timeout - no chunks received` — firing at about 300 s
+while the model was still thinking and had emitted nothing. Six of seven `direct` attempts died
+that way; `fs:024` reproduced it four times across two runs at two different concurrency levels,
+and the one that survived, `fs:010`, finished its call in 264 s, just under the ceiling. The CLI
+imposes a hard limit on how long a model may think before its first token, and the hardest
+questions on this benchmark are exactly the ones that exceed it.
+`CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS` is the knob; nothing in `fs_agent.py` reaches it, and
+raising it is the first thing to do before a full campaign.
+
+**The `ideate` arm's refusal is the one the design was built for.** `fs:024` spent 76 minutes and
+16 backend calls, approved no stage, and came out with `pipeline_completed: false`,
+`stages_approved: []` and a `fallback` answer of 236 characters. The synthesizer refused to write
+an answer from zero approved stages rather than quietly asking the model the original question
+again — which would have produced a plausible document, a `synthesized` source and an exit code
+of 0. Two clauses named it, `answer_not_fallback` and `pipeline_completed`, and the exit code was
+1. On the sibling benchmark the same shape of run wrote `status: "completed"` thirty-nine times
+out of forty.
+
+Three further things the calibration confirmed in a real run rather than a fake one: the
+no-browsing protocol held on **all seven model seats** of the `ideate` arm, each carrying the
+denied-tool list and each witnessed at `browsing_tool_calls: 0`; the walk approved exactly
+`["02_hypothesis_generation"]` and auto-skipped nothing; and the `direct` arm through the CLI
+writes a far longer answer than the same model called through the API — 43,075 characters against
+5,822 on the same question — which is most of why it scored 9.375 where the API baseline scored
+5.75. The two things called `direct` are not the same instrument, and only the CLI one is the
+paired control.
+
+Artifacts: `fs-runs/fs0NN_{direct,ideate}/` with `_meta.json`, `answer.md` and the run tree, and
+`fs-runs/fs0NN_*.score.json` beside them.
+
+### Reproducing it
 
 ```bash
 export FRONTIERSCIENCE_DATASET=/abs/path/to/research_test.jsonl
@@ -557,28 +602,31 @@ python3 tools/score_fs_run.py \
 
 Three of those defaults are load-bearing and are the defaults of `fs_agent.py` rather than of
 `main.py`. `DEFAULT_FS_STAGE_TIMEOUT` is 3,600 s, three times the interactive default: the only
-per-stage wall clock ever recorded on this box for a comparable configuration was 2,100 s, and
-a sibling trial run at 1,800 s had twenty-eight of forty arms hit the ceiling. A timeout below
-the distribution does not slow the treatment arm down, it converts it into a refusal, and a
-refusal rate that differs between arms is not a difference anybody can interpret.
+per-stage wall clock ever recorded on this box for a comparable configuration was 2,100 s, and a
+sibling trial run at 1,800 s had twenty-eight of forty arms hit the ceiling. A timeout below the
+distribution does not slow the treatment arm down, it converts it into a refusal, and a refusal
+rate that differs between arms is not a difference anybody can interpret.
 `DEFAULT_FS_MAX_ATTEMPTS` is 2 where `main.py` is unbounded — the stuck detector only fires on
-three *identical* consecutive validation errors, and artifact errors carry filenames and
-counts, so an unbounded budget is unbounded; a real sibling run reached attempt nine on one
-stage. `DEFAULT_FS_MAX_AUTO_SKIPS` is 0, because an auto-skipped Stage 02 in a run whose only
-stage is Stage 02 is a run that produced nothing while reporting that it finished.
+three *identical* consecutive validation errors, and artifact errors carry filenames and counts,
+so an unbounded budget is unbounded; a real sibling run reached attempt nine on one stage.
+`DEFAULT_FS_MAX_AUTO_SKIPS` is 0, because an auto-skipped Stage 02 in a run whose only stage is
+Stage 02 is a run that produced nothing while reporting that it finished.
 
-### The cost estimate, framed as an estimate
+### The cost, and the neighbour it used to be estimated from
 
-Judging is the only measured cost: at a mean of 72.9 s per serial call, sixty tasks by two arms
-at one draw each is about 2.4 hours.
+Judging: at a mean of 72.9 s per serial call, sixty tasks by two arms at one draw each is about
+2.4 hours. Answering, now that the calibration has run: the `ideate` arm's median is 72 minutes
+a task over three tasks, so the same sixty by two arms is roughly a day at a concurrency of six.
 
-For the answer side there is no measurement, only a neighbour. Thirty-nine real
-ResearchClawBench runs on this box had a **median wall clock of 15.2 h** (p25 11.9, p75 19.4,
-max 26.5), and 31 of 40 auto-skipped at least one stage. That is a *different benchmark*: eight
-stages against the one this configuration runs, with experiments and a written report at the
-end. It is an upper anchor and a warning about variance, not a schedule. The retry mechanics
-behind that variance are also measured: one 10.2-hour run spent 3/3/3/6/5/9/4 attempts across
-its stages, roughly 65 backend calls against a 16-call floor.
+Before that measurement existed this section reasoned from a neighbour, and the neighbour was
+wrong by an order of magnitude in the direction that matters. Thirty-nine real
+ResearchClawBench runs on this box have a **median wall clock of 15.2 h** (p25 11.9, p75 19.4,
+max 26.5), with 31 of 40 auto-skipping at least one stage and one 10.2-hour run spending
+3/3/3/6/5/9/4 attempts across its stages. That is eight stages with experiments and a written
+report; this configuration runs one stage and writes an answer, and it costs a twelfth as much.
+The lesson is not that the anchor was useless — it bounded the problem while nothing else could
+— but that a projection across benchmarks is worth about one order of magnitude, which is why
+the plan refuses to state one as a schedule.
 
 The plan file is where a projection would most easily be read as an observation, so
 `_refuse_a_budget_nobody_measured` requires every plan with an `autor` arm to carry a

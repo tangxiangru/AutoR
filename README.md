@@ -992,12 +992,26 @@ and reproducing its ordering is **corroboration of the scoring path, not compara
 instruments**; judge choice is worth more than the difference being discussed, so no number
 here may be placed beside the paper's table.
 
-**AutoR's own score and wall clock on this benchmark are UNMEASURED**, and they are blank for
-one reason: the operator builds its CLI command with a permission-bypass flag pair that the
-agent harness this work was done under refuses to launch. Everything else on the page was
-reachable without it. The exact command a human can run to fill the blank, the ten admission
-clauses of the paired trial, the judge's measured noise and the honest cost estimate are in
-[docs/frontierscience.md](docs/frontierscience.md).
+**What AutoR costs here.** A three-task calibration — both arms, real operator, `opus`
+answering and reviewing — puts the `ideate` arm at 33 to 77 minutes a task, median 72, at 9 to
+20 backend calls and 154k to 335k output tokens. Sixty tasks by two arms is about a day at a
+concurrency of six, which makes a full paired campaign affordable.
+
+**No difference is published from it.** Both arms refused above the plan's 20% ceiling — the
+single-call arm on two of three tasks, all of them the Claude CLI's 300 s byte-stream idle
+timeout firing while the model was still thinking, and the pipeline arm on one of three, a run
+that approved no stage and was refused by two clauses rather than being handed a synthesized
+answer. Refusals are not random across arms, so the survivors are biased and the report says so
+instead of averaging them.
+
+The one complete pair is worth stating on its own terms: on `fs:010` the pipeline arm scored
+**2.500 against the single call's 9.375**, at 7.4× the wall clock and 6.5× the tokens, having
+written an answer one eleventh as long. One task is one task — but the gap is twenty times the
+judge's sampling noise and it points the same way as ResearchClawBench, where AutoR also lands
+below the bare CLI it can be configured to run on top of.
+
+The full table, why each arm refused, the ten admission clauses and the judge's measured noise
+are in [docs/frontierscience.md](docs/frontierscience.md).
 
 ## Documentation
 
