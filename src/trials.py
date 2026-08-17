@@ -26,9 +26,21 @@ fitness is not one measurement of two configurations — later stages are scored
 strictly more criteria, so the arm that stopped early scores higher for stopping
 early. That is the same bias :func:`src.archive.comparability_basis` exists to
 remove, and it reappears inside a pair. The difference is taken over the stages
-*both* arms measured, and pairs whose shapes differed are counted and reported
-separately, because a capability that changes how far runs get has done something
-worth knowing about and it is not a score.
+*both* arms measured, and pairs whose shapes differed are set aside from the mean
+and reported on their own line with their own count and their own mean, because a
+capability that changes how far runs get has done something worth knowing about
+and it is not a score.
+
+Two things had to change for that sentence to be true of this module rather than
+of its intentions. The mean, the p-value, the floor and the decomposition run over
+:attr:`TrialResult.comparable_pairs`; they used to run over every pair while the
+report printed the shape-change count underneath, so a shape-differing pair was
+counted and averaged in at once. And a producer whose outcome measure cannot see
+the composition — a benchmark total is one key per pair by construction — declares
+it, through ``collect_pairs(composition=...)``. Without that, ``same_shape`` on the
+benchmark path was a comparison of two single-element key sets that are equal for
+every pair that survives pairing at all: structurally true, and empty in exactly
+the trial it was written for.
 
 **It does not report a total without the criterion decomposition.** The outcome
 measure is a rubric, and a rubric can be gamed. A capability that writes more files
@@ -280,6 +292,22 @@ class Pair:
     trial_id: str
     control: RunRecord
     treatment: RunRecord
+    #: How far each arm's run actually got, when the producer knows and the outcome
+    #: measure cannot see it. Empty is the ordinary case and means "ask the measure",
+    #: which is what an archived rubric row supports: its ``stage_fitness`` has one key
+    #: per stage the run scored, so the key set *is* the composition.
+    #:
+    #: A benchmark total has one key by construction — :mod:`src.rcb_trial` builds
+    #: ``"<task_id>|<env_digest>"`` so that an unweighted mean over one element is the
+    #: weighted total — so on that path the key sets are equal for every pair that
+    #: survives at all and :attr:`same_shape` was structurally true. The first live
+    #: paired trial is exactly the pair that refutes: the control arm skipped four stages
+    #: and was cancelled after scoring four of eight, the treatment arm skipped none and
+    #: completed at seven of eight, and both were scored against the same checklist, so
+    #: the strongest refusal in this module was true and empty over the one comparison it
+    #: was written for.
+    control_composition: tuple[str, ...] = ()
+    treatment_composition: tuple[str, ...] = ()
 
     @property
     def shared_stages(self) -> tuple[str, ...]:
@@ -287,6 +315,16 @@ class Pair:
 
     @property
     def same_shape(self) -> bool:
+        """Both arms measured the same stages *and* their runs got equally far.
+
+        Two questions, one answer, because the consequence is the same: a difference
+        between two depths of run is not a difference between two configurations. Which
+        of the two can see it depends on the measure — the rubric's key set carries the
+        composition and a benchmark total cannot — so a declared composition is checked
+        first and the key sets are checked always.
+        """
+        if set(self.control_composition) != set(self.treatment_composition):
+            return False
         return set(self.control.stage_fitness) == set(self.treatment.stage_fitness)
 
     def _mean_over(self, record: RunRecord, stages: Sequence[str]) -> float:
@@ -369,16 +407,54 @@ class TrialResult:
             )
 
     @property
+    def comparable_pairs(self) -> tuple[Pair, ...]:
+        """The pairs the result is a mean over: both arms got the same distance.
+
+        Every statistic below reads this and not :attr:`pairs`. The mean, the p-value and
+        the floor have to be over one population or the report states a p from one sample
+        beside a floor from another — the crack this module's header already records at
+        ``MAX_EXACT_PAIRS`` and which is worth exactly one instance.
+        """
+        return tuple(pair for pair in self.pairs if pair.same_shape)
+
+    @property
+    def shape_changed_pairs(self) -> tuple[Pair, ...]:
+        """Pairs whose arms did not get equally far. Reported, never averaged in.
+
+        Not a failure and not an exclusion: a capability that changes how far a run gets
+        has done something real, and it is the most interesting thing this apparatus has
+        seen. It is simply not a score, and putting it in the mean makes the number a
+        comparison of two depths of run wearing the label of a comparison of two
+        configurations.
+        """
+        return tuple(pair for pair in self.pairs if not pair.same_shape)
+
+    @property
     def n(self) -> int:
-        return len(self.pairs)
+        return len(self.comparable_pairs)
 
     @property
     def differences(self) -> list[float]:
-        return [pair.difference for pair in self.pairs]
+        return [pair.difference for pair in self.comparable_pairs]
+
+    @property
+    def shape_changed_differences(self) -> list[float]:
+        return [pair.difference for pair in self.shape_changed_pairs]
 
     @property
     def mean_difference(self) -> float:
         values = self.differences
+        return sum(values) / len(values) if values else 0.0
+
+    @property
+    def shape_changed_mean(self) -> float:
+        """The mean over the shape-differing pairs, on its own line and its own count.
+
+        Printed rather than withheld. A reader who is told a count and not a number will
+        estimate one, and the sign of what was set aside is the first thing anybody wants
+        to know about a set-aside.
+        """
+        values = self.shape_changed_differences
         return sum(values) / len(values) if values else 0.0
 
     @property
@@ -395,13 +471,15 @@ class TrialResult:
 
     @property
     def shape_changes(self) -> int:
-        """Pairs whose two arms did not measure the same stages.
+        """Pairs whose two arms did not measure the same stages, or did not get as far.
 
-        Not folded into the score. A capability that changes how far a run gets has
-        done something, and averaging it into a mean over shared stages would hide
-        exactly the thing worth reporting.
+        Not folded into the score, and — since the split above — not folded into the
+        mean either. Counting them while averaging them was the state this left behind:
+        the report printed "1 pair(s) whose arms did not reach the same stages" one line
+        under a mean difference that pair was half of, and the sentence "the score above
+        is over the stages both measured" was true of the stages and false of the pairs.
         """
-        return sum(1 for pair in self.pairs if not pair.same_shape)
+        return len(self.shape_changed_pairs)
 
     @property
     def p_value(self) -> float:
@@ -440,9 +518,14 @@ class TrialResult:
         criterion mechanically — writing more files raises ``artifact_breadth``
         whether or not the work improved — produces a real total and a fake result.
         A win concentrated in a single criterion is a flag.
+
+        Over :attr:`comparable_pairs`, like every other statistic here. The decomposition
+        is the total's decomposition — the column sums to the scalar on the benchmark
+        path — so a table built over a different population than the scalar above it
+        would break the one identity that makes ``concentration`` readable.
         """
         totals: dict[str, list[float]] = {}
-        for pair in self.pairs:
+        for pair in self.comparable_pairs:
             for key, value in pair.criterion_differences().items():
                 totals.setdefault(key, []).append(value)
         return {
@@ -463,7 +546,7 @@ class TrialResult:
         between an anecdote and a measurement.
         """
         counts: dict[str, int] = {}
-        for pair in self.pairs:
+        for pair in self.comparable_pairs:
             for key in pair.criterion_differences():
                 counts[key] = counts.get(key, 0) + 1
         return counts
@@ -488,6 +571,7 @@ def collect_pairs(
     control_arm: str,
     treatment_arm: str,
     outcome: Outcome = RUBRIC_TOTAL,
+    composition: Mapping[tuple[str, str], Sequence[str]] | None = None,
 ) -> TrialResult:
     """Group tagged runs into pairs and say why any were dropped.
 
@@ -497,7 +581,15 @@ def collect_pairs(
     holds nothing else, and a producer that fills the dicts from another instrument
     passes its own — :func:`src.rcb_trial.collect_rcb_pairs` passes
     :data:`RCB_TOTAL`. Only a measure in :data:`DECLARED_OUTCOMES` is accepted.
+
+    ``composition`` is the same shape of declaration for how far each run got, keyed
+    ``(trial_id, arm)`` and read into :attr:`Pair.control_composition`. Keyed on the pair
+    rather than on ``run_id`` because that is the identity this function already groups
+    by, and two arms of one trial that happened to share a run id would otherwise be one
+    entry. Omitted, every pair keeps the shape its ``stage_fitness`` keys give it, which
+    is what the archive's rubric rows support and all this module ever had.
     """
+    declared = dict(composition or {})
     by_trial: dict[str, dict[str, RunRecord]] = {}
     for record in records:
         if not record.trial_id or record.capability != capability:
@@ -518,7 +610,13 @@ def collect_pairs(
         if not (control.usable and treatment.usable):
             excluded.append((trial_id, "an arm is a fake run or a stale rubric version"))
             continue
-        pair = Pair(trial_id, control, treatment)
+        pair = Pair(
+            trial_id,
+            control,
+            treatment,
+            control_composition=tuple(declared.get((trial_id, control_arm), ())),
+            treatment_composition=tuple(declared.get((trial_id, treatment_arm), ())),
+        )
         if not pair.shared_stages:
             excluded.append((trial_id, "the two arms measured no stage in common"))
             continue
@@ -598,7 +696,8 @@ def format_trial_report(result: TrialResult, *, unit: str | None = None) -> str:
     lines = [
         header,
         "",
-        f"- pairs: **{result.n}**"
+        f"- pairs: **{result.n}** same-shape"
+        + (f" (+{result.shape_changes} shape-differing)" if result.shape_changes else "")
         + (f" ({len(result.excluded)} excluded)" if result.excluded else ""),
         measure,
         f"- mean difference: **{result.mean_difference:+.4f}** {unit}",
@@ -613,10 +712,23 @@ def format_trial_report(result: TrialResult, *, unit: str | None = None) -> str:
             "capability."
         )
     if result.shape_changes:
+        # Its own line, its own count and its own mean, under the result rather than
+        # inside it. The count alone was printed here for as long as the mean above it
+        # included the pairs being counted, which is the reading a reader cannot recover
+        # from: "1 pair did not reach the same stages" over a mean of one pair.
         lines.append(
-            f"- {result.shape_changes} pair(s) whose arms did not reach the same stages. The score "
-            "above is over the stages both measured; that a capability changes how far a run gets "
-            "is a separate result and is not in this number."
+            f"- **set aside: {result.shape_changes} shape-differing pair(s)**, mean "
+            f"**{result.shape_changed_mean:+.4f}** {unit} among them. Their arms did not "
+            "reach the same stages or did not get equally far, so their difference is "
+            "between two depths of run and not between two configurations. That a "
+            "capability changes how far a run gets is a real result and it is not a "
+            "score; it is not in the number above and must not be read as one."
+        )
+    if result.n == 0 and result.shape_changes:
+        lines.append(
+            "- **there is no same-shape pair yet, so the mean above is over nothing.** "
+            "The whole sample is shape-differing. Read the set-aside line, not the "
+            f"{result.mean_difference:+.4f} above it."
         )
     for trial_id, reason in result.excluded:
         lines.append(f"  - excluded `{trial_id}`: {reason}")
