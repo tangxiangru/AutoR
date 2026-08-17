@@ -1,15 +1,23 @@
 """The unit of observation is a decision, not a run.
 
 :func:`src.archive.edge_payoffs` compares runs that took an edge against runs that
-"reached the same node and did not". That control arm pools four unrelated states:
+"reached the same node and did not". That control arm pools seven unrelated states —
+one per kind in :data:`src.stage_graph.BLOCK_KINDS`, plus the topology that never
+declared the edge:
 
-* the guard was shut, so the edge was never on offer;
-* ``--final-stage`` pruned it;
-* the visit budget was spent;
+* the guard was shut, so the edge was never on offer (``guard``);
+* ``--final-stage`` pruned it (``pruned``);
+* the step budget or the per-stage visit budget was spent (``steps``, ``visits``);
+* the run had already concluded and every other move was moot (``concluded``);
+* the delivery reserve withdrew a backward move the auto-skip pool could not afford
+  (``budget``);
 * the run was on a topology where the edge does not exist at all.
 
-Only the last of those was ever a *choice*, and only a choice is evidence about a
-choice. The distinction is not academic here, because five of the seven guards test
+None of those was ever a *choice*. The one way of not taking an edge that is one —
+being offered it and declining — is what this module's control arm holds instead,
+because only a choice is evidence about a choice.
+
+The distinction is not academic here, because five of the seven guards test
 the same disk predicates the rubric scores — ``_guard_results_exist`` and the
 reproducibility check read the same expression. So a guard being shut is correlated
 with the run being weak, and pooling "guard shut" into the control arm makes the

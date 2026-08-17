@@ -31,6 +31,7 @@ every node of the shipped topology rather than argued in a comment.
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import io
 import json
 import sys
@@ -44,6 +45,8 @@ from src.router import StageRouter
 from src.stage_graph import (
     BLOCK_KINDS,
     DELIVERY_RESERVE,
+    FINISH,
+    Edge,
     GraphState,
     StageGraph,
     Visit,
@@ -308,6 +311,75 @@ class TheRuleOnlyEverRemovesAMove(unittest.TestCase):
                 None if with_none_left is None else (with_none_left.target, with_none_left.last_resort),
                 stage.slug,
             )
+
+
+class TheReserveClosesTheGraphAtTheBottomOfTheFlag(unittest.TestCase):
+    """What ``--max-auto-skips`` now does to the topology, measured rather than argued.
+
+    The pool only shrinks, so an unattended run that *starts* at or below
+    :data:`~src.stage_graph.DELIVERY_RESERVE` is at the reserve for its whole life
+    and `adaptive` offers no backward move at any node, from the first decision on.
+    At that setting the flag has quietly chosen the topology, which is what
+    ``--stage-graph`` is for.
+
+    Recorded rather than prevented: a reserve that yields to a small pool is not a
+    reserve, and the abort it exists to stop is the same abort either way. What was
+    missing is that nothing said so and nothing measured it — this is the widest part
+    of the gate's blast radius, and it was reachable from a documented flag value.
+    ``docs/cli-reference.md`` says it where an operator sets the number.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.paths = _run_paths(Path(self._tmp.name))
+        self.graph = StageGraph.adaptive()
+
+    def _admissible_revisits(self, skips_left: int | None) -> list[str]:
+        return [
+            f"{stage.slug}->{move.target}"
+            for stage in STAGES
+            for move in self.graph.moves(
+                self.paths, stage.slug, GraphState(), skips_left=skips_left
+            )
+            if move.edge.kind == "revisit" and move.admissible
+        ]
+
+    def test_the_fixture_has_backward_moves_to_lose(self) -> None:
+        """Control. On a workspace this empty the content guards shut some revisits
+        by themselves, so "no backward move" has to be shown to mean something."""
+        self.assertNotEqual(self._admissible_revisits(None), [])
+
+    def test_a_pool_at_or_below_the_reserve_leaves_none_anywhere(self) -> None:
+        for left in range(0, DELIVERY_RESERVE + 1):
+            with self.subTest(skips_left=left):
+                self.assertEqual(self._admissible_revisits(left), [])
+
+    def test_one_unit_above_the_reserve_restores_every_one_of_them(self) -> None:
+        """The withdrawal is the budget's, not a second guard's: the set that comes
+        back is the set an unbudgeted caller sees."""
+        self.assertEqual(
+            self._admissible_revisits(DELIVERY_RESERVE + 1),
+            self._admissible_revisits(None),
+        )
+
+    def test_the_flag_values_that_close_the_graph_are_exactly_the_reserve_and_below(
+        self,
+    ) -> None:
+        """Stated the way an operator sets it: ``--max-auto-skips N``, nothing spent."""
+        closed = [n for n in range(0, 6) if not self._admissible_revisits(n)]
+        self.assertEqual(closed, list(range(0, DELIVERY_RESERVE + 1)))
+
+    def test_the_shipped_default_keeps_them_open_until_the_second_unit_is_spent(
+        self,
+    ) -> None:
+        """Read off ``ResearchManager``'s own signature rather than typed in, so a
+        change to the default flag moves this test instead of stranding it."""
+        default = inspect.signature(ResearchManager.__init__).parameters["max_auto_skips"].default
+        open_after = [
+            spent for spent in range(default + 1) if self._admissible_revisits(default - spent)
+        ]
+        self.assertEqual(open_after, list(range(default - DELIVERY_RESERVE)))
 
 
 class TheRefusalIsRecorded(unittest.TestCase):
@@ -606,6 +678,114 @@ class TheRouterHonoursTheWithdrawal(unittest.TestCase):
     def test_the_refusal_degrades_forward_rather_than_stalling(self) -> None:
         """The module's standing guarantee: a refused choice becomes the forward edge."""
         self.assertEqual(self._choose(DELIVERY_RESERVE).target, "07_writing")
+
+
+class TheDefaultReadsTheSameBudgetTheMenuDoes(unittest.TestCase):
+    """The other half of that seam, and the mutation that was still alive after it.
+
+    :meth:`~src.router.StageRouter.choose` forwards ``skips_left`` to two calls:
+    ``moves``, whose result is the menu, and ``default_move``, whose result is what
+    happens when nobody chooses. Dropping it from the second one leaves the whole
+    suite green, because ``default_move`` ranks ``advance`` and ``finish`` edges and
+    a ``budget`` block is only ever attached to a ``revisit``.
+
+    It is not inert. ``default_move``'s last branch — a node that declares no forward
+    edge at all — falls back to whatever is *live*, computed from its own ``moves()``
+    call. Fed a budget the menu was not fed, that branch returns a backward move the
+    router's own ``blocked`` map records as withdrawn, and ``choose`` takes it: with
+    ``live`` empty nothing is asked, so the run makes the move the reserve exists to
+    refuse and records the refusal beside it.
+
+    Every shipped node has a forward edge, so the fixture is a hand-built topology.
+    That is the point rather than an apology for it: the argument keeps two halves of
+    one decision reading one budget, and a rule that holds only because no shipped
+    graph exercises it is a rule nothing is checking. The last test here is the
+    invariant stated over the shipped graph as well, where it is a control — it
+    passes on `adaptive` either way, which is exactly why the fixture is needed.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.paths = _run_paths(Path(self._tmp.name))
+        self.graph = StageGraph(
+            [
+                Edge(
+                    source=WRITING_STAGE.slug,
+                    target="06_analysis",
+                    kind="revisit",
+                    rationale="the write-up found a claim the analysis does not support",
+                )
+            ],
+            name="revisit-only",
+        )
+
+    def _choose(self, skips_left: int | None):
+        return StageRouter(None, mode="auto").choose(
+            paths=self.paths,
+            stage=WRITING_STAGE,
+            graph=self.graph,
+            state=GraphState(),
+            skips_left=skips_left,
+        )
+
+    def test_the_fixture_reaches_the_branch_no_shipped_topology_does(self) -> None:
+        """Control. A node with a forward edge never gets to the ``live`` fallback,
+        so a fixture that quietly had one would make every assertion below vacuous."""
+        moves = self.graph.moves(self.paths, WRITING_STAGE.slug, GraphState())
+        self.assertEqual([move.edge.kind for move in moves], ["revisit"])
+        default = self.graph.default_move(self.paths, WRITING_STAGE.slug, GraphState())
+        self.assertIsNotNone(default)
+        assert default is not None  # for the type checker
+        self.assertEqual(default.target, "06_analysis")
+
+    def test_the_fallback_withholds_the_move_the_pool_cannot_afford(self) -> None:
+        self.assertIsNone(
+            self.graph.default_move(
+                self.paths, WRITING_STAGE.slug, GraphState(), skips_left=DELIVERY_RESERVE
+            )
+        )
+
+    def test_the_router_does_not_take_a_move_its_own_record_calls_withdrawn(self) -> None:
+        """The mutation this class exists for: `skips_left` dropped from the
+        `default_move` call in `choose` returns `06_analysis` here, with
+        `blocked["06_analysis"] == "budget"` on the same decision."""
+        decision = self._choose(DELIVERY_RESERVE)
+        self.assertEqual(decision.blocked.get("06_analysis"), "budget")
+        self.assertNotEqual(decision.target, "06_analysis")
+        self.assertEqual(decision.target, FINISH)
+
+    def test_a_pool_above_the_reserve_still_takes_it(self) -> None:
+        """The second control: the refusal is the budget's doing, not the fixture's."""
+        self.assertEqual(self._choose(DELIVERY_RESERVE + 1).target, "06_analysis")
+
+    def test_the_recorded_default_never_falls_through_a_budget(self) -> None:
+        """``default_target`` is what the archive reads as "what AutoR would have
+        done", and ``default_move`` is allowed to name exactly one kind of
+        unavailable move: a ``guard``-blocked advance, taken under protest, because a
+        guard is a routing preference and the stage gate is the real gate. Every
+        other kind is a statement about the *run* — including this one — and the
+        method's own docstring says a budget block is never overridden. Asserted over
+        the hand-built node and the shipped topology, at every pool size.
+        """
+        overridable = {"", "guard"}
+        for graph in (self.graph, StageGraph.adaptive()):
+            for stage in (WRITING_STAGE, STAGES[5]):
+                for left in (None, 0, DELIVERY_RESERVE, DELIVERY_RESERVE + 1):
+                    with self.subTest(graph=graph.name, stage=stage.slug, skips_left=left):
+                        decision = StageRouter(None, mode="auto").choose(
+                            paths=self.paths,
+                            stage=stage,
+                            graph=graph,
+                            state=GraphState(),
+                            skips_left=left,
+                        )
+                        self.assertIn(
+                            decision.blocked.get(decision.default_target, ""),
+                            overridable,
+                            f"the default is `{decision.default_target}`, which this "
+                            f"same decision records as blocked: {decision.blocked}",
+                        )
 
 
 if __name__ == "__main__":

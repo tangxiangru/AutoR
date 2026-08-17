@@ -668,10 +668,10 @@ class Archive:
         common answer and the right one. A proposer that always proposes converts an
         archive into a random walk.
         """
-        # The `offered and declined` contrast, not the run-level one. The old
-        # control arm pooled "the guard was shut", "--final-stage pruned it", "the
-        # visit budget was spent" and "this topology has no such edge" into one
-        # group, and only the absence of a *choice* is evidence about a choice.
+        # The `offered and declined` contrast, not the run-level one. The old control
+        # arm pooled every kind of block in `BLOCK_KINDS`, and a topology that never
+        # had the edge, into one group with the runs that were offered it and said no;
+        # `src.decisions` enumerates them. Only a *choice* is evidence about a choice.
         # `edge_payoffs` is still computed and still printed by `report`, under a
         # heading saying it is unadjusted — an operator should be able to see the
         # two estimators disagree rather than have the conclusion change silently.
@@ -933,9 +933,12 @@ class Archive:
                 "## Edge payoff — unadjusted (not acted on)",
                 "",
                 "The older run-level contrast, kept and printed so the two can be seen to "
-                "disagree. Its control arm pools four states — the guard was shut, "
-                "`--final-stage` pruned the edge, the visit budget was spent, or the topology "
-                "never had it — and only one of those was a choice.",
+                "disagree. Its control arm pools seven unrelated states — the guard was shut "
+                "(`guard`), `--final-stage` pruned the edge (`pruned`), the step or per-stage "
+                "visit budget was spent (`steps`, `visits`), the run had already concluded "
+                "(`concluded`), the delivery reserve withdrew it (`budget`), or the topology "
+                "never had it — with the runs that were offered the edge and declined it, and "
+                "only that last group was a choice.",
                 "",
                 "| Edge | Took | Mean | Skipped | Mean | Delta | Believable |",
                 "| --- | --- | --- | --- | --- | --- | --- |",

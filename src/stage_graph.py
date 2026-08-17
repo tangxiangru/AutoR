@@ -552,12 +552,15 @@ class Visit:
     #:
     #: Recorded because it is the difference between "this edge was taken" and
     #: "this edge was offered and taken". Without it the archive's control arm pools
-    #: four unrelated states — the guard was shut, `--final-stage` pruned the edge,
-    #: the visit budget was spent, or the run was on a topology where the edge does
-    #: not exist — and calls all of them "did not take it". The guards read the same
-    #: disk predicates the rubric scores, so that pooling makes the guard a selection
-    #: mechanism on the outcome, which is the textbook way to measure a difference
-    #: that is not there.
+    #: seven unrelated states — one per kind in `BLOCK_KINDS`, plus a topology that
+    #: never declared the edge: the guard was shut (`guard`), `--final-stage` pruned
+    #: the edge (`pruned`), the step budget or the per-stage visit budget was spent
+    #: (`steps`, `visits`), the run had already concluded (`concluded`), the delivery
+    #: reserve withdrew a backward move the auto-skip pool could not afford
+    #: (`budget`), or the run was on a topology where the edge does not exist — and
+    #: calls all of them "did not take it". The guards read the same disk predicates
+    #: the rubric scores, so that pooling makes the guard a selection mechanism on the
+    #: outcome, which is the textbook way to measure a difference that is not there.
     #:
     #: It costs nothing: `StageRouter.choose` computes both lists and discards them.
     #: And it cannot be recovered afterwards — re-evaluating a guard needs the
@@ -898,6 +901,18 @@ BLOCK_KINDS = ("guard", "visits", "steps", "concluded", "pruned", "budget")
 #: the corpus contains — a Stage 06 decision offering four backward moves with the
 #: pool already at zero, one step from the deliverable, in a run that then aborted at
 #: the deliverable — and not a repair for the shape that killed those two.
+#:
+#: **What it costs at the bottom of the flag's range.** The pool only shrinks, so an
+#: unattended run whose ``--max-auto-skips`` *starts* at or below this number is at
+#: the reserve for its whole life: no node offers a backward move, from the first
+#: decision on, and ``adaptive`` walks forward only. ``--max-auto-skips 1`` and ``0``
+#: are that setting today, and they are documented values of a documented flag — so
+#: the flag selects the topology, which is what ``--stage-graph`` is for. It is left
+#: standing rather than special-cased, because a reserve that yields to a small pool
+#: is not a reserve and the abort is the same abort at any pool size; but it is
+#: written down here, swept in ``TheReserveClosesTheGraphAtTheBottomOfTheFlag``, and
+#: said to the operator in ``docs/cli-reference.md`` where the number is set. The
+#: shipped default of 3 keeps the backward edges open until the second unit is spent.
 DELIVERY_RESERVE = 1
 
 
@@ -1361,9 +1376,18 @@ class StageGraph:
         about the research, a budget says something about the run, and the run
         stopping is exactly what a budget is for.
 
-        The ``budget`` kind is not in the set below and does not need to be: it is
-        attached only to a ``revisit``, and the default is never a backward move, so
-        it can only ever remove a move this function had already declined to take.
+        The ``budget`` kind is not in the set below and does not need to be. That set
+        decides whether a node with no *live forward* move is a halt, and a ``budget``
+        block is attached only to a ``revisit``, which is never in ``forward`` at all.
+
+        It does reach the last branch, and there it is load-bearing. A node that
+        declares no forward edge falls back to whatever is live, and live is read off
+        this method's own ``moves()`` call — so ``skips_left`` has to arrive here as
+        well as at the menu, or the fallback returns a backward move the same decision
+        records as withdrawn and ``StageRouter.choose`` takes it with nobody asked.
+        Only a hand-built topology reaches that branch, which is why
+        ``test_the_router_does_not_take_a_move_its_own_record_calls_withdrawn`` builds
+        one: dropping the argument from either call site is otherwise green.
         """
         moves = self.moves(paths, slug, state, **kwargs)
         by_rank = lambda move: (move.edge.priority, move.edge.target)  # noqa: E731

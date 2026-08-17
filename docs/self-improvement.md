@@ -290,10 +290,14 @@ For each edge, the archive compares decisions that took it against decisions tha
 were **offered it and declined**.
 
 That distinction is the estimator. The obvious control arm — runs that reached the
-node and did not take the edge — pools four unrelated states: the guard was shut,
-`--final-stage` pruned the move, the visit budget was spent, or the topology never
-had the edge at all. Only the first kind of "did not" is a *choice*, and only a
-choice is evidence about a choice.
+node and did not take the edge — pools seven unrelated states: the guard was shut
+(`guard`), `--final-stage` pruned the move (`pruned`), the step budget or the
+per-stage visit budget was spent (`steps`, `visits`), the run had already concluded
+and every other move was moot (`concluded`), the delivery reserve withdrew a
+backward move the auto-skip pool could not afford (`budget`), or the topology never
+had the edge at all. None of those is a *choice* — the choice is the run that was
+offered the edge and declined it, and that is the only one the arm should hold.
+Only a choice is evidence about a choice.
 
 It is not a fine distinction. Five of the seven guards read the same disk predicates
 the rubric scores, so a shut guard is correlated with a weak run. Pooling those into

@@ -54,7 +54,13 @@ from pathlib import Path
 from src.information_flow import ALL_STAGES, CHANNELS
 from src.rubric import CRITERIA
 from src.run_skills import discipline_of, read_skill_pack
-from src.stage_graph import _ADVANCE_GUARDS, REVISIT_EDGES, TERMINAL_EDGES, StageGraph
+from src.stage_graph import (
+    _ADVANCE_GUARDS,
+    BLOCK_KINDS,
+    REVISIT_EDGES,
+    TERMINAL_EDGES,
+    StageGraph,
+)
 from src.utils import REQUIRED_STAGE_HEADINGS, STAGES
 
 REPO = Path(__file__).resolve().parent.parent
@@ -462,6 +468,102 @@ class CountsInProseMatchTheSymbolTests(unittest.TestCase):
             f"the diagram draws {dotted} backward edges, REVISIT_EDGES has "
             f"{len(REVISIT_EDGES)}",
         )
+
+
+#: Where the per-visit ``blocked`` field's value set is written out for a reader.
+#: One document does it, and adding a sixth kind to ``BLOCK_KINDS`` left it listing
+#: five — the reader was told an exhaustive set that had stopped being exhaustive.
+BLOCK_KIND_ENUMERATION = ("docs/run-artifacts.md", r"`blocked`, target → ((?:`\w+`/)*`\w+`)")
+
+#: Every copy of the argument for the ``offered and declined`` control arm. All four
+#: make the case by enumerating what the naive arm pools, and the enumeration is one
+#: entry per :data:`BLOCK_KINDS` kind plus "the topology never had the edge" — so a
+#: new block kind falsifies all four at once, in two documents and two modules that
+#: nothing else connects. Adding ``budget`` moved the true count from five to six
+#: kinds and every copy still said "four".
+POOLED_CONTROL_ARM = (
+    "docs/self-improvement.md",
+    "src/decisions.py",
+    "src/stage_graph.py",
+    "src/archive.py",
+)
+
+
+class TheBlockedValueSetIsWrittenDownOnceTests(unittest.TestCase):
+    """Prose that enumerates ``BLOCK_KINDS``, checked against ``BLOCK_KINDS``.
+
+    Both checks here are about an *exhaustive* claim rather than a count: a reader
+    parsing `stage_graph.json` is told which values `blocked` can take, and an
+    operator reading the archive's argument is told what the naive control arm
+    pools. Neither is a rounding error when it goes stale — the first makes a
+    schema wrong, and the second makes the estimator's justification wrong.
+    """
+
+    def test_the_documented_blocked_value_set_is_the_live_one(self) -> None:
+        name, pattern = BLOCK_KIND_ENUMERATION
+        text = (REPO / name).read_text(encoding="utf-8")
+        found = re.findall(pattern, text)
+        self.assertEqual(
+            len(found),
+            1,
+            f"{name} no longer writes the `blocked` value set in the form this test "
+            f"reads; a scan that matches nothing passes anything",
+        )
+        listed = [item.strip("`") for item in found[0].split("/")]
+        self.assertEqual(
+            sorted(listed),
+            sorted(BLOCK_KINDS),
+            f"{name} documents `blocked` as {listed}, BLOCK_KINDS is {list(BLOCK_KINDS)}",
+        )
+
+    def test_every_copy_of_the_pooled_control_arm_counts_the_same_states(self) -> None:
+        """One state per block kind, plus the topology that never had the edge.
+
+        The four copies are the shape this repository keeps shipping: one argument
+        written out four times, in files no test connects, so a change that
+        falsifies it falsifies all four silently. Pinned as a group rather than one
+        at a time, because two of them disagreeing is as bad as both being stale.
+        """
+        expected = spelled(len(BLOCK_KINDS) + 1)
+        for name in POOLED_CONTROL_ARM:
+            with self.subTest(document=name):
+                text = (REPO / name).read_text(encoding="utf-8")
+                found = re.findall(r"(\w+)\s+unrelated\s+states", text)
+                self.assertEqual(
+                    len(found),
+                    1,
+                    f"{name} states the pooled-control-arm count {len(found)} times; "
+                    f"this test reads exactly one",
+                )
+                self.assertEqual(
+                    found[0],
+                    expected,
+                    f"{name} says the naive control arm pools '{found[0]}' unrelated "
+                    f"states; it pools one per BLOCK_KINDS kind ({len(BLOCK_KINDS)}) "
+                    f"plus the topology that never had the edge, so {expected}",
+                )
+
+    def test_every_copy_names_every_block_kind_it_claims_to_pool(self) -> None:
+        """The count agreeing is not the list agreeing.
+
+        Bumping "four" to "seven" and leaving the list at four entries passes the
+        check above and tells the reader less than the wrong number did. Each kind
+        has to appear, in backticks, in the sentence that does the counting.
+        """
+        for name in POOLED_CONTROL_ARM:
+            text = (REPO / name).read_text(encoding="utf-8")
+            start = re.search(r"(\w+)\s+unrelated\s+states", text)
+            self.assertIsNotNone(start, name)
+            assert start is not None  # for the type checker
+            window = text[start.start() : start.start() + 900]
+            for kind in BLOCK_KINDS:
+                with self.subTest(document=name, kind=kind):
+                    self.assertIn(
+                        f"`{kind}`",
+                        window,
+                        f"{name} enumerates what the naive control arm pools without "
+                        f"naming `{kind}`",
+                    )
 
 
 class DocsDoNotCiteLineNumbersTests(unittest.TestCase):
