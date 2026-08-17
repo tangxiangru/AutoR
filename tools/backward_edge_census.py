@@ -65,7 +65,8 @@ from src.stage_graph import (  # noqa: E402
     StageGraph,
     stage_for_slug,
 )
-from src.stage_cost import (  # noqa: E402
+from src.stage_cost import (
+    read_stage_cost_ledger,  # noqa: E402
     OUTCOME_AUTO_SKIPPED,
     StageCostMeter,
     append_stage_cost_row,
@@ -192,7 +193,19 @@ def _required_target(paths, graph: StageGraph, slug: str, final, stack: Stack):
     node = stage_for_slug(slug)
     if node is None:
         return None
-    for _ in range(stack.unsettled):
+    # Seed *to* `stack.unsettled`, not *by* it. This function runs once per node per
+    # `decide`, and `table` decides twice over the same nodes -- once through `census` and
+    # once through `preemptions` -- so appending unconditionally left the second pass
+    # looking at twice the unsettled visits the caller asked for. Measured before the fix:
+    # `--unsettled 1 --skips-left 2` printed 6 of 7 pre-empted where the truth at
+    # `UNSETTLED_VISITS_BEFORE_A_REDIRECT` is 0 of 7, and the printed table above it
+    # described a different state from the line below it.
+    already = sum(
+        1
+        for row in read_stage_cost_ledger(paths)
+        if row.get("stage") == slug and row.get("outcome") == OUTCOME_AUTO_SKIPPED
+    )
+    for _ in range(max(stack.unsettled - already, 0)):
         meter = StageCostMeter(node)
         meter.note_attempt()
         meter.note_outcome(OUTCOME_AUTO_SKIPPED)

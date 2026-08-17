@@ -450,7 +450,13 @@ class FullStackFixture(ManagerLoopFixture):
         self.manager.unattended = True
         self.manager.auto_skipped_stages = list(self.ALREADY_SKIPPED)
         self.manager.effort_plan = EffortPlan(enabled=True)
-        self.manager.concentration = Concentration(polish_routine=True)
+        # False is the narrowing ON: `src/manager.py` gates polish on
+        # `not self.concentration.polish_routine` and `src/effort.py` serialises it as
+        # `polish_withheld_from_routine = not polish_routine`. The manager's own default
+        # is `Concentration()`, i.e. withheld. This fixture had it True — the narrowing
+        # off — while the assertion below claimed the whole stack was on, which is the
+        # one thing that class of assertion exists to prevent.
+        self.manager.concentration = Concentration(polish_routine=False)
         self.manager.stage_graph = StageGraph.adaptive()
 
     def _skips_left(self) -> int:
@@ -531,7 +537,7 @@ class TheFullStackFundsEveryVisitTests(FullStackFixture, unittest.TestCase):
         self.assertIsInstance(self.manager.supervisor, RunSupervisor)
         self.assertTrue(self.manager.unattended)
         self.assertTrue(self.manager.effort_plan.enabled)
-        self.assertTrue(self.manager.concentration.polish_routine)
+        self.assertFalse(self.manager.concentration.polish_routine)
         self.assertEqual(self._skips_left(), DELIVERY_RESERVE + 1)
         self.assertEqual(self.manager.stage_graph.name, "adaptive")
 
@@ -874,6 +880,97 @@ class ThePreEmptedDecisionIsCountedTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # The instrument behind the table
 # ---------------------------------------------------------------------------
+
+
+class ThePreemptionCountIsMeasuredOnceTests(unittest.TestCase):
+    """The census's headline number, which shipped at twice its true value.
+
+    `_required_target` seeded the unsettled visits by *appending* them, and `table` decides
+    over the same nodes twice — once through `census`, once through `preemptions` — so the
+    second pass saw twice the unsettled visits the caller asked for. Measured before the
+    fix: `--unsettled 1 --skips-left 2` printed "6 of 7" where the truth at
+    `UNSETTLED_VISITS_BEFORE_A_REDIRECT = 2` is 0 of 7, and the table above the line
+    described a different state from the line itself.
+
+    It was invisible because the function that produces the number had no test. These are
+    that test, and they drive it both directly and through `table`, because the bug lived
+    in the difference between those two paths.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.paths = build_run_paths(Path(self.tmp.name))
+        ensure_run_layout(self.paths)
+
+    def test_below_the_threshold_nothing_is_pre_empted(self) -> None:
+        self.assertEqual(
+            CENSUS.preemptions(
+                self.paths,
+                skips_left=DELIVERY_RESERVE + 1,
+                unsettled=UNSETTLED_VISITS_BEFORE_A_REDIRECT - 1,
+            ),
+            0,
+        )
+
+    def test_at_the_threshold_the_count_rises(self) -> None:
+        """How far it rises depends on the workspace, and that is worth stating.
+
+        A redirect can only name a move the guards already left open, so a node whose
+        forward edges are shut cannot be pre-empted however unsettled it is. On the bare
+        workspace this fixture builds, most guards are shut for want of artifacts and the
+        count at the threshold is 2 of 7; on the furnished workspace `tools/
+        backward_edge_census.py` sets up by default it is 6 of 7. Both are the same rule
+        meeting different graphs, which is why the census furnishes and says so, and why
+        this asserts the movement rather than one of the two numbers as though it were the
+        number.
+        """
+        below = CENSUS.preemptions(
+            self.paths,
+            skips_left=DELIVERY_RESERVE + 1,
+            unsettled=UNSETTLED_VISITS_BEFORE_A_REDIRECT - 1,
+        )
+        at = CENSUS.preemptions(
+            self.paths,
+            skips_left=DELIVERY_RESERVE + 1,
+            unsettled=UNSETTLED_VISITS_BEFORE_A_REDIRECT,
+        )
+        self.assertEqual(below, 0)
+        self.assertGreater(at, below)
+        self.assertLessEqual(at, len(CENSUS.BACKWARD_SOURCES))
+
+    def test_the_table_and_the_count_describe_the_same_state(self) -> None:
+        """The bug in one assertion: the two paths through `decide` must agree.
+
+        Rendered first and asked second, on one workspace, at a threshold one below the
+        firing point. If seeding is not idempotent the table's pass leaves the ledger
+        primed and the count comes back at the firing value instead of zero.
+        """
+        rendered = CENSUS.table(
+            self.paths,
+            skips_left=DELIVERY_RESERVE + 1,
+            unsettled=UNSETTLED_VISITS_BEFORE_A_REDIRECT - 1,
+        )
+        self.assertIn("pre-empted: 0 of", rendered)
+        self.assertEqual(
+            CENSUS.preemptions(
+                self.paths,
+                skips_left=DELIVERY_RESERVE + 1,
+                unsettled=UNSETTLED_VISITS_BEFORE_A_REDIRECT - 1,
+            ),
+            0,
+        )
+
+    def test_deciding_twice_over_does_not_move_the_count(self) -> None:
+        """Idempotence stated directly, so a future caller may decide as often as it likes."""
+        kwargs = dict(
+            skips_left=DELIVERY_RESERVE + 1,
+            unsettled=UNSETTLED_VISITS_BEFORE_A_REDIRECT,
+        )
+        first = CENSUS.preemptions(self.paths, **kwargs)
+        CENSUS.census(self.paths, **kwargs)
+        CENSUS.table(self.paths, **kwargs)
+        self.assertEqual(CENSUS.preemptions(self.paths, **kwargs), first)
 
 
 class TheCensusInstrumentIsTheGateTests(unittest.TestCase):
