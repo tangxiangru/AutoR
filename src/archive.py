@@ -204,6 +204,20 @@ class RunRecord:
     capability: str = ""
     #: Which side of the pair, e.g. `off` / `on`.
     arm: str = ""
+    #: Routing decisions the run supervisor returned before the agent was asked, from
+    #: :func:`~src.router.routing_summary`. Carried beside :attr:`agent_directed` for the
+    #: same reason :attr:`bypassed` is: the route alone cannot say whether a move was the
+    #: run's choice, and a mechanism that takes the choice away is not the run declining
+    #: it. Not an edge observation and deliberately not in :attr:`decisions` — the
+    #: supervisor picks from `live`, so no alternative was declined — but a run-level
+    #: count, so that loosening
+    #: :data:`~src.supervisor.UNSETTLED_VISITS_BEFORE_A_REDIRECT` shows up across runs as
+    #: a figure moving rather than as the graph quietly going quiet.
+    #:
+    #: Defaulted, like `criterion_fitness` and for the same reason: a row written before
+    #: the field existed did not record zero pre-emptions, but zero is the only honest
+    #: reading of a walk whose visits carry no such mark.
+    preempted: int = 0
 
     @property
     def mean_fitness(self) -> float:
@@ -249,6 +263,7 @@ class RunRecord:
             "steps": self.steps,
             "revisits": self.revisits,
             "agent_directed": self.agent_directed,
+            "preempted": self.preempted,
             "bypassed": self.bypassed,
             "decisions": [dict(item) for item in self.decisions],
             "recorded_at": self.recorded_at,
@@ -283,6 +298,7 @@ class RunRecord:
             steps=int(payload.get("steps") or 0),
             revisits=int(payload.get("revisits") or 0),
             agent_directed=int(payload.get("agent_directed") or 0),
+            preempted=int(payload.get("preempted") or 0),
             bypassed=int(payload.get("bypassed") or 0),
             decisions=[dict(item) for item in payload.get("decisions", []) if isinstance(item, dict)],
             recorded_at=str(payload.get("recorded_at") or ""),
@@ -581,6 +597,7 @@ class Archive:
             steps=int(summary.get("steps") or 0),
             revisits=int(summary.get("revisits") or 0),
             agent_directed=int(summary.get("agent_directed") or 0),
+            preempted=int(summary.get("preempted") or 0),
             bypassed=int(summary.get("bypassed") or 0),
             decisions=list(summary.get("decisions") or []),
             recorded_at=_now(),
