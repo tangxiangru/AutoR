@@ -25,7 +25,15 @@ from src.obligations import (
     record_obligations,
 )
 from src.terminal_ui import TerminalUI
-from src.utils import STAGES, build_run_paths, ensure_run_layout, read_text, write_text
+from src.utils import (
+    STAGES,
+    build_continuation_prompt,
+    build_prompt,
+    build_run_paths,
+    ensure_run_layout,
+    read_text,
+    write_text,
+)
 
 
 STAGE_01, STAGE_03, STAGE_05 = STAGES[0], STAGES[2], STAGES[4]
@@ -189,6 +197,80 @@ class RenderingTest(LedgerTestBase):
         record_obligations(self.paths, stage=STAGE_01, entries=[DEBT, OTHER])
         discharge_obligations(self.paths, stage=STAGE_03, obligation_ids=["O001"])
         self.assertIn("1 open / 2 total", ledger_summary(load_ledger(self.paths)))
+
+
+class ReachesEveryAttemptTest(LedgerTestBase):
+    """A debt the doer cannot read on the attempt that pays it is not carried forward.
+
+    `build_prompt` rendered `# Obligations Carried Forward` and
+    `build_continuation_prompt` took the same parameter, was passed it by
+    `ResearchManager._build_stage_prompt`, and never rendered it. So the block reached
+    attempt 1 and vanished from attempt 2 on -- which is every attempt that exists
+    because the previous one was refused -- while `format_for_review_prompt` went on
+    asking the inheriting reviewer whether the debt had been met.
+
+    The parity test below is the general form and is what would have caught it: the two
+    builders take five of the same optional content parameters, and a parameter one of
+    them accepts and drops is the same defect under a different name. Dropping the
+    `obligations` row from it leaves the specific test above still failing, which is the
+    point -- the two are not one check written twice.
+    """
+
+    #: The optional content parameters both builders accept. Each is passed a sentinel
+    #: and required to survive into both prompts. `stage_template` and `handoff_context`
+    #: are positional in one and keyword in the other, so they are driven by name here.
+    SHARED_CONTENT_PARAMS = (
+        "handoff_context",
+        "revision_feedback",
+        "intake_context_text",
+        "web_search_context",
+        "obligations_context",
+    )
+
+    def _build_both(self, **overrides: str) -> tuple[str, str]:
+        kwargs = {name: f"SENTINEL-{name}" for name in self.SHARED_CONTENT_PARAMS}
+        kwargs.update(overrides)
+        fresh = build_prompt(
+            STAGE_03,
+            "stage template",
+            "the user goal",
+            # Empty, because `build_prompt` withholds the handoff when memory is
+            # non-empty -- the one shared parameter with a documented reason to be
+            # dropped, and the reason is duplication rather than forgetting.
+            "",
+            **kwargs,
+        )
+        continuation = build_continuation_prompt(
+            STAGE_03,
+            "stage template",
+            self.paths,
+            attempt_no=2,
+            **kwargs,
+        )
+        return fresh, continuation
+
+    def test_an_obligation_survives_into_a_retry(self) -> None:
+        record_obligations(self.paths, stage=STAGE_01, entries=[DEBT])
+        rendered = format_for_stage_prompt(load_ledger(self.paths), STAGE_03)
+        fresh, continuation = self._build_both(obligations_context=rendered)
+        for prompt in (fresh, continuation):
+            self.assertIn("# Obligations Carried Forward", prompt)
+            self.assertIn(DEBT, prompt)
+
+    def test_every_shared_content_parameter_survives_into_both_prompts(self) -> None:
+        fresh, continuation = self._build_both()
+        missing = [
+            f"{name} is dropped by {builder}"
+            for name in self.SHARED_CONTENT_PARAMS
+            for builder, prompt in (("build_prompt", fresh), ("build_continuation_prompt", continuation))
+            if f"SENTINEL-{name}" not in prompt
+        ]
+        self.assertEqual(missing, [], "\n".join(missing))
+
+    def test_the_sentinel_scan_can_fail(self) -> None:
+        """Control: a parameter that is genuinely absent is reported, not passed over."""
+        fresh, _ = self._build_both()
+        self.assertNotIn("SENTINEL-a-parameter-nobody-passes", fresh)
 
 
 class ReviewSchemaTest(LedgerTestBase):

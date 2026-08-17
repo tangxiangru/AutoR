@@ -1212,6 +1212,16 @@ def build_continuation_prompt(
     _deliverables = format_deliverables_for_prompt(task_statement(read_text(paths.user_input)))
     if _deliverables:
         sections.extend(["# What the Task Asks For", _deliverables])
+    # An obligation is a debt a reviewer attached to an approval and only a reviewer may
+    # discharge, so the stage that owes it has to be able to read it on the attempt that
+    # pays it. This block was a parameter the manager passed and this function never
+    # rendered: `# Obligations Carried Forward` reached attempt 1 through `build_prompt`
+    # and vanished from attempt 2 on, which is every attempt that exists because the
+    # first one was refused. The stage was then judged against a spec its prompt no
+    # longer carried, and `format_for_review_prompt` asked the inheriting reviewer
+    # whether a debt the doer could not see had been met.
+    if obligations_context:
+        sections.extend(["# Obligations Carried Forward", obligations_context.strip()])
     if intake_context_text:
         sections.extend([
             "# Intake Context (User-Provided Resources and Clarifications)",
