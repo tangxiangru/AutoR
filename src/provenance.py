@@ -643,6 +643,63 @@ def trim_to_snapshot(paths: RunPaths, marks: Mapping[str, str]) -> None:
     save_ledger(paths, ProvenanceLedger(next_uid=ledger.next_uid, entries=entries))
 
 
+def plan_single_stage_withdrawal(
+    paths: RunPaths, stage: StageSpec
+) -> tuple[list[Withdrawal], list[str]]:
+    """What withdrawing *only* this stage implies, and what stops it.
+
+    Returns the plan and the list of contested paths -- files this stage wrote that a later
+    stage has written since. A contested file cannot be handled selectively: rewinding it to
+    what preceded this stage would discard the later stage's work, and leaving it alone
+    would leave this stage's work standing. The caller either drops back to a reverse-order
+    withdrawal or refuses, and the contested list is what it says when it does.
+
+    Uncontested files rewind to the last version written by a stage other than this one, or
+    are deleted where there is none. Same two cases as :func:`plan_withdrawal`; the
+    difference is only which versions count as inside the range.
+    """
+
+    ledger = load_ledger(paths)
+    plan: list[Withdrawal] = []
+    contested: list[str] = []
+    for rel_path, entry in sorted(ledger.entries.items()):
+        indices = [i for i, v in enumerate(entry.versions) if v.stage == stage.slug]
+        if not indices:
+            continue
+        if any(v.stage != stage.slug for v in entry.versions[indices[0] + 1 :]):
+            contested.append(rel_path)
+            continue
+        restore_to = entry.versions[indices[0] - 1] if indices[0] > 0 else None
+        plan.append(Withdrawal(entry=entry, restore_to=restore_to))
+    return plan, contested
+
+
+def trim_stage_versions(paths: RunPaths, stage: StageSpec, rel_paths: Sequence[str]) -> None:
+    """Drop this stage's versions from the named chains, after the files have moved.
+
+    Called with the uncontested paths only, so every version being dropped is one this
+    stage wrote and nothing later depends on. A row left with no versions is dropped
+    entirely: the file was deleted, and a row for a path that is not on disk would make the
+    next :func:`observe` read the next creation as a rewrite of something never there.
+    """
+
+    targets = {str(item) for item in rel_paths}
+    if not targets:
+        return
+    ledger = load_ledger(paths)
+    entries: dict[str, ArtifactProvenance] = {}
+    for rel_path, entry in ledger.entries.items():
+        if rel_path not in targets:
+            entries[rel_path] = entry
+            continue
+        kept = tuple(v for v in entry.versions if v.stage != stage.slug)
+        if kept:
+            entries[rel_path] = replace(
+                entry, versions=kept, invalidated_by_stage=None, invalidated_reason=""
+            )
+    save_ledger(paths, ProvenanceLedger(next_uid=ledger.next_uid, entries=entries))
+
+
 def invalidate_from(
     paths: RunPaths,
     stage: StageSpec,
