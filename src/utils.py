@@ -805,6 +805,15 @@ def load_run_config(paths: RunPaths) -> dict[str, Any]:
     created_at = payload.get("created_at")
     if isinstance(created_at, str) and created_at.strip():
         config["created_at"] = created_at
+    # Fields this function does not own, carried through rather than dropped. The dict
+    # above names every key it normalises, and `save_run_config` does the same, so the
+    # pair silently deletes anything a third writer records. `Manager._install_skills`
+    # records `skill_pins` -- the statement that a run's skills were chosen by its task
+    # identifier rather than by its task statement -- and it did not survive one
+    # load/save round trip, while the matching log line did. That is the wrong half to
+    # keep: the log is read by someone already suspicious; the config is what a later
+    # reader parses.
+    config = {**{k: v for k, v in payload.items() if k not in config}, **config}
     return config
 
 
@@ -843,6 +852,17 @@ def save_run_config(paths: RunPaths, config: dict[str, Any]) -> None:
         normalized["created_at"] = created_at
     else:
         normalized["created_at"] = datetime.now().isoformat(timespec="seconds")
+    # Fields this function does not own, carried through rather than dropped.
+    #
+    # Everything above is named explicitly, so a key any other writer puts in the config
+    # does not survive one call to this. `Manager._install_skills` records `skill_pins`
+    # -- the statement that a run's skills were chosen by its task identifier rather
+    # than by its task statement -- and the key was gone before the file was written,
+    # while the matching log line survived. That is the wrong half to lose: the log is
+    # read by someone already suspicious, and the config is what a later reader parses.
+    #
+    # Merged under the normalised fields, so nothing here can override one of them.
+    normalized = {**{k: v for k, v in config.items() if k not in normalized}, **normalized}
     write_text(paths.run_config, json.dumps(normalized, indent=2, ensure_ascii=False))
 
 
@@ -884,6 +904,11 @@ def ensure_run_config(
         "web_search": normalize_web_search_mode(web_search or current.get("web_search")),
         "created_at": current.get("created_at") or datetime.now().isoformat(timespec="seconds"),
     }
+    # And the same carry-through here, because this builds its own dict from `current`
+    # field by field: an unknown key survives the load and is then dropped before
+    # `save_run_config` ever sees it. Three functions name their fields explicitly and
+    # all three have to carry what they do not own, or the round trip loses it.
+    updated = {**{k: v for k, v in current.items() if k not in updated}, **updated}
     save_run_config(paths, updated)
     return updated
 
