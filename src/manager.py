@@ -114,6 +114,12 @@ from .manifest import (
 from .operator_protocol import OperatorProtocol
 from .evolution import EvolutionConfig, EvolutionController
 from .router import StageRouter, format_decision
+from .supervisor import (
+    INTERVENTION_EFFECTS,
+    REDIRECT,
+    Intervention,
+    RunSupervisor,
+)
 from .stage_comments import (
     assess_revision,
     build_comment_feedback,
@@ -331,6 +337,14 @@ class ResearchManager:
         self._stage_cost: "StageCostMeter | None" = None
         self.unattended = unattended
         self.max_auto_skips = max_auto_skips
+        #: The run-level supervisor. Built here rather than passed in because there is no
+        #: configuration to make: every threshold it applies was measured, and a knob on a
+        #: measured value is an invitation to unmeasure it. It reads the stage cost ledger
+        #: and can only ever slow the run down; see :mod:`src.supervisor`.
+        self.supervisor = RunSupervisor(
+            stage_slugs=[item.slug for item in STAGES],
+            max_auto_skips=max_auto_skips,
+        )
         #: How many times Stages 03-06 may run. 1 keeps the historical
         #: single-pass behaviour; the round decision is recorded either way,
         #: so a one-round run still says whether it converged or just stopped.
@@ -863,6 +877,22 @@ class ResearchManager:
             state.path[-1].closed_round = self._closed_round
 
         intent = self._round_intent
+        # The other boundary. A stage that has now ended two visits without an approval is
+        # not one a third visit fixes, and the supervisor says so by naming a forward move
+        # -- but only one the guards already left open, which is why the admissible set is
+        # computed here and handed in rather than looked up there.
+        exit_ruling = self.supervisor.review_stage_exit(
+            paths=paths,
+            stage_slug=stage.slug,
+            admissible_forward=[
+                move.target
+                for move in self.stage_graph.moves(
+                    paths, stage.slug, state, final_stage=self._final_stage
+                )
+                if move.admissible and move.edge.kind in {"advance", "finish"}
+            ],
+        )
+        self._note_supervisor_ruling(paths, stage, exit_ruling)
         decision = self.router.choose(
             paths=paths,
             stage=stage,
@@ -871,6 +901,11 @@ class ResearchManager:
             score=score,
             final_stage=self._final_stage,
             declared=(intent.target, intent.reason) if intent is not None else None,
+            required=(
+                (exit_ruling.target, exit_ruling.because)
+                if exit_ruling.kind == REDIRECT
+                else None
+            ),
         )
         if intent is not None:
             honoured = decision.target == intent.target
@@ -2195,6 +2230,44 @@ class ResearchManager:
         except Exception:
             pass
 
+    def _deliverable_stage_number(self) -> int:
+        """The stage a run out of budget would be routed to, as a number.
+
+        The same value ``_route_to_deliverable`` computes, read from the same two places
+        so the supervisor's last-resort rule and the routing it describes cannot disagree:
+        the writing node, unless ``--final-stage`` names an earlier one, in which case the
+        run was told to stop there and there is nothing beyond it either.
+        """
+        target = WRITING_STAGE
+        if self._final_stage is not None and self._final_stage.number < target.number:
+            target = self._final_stage
+        return target.number
+
+    def _note_supervisor_ruling(
+        self, paths: RunPaths, stage: StageSpec, ruling: "Intervention"
+    ) -> None:
+        """Put an acting ruling in the run log, beside everything else the run did.
+
+        Only the ones that act. Every ruling including the ones that changed nothing is
+        already in the supervisor's own ledger, which is what an audit reads; copying a
+        hundred and fifty ``continue``s into ``logs.txt`` would bury the two or three that
+        mattered under the ones that did not.
+        """
+        if not ruling.acts:
+            return
+        try:
+            append_log_entry(
+                paths.logs,
+                f"{stage.slug} supervisor_{ruling.kind}",
+                (
+                    f"rule: {ruling.rule}\n"
+                    f"permitted: {INTERVENTION_EFFECTS[ruling.kind]}\n"
+                    f"because: {ruling.because}"
+                ),
+            )
+        except Exception:
+            pass
+
     def _note_stage_failure(self, stage: StageSpec, attempt_no: int, kind: str, reason: str = "") -> None:
         """Charge one consumed attempt to the open meter, if this stage owns it.
 
@@ -2327,9 +2400,31 @@ class ResearchManager:
             # "no attempts allowed" and every stage fails before it starts, which is the
             # opposite of no limit. Same predicate, offset by one to match the `>=`.
             stuck = is_stuck(recent_failures)
-            if stuck or attempts_exhausted(
+            # The supervisor is asked here, before the attempt is bought, because the
+            # failure it exists to prevent is a visit grinding through attempt after
+            # attempt inside one stage: asked only at the stage boundary it would watch
+            # the money leave and comment afterwards. It rules on the harness-written cost
+            # ledger and the open meter, never on anything under `workspace/`.
+            ruling = self.supervisor.review_attempt(
+                paths=paths,
+                stage_slug=stage.slug,
+                stage_number=stage.number,
+                meter=self._stage_cost,
+                attempt_no=attempt_no,
+                auto_skips_spent=len(self.auto_skipped_stages),
+                deliverable_number=self._deliverable_stage_number(),
+                per_stage_ceiling=self.max_stage_attempts,
+            )
+            self._note_supervisor_ruling(paths, stage, ruling)
+            # `attempt_ceiling` is a `min` against `--max-attempts`, so this can differ
+            # from the ceiling the run was started with only downwards, and only on a
+            # stage a backward edge has already re-entered.
+            ceiling = self.supervisor.attempt_ceiling(
+                paths, stage.slug, self.max_stage_attempts
+            )
+            if stuck or ruling.ends_the_visit or attempts_exhausted(
                 loop_attempts - (polish_rounds - entry_polish_rounds) + 1,
-                self.max_stage_attempts,
+                ceiling,
             ):
                 # What the attempts were spent on, from the meter rather than from
                 # `last_validation_errors`. That list is assigned at exactly one place --
@@ -2347,7 +2442,16 @@ class ResearchManager:
                 )
                 if self._stage_cost is not None:
                     self._stage_cost.note_exhausted()
-                if stuck:
+                if ruling.ends_the_visit:
+                    # Named as the supervisor's, not folded into the exhaustion message:
+                    # a stage the run chose to stop paying for and a stage that ran out of
+                    # tries are different events, and only one of them has a rule behind
+                    # it that can be looked up.
+                    error = (
+                        f"The run supervisor ruled `{ruling.kind}` under `{ruling.rule}`: "
+                        f"{ruling.because}. Attempts spent on: {spent_on}."
+                    )
+                elif stuck:
                     error = (
                         f"{STUCK_AFTER_IDENTICAL_FAILURES} consecutive attempts failed in "
                         f"exactly the same way, so another one cannot help. Attempts spent "
@@ -2356,22 +2460,31 @@ class ResearchManager:
                     )
                 else:
                     error = (
-                        f"Exceeded {self.max_stage_attempts} attempts in the current stage run. "
+                        f"Exceeded {ceiling} attempts in the current stage run. "
                         f"Attempts spent on: {spent_on}. "
                         f"Last validation errors: {'; '.join(last_validation_errors) or 'None recorded.'}"
                     )
                 self.ui.show_status(
                     f"{stage.stage_title} "
                     + (
-                        f"made no progress across {STUCK_AFTER_IDENTICAL_FAILURES} identical failures."
+                        f"was stopped by the run supervisor: {ruling.because}."
+                        if ruling.ends_the_visit
+                        else f"made no progress across {STUCK_AFTER_IDENTICAL_FAILURES} identical failures."
                         if stuck
-                        else f"failed after {self.max_stage_attempts} attempts in this run."
+                        else f"failed after {ceiling} attempts in this run."
                     ),
                     level="error",
                 )
                 append_log_entry(
                     paths.logs,
-                    f"{stage.slug} " + ("stage_stuck" if stuck else "max_attempts_exceeded"),
+                    f"{stage.slug} "
+                    + (
+                        f"supervisor_{ruling.kind}"
+                        if ruling.ends_the_visit
+                        else "stage_stuck"
+                        if stuck
+                        else "max_attempts_exceeded"
+                    ),
                     error,
                 )
                 mark_stage_failed_manifest(paths, stage, error)
