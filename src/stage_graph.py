@@ -860,8 +860,9 @@ BLOCK_KINDS = ("guard", "visits", "steps", "concluded", "pruned", "budget")
 #:
 #: *The blast radius*, from ``tools/replay_revisit_reserve.py``, which replays finished
 #: runs against :func:`revisit_would_strand_delivery` at every candidate reserve. Over
-#: the four runs of the first live paired trial — 23 routing decisions, one backward
-#: move taken, 28 backward moves offered:
+#: the runs of the first live paired trial that had stopped walking — two ``adaptive``
+#: and one ``linear``, 20 routing decisions, one backward move taken, 28 backward
+#: moves offered:
 #:
 #: ===========  ==================  ==================  ==========================
 #: reserve      revisits withdrawn  offers withdrawn    cancellations it prevents
@@ -871,6 +872,16 @@ BLOCK_KINDS = ("guard", "visits", "steps", "concluded", "pruned", "budget")
 #: 2            0 of 1              15 of 28            0 of 2
 #: 3            1 of 1              28 of 28            0 of 2
 #: ===========  ==================  ==================  ==========================
+#:
+#: Three runs and not the trial's four, because the fourth was still adding visits
+#: while this was being written and a denominator that moves under the reader is not
+#: a measurement. It changes no cell above and could not: it is a ``linear`` arm, so
+#: it declares no backward edge and can never offer, withdraw or take one. What it
+#: does move is the decision count, which is the one figure here that is not a cell:
+#: replayed over all four today it reads 24, and that run's ``stage_graph.json`` has
+#: an open visit at ``05_experimentation`` with no ``left_at``, so tomorrow it reads
+#: more. The pinned population is the two ``Astronomy_000`` runs and
+#: ``Chemistry_000_20260816_011751``.
 #:
 #: That refutes the top of the range outright: reserve 3 takes every backward move the
 #: corpus ever offered, including the one that was taken — a return from writing to

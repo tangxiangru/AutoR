@@ -45,6 +45,13 @@ table honest about a rule that mostly refuses things nothing was going to need.
 
     python3 tools/replay_revisit_reserve.py \\
         /rmeng_data/robtang/rcb-trial-graph/workspaces/*/.autor/*/
+
+The glob takes whatever is on disk, and that includes a run still walking: a directory
+whose `stage_graph.json` ends in a visit with no `left_at` will keep adding decisions
+between one invocation and the next. `DELIVERY_RESERVE`'s table is therefore pinned to
+the runs of that trial that had stopped, and names them; point this at those and it
+reproduces cell for cell. Every cell but the decision count is a property of the
+`adaptive` arms alone, because a `linear` arm declares no backward edge to offer.
 """
 
 from __future__ import annotations
