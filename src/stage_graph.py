@@ -865,11 +865,10 @@ BLOCK_KINDS = ("guard", "visits", "steps", "concluded", "pruned", "budget")
 #: corpus ever offered, including the one that was taken — a return from writing to
 #: analysis whose recorded reason was that a bootstrap "can flip that sentence from
 #: 'clears the bar' to 'not resolved either way'" — and prevents neither cancellation.
-#: A reserve sized to cover every
-#: stage between the revisit target and the deliverable is larger than 3 and is
-#: refuted by the same row. It does not separate 0, 1 and 2: none of them reaches a
-#: revisit that was actually taken, because the corpus's one backward move was made
-#: with the pool untouched.
+#: A reserve sized to cover every stage between the revisit target and the deliverable
+#: is larger than 3 and is refuted by the same row. It does not separate 0, 1 and 2:
+#: none of them reaches a revisit that was actually taken, because the corpus's one
+#: backward move was made with the pool untouched.
 #:
 #: *What the abort costs*, which is what separates them, and is a property of
 #: :meth:`~src.manager.ResearchManager._handle_unattended_stage_exhaustion` rather
