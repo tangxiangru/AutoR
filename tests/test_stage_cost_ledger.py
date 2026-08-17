@@ -1128,6 +1128,52 @@ class ManagerWritesTheLedgerTests(unittest.TestCase):
         self.assertEqual(row["failure_census"], {})
         self.assertEqual(row["outcome"], OUTCOME_APPROVED)
 
+    def test_a_polish_round_reaches_the_row_from_the_loop_that_spends_it(self) -> None:
+        """The improvement round, counted where it is actually taken.
+
+        Polish is charged to its own budget rather than to ``--max-attempts``, so a visit
+        that spent its wall clock getting better and one that spent it thrashing are the
+        same number of attempts and different rows. That distinction is only real if the
+        loop tells the meter, which nothing tested until this did.
+        """
+        stage = STAGE_01
+        self._stub_operator(self._valid_draft(stage))
+        self.manager.reviewer = _StubReviewer([ReviewDecision(choice="5", decision_token="approve")])
+        evolution = MagicMock()
+        evolution.consider.return_value = MagicMock(
+            reverted=False, improved=True, note="promoted", score=MagicMock(total=0.9)
+        )
+        # One directive, then nothing: the visit takes a single polish round and is then
+        # approved, so `attempts` and `polish_rounds` have to come apart on the row.
+        evolution.should_continue.side_effect = [True, False]
+        evolution.next_directive.return_value = "Tighten the abstract."
+        self.manager.evolution = evolution
+        self.manager._evolution_measures = MagicMock(return_value=True)
+        self.manager._evolution_polishes = MagicMock(return_value=True)
+        self.assertTrue(self.manager._run_stage(self.paths, stage))
+        row = read_stage_cost_ledger(self.paths)[0]
+        self.assertEqual(row["polish_rounds"], 1)
+        self.assertEqual(row["attempts"], 2)
+        self.assertEqual(row["failure_census"], {POLISH_ROUND: 1})
+        self.assertEqual(row["outcome"], OUTCOME_APPROVED)
+        # And the improvement round is not a failure: a visit that got better must not
+        # read as one that could not.
+        self.assertIsNone(row["dominant_failure"])
+        self.assertEqual(row["distinct_failures"], 0)
+
+    def test_finishing_a_run_puts_the_ledger_in_the_log_without_being_asked(self) -> None:
+        """`_complete_run`, not the helper. A summary nobody calls is the shape of defect
+        this repository has a whole test file about."""
+        stage = STAGE_01
+        self._stub_operator(self._valid_draft(stage))
+        self.manager.reviewer = _StubReviewer([ReviewDecision(choice="5", decision_token="approve")])
+        self.manager._run_stage(self.paths, stage)
+        self.manager._complete_run(self.paths)
+        log = self.paths.logs.read_text(encoding="utf-8")
+        self.assertIn("| stage_cost_ledger ===", log)
+        self.assertIn("Run total", log)
+        self.assertIn(STAGE_01.slug, log.split("| stage_cost_ledger ===", 1)[1][:400])
+
     def test_the_run_writes_the_ledger_into_its_own_log(self) -> None:
         stage = STAGE_01
         self._stub_operator(self._valid_draft(stage))
