@@ -116,10 +116,19 @@ class StageRouter:
         score: StageScore | None = None,
         final_stage: StageSpec | None = None,
         declared: tuple[str, str] | None = None,
+        skips_left: int | None = None,
     ) -> RoutingDecision:
-        moves = graph.moves(paths, stage.slug, state, final_stage=final_stage)
+        # `skips_left` reaches the graph and stops there. It is deliberately not shown
+        # to the agent here and not weighed by anything in this module: the decision
+        # this file makes is "which of the open moves", and whether a backward edge is
+        # open at all under a nearly-spent recovery budget is a refusal in code, made
+        # in `StageGraph.moves`. What the agent sees of it is what it sees of every
+        # other block — the edge on the menu, marked unavailable, with the reason.
+        moves = graph.moves(paths, stage.slug, state, final_stage=final_stage, skips_left=skips_left)
         live = [move for move in moves if move.admissible]
-        default = graph.default_move(paths, stage.slug, state, final_stage=final_stage)
+        default = graph.default_move(
+            paths, stage.slug, state, final_stage=final_stage, skips_left=skips_left
+        )
         default_target = default.target if default is not None else FINISH
         # Computed here anyway; recorded rather than dropped. See `Visit.offered`.
         offered = tuple(sorted(move.target for move in live))

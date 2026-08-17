@@ -836,6 +836,26 @@ class ResearchManager:
             score=score,
             final_stage=self._final_stage,
             declared=(intent.target, intent.reason) if intent is not None else None,
+            # The one thing the graph cannot compute for itself. `auto_skipped_stages`
+            # is this object's list and the budget test against it is
+            # `_handle_unattended_stage_exhaustion`'s, so a backward edge that could
+            # spend the last unit is invisible from inside `StageGraph`. Passed as a
+            # number rather than as the list: the graph needs the size of what is
+            # left, and handing it the slugs would invite a second reader of a record
+            # this class owns.
+            #
+            # `None` when a person is at the keyboard, because then the pool is not a
+            # budget. Every site that spends it — this class's two — is behind
+            # `self.unattended`, and an attended stage that exhausts asks the operator
+            # what to do. Withdrawing a backward edge there would be refusing a move
+            # to protect a reserve nothing was going to draw on, and with
+            # `--max-auto-skips 1` it would refuse every backward edge of an attended
+            # run for a mechanism that never fires in one.
+            skips_left=(
+                self.max_auto_skips - len(self.auto_skipped_stages)
+                if self.unattended
+                else None
+            ),
         )
         if intent is not None:
             honoured = decision.target == intent.target
