@@ -212,6 +212,17 @@ GATES: tuple[Gate, ...] = (
         "that, because a run-time caller would make this a gate over installed files.",
     ),
     Gate(
+        "run_skills.validate_task_pins",
+        ("repo:configs/task_skill_pins.json", "repo:src/skills"),
+        HARNESS,
+        "Reads two files in the AutoR checkout -- the pin table and the skill pack -- and "
+        "nothing the run can write. It refuses nothing either: `Manager._install_skills` "
+        "logs each problem and installs what is left, because a stale pin should not stop "
+        "a run. It is here because its failure is otherwise invisible: a pin naming a "
+        "renamed skill selects nothing, so the run proceeds with the pack it would have "
+        "had, with no error and a table that still reads correctly in the diff.",
+    ),
+    Gate(
         "experimental_protocol.validate_experimental_protocol",
         ("experimental_protocol",),
         COUNTED,

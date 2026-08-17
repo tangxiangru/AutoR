@@ -20,7 +20,11 @@ from pathlib import Path
 from src.run_skills import (
     discipline_of,
     format_skills_for_prompt,
+    load_task_pins,
+    pinned_skills_note,
+    pins_for,
     select_run_skills,
+    validate_task_pins,
     install_run_skills,
     read_skill_pack,
     validate_skill_pack,
@@ -484,3 +488,152 @@ class DescriptionsDiscriminateTest(unittest.TestCase):
                     entry.description.casefold(),
                     "the description opens with the clause the installer enforces",
                 )
+
+
+class TaskPinTest(unittest.TestCase):
+    """Skills forced into a run by its identifier, over both routing filters.
+
+    The field prefix and the `applies_when` predicate are inferences: guesses about
+    what a task needs, made from the task alone. A pin is not a guess — it is a
+    record that this identifier already ran, already scored, and lost criteria whose
+    subject is these skills. So it wins over both filters, and so it has to announce
+    itself: a pinned arm and an unpinned arm are two configurations, and the run
+    config and the log both say which one produced a given score.
+    """
+
+    def _pack(self) -> Path:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        for name, extra in (
+            ("physics-two-things", ""),
+            ("scoped-thing", "applies_when: widget\nstages: 06_analysis"),
+            ("always-thing", ""),
+        ):
+            (root / name).mkdir(parents=True)
+            (root / name / "SKILL.md").write_text(
+                f"---\nname: {name}\ndescription: Use when a situation arises, at some stage.\n"
+                f"{extra}\n---\n\nbody\n",
+                encoding="utf-8",
+            )
+        return root
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.paths = build_run_paths(Path(self._tmp.name) / "run_0001")
+        ensure_run_layout(self.paths)
+        write_text(self.paths.user_input, "Scientific Objective: forecast the series.")
+        self.pack = self._pack()
+
+    def test_a_pin_beats_the_field_filter(self) -> None:
+        """A physics skill in a chemistry run, because a previous chemistry run needed it."""
+        without = install_run_skills(self.paths, self.pack, discipline="chemistry")
+        self.assertNotIn("physics-two-things", without)
+        with_pin = install_run_skills(
+            self.paths, self.pack, discipline="chemistry", pinned=frozenset({"physics-two-things"})
+        )
+        self.assertIn("physics-two-things", with_pin)
+        self.assertTrue((self.paths.skills_dir / "physics-two-things" / "SKILL.md").is_file())
+
+    def test_a_pin_beats_a_predicate_that_does_not_match(self) -> None:
+        self.assertNotIn("scoped-thing", install_run_skills(self.paths, self.pack))
+        self.assertIn(
+            "scoped-thing",
+            install_run_skills(self.paths, self.pack, pinned=frozenset({"scoped-thing"})),
+        )
+
+    def test_an_unpinned_run_is_unchanged(self) -> None:
+        self.assertEqual(
+            install_run_skills(self.paths, self.pack),
+            install_run_skills(self.paths, self.pack, pinned=frozenset()),
+        )
+
+    def test_a_pin_naming_nothing_in_the_pack_changes_nothing(self) -> None:
+        """Silent by construction, which is why `validate_task_pins` exists."""
+        self.assertEqual(
+            install_run_skills(self.paths, self.pack, pinned=frozenset({"no-such-skill"})),
+            install_run_skills(self.paths, self.pack),
+        )
+
+    def test_a_pin_is_announced_at_every_stage_and_marked_as_a_pin(self) -> None:
+        """Unlike a shape match, which is announced only at the stages it names.
+
+        A pin is short by construction and the stage that needed it is usually the one
+        that had already gone wrong before anyone looked, so it is repeated.
+        """
+        entries = read_skill_pack(self.pack)
+        pinned = frozenset({"physics-two-things"})
+        for slug in ("01_literature_survey", "03_study_design", "07_writing"):
+            block = format_skills_for_prompt(entries, slug, pinned)
+            with self.subTest(stage=slug):
+                self.assertIn("physics-two-things", block)
+                self.assertIn("pinned to this task by name", block)
+
+    def test_a_skill_that_is_both_pinned_and_shape_matched_is_listed_once(self) -> None:
+        entries = read_skill_pack(self.pack)
+        block = format_skills_for_prompt(entries, "06_analysis", frozenset({"scoped-thing"}))
+        self.assertEqual(block.count("`scoped-thing`"), 1)
+
+    def test_no_pin_means_no_pin_block(self) -> None:
+        entries = read_skill_pack(self.pack)
+        self.assertNotIn("pinned", format_skills_for_prompt(entries, "06_analysis", frozenset()))
+
+
+class PinTableTest(unittest.TestCase):
+    """The shipped table, and the ways it dies quietly."""
+
+    PINS = REPO_ROOT / "configs" / "task_skill_pins.json"
+
+    def test_every_pinned_name_is_a_skill_that_exists(self) -> None:
+        """A renamed skill silently empties every pin that names it.
+
+        `select_run_skills` filters the pack by name, so an unknown name selects
+        nothing and the task runs with the pack it would have had anyway — no error,
+        no log line, and a table that looks fine in the diff.
+        """
+        table = load_task_pins(self.PINS)
+        self.assertEqual(validate_task_pins(table, SKILL_PACK), [])
+
+    def test_the_table_parses_and_is_not_accidentally_empty(self) -> None:
+        table = load_task_pins(self.PINS)
+        self.assertTrue(self.PINS.is_file(), f"{self.PINS} is missing")
+        self.assertTrue(table, "the pin table parsed to nothing")
+
+    def test_a_malformed_table_is_ignored_rather_than_fatal(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        bad = Path(tmp.name) / "pins.json"
+        bad.write_text("{not json", encoding="utf-8")
+        self.assertEqual(load_task_pins(bad), {})
+        self.assertEqual(load_task_pins(Path(tmp.name) / "absent.json"), {})
+
+    def test_a_note_key_is_not_a_task(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = Path(tmp.name) / "pins.json"
+        path.write_text('{"_why": "a note", "T_000": ["a"]}', encoding="utf-8")
+        self.assertEqual(load_task_pins(path), {"T_000": ["a"]})
+
+    def test_the_validator_catches_the_ways_a_table_goes_wrong(self) -> None:
+        problems = validate_task_pins(
+            {"A_000": ["citation-discipline", "citation-discipline"],
+             "B_000": ["no-such-skill"],
+             "C_000": []},
+            SKILL_PACK,
+        )
+        self.assertTrue(any("same skill twice" in p for p in problems), problems)
+        self.assertTrue(any("not in" in p for p in problems), problems)
+        self.assertTrue(any("empty list" in p for p in problems), problems)
+
+    def test_pins_are_read_by_task_id(self) -> None:
+        table = {"Physics_000": ["a", "b"]}
+        self.assertEqual(pins_for("Physics_000", table), frozenset({"a", "b"}))
+        self.assertEqual(pins_for("Physics_001", table), frozenset())
+        self.assertEqual(pins_for(None, table), frozenset())
+
+    def test_the_note_names_the_task_and_the_skills(self) -> None:
+        note = pinned_skills_note("Physics_000", frozenset({"b", "a"}))
+        self.assertIn("Physics_000", note)
+        self.assertIn("a, b", note)
+        self.assertEqual(pinned_skills_note("Physics_000", frozenset()), "")

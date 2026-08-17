@@ -671,6 +671,10 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
     # this study is in; without it every run is offered advice about nine fields it is not in.
     _task_id = infer_task_id(workspace) or ""
     manager.skill_discipline = _task_id.rsplit("_", 1)[0].casefold() if "_" in _task_id else None
+    # The only place an identifier enters routing. Everything else AutoR routes on is
+    # derived from the task statement; a pin is derived from a previous run's score, so
+    # it needs the name of the task that produced it. `configs/task_skill_pins.json`.
+    manager.skill_task_id = _task_id or None
 
     pipeline_completed = False
     try:
