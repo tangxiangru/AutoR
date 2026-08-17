@@ -59,6 +59,7 @@ from .emissions import (
     withhold as withhold_emission,
 )
 from .provenance import format_withdrawal_plan, observe as observe_artifacts, plan_withdrawal
+from .withdrawal_ledger import load_withdrawals, summarise as summarise_withdrawals
 from .experiment_manifest import write_experiment_manifest
 from .hypothesis_manifest import write_hypothesis_manifest
 from .information_flow import CHANNELS, ChannelContext, render_inbound
@@ -3816,6 +3817,13 @@ class ResearchManager:
                     "reverse order, not because it had to be."
                 )
             )
+
+        # What this run has already taken back. The state of each of those withdrawals is
+        # gone; the record is not, and an operator about to authorise another one is owed
+        # the count. A run on its third withdrawal of the same stage is not iterating.
+        history = load_withdrawals(paths)
+        if history:
+            lines.append(summarise_withdrawals(history))
 
         withheld = pending_emissions(paths)
         if withheld:

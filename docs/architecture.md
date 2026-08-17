@@ -23,7 +23,7 @@ survives a crash because it was never anywhere else.
 **No conversation crosses a stage boundary.** Stage 05 cannot see Stage 03's
 session. What crosses is `memory.md` — the approved stage summaries — plus
 `handoff/<slug>.md`, the same summaries cut down to Objective / Key Results /
-Files Produced (`write_stage_handoff`, `src/utils.py`), plus eighteen typed
+Files Produced (`write_stage_handoff`, `src/utils.py`), plus nineteen typed
 channels in [`src/information_flow.py`](../src/information_flow.py), each of
 which declares which stages read it. Memory and the handoff are the free text;
 everything else that crosses a boundary is a typed channel or a JSON artifact.
@@ -204,7 +204,7 @@ for the argument.
 
 | Module | Responsibility |
 | --- | --- |
-| [`src/information_flow.py`](../src/information_flow.py) | Eighteen typed channels (`CHANNELS`). Each declares `produced_by`, a `consumed_by` set of real stage slugs, and a rationale for every narrowing. `render_inbound()` composes a stage's context per consumer; `dependency_edges()` prints the producer→consumer topology. |
+| [`src/information_flow.py`](../src/information_flow.py) | Nineteen typed channels (`CHANNELS`). Each declares `produced_by`, a `consumed_by` set of real stage slugs, and a rationale for every narrowing. `render_inbound()` composes a stage's context per consumer; `dependency_edges()` prints the producer→consumer topology. |
 | [`src/prompt_fragments.py`](../src/prompt_fragments.py) | The rules every stage prompt shares, held once. `compose_stage_template` orders them: the stage's own instructions, then the output-format rules that constrain them, then `RUN_SAFETY`. |
 | [`src/intake.py`](../src/intake.py) | Stage 00: clarification-question parsing, resource classification and ingestion, `intake_context.json`. Runs before the graph walk begins. |
 | [`src/bootstrap.py`](../src/bootstrap.py) | `--paper-corpus`: scans your prior papers (PDF/LaTeX/BibTeX) into a researcher profile, citation neighborhood, and style profile. |
