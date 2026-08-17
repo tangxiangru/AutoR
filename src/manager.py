@@ -377,6 +377,7 @@ class ResearchManager:
             mode=routing_mode,
             fake_mode=bool(getattr(operator, "fake_mode", False)),
             archive=archive,
+            skip_budget=self._auto_skip_budget,
         )
         # Measuring is on unless a caller turns it off: scoring a draft and running
         # the ratchet spends no backend call, and the property it buys — the draft
@@ -3438,6 +3439,29 @@ class ResearchManager:
             if choice == "3":
                 return False
             self.ui.show_status("Invalid choice. Enter 1, 2, or 3.", level="warn")
+
+    def _auto_skip_budget(self) -> tuple[int, int | None]:
+        """The auto-skip pool, for the router to *show*. Nothing routes on it.
+
+        Deliberately the same two values `_handle_unattended_stage_exhaustion` tests
+        against each other — `len(self.auto_skipped_stages)` and `self.max_auto_skips`
+        — so the figure in the routing prompt cannot disagree with the figure that
+        ends the run. Two consequences, both wanted:
+
+        * `_route_to_deliverable` extends `auto_skipped_stages` with the stages it
+          bypasses and never writes an `auto_skip_used:` line, so a tally recovered
+          from `logs.txt` reads zero where this reads four. This reads the enforcer.
+        * A resumed run starts the list empty because the manager does, and the
+          allowance it will actually enforce is the fresh one. Reporting the
+          pre-resume spend would be reporting a budget nothing consults.
+
+        `None` for attended runs: the allowance is only ever consulted in unattended
+        mode, and a number no path can spend is not a balance. `describe_budget_for_prompt`
+        says "not declared" rather than filling one in.
+        """
+        if not self.unattended:
+            return len(self.auto_skipped_stages), None
+        return len(self.auto_skipped_stages), self.max_auto_skips
 
     def _handle_unattended_stage_exhaustion(
         self,

@@ -26,6 +26,7 @@ from src.stage_graph import (
     Move,
     StageGraph,
     Visit,
+    WalkBudget,
     block_census,
     enter,
     format_block_census,
@@ -230,9 +231,10 @@ class AdaptiveTopologyTests(unittest.TestCase):
     def test_a_blocked_move_is_still_shown_to_the_router(self) -> None:
         """Hiding it would be the obvious design and it is the wrong one: an agent
         that can see why writing is closed routes to what opens it."""
-        moves = self.graph.moves(self.paths, "06_analysis", GraphState())
+        state = GraphState()
+        moves = self.graph.moves(self.paths, "06_analysis", state)
         self.assertIn("07_writing", {move.target for move in moves})
-        rendered = self.graph.describe_for_prompt(moves)
+        rendered = self.graph.describe_for_prompt(moves, WalkBudget.of(state, "06_analysis"))
         self.assertIn("07_writing", rendered)
         self.assertIn("**no**", rendered)
 
