@@ -1525,17 +1525,29 @@ Original stderr:
         )
 
     def _mcp_config_path(self, paths: RunPaths) -> Path | None:
-        """Materialize the search server's config inside the run, or None if unused.
+        """Materialize the MCP servers' config inside the run.
 
         Written into `operator_state/` rather than a temp file so it sits with the prompts
         and session IDs: a run should be able to say what tools its agent was given, not
         only what it was told.
-        """
-        if not self.web_search_mcp:
-            return None
-        from .web_search import write_mcp_config
 
-        return write_mcp_config(paths.operator_state_dir / "mcp_config.json")
+        Two servers, composed here rather than by either of them. The search server is
+        conditional -- it replaces a built-in that only some deployments disable. The
+        workspace server is not: it hands the agent the revertible write primitives, which
+        are additive (a stage that ignores them writes files as before, and those writes
+        are still attributed at the boundary) and are the only way a write can be withdrawn
+        at the grain it was made rather than as a whole file at the end of a stage.
+        """
+        from .mcp_write import build_mcp_server_entry
+        from .web_search import build_mcp_config, write_mcp_config
+
+        servers: dict[str, object] = dict(build_mcp_server_entry(paths))
+        if self.web_search_mcp:
+            servers.update(build_mcp_config().get("mcpServers", {}))
+
+        return write_mcp_config(
+            paths.operator_state_dir / "mcp_config.json", servers=servers
+        )
 
     def _build_cli_command(
         self,

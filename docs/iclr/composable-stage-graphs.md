@@ -160,6 +160,37 @@ does — and a consumer comparing values could not tell the re-run from the orig
 consumer that recorded `a000007` and now reads `a000019` knows its input changed without
 comparing anything about the content.
 
+### 3.7 Two grains of attribution, and a tool that offers the finer one
+
+Observation gives attribution at the grain of a stage boundary. That is enough to withdraw a
+stage, and it is weaker than instrumentation in two ways the ledger has to record: a change
+is attributed to whichever boundary next observes it, so a write and its attribution are
+separated by everything in between; and a version whose bytes were never held can be deleted
+on the way back but not rewound to.
+
+So the framework also *offers* the finer grain, as tools in the agent's own tool list rather
+than as an instruction in its prompt. A write that comes through a tool is attributed at the
+moment it happens, to the stage the run's manifest says is running, with the previous bytes
+stored before the new ones land — the inverse is exact rather than reconstructed. Table
+writes get their own tools, so one source or one hypothesis can be withdrawn without
+rewriting the file that holds it.
+
+Three properties make this safe to offer on every stage:
+
+- **Nothing depends on it being used.** A stage that writes files directly is attributed at
+  the next boundary exactly as before. The tool adds exactness where it is used and takes
+  nothing away where it is not.
+- **A failure degrades rather than breaks.** A server that will not start leaves the run in
+  the prior behaviour, which is a working behaviour.
+- **Refusals are answers, not errors.** A write that cannot be attributed comes back as a
+  result the model can read — *"the manifest names no stage as running; write the file
+  directly instead"* — rather than as a protocol error that ends the call with nothing it
+  can act on.
+
+The stage is resolved per call rather than captured at start-up: the tool server outlives
+any one stage, and a captured value would attribute Stage 05's writes to Stage 01 for the
+rest of the run.
+
 ---
 
 ## 4. Spatial composability: staleness as a comparison, not as arithmetic
@@ -436,7 +467,7 @@ which parts are running.
 | Excursions and the walk-level ratchet | implemented |
 | Walk-level ratchet: excursions judged, and rewound when they lose | implemented |
 | **Selective withdrawal as an action** | precondition computed and reported; *deliberately* not wired — see below |
-| **A write surface the stage agent writes through** | pending |
+| Write surface: revertible write tools in the agent's tool list | implemented |
 | **Intra-stage checkpoints** | pending |
 
 ### On selective withdrawal
