@@ -841,6 +841,10 @@ class EvidenceTests(unittest.TestCase):
         evidence = self.tool.evidence_for(plan, self.state("621566b"))
         self.assertEqual(evidence.env.judge_replicates, 6)
         self.assertEqual(evidence.items[0].scores, (18, 20, 22, 18, 20, 22))
+        # The count is the half that gates; this is the half the count is *for*. Reading
+        # one score per file left `spread` at 0 over an item the judge had moved, and
+        # `resolution_is_measured` then declined to state a band that was measured.
+        self.assertEqual(evidence.items[0].spread, 4)
 
     def test_a_cancelled_run_carries_its_status_into_the_evidence(self) -> None:
         """The producer half of the truncation report: ``run_manifest.run_status``.
@@ -856,9 +860,35 @@ class EvidenceTests(unittest.TestCase):
         cut = self.tool.evidence_for(plan, self.state("621566b", run_status="cancelled"))
         clean = self.tool.evidence_for(plan, self.state("621566b", run_status="completed"))
 
+        silent = self.tool.evidence_for(plan, self.state("621566b"))
+
         self.assertEqual(run_status_of(cut), "cancelled")
         self.assertTrue(truncated(cut))
         self.assertFalse(truncated(clean))
+        # Silence is the third reading and the producer has to carry it as one: a state
+        # file written before the driver recorded the field says nothing, and neither
+        # "truncated" nor "clean" is a claim anything measured.
+        self.assertEqual((run_status_of(silent), truncated(silent)), ("", False))
+
+    def test_no_admission_clause_reads_the_run_status(self) -> None:
+        """The same refusal as the report-side test, through the real producer.
+
+        ``run_manifest.json`` is inside the run root, which the operator writes with
+        ``bypassPermissions``, so a gate on this field would be a gate its subject clears
+        by rewriting one word. The report-side test builds its evidence by hand; this one
+        makes ``evidence_for`` build it, which is the path a real run takes.
+        """
+        from src.rcb_trial import admit_arm
+
+        plan = self.plan()
+        self.write_scores(plan, "621566b", 20)
+        verdicts = {
+            status: admit_arm(
+                self.tool.evidence_for(plan, self.state("621566b", run_status=status))
+            )
+            for status in ("cancelled", "completed", "failed", "")
+        }
+        self.assertEqual(len(set(map(repr, verdicts.values()))), 1, verdicts)
 
     def test_two_arms_run_on_different_models_are_not_a_pair(self) -> None:
         """Fact one's exact confound, through the real producer.
