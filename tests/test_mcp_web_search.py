@@ -298,9 +298,47 @@ class OperatorWiringTest(unittest.TestCase):
         written = Path(command[command.index("--mcp-config") + 1])
         self.assertEqual(written.parent, paths.operator_state_dir)
 
-    def test_no_flag_when_search_is_not_active(self) -> None:
+    def test_the_search_server_is_the_conditional_one_not_the_flag(self) -> None:
+        """The flag is unconditional now, and the config's contents are what vary.
+
+        The write server in ``src.mcp_write`` runs on every stage: it is additive, and a
+        stage that ignores its tools is where it was before. Search replaces a built-in
+        that only some deployments disable, so it is the part that comes and goes. The
+        earlier version of this test asserted the *flag* was absent without search, which
+        stopped being the invariant the moment a second server existed.
+        """
+
+        from src.mcp_write import SERVER_NAME as WRITE_SERVER_NAME
+
         command, _ = self._command(web_search_mcp=False)
-        self.assertNotIn("--mcp-config", command)
+        self.assertIn("--mcp-config", command)
+        servers = json.loads(
+            Path(command[command.index("--mcp-config") + 1]).read_text(encoding="utf-8")
+        )["mcpServers"]
+        self.assertIn(WRITE_SERVER_NAME, servers)
+        self.assertNotIn(MCP_SERVER_NAME, servers)
+
+    def test_both_servers_are_offered_when_search_is_active(self) -> None:
+        from src.mcp_write import SERVER_NAME as WRITE_SERVER_NAME
+
+        command, _ = self._command(web_search_mcp=True)
+        servers = json.loads(
+            Path(command[command.index("--mcp-config") + 1]).read_text(encoding="utf-8")
+        )["mcpServers"]
+        self.assertEqual(sorted(servers), sorted({WRITE_SERVER_NAME, MCP_SERVER_NAME}))
+
+    def test_the_write_server_is_told_which_run_to_write_into(self) -> None:
+        """A server that could not resolve the run would attribute writes to nothing."""
+
+        from src.mcp_write import RUN_ROOT_ENV, SERVER_NAME as WRITE_SERVER_NAME
+
+        command, paths = self._command(web_search_mcp=False)
+        servers = json.loads(
+            Path(command[command.index("--mcp-config") + 1]).read_text(encoding="utf-8")
+        )["mcpServers"]
+        self.assertEqual(
+            servers[WRITE_SERVER_NAME]["env"][RUN_ROOT_ENV], str(paths.run_root.resolve())
+        )
 
     def test_the_config_lands_in_the_run_for_audit(self) -> None:
         """A run should be able to say what tools its agent was given, not only what it
