@@ -645,7 +645,16 @@ def normalize_walk_settings(source: "Mapping[str, Any]") -> dict[str, Any]:
         "evolve_measure": DEFAULT_EVOLVE_MEASURE if measure is None else bool(measure),
         "archive_steer": DEFAULT_ARCHIVE_STEER if steer is None else bool(steer),
     }
-WEB_SEARCH_MODE_CHOICES = ("auto", "gemini", "native")
+#: The search paths a run can be put on. `off` is the one that is not a choice of
+#: provider: the other three all end with the agent holding a search tool, and a
+#: benchmark whose published protocol is "without browsing" has nowhere to stand on a
+#: flag whose quietest value still hands one over. `native` was the closest thing and it
+#: is the opposite claim -- it says "the backend's own tool is in charge", which on a
+#: deployment where that tool works is browsing with no prompt block to show for it.
+#:
+#: Ordered rather than a set because argparse prints it: the three provider choices come
+#: first and the negation last, which is how the help text reads.
+WEB_SEARCH_MODE_CHOICES = ("auto", "gemini", "native", "off")
 DEFAULT_WEB_SEARCH_MODE = "auto"
 
 

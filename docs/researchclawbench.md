@@ -489,8 +489,10 @@ or unattended switch of its own.
                         and stays silent when none is.
 --cross-review-model NAME         Default: gemini-3.1-pro-preview
                                   (`DEFAULT_CROSS_REVIEW_MODEL`).
---web-search {auto,gemini,native}
-                        Default: auto. See the section above.
+--web-search {auto,gemini,native,off}
+                        Default: auto. See the section above. `off` offers no search tool and
+                        denies WebSearch and WebFetch to the Claude CLI, for a protocol that
+                        says the run must not browse.
 --no-synthesis          Skip the operator-backed report synthesis pass and use only the
                         deterministic fallback.
 --fake-operator         Smoke-test the adapter. rcb_agent.py threads fake_mode into the
@@ -921,13 +923,22 @@ working untouched:
   total. One key because `Pair._mean_over` is unweighted while the benchmark total is
   weighted, and a mean over one element is that element. The environment digest is in
   the key so that a pair whose arms differed in judge, `model`, `review_model`,
-  checklist bytes, resolved web-search level, `INSTRUCTIONS.md`, benchmark revision or
+  checklist bytes, resolved web-search level, *requested web-search mode*,
+  `INSTRUCTIONS.md`, benchmark revision or
   *the number of judge draws its total averages* is excluded by the composition refusal
   that already exists, with no new gate to get wrong. `rcb_trial.py report` additionally
   names *which* field differed; that is diagnostics, and a test holds it in step with
   the digest field by field — and a second test holds that the fields are actually read
-  off the run, because seven blank strings are a constant digest and a gate that
+  off the run, because eight blank strings are a constant digest and a gate that
   excludes nothing.
+
+  The requested mode sits beside the resolved level because the level stopped
+  separating what it was added to separate. `--web-search off` announces itself at
+  `level: info`, which is the right level for a deliberate choice and is also what an
+  `auto` that found a working backend emits; since `rcb_agent.py` began accepting `off`,
+  an arm told not to browse and an arm that browsed freely could carry the same level.
+  The mode is read off `run_config.json`, which stores the request and never the
+  resolved backend.
 
   The draw count is in there because `final_pass` gives each replicate two tries and
   then moves on writing nothing: an arm silently scored once against an arm scored three

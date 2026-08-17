@@ -10,7 +10,7 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import TextIO
+from typing import Sequence, TextIO
 
 from .terminal_ui import TerminalUI
 from .utils import (
@@ -41,6 +41,7 @@ class ClaudeOperator:
         ui: TerminalUI | None = None,
         stage_timeout: int = 14400,
         web_search_mcp: bool = False,
+        disallowed_tools: Sequence[str] | None = None,
     ) -> None:
         self.command = command
         self.model = model
@@ -53,6 +54,12 @@ class ClaudeOperator:
         # more reliably reached for than a prompt paragraph and legible in the trace as a
         # named call rather than an opaque shell command.
         self.web_search_mcp = web_search_mcp
+        # Built-in tools this operator's stages may not call. Empty on every existing
+        # path, and the default has to stay empty: withholding a tool the stage contract
+        # assumes is available fails the stage, not the tool. `src.web_search`'s
+        # `disallowed_tools_for` is the only thing that fills it today, for a run whose
+        # protocol says it must not browse.
+        self.disallowed_tools = tuple(disallowed_tools or ())
 
     def run_stage(
         self,
@@ -1519,6 +1526,7 @@ Original stderr:
                 resume=resume,
                 tools=tools,
                 mcp_config=self._mcp_config_path(paths),
+                disallowed_tools=self.disallowed_tools,
             ),
             paths.run_root,
             None,
@@ -1557,6 +1565,7 @@ Original stderr:
         resume: bool,
         tools: str | None = None,
         mcp_config: Path | None = None,
+        disallowed_tools: Sequence[str] | None = None,
     ) -> list[str]:
         command = [
             self.command,
@@ -1572,6 +1581,14 @@ Original stderr:
             command.extend(["--mcp-config", str(mcp_config)])
         if tools:
             command.extend(["--tools", tools])
+        if disallowed_tools:
+            # One comma-joined argument rather than one argument per tool: `claude --help`
+            # (2.1.229) declares the option variadic, so a second bare word after it is
+            # read as a second tool name. Joining is also what makes the omission legible
+            # -- the flag is absent entirely when nothing is denied, instead of present
+            # with an empty value, which the CLI would read as a denial of nothing and a
+            # reader would have to decide about.
+            command.extend(["--disallowed-tools", ",".join(disallowed_tools)])
         if resume:
             command.extend(["--resume", session_id])
         else:

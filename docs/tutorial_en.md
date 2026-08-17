@@ -500,7 +500,7 @@ You do not need the full flag list to start, but these come up almost immediatel
 | `--final-stage STAGE` | run everything | Stop after this stage instead of running the whole workflow, e.g. `--final-stage 07_writing` when you want the report but not the dissemination package. |
 | `--max-attempts N` | `5` | Attempts per stage before AutoR escalates (or, unattended, auto-skips). Each retry re-runs the stage with the previous attempt's validation errors attached. Raise it for a stubborn stage. |
 | `--stage-timeout SECONDS` | `14400` (4 hours) | Wall-clock ceiling for one stage attempt. Raise it before a heavy Stage 05, not after it times out. |
-| `--web-search {auto,gemini,native}` | `auto` | How the agent searches. `gemini` routes searches through the Gemini API, which is what you need where the backend's own web search is disabled (Claude Code on Vertex AI, for example). `native` leaves the backend's own tool in charge. `auto` uses Gemini when a key is available and falls back to native. |
+| `--web-search {auto,gemini,native,off}` | `auto` | How the agent searches. `gemini` routes searches through the Gemini API, which is what you need where the backend's own web search is disabled (Claude Code on Vertex AI, for example). `native` leaves the backend's own tool in charge. `auto` uses Gemini when a key is available and falls back to native. `off` gives the agent no search tool and denies `WebSearch` and `WebFetch` to the CLI. |
 | `--fake-operator` | off | A dry run with no backend and no tokens. See [6.3](#63-optional-run-a-smoke-test-first). |
 | `--resume-run ID`, `--redo-stage STAGE`, `--rollback-stage STAGE` | — | Continue, re-run, or invalidate. See [12.1](#121---redo-stage-vs---rollback-stage). |
 

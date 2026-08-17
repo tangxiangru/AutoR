@@ -171,7 +171,7 @@ overnight job.
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--web-search {auto,gemini,native}` | `auto`, or the recorded mode when resuming | Which search path the operators use. `gemini` routes searches through the Gemini API's Google Search grounding via `tools/web_search.py`; `native` leaves the backend's own tool in charge; `auto` picks Gemini when it can actually run and falls back to native otherwise. |
+| `--web-search {auto,gemini,native,off}` | `auto`, or the recorded mode when resuming | Which search path the operators use. `gemini` routes searches through the Gemini API's Google Search grounding via `tools/web_search.py`; `native` leaves the backend's own tool in charge; `auto` picks Gemini when it can actually run and falls back to native otherwise; `off` offers no search tool at all and denies `WebSearch` and `WebFetch` to the Claude CLI. |
 
 Set `gemini` on deployments where the built-in `WebSearch` tool is disabled —
 notably **Claude Code on Vertex AI** — otherwise Stage 01 has no way to search
@@ -531,7 +531,7 @@ python rcb_agent.py [--workspace PATH] [--prompt TEXT] [--prompt-file PATH]
                     [--rigor {fast,standard,thorough,max}]
                     [--output-format {markdown,md,latex,tex}] [--final-stage STAGE]
                     [--stage-timeout SECONDS] [--max-attempts N] [--max-auto-skips N]
-                    [--intake] [--web-search {auto,gemini,native}]
+                    [--intake] [--web-search {auto,gemini,native,off}]
                     [--no-synthesis] [--export-only] [--fake-operator]
 ```
 
