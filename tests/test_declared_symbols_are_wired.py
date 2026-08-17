@@ -18,20 +18,25 @@ None of those was found by the suite. All of them were found by reading, one at 
 What this gate refuses
 ----------------------
 A public symbol defined under ``src/`` that no line of production code references. Every
-one is wired, deleted, or listed in :data:`ALLOWLIST` with a written reason.
+one is wired, deleted, or listed in :data:`ALLOWLIST` with a written reason. Note the
+shape of the largest group: a *tool* is not a reference root, so moving a tool's shared
+half into ``src/`` -- which is the right thing to do the moment a second tool needs it --
+converts every public function in it into an accusation here. That is the gate working,
+not the gate misfiring: the code did become reachable from more places and less
+reachable from a run, and :data:`_TRIAL_DRIVER_ONLY` is where that trade is written down.
 
 The reference roots are :data:`ENTRY_POINTS` plus every module under ``src/`` -- every
 place the product actually starts from, including ``studio.py``, without which the whole
 ``src/backend/`` package would read as dead.
 
 ``tests/`` and ``tools/`` are deliberately *not* roots. A test is the thing that keeps a
-dead symbol green -- twenty-six of the thirty-six symbols listed below have one -- so
+dead symbol green -- thirty-six of the forty-six symbols listed below have one -- so
 counting a test as wiring would make the gate assert nothing. An instrument is not evidence:
 ``archive_sample_complexity`` was importing ``RunRecord`` and crashing on it at the same
 time. A symbol that only ``tools/`` reaches is still exempt, but by a line somebody wrote,
 and :attr:`Exempt.reached_from` makes that line checkable.
 
-That twenty-six is :func:`allowlisted_symbols_with_a_test`, printed by the census and pinned
+That thirty-six is :func:`allowlisted_symbols_with_a_test`, printed by the census and pinned
 against this sentence by
 :meth:`AllowlistIsHonestTests.test_the_stated_count_of_tested_symbols_is_the_measured_one`,
 because the first version of the sentence said twenty-one and no instrument could
@@ -64,17 +69,17 @@ the answer, when it happens, is an allowlist entry naming the framework that cal
 
 Measured precision
 ------------------
-1446 public definitions over 1302 distinct names in ``src/``, and 36 referenced by
+1466 public definitions over 1322 distinct names in ``src/``, and 46 referenced by
 nothing outside ``tests/`` and ``tools/``. One of them was ``DATA_DIRNAME`` until a one-line
 wiring fix in ``src/rcb.py`` took it off the list, so reverting that line puts the population
 back up by one -- stated as a delta rather than as the absolute it used to be, because the
-absolute drifts with the tree and the sentence outlived two of them. Six more arrived with
-FrontierScience, whose dataset reader and scorer are reached only from
-``tools/score_fs_run.py``; the entry that names that is :data:`_FS_SCORER_ONLY`.
-
-Each of those 36 has exactly one *executable* occurrence of its name across ``main.py``,
+absolute drifts with the tree and the sentence outlived two of them. Sixteen more arrived with
+FrontierScience: six because its dataset reader and its scorer are reached only from
+``tools/score_fs_run.py`` (:data:`_FS_SCORER_ONLY`), and ten because the benchmark-agnostic
+half of ``tools/rcb_trial.py`` moved into ``src/trial_driver.py`` so that the second
+benchmark's driver would share it rather than copy it (:data:`_TRIAL_DRIVER_ONLY`).
 ``studio.py``, ``rcb_agent.py`` and ``src/`` -- its own definition -- and every other
-textual hit is a comment or a docstring. **False-positive rate 0/36.** That is not the scan
+textual hit is a comment or a docstring. **False-positive rate 0/46.** That is not the scan
 marking its own homework. :func:`code_lines_naming` re-reads the roots with ``tokenize``,
 which cannot see inside a string or a comment and knows nothing about reference units;
 :func:`accusations_with_a_second_code_line` is where the two readers are made to agree, and
@@ -86,10 +91,10 @@ The census prints the rate and the evidence under it, every occurrence labelled 
 
     python3 -m tests.test_declared_symbols_are_wired --census
 
-Its header carries 1446, 1302, 36, 26 and the rate, so those drift with the
+Its header carries 1466, 1322, 46, 36 and the rate, so those drift with the
 tree and none of them has to be believed.
 :meth:`AllowlistIsHonestTests.test_the_allowlist_is_exactly_what_the_scan_finds` keeps the
-36 honest.
+46 honest.
 """
 
 from __future__ import annotations
@@ -174,6 +179,28 @@ _FS_SCORER_ONLY = (
     "then `reached_from` is what keeps this claim checkable."
 )
 
+#: Shared by the ``src/trial_driver.py`` functions that only a driver in ``tools/`` calls.
+#: One decision rather than ten, for the same reason :data:`_DRIVER_ONLY` is one rather
+#: than six.
+#:
+#: These ten did not become less reachable; they became reachable from *two* drivers
+#: instead of one, which is why they moved. Ten and not nine: ``git_contrast_log`` was the
+#: tenth all along and the scan could not see it while it was called ``contrast_log``,
+#: because a keyword parameter of that name in ``src/rcb_trial.py`` read as a reference. The gate flags them because a tool is not a
+#: reference root, and it is right to: nothing a run executes calls an ``os.link`` lock or
+#: a ``/proc`` census, and if it ever did that would be the alarming thing.
+_TRIAL_DRIVER_ONLY = (
+    "Reached only from `tools/rcb_trial.py`, and shortly from a second driver beside it -- "
+    "this module is the benchmark-agnostic half of that driver, extracted so that "
+    "FrontierScience's driver shares the lock, the `/proc` census and the atomic state "
+    "writes instead of copying them. A tool is not a reference root here, on purpose: "
+    "`tools/archive_sample_complexity.py` was importing `RunRecord` and crashing on it at "
+    "the same time, so being imported by an instrument is not evidence a symbol works. "
+    "Wiring it means having a run acquire a trial lock or scan `/proc` for its rivals, "
+    "which is the driver's job and the exact thing the seam was cut to keep out of a run; "
+    "`reached_from` is what keeps this claim checkable instead of asserted."
+)
+
 #: The symbols this repository knowingly declares and does not reach, each with the reason.
 #:
 #: Keyed ``<path>::<name>`` and matched exactly, so an entry has to be a decision somebody
@@ -188,6 +215,25 @@ ALLOWLIST: dict[str, Exempt] = {
     "src/rcb_trial.py::items_from_score_payloads": Exempt(_DRIVER_ONLY, ("tools/rcb_trial.py",)),
     "src/rcb_trial.py::judge_draws_in": Exempt(_DRIVER_ONLY, ("tools/rcb_trial.py",)),
     "src/rcb_trial.py::next_action": Exempt(_DRIVER_ONLY, ("tools/rcb_trial.py",)),
+    "src/trial_driver.py::acquire_lock": Exempt(_TRIAL_DRIVER_ONLY, ("tools/rcb_trial.py",)),
+    "src/trial_driver.py::autor_pids": Exempt(_TRIAL_DRIVER_ONLY, ("tools/rcb_trial.py",)),
+    "src/trial_driver.py::digest_bytes": Exempt(_TRIAL_DRIVER_ONLY, ("tools/rcb_trial.py",)),
+    "src/trial_driver.py::foreign_runs": Exempt(_TRIAL_DRIVER_ONLY, ("tools/rcb_trial.py",)),
+    # `git_contrast_log` was invisible to this scan until it was renamed off
+    # `contrast_log`: `src/rcb_trial.py`'s report formatter takes a keyword parameter of
+    # that name and reads it, and `names_used` matches bare identifiers, so an unrelated
+    # local laundered the symbol into looking wired from inside `src/`. The published 45
+    # was therefore one short of the measurement it claimed to be, and the entry could
+    # not simply be added -- `test_the_allowlist_is_exactly_what_the_scan_finds` refuses
+    # an exemption the scan does not flag.
+    "src/trial_driver.py::git_contrast_log": Exempt(
+        _TRIAL_DRIVER_ONLY, ("tools/rcb_trial.py",)
+    ),
+    "src/trial_driver.py::git_dirty": Exempt(_TRIAL_DRIVER_ONLY, ("tools/rcb_trial.py",)),
+    "src/trial_driver.py::git_head": Exempt(_TRIAL_DRIVER_ONLY, ("tools/rcb_trial.py",)),
+    "src/trial_driver.py::release_lock": Exempt(_TRIAL_DRIVER_ONLY, ("tools/rcb_trial.py",)),
+    "src/trial_driver.py::watch": Exempt(_TRIAL_DRIVER_ONLY, ("tools/rcb_trial.py",)),
+    "src/trial_driver.py::write_json": Exempt(_TRIAL_DRIVER_ONLY, ("tools/rcb_trial.py",)),
     "src/frontierscience.py::load_dataset": Exempt(_FS_SCORER_ONLY, ("tools/score_fs_run.py",)),
     "src/frontierscience.py::resolve_task_keys": Exempt(
         _FS_SCORER_ONLY, ("tools/score_fs_run.py",)
