@@ -52,7 +52,7 @@ silently half-restored.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
@@ -586,6 +586,12 @@ class RecoveryReport:
     accumulated: RevertReport = field(default_factory=RevertReport)
     observed: RevertReport = field(default_factory=RevertReport)
     emissions_discarded: int = 0
+    #: True when only this stage was withdrawn and the stages after it were left standing.
+    #: False for a reverse-order withdrawal, which is every rollback and a redo that could
+    #: not be selective.
+    selective: bool = False
+    #: Why a selective withdrawal was not available, when one was asked for.
+    refusal: str = ""
     #: Files whose creator was inside the withdrawn range. Counted from the plan rather
     #: than from the applied list, so a file the recovery could not remove is still
     #: reported as one the withdrawal was owed.
@@ -606,7 +612,15 @@ class RecoveryReport:
     def render(self) -> str:
         if not self.touched:
             return f"Rollback to {self.stage} withdrew nothing: the workspace held no attributed change."
-        lines = [f"Rollback to {self.stage} withdrew the workspace, not only the manifest."]
+        opening = (
+            f"Withdrew {self.stage} alone; the stages after it are independent of it and "
+            "still stand."
+            if self.selective
+            else f"Rollback to {self.stage} withdrew the workspace, not only the manifest."
+        )
+        lines = [opening]
+        if self.refusal:
+            lines.append(f"A selective withdrawal was not available: {self.refusal}")
         if self.accumulated.applied or self.accumulated.skipped:
             lines.append(self.accumulated.render())
         if self.observed.applied or self.observed.skipped:
@@ -825,3 +839,89 @@ def record_result(
     if not normalised.startswith(f"{results_root}/"):
         normalised = f"{results_root}/{normalised}"
     return set_artifact(paths, stage, normalised, content, key="results")
+
+
+def revert_only(paths: RunPaths, stage: StageSpec, stages: Iterable[StageSpec]) -> RevertReport:
+    """Withdraw one stage's accumulated writes and leave the stages after it standing.
+
+    Refuses unless the later stages are independent of this one, and says which key
+    obstructed. This is what a graph buys over a pipeline: a design that turned out wrong
+    need not also discard the measurement that revealed it.
+    """
+
+    later: list[EffectRecord] = []
+    for item in stages:
+        if item.number > stage.number:
+            later.extend(load_accumulator(paths, item))
+
+    records = load_accumulator(paths, stage)
+    if not records:
+        return RevertReport()
+
+    obstruction = independence_obstruction(records, later)
+    if obstruction is not None:
+        return RevertReport(
+            skipped=[f"{stage.slug} cannot be withdrawn on its own: {obstruction}"]
+        )
+
+    applied, skipped = _apply_records(paths, records)
+    _retire_accumulator(paths, stage, records)
+    return RevertReport(stages=[stage.slug], applied=applied, skipped=skipped)
+
+
+def withdraw_one_stage(paths: RunPaths, stage: StageSpec) -> RecoveryReport:
+    """Take back a single stage's contribution, keeping the later stages where possible.
+
+    What ``--redo-stage`` needs and never had. Re-running a stage used to leave its previous
+    contribution on disk for the new attempt to write on top of -- the same defect as a
+    rollback that only edited the manifest, at the grain of one stage instead of a range.
+
+    Selective when it can be. Two conditions, checked separately because they cover
+    different writes: no later stage may have written a key this stage wrote
+    (:func:`independence_obstruction`, over the accumulators), and no later stage may have
+    rewritten a file this stage wrote (the contested list from
+    :func:`src.provenance.plan_single_stage_withdrawal`, over the observed versions).
+
+    Where either fails, the honest move is the reverse-order withdrawal of this stage and
+    everything after it, and to say why rather than silently doing less. Leaving a contested
+    file alone would keep this stage's work standing; rewinding it would discard the later
+    stage's. Neither is "withdrew this stage".
+    """
+
+    from . import emissions
+    from .provenance import (
+        invalidate_from,
+        plan_single_stage_withdrawal,
+        trim_stage_versions,
+    )
+
+    plan, contested = plan_single_stage_withdrawal(paths, stage)
+    accumulated = revert_only(paths, stage, STAGES)
+    blocked = bool(contested) or bool(accumulated.skipped and not accumulated.applied)
+
+    if blocked:
+        detail = []
+        if contested:
+            detail.append(
+                "a later stage has rewritten " + ", ".join(sorted(contested)[:5])
+            )
+        detail.extend(accumulated.skipped)
+        report = recover_to_stage(
+            paths,
+            stage,
+            f"redo of {stage.stage_title} could not be selective: {'; '.join(detail)}",
+        )
+        return replace(report, selective=False, refusal="; ".join(detail))
+
+    observed = apply_withdrawal(paths, plan)
+    trim_stage_versions(paths, stage, [item.rel_path for item in plan])
+    invalidate_from(paths, stage, f"Redoing {stage.stage_title}")
+    discarded = emissions.discard_from(paths, stage, f"Redoing {stage.stage_title}")
+
+    return RecoveryReport(
+        stage=stage.stage_title,
+        accumulated=accumulated,
+        observed=observed,
+        emissions_discarded=len(discarded),
+        selective=True,
+    )

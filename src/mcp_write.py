@@ -220,6 +220,14 @@ def call_tool(name: str, arguments: dict[str, Any], *, run_root: Path | None) ->
             is_error=True,
         )
 
+    # Refused here rather than left to the writer. An empty path reaches `set_artifact`
+    # as the workspace root and comes back as `IsADirectoryError`, which is true and
+    # useless: the model can act on "that needs a path" and cannot act on an errno.
+    if name in {"autor_record_result", "autor_set_artifact"} and not str(
+        arguments.get("path") or ""
+    ).strip():
+        return _text_result(f"{name} requires a non-empty 'path'.", is_error=True)
+
     try:
         if name == "autor_record_result":
             record = record_result(

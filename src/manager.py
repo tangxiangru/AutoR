@@ -52,7 +52,7 @@ from .intake import (
     save_intake_context
 )
 from .artifact_index import write_artifact_index
-from .effects import independence_obstruction, load_accumulator
+from .effects import independence_obstruction, load_accumulator, withdraw_one_stage
 from .emissions import (
     pending as pending_emissions,
     release as release_emissions,
@@ -501,6 +501,22 @@ class ResearchManager:
             self._print(self._format_rollback_preview(paths, rollback_stage))
             rollback_to_stage(paths, rollback_stage)
             start_stage = rollback_stage
+        elif start_stage is not None:
+            # `--redo-stage` re-ran a stage on top of its own previous contribution.
+            # Nothing withdrew it: the artifacts of the attempt being replaced stayed on
+            # disk, counted by the same guards a rollback used to leave satisfied, and the
+            # new attempt wrote over whichever of them it happened to touch. The same
+            # defect as a rollback that only edited the manifest, at the grain of one stage.
+            #
+            # Selective where it can be, which is the point of redoing one stage rather
+            # than rolling back to it: a design that turned out wrong need not discard the
+            # measurement that revealed it. Where a later stage has written the same key or
+            # the same file, that is not available and the withdrawal falls back to the
+            # reverse-order one, saying so.
+            recovery = withdraw_one_stage(paths, start_stage)
+            if recovery.touched:
+                self._print(recovery.render())
+                append_log_entry(paths.logs, "redo withdrawal", recovery.render())
 
         append_log_entry(
             paths.logs,

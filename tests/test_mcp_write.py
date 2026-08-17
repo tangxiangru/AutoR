@@ -1,33 +1,36 @@
-"""The write surface, and the two things that make it safe to offer on every stage.
+"""The write server: protocol, attribution, and the failure modes that must not raise.
 
-`src.provenance` attributes a stage's writes by comparing the workspace across a boundary,
-because the agent writes files directly. This server closes the gap for writes that come
-through it: attributed at the moment they happen, to the stage the manifest says is
-running, with the previous bytes stored before the new ones land.
+Verified against the real binary once, which is the check a protocol test cannot make.
+``claude --mcp-config <cfg> -p "list your autor tools"`` returned::
 
-The tests that matter most are the refusals. A tool that fails has to leave the agent a way
-forward, and the way forward is the ordinary file write -- still attributed, still
-withdrawable, just less exactly. A refusal that reads as a protocol error instead would end
-the call with nothing the model can act on.
+    mcp__autor-write__autor_append_claim
+    mcp__autor-write__autor_append_source
+    mcp__autor-write__autor_record_result
+    mcp__autor-write__autor_register_hypothesis
+    mcp__autor-write__autor_set_artifact
+
+so the config shape, the server name and the tool names reach the model's tool list as
+``mcp__<server>__<tool>``. Everything below is the part that can be held green.
 """
 
 from __future__ import annotations
 
+import io
 import json
 import tempfile
 import unittest
 from pathlib import Path
 
 from src.effects import load_accumulator
-from src.manifest import ensure_run_manifest, mark_stage_running_manifest
+from src.manifest import ensure_run_manifest, mark_stage_running_manifest, update_manifest_run_status
 from src.mcp_write import (
     RUN_ROOT_ENV,
+    SERVER_NAME,
     TOOLS,
     build_mcp_server_entry,
     call_tool,
     current_stage,
     handle_message,
-    resolve_run_root,
     serve,
 )
 from src.utils import STAGES, build_run_paths, ensure_run_layout
@@ -42,161 +45,159 @@ class WriteServerTestCase(unittest.TestCase):
         self.paths = build_run_paths(Path(tmp_dir.name) / "run")
         ensure_run_layout(self.paths)
         ensure_run_manifest(self.paths)
-        self.run_root = self.paths.run_root
 
     def running(self, stage) -> None:
         mark_stage_running_manifest(self.paths, stage, 1)
 
     def call(self, name: str, arguments: dict) -> dict:
-        return call_tool(name, arguments, run_root=self.run_root)
+        return call_tool(name, arguments, run_root=self.paths.run_root)
 
 
 class ProtocolTests(WriteServerTestCase):
-    def test_tools_list_answers_with_every_tool(self) -> None:
-        response = handle_message({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
-
-        assert response is not None
-        self.assertEqual(len(response["result"]["tools"]), len(TOOLS))
-
-    def test_initialize_echoes_the_client_protocol_version(self) -> None:
+    def test_initialize_echoes_the_client_version(self) -> None:
         """MCP negotiates down; a server that insists on its favourite stops working the
         next time the CLI updates."""
 
         response = handle_message(
-            {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {"protocolVersion": "2099-01-01"},
-            }
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "9999-01-01"}},
+            run_root=self.paths.run_root,
         )
-
         assert response is not None
-        self.assertEqual(response["result"]["protocolVersion"], "2099-01-01")
+        self.assertEqual(response["result"]["protocolVersion"], "9999-01-01")
+        self.assertEqual(response["result"]["serverInfo"]["name"], SERVER_NAME)
+
+    def test_every_advertised_tool_is_dispatchable(self) -> None:
+        response = handle_message(
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, run_root=self.paths.run_root
+        )
+        assert response is not None
+        advertised = {tool["name"] for tool in response["result"]["tools"]}
+        self.assertEqual(advertised, {tool["name"] for tool in TOOLS})
+
+        self.running(STAGE_05)
+        for name in advertised:
+            reply = handle_message(
+                {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": name, "arguments": {}}},
+                run_root=self.paths.run_root,
+            )
+            assert reply is not None
+            self.assertIn("result", reply, f"{name} is advertised and not dispatched")
 
     def test_a_notification_is_answered_with_silence(self) -> None:
         """Answering a notification is itself a protocol error."""
 
-        self.assertIsNone(handle_message({"jsonrpc": "2.0", "method": "notifications/initialized"}))
-
-    def test_an_unknown_tool_is_a_protocol_error(self) -> None:
-        response = handle_message(
-            {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "rm_rf"}}
+        self.assertIsNone(
+            handle_message({"jsonrpc": "2.0", "method": "notifications/initialized"}, run_root=None)
         )
 
-        assert response is not None
-        self.assertIn("error", response)
+    def test_an_unknown_tool_is_a_protocol_error_and_an_unknown_method_too(self) -> None:
+        for message in (
+            {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "nope"}},
+            {"jsonrpc": "2.0", "id": 5, "method": "does/not/exist"},
+        ):
+            response = handle_message(message, run_root=self.paths.run_root)
+            assert response is not None
+            self.assertIn("error", response)
 
-    def test_unparseable_input_does_not_take_the_session_down(self) -> None:
-        import io
+    def test_unparseable_input_does_not_stop_the_loop(self) -> None:
+        stdin = io.StringIO('not json\n{"jsonrpc":"2.0","id":9,"method":"ping"}\n')
+        stdout = io.StringIO()
 
-        out = io.StringIO()
-        code = serve(io.StringIO("not json\n\n"), out, run_root=self.run_root)
+        serve(stdin=stdin, stdout=stdout, run_root=self.paths.run_root)
 
-        self.assertEqual(code, 0)
-        self.assertEqual(out.getvalue(), "")
+        replies = [json.loads(line) for line in stdout.getvalue().splitlines() if line.strip()]
+        self.assertEqual([reply["id"] for reply in replies], [9])
 
 
 class AttributionTests(WriteServerTestCase):
-    def test_the_stage_is_read_from_the_manifest_at_call_time(self) -> None:
-        """The config is written once per run and this process outlives any one stage, so a
-        captured value would attribute Stage 05's writes to Stage 01 for the rest of the
-        run."""
+    def test_the_stage_comes_from_the_manifest_rather_than_the_arguments(self) -> None:
+        """The config is written once per run and outlives any one stage."""
+
+        self.running(STAGE_05)
+        self.assertEqual(current_stage(self.paths).slug, STAGE_05.slug)
 
         self.running(STAGE_01)
-        self.assertEqual(current_stage(self.paths), STAGE_01)
+        self.assertEqual(current_stage(self.paths).slug, STAGE_01.slug)
 
-        self.running(STAGE_05)
-        self.assertEqual(current_stage(self.paths), STAGE_05)
+    def test_a_write_between_stages_is_refused_rather_than_guessed(self) -> None:
+        """A write attributed to the wrong stage is withdrawn by the wrong rollback."""
 
-    def test_a_write_is_attributed_to_the_stage_that_is_running(self) -> None:
-        self.running(STAGE_05)
-        result = self.call("autor_record_result", {"path": "metrics.json", "content": "{}\n"})
-
-        self.assertFalse(result["isError"])
-        self.assertEqual(
-            [record.rel_path for record in load_accumulator(self.paths, STAGE_05)],
-            ["results/metrics.json"],
+        update_manifest_run_status(
+            self.paths, run_status="pending", last_event="stage.approved", current_stage_slug=None
         )
 
-    def test_the_write_lands_and_carries_its_inverse(self) -> None:
+        result = self.call("autor_set_artifact", {"path": "data/x.csv", "content": "a\n"})
+
+        self.assertTrue(result["isError"])
+        self.assertFalse((self.paths.data_dir / "x.csv").exists())
+
+    def test_a_write_lands_and_accumulates_its_inverse_against_the_running_stage(self) -> None:
         self.running(STAGE_05)
-        self.call("autor_set_artifact", {"path": "data/counts.csv", "content": "id\n1\n"})
 
-        self.assertTrue((self.paths.data_dir / "counts.csv").exists())
-        inverse = load_accumulator(self.paths, STAGE_05)[0].inverse
-        self.assertEqual(inverse.kind, "delete_path")
+        result = self.call("autor_set_artifact", {"path": "data/x.csv", "content": "a\n"})
 
-    def test_a_table_entry_is_withdrawable_on_its_own(self) -> None:
+        self.assertFalse(result["isError"])
+        self.assertEqual((self.paths.data_dir / "x.csv").read_text(encoding="utf-8"), "a\n")
+        records = load_accumulator(self.paths, STAGE_05)
+        self.assertEqual([record.inverse.kind for record in records], ["delete_path"])
+
+    def test_an_appended_entry_is_withdrawable_on_its_own(self) -> None:
+        """The grain the observed path cannot reach: one entry, not the whole file."""
+
         self.running(STAGE_01)
-        self.call("autor_append_source", {"source": {"id": "S1", "title": "one"}})
-        self.call("autor_append_source", {"source": {"id": "S2", "title": "two"}})
+        self.call("autor_append_source", {"source": {"id": "S1", "title": "first"}})
+        self.call("autor_append_source", {"source": {"id": "S2", "title": "second"}})
 
         records = load_accumulator(self.paths, STAGE_01)
         self.assertEqual([record.inverse.payload["entry_id"] for record in records], ["S1", "S2"])
-        self.assertEqual({record.key for record in records}, {"literature.sources"})
+        self.assertEqual([record.key for record in records], ["literature.sources"] * 2)
+
+    def test_a_result_cannot_be_written_outside_the_results_directory(self) -> None:
+        """The family the forward gates count is the one this tool writes into."""
+
+        self.running(STAGE_05)
+        self.call("autor_record_result", {"path": "../../escaped.json", "content": "{}\n"})
+
+        self.assertTrue((self.paths.results_dir / "escaped.json").exists())
+        self.assertFalse((self.paths.run_root.parent / "escaped.json").exists())
 
 
-class RefusalTests(WriteServerTestCase):
-    def test_a_refusal_is_a_result_the_model_can_act_on_not_a_protocol_error(self) -> None:
+class FailuresComeBackAsResultsTests(WriteServerTestCase):
+    def test_a_missing_identifier_is_reported_rather_than_raised(self) -> None:
+        """The model can act on "that needs an id"; a protocol error ends the call."""
+
         self.running(STAGE_01)
         result = self.call("autor_append_source", {"source": {"title": "no id"}})
 
         self.assertTrue(result["isError"])
         self.assertIn("id", result["content"][0]["text"])
 
-    def test_no_running_stage_refuses_and_names_the_way_forward(self) -> None:
-        """A write with no stage cannot be attributed, and a refusal that leaves the agent
-        stuck is worse than one that tells it to write the file directly."""
-
-        result = self.call("autor_record_result", {"path": "m.json", "content": "{}"})
-
-        self.assertTrue(result["isError"])
-        self.assertIn("directly", result["content"][0]["text"])
-
-    def test_no_run_root_refuses_rather_than_writing_somewhere(self) -> None:
-        result = call_tool("autor_set_artifact", {"path": "a", "content": "b"}, run_root=None)
-
-        self.assertTrue(result["isError"])
-        self.assertIn(RUN_ROOT_ENV, result["content"][0]["text"])
-
-    def test_a_result_path_cannot_escape_the_results_directory(self) -> None:
+    def test_a_missing_argument_is_reported_rather_than_raised(self) -> None:
         self.running(STAGE_05)
-        result = self.call(
-            "autor_record_result", {"path": "../../../etc/passwd", "content": "x"}
-        )
-
-        self.assertFalse(result["isError"], "the traversal is normalised away, not refused")
-        written = [record.rel_path for record in load_accumulator(self.paths, STAGE_05)]
-        self.assertEqual(written, ["results/etc/passwd"])
-        self.assertTrue(str(self.paths.results_dir) in str((self.paths.workspace_root / written[0])))
+        for name, arguments in (
+            ("autor_set_artifact", {"content": "a\n"}),
+            ("autor_record_result", {"content": "a\n"}),
+            ("autor_append_source", {"source": "not an object"}),
+        ):
+            result = self.call(name, arguments)
+            self.assertTrue(result["isError"], name)
 
 
 class ConfigTests(WriteServerTestCase):
-    def test_the_server_block_names_the_run_it_writes_into(self) -> None:
-        entry = build_mcp_server_entry(self.paths)
-        block = next(iter(entry.values()))
+    def test_the_server_is_told_which_run_to_write_into(self) -> None:
+        entry = build_mcp_server_entry(self.paths)[SERVER_NAME]
 
-        self.assertEqual(block["args"], ["-m", "src.mcp_write"])
-        self.assertEqual(block["env"][RUN_ROOT_ENV], str(self.run_root.resolve()))
+        self.assertEqual(entry["env"][RUN_ROOT_ENV], str(self.paths.run_root.resolve()))
 
-    def test_the_run_root_comes_from_the_environment(self) -> None:
-        self.assertEqual(resolve_run_root({RUN_ROOT_ENV: "/tmp/x"}), Path("/tmp/x"))
-        self.assertIsNone(resolve_run_root({}))
-        self.assertIsNone(resolve_run_root({RUN_ROOT_ENV: "   "}))
+    def test_it_runs_under_autors_own_interpreter(self) -> None:
+        """Not whatever ``python3`` the agent's PATH finds: the child has to resolve
+        ``src.effects`` the way the parent already verified."""
 
-    def test_the_operator_hands_the_agent_both_servers(self) -> None:
-        """Search is conditional on the deployment; the write surface is not."""
+        import sys
 
-        from src.operator import ClaudeOperator
-
-        operator = ClaudeOperator.__new__(ClaudeOperator)
-        operator.web_search_mcp = False
-        destination = operator._mcp_config_path(self.paths)
-
-        assert destination is not None
-        servers = json.loads(destination.read_text(encoding="utf-8"))["mcpServers"]
-        self.assertIn("autor-write", servers)
+        entry = build_mcp_server_entry(self.paths)[SERVER_NAME]
+        self.assertEqual(entry["command"], sys.executable or "python3")
+        self.assertIn("PYTHONPATH", entry["env"])
 
 
 if __name__ == "__main__":

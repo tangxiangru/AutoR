@@ -130,16 +130,37 @@ that nobody records. Where a natural undo *does* carry a precondition, we take t
 unconditional operation instead — for a registered child stage, the inverse *retires* it
 rather than *removing* it, because removal has premises and retirement does not.
 
-### 3.4 Attribution is observed, not declared
+### 3.4 Two ways a write is attributed, and what each costs
 
-A stage's work is performed by an agent process writing files directly, so the framework
-cannot intercept the writes. It compares instead: a ledger keeps a content identity per file
-per version, and a scan at each stage boundary attributes whatever is new or changed to the
-stage that just ran.
+A stage's work is performed by an agent process, so the framework has two routes to what it
+wrote and uses both.
 
-This is weaker than instrumentation in exactly one way, and the ledger records where: a
-version whose bytes were never held can be withdrawn from the guards and deleted, but not
-rewound to.
+**Instrumented.** The write primitives are exposed to the agent as tools. A write that comes
+through one is attributed to the running stage at the moment it happens, its previous bytes
+go into the store *before* the new ones land, and — for a collection — the inverse removes
+one entry by identifier.
+
+**Observed.** Anything written directly is picked up by comparing content identities at the
+stage boundary.
+
+The second is weaker in three specific ways, which is the argument for the first:
+
+| | Instrumented | Observed |
+| --- | --- | --- |
+| Grain | one entry in a collection | the whole file |
+| When | at the write | at the next stage boundary |
+| Large files | inverse regardless of size | delete-only above the limit |
+
+Neither is a fallback for the other: the tools are additive, and a stage that ignores them
+is exactly where it was before. That is what makes them safe to offer on every stage — a
+server that fails to start degrades to the behaviour that was already there rather than
+breaking the run. It also means the design does not depend on the agent's cooperation for
+*correctness*, only for *exactness*.
+
+**A tool, not a paragraph.** An instruction to route writes through a helper competes with
+everything else in a long prompt; a tool in the model's actual tool list does not. It also
+puts each write in the trace as a named call with structured arguments, which is what makes
+"what did this stage record" answerable without parsing shell strings.
 
 ### 3.5 A row is a version chain, not a state
 
@@ -459,25 +480,41 @@ which parts are running.
 | --- | --- |
 | Attribution, version chains, withdrawal plan | implemented |
 | Per-stage accumulator, reverse-order withdrawal, blob store | implemented |
-| Commutativity classification, independence check, reported on withdrawal | implemented |
-| Emission withholding | implemented |
+| Entry-grained inverses, so one entry in a collection is withdrawable alone | implemented |
+| Write primitives in the stage agent's tool list | implemented |
+| Commutativity classification and the independence check, reported at every withdrawal | implemented |
 | Committed view, drift, topology-derived staleness | implemented |
+| Emission withholding | implemented |
 | Withdrawal ledger, delivered to every backward-edge target | implemented |
-| Snapshot/restore of version pointers | implemented |
-| Excursions and the walk-level ratchet | implemented |
-| Walk-level ratchet: excursions judged, and rewound when they lose | implemented |
-| **Selective withdrawal as an action** | precondition computed and reported; *deliberately* not wired — see below |
-| Write surface: revertible write tools in the agent's tool list | implemented |
+| Snapshot and restore of version pointers | implemented |
+| Excursions, and the walk-level ratchet that rewinds one that lost | implemented |
+| Selective withdrawal, taken on redo, with a stated fallback | implemented |
 | **Intra-stage checkpoints** | pending |
 
 ### On selective withdrawal
 
-The precondition is computed and reported at every withdrawal: whether the target stage
-could have gone on its own, and if not, which ordered location both it and the stages after
-it wrote. The *action* is not wired, and that is a finding rather than an omission. In this
-stage topology, reverse-order withdrawal is almost always the correct answer — the stages
-after a withdrawn one were reading what it produced, so keeping them would leave them
-standing on a state that no longer exists. Selective withdrawal becomes valuable exactly
-when stages are more independent than they are here, which is the direction the design
-points and not the state it is in. Wiring it now would mean inventing a caller, and a
-mechanism with an invented caller is one nobody has checked.
+The action has a caller, and finding it took correcting a wrong conclusion. Reverse-order
+withdrawal is the right answer for a *range* — the stages after a withdrawn one were reading
+what it produced, so keeping them would leave them standing on a state that no longer
+exists — and from that it looked as though selective withdrawal had no place in this
+topology at all.
+
+It does: **`--redo-stage`**. Re-running one stage is exactly the single-stage case, and the
+redo path had the same defect a rollback used to have, at a finer grain — the previous
+attempt's artifacts stayed on disk, counted by the same guards, for the new attempt to write
+over whichever of them it happened to touch.
+
+Two conditions are checked, separately, because they cover different writes:
+
+- no later stage wrote a **key** this stage wrote — over the accumulators, the independence
+  test of §5;
+- no later stage rewrote a **file** this stage wrote — over the observed version chains.
+
+Where either fails the withdrawal falls back to reverse-order and says which files or keys
+were contested. That fallback is the honest move rather than a weaker success: leaving a
+contested file alone keeps this stage's work standing, and rewinding it discards the later
+stage's, and neither of those is "withdrew this stage".
+
+This is the mechanism paying for itself. A design that turned out wrong need not discard the
+measurement that revealed it — but only when nothing since has touched the same ground, and
+the system can now tell the difference instead of assuming one answer.
