@@ -57,7 +57,12 @@ and they group into five kinds of hole:
 
 * **Four visit outcomes** the manager recorded and nothing read -- the route to the
   deliverable, the rollback, the abort at the approval gate, and a human skip filed as
-  the budget's. The first is the event that ended two of the measured runs.
+  the budget's. The first is what *rescued* a measured run: over the three finished trial
+  runs ``grep -ac '^=== .* routed_to_deliverable ===$'`` returns 1, 0, 0, and the one is
+  Astronomy_000_20260814_175426 leaving 05_experimentation for the writing node. What ended
+  both cancelled runs was the same branch failing to route -- ``unattended_abort`` then
+  ``run_aborted``, 1 and 1 in each -- because by then they were already at the deliverable
+  stage and there was nowhere to route to.
 * **Six of the run-level totals**, including ``degraded_attempts``, which is the one whose
   remedy is different in kind from every other.
 * **Six fields written and never read back**, and **three claims about the sentence**
@@ -1188,7 +1193,7 @@ class ManagerWritesTheLedgerTests(unittest.TestCase):
     def test_routing_to_the_deliverable_leaves_a_row_for_every_stage_it_stepped_over(
         self,
     ) -> None:
-        """The route that ends the measured runs, and the stages it never enters.
+        """The route that rescued a measured run, and the stages it never enters.
 
         `_route_to_deliverable` puts the stages between here and the writing node into the
         run's not-completed list without ever calling `_run_stage` on them, so no meter is
@@ -1198,8 +1203,10 @@ class ManagerWritesTheLedgerTests(unittest.TestCase):
         And the stage that *failed* keeps the more specific of its two outcomes. `_skip_stage`
         files the visit as an auto-skip, which it is; the route is what happened to it next,
         and it is the difference between "the budget skipped one stage and carried on" and
-        "the budget ran out and the run went straight to writing up" -- the event that
-        ended two of the measured runs.
+        "the budget ran out and the run went straight to writing up". It fired exactly once
+        over the three finished trial runs, and the sentence here used to say it ended two of
+        them -- it ended none. Its failure is what ended two: when the run is already at the
+        deliverable stage the route has nowhere to go, returns False, and the abort follows.
         """
         failed = STAGES[3]
         meter = StageCostMeter(failed)
