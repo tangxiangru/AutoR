@@ -7,14 +7,20 @@ the stage summary — and no budget of any kind. Then it told the agent not to w
 on price writes up around the flaw it should have gone back for."
 
 That is right in the abstract and it was addressed to an agent that could not see the
-balance. Measured on the four runs of the first live paired trial, by reading
-`evolution/stage_graph.json` and `logs.txt` under
-`/rmeng_data/robtang/rcb-trial-graph/workspaces/*/.autor/*/`: every run was given
-twenty steps and the longest walk took nine of them, so the step budget never bound;
-the auto-skip allowance was three on all four and two runs spent all three. On the run
-that spent them, the next exhaustion landed at Stage 07, which is already the stage
-that writes the deliverable, so there was nowhere left to route and the run ended
-`cancelled`.
+balance. Measured by reading `evolution/stage_graph.json`, `run_manifest.json` and
+`logs.txt` under `/rmeng_data/robtang/rcb-trial-graph/workspaces/*/.autor/*/`, over the
+runs of the first live paired trial that had *finished* —
+`Astronomy_000_20260814_175426`, `Astronomy_000_20260815_074118` and
+`Chemistry_000_20260816_011751`. A fourth, `Chemistry_000_20260816_173127`, still reads
+`run_status: running` and is out of every count below on purpose: its walk was four
+steps when this branch was written and when it was reviewed, and five when this
+paragraph was, and a number that moves under the reader is not evidence.
+
+Of the three: each was given twenty steps and the longest walk took nine of them, so
+the step budget never bound; every `auto_skip_used:` line in all three has denominator
+three, and two of the three reached `3/3`. On one that spent them, the next exhaustion
+landed at Stage 07, which is already the stage that writes the deliverable, so there
+was nowhere left to route and the run ended `cancelled`.
 
 A backward move re-runs stages. A re-run stage can exhaust its attempts like any other,
 and an exhausted stage spends a skip. So revisiting and reaching the deliverable draw on
@@ -163,9 +169,27 @@ class WorstCaseTest(unittest.TestCase):
         self.assertIn("up to 2 of the 2 auto-skips left", cell)
 
     def test_the_skips_at_risk_are_capped_by_the_skips_that_remain(self) -> None:
-        """Four re-runs cannot spend five skips out of an allowance of two."""
+        """Four re-runs cannot spend four skips out of the one that is left.
+
+        The move re-runs four stages, `_budget(skips_spent=2)` leaves one of the three,
+        and the ceiling shown is one. A cell reading "up to 4" would be quoting the
+        move's cost where the balance is what the reader needs.
+        """
         cell = worst_case(self._move("06_analysis", "03_study_design"), _budget(skips_spent=2))
         self.assertIn("up to 1 of the 1 auto-skip left", cell)
+
+    def test_a_cheap_move_risks_fewer_skips_than_the_pool_holds(self) -> None:
+        """The other side of that cap, and it needed its own test.
+
+        Every other case in this class has the move re-running at least as many stages
+        as there are skips left, where `min(runs, skips_left)` and a bare `skips_left`
+        agree. An advance risks one skip out of three and the two come apart: a cell
+        reading "up to 3" would be telling the agent that stepping forward one stage
+        can cost the whole allowance.
+        """
+        cell = worst_case(self._move("06_analysis", "07_writing"), _budget(skips_spent=0))
+        self.assertIn("1 step of 11 left", cell)
+        self.assertIn("up to 1 of the 3 auto-skips left", cell)
 
     def test_a_move_the_walk_cannot_finish_says_so(self) -> None:
         cell = worst_case(self._move("06_analysis", "02_hypothesis_generation"), _budget(steps_taken=18))
@@ -181,6 +205,30 @@ class WorstCaseTest(unittest.TestCase):
 
     def test_finishing_costs_nothing_and_is_shown_as_nothing(self) -> None:
         self.assertEqual(worst_case(self._move("06_analysis", "finish"), _budget()), "—")
+
+    def test_the_skip_ceiling_saturates_once_the_pool_is_low(self) -> None:
+        """What the column stops discriminating, said out loud so nobody over-reads it.
+
+        With one skip left, `min(runs, skips_left)` is 1 for every move that re-runs a
+        stage at all, so the whole menu out of `06_analysis` carries the same skip term
+        and only the step term still separates the rows. Honest — the run can lose its
+        last skip to any of them — and the reason `worst_case` documents it.
+        """
+        budget = _budget(skips_spent=2)
+        self.assertEqual(budget.skips_left, 1)
+        cells = {
+            move.target: worst_case(move, budget)
+            for move in self.graph.moves(self.paths, "06_analysis", GraphState())
+        }
+        spending = {target: cell for target, cell in cells.items() if cell != "—"}
+        self.assertGreater(len(spending), 1, "one row cannot show saturation")
+        self.assertEqual(
+            {cell.split("; ", 1)[1] for cell in spending.values()},
+            {"up to 1 of the 1 auto-skip left"},
+        )
+        # The step term is what still tells them apart.
+        self.assertGreater(len({cell.split("; ", 1)[0] for cell in spending.values()}), 1)
+        self.assertEqual(cells["finish"], "—")
 
 
 class BudgetBlockTest(unittest.TestCase):
@@ -216,10 +264,15 @@ class TheSkipPoolComesFromTheEnforcerTest(unittest.TestCase):
     log reader can report an untouched pool to the very next routing decision after the
     pool has been emptied and overdrawn.
 
-    Measured on the trial, not just constructed here: on
-    `workspaces/Astronomy_000_20260814_175426/.autor/20260814_175429/logs.txt` the last
-    `auto_skip_used:` line reads `3/3` while the `already_skipped:` list in the same
-    file's `routed_to_deliverable` entry names five stages.
+    Measured on the trial, not just constructed here. That file is
+    `workspaces/Astronomy_000_20260814_175426/.autor/20260814_175429/logs.txt`, and it
+    carries three `auto_skip_used:` lines — `1/3`, `2/3`, `3/3` — then, later in the
+    file, its one `routed_to_deliverable` entry, whose `already_skipped:` list names
+    four stages: `02_hypothesis_generation`, `03_study_design`, `04_implementation`,
+    `06_analysis`. The published tally stopped at three and the list the budget test
+    reads had already gone past it. (The five-name list, those four plus
+    `05_experimentation`, is in the `07_writing unattended_abort` entry later still —
+    a different entry, and the pool was overdrawn before it was written.)
 
     Asking the enforcer cannot disagree with the enforcer. The second half — `logs.txt`
     is at the run root, where the operator runs `bypassPermissions` — is why it would
@@ -396,6 +449,86 @@ class RoutingPromptTest(unittest.TestCase):
         self.assertIn("4 steps of 2 left — does not fit", prompt)
         # `06 -> 05` re-runs two and still fits.
         self.assertIn("| 2 steps of 2 left; up to 2 auto-skips |", prompt)
+
+
+class TheVisitDenominatorIsTheCapThatBlocksTest(unittest.TestCase):
+    """The visit line divides by this run's cap, not by the constant.
+
+    Every other state in this file sits at :data:`DEFAULT_MAX_VISITS`, so
+    :meth:`WalkBudget.of` reading the constant instead of ``state.max_visits`` is
+    invisible to all of them and to the rest of the suite with it. The two numbers do
+    come apart: `--graph-max-visits` overrides the constant and `load_graph_state`
+    writes the override onto the state, which is why `WalkBudget.of` departs from the
+    wording that asked for "visits to this node of `DEFAULT_MAX_VISITS`".
+
+    The failure that departure removes is the one this whole item is about — a
+    denominator shown to the routing agent that is not the number
+    :meth:`StageGraph.moves` refuses at. Showing "1 of 3" to a run configured for five
+    would understate what it has left, which is the same error as showing no
+    denominator at all, only harder to notice.
+    """
+
+    CAP = DEFAULT_MAX_VISITS + 2
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.paths = build_run_paths(Path(self._tmp.name) / "run")
+        ensure_run_layout(self.paths)
+        write_text(self.paths.user_input, "goal")
+        write_text(self.paths.stage_file(STAGE_06), "# Stage 06: Analysis\n\nBody.\n")
+        write_text(self.paths.code_dir / "run.py", "print(1)\n")
+        write_text(self.paths.results_dir / "metrics.json", json.dumps({"acc": 0.7}))
+        write_text(self.paths.experiment_manifest, json.dumps({"result_artifacts": ["metrics.json"]}))
+        self.graph = StageGraph.adaptive()
+
+    def _state(self, visits_to_05: int = 1) -> GraphState:
+        """A walk out of `06_analysis` that has entered `05_experimentation` N times."""
+        slugs = [stage.slug for stage in STAGES[:6]]
+        slugs += ["05_experimentation", "06_analysis"] * (visits_to_05 - 1)
+        state = GraphState(
+            path=[Visit(stage=slug, entered_at="t") for slug in slugs], max_visits=self.CAP
+        )
+        self.assertEqual(state.visits("05_experimentation"), visits_to_05)
+        self.assertLess(state.steps, state.max_steps, "the step pool must not decide this")
+        return state
+
+    def _move_into_05(self, visits_to_05: int):
+        state = self._state(visits_to_05)
+        return next(
+            move
+            for move in self.graph.moves(self.paths, STAGE_06.slug, state)
+            if move.target == "05_experimentation"
+        )
+
+    def test_walk_budget_takes_the_cap_from_the_state_it_was_given(self) -> None:
+        self.assertNotEqual(self.CAP, DEFAULT_MAX_VISITS)
+        self.assertEqual(WalkBudget.of(self._state(), STAGE_06.slug).max_visits, self.CAP)
+
+    def test_the_prompt_divides_by_this_runs_cap_and_not_by_the_constant(self) -> None:
+        state = self._state()
+        prompt = StageRouter(None, mode="agent").build_prompt(
+            paths=self.paths,
+            stage=STAGE_06,
+            moves=self.graph.moves(self.paths, STAGE_06.slug, state),
+            state=state,
+            score=None,
+        )
+        self.assertIn(f"Visits to `06_analysis`**: 1 of {self.CAP}", prompt)
+        self.assertNotIn(f"Visits to `06_analysis`**: 1 of {DEFAULT_MAX_VISITS}", prompt)
+
+    def test_that_denominator_is_the_number_the_graph_refuses_at(self) -> None:
+        """Shown and enforced have to be one number or the display misinforms.
+
+        One entry below the cap the move into `05_experimentation` is live; at the cap
+        `StageGraph.moves` closes it with block kind `visits`. Both read the same
+        ``max_visits`` the line above prints, so the prompt's denominator is the wall.
+        """
+        self.assertTrue(self._move_into_05(self.CAP - 1).admissible)
+        at_cap = self._move_into_05(self.CAP)
+        self.assertFalse(at_cap.admissible)
+        self.assertEqual(at_cap.blocked_kind, "visits")
+        self.assertIn(f"entered {self.CAP} times", at_cap.blocked_because)
 
 
 class TheBudgetIsShownAndNotEnforcedTest(unittest.TestCase):

@@ -3450,7 +3450,11 @@ class ResearchManager:
 
         * `_route_to_deliverable` extends `auto_skipped_stages` with the stages it
           bypasses and never writes an `auto_skip_used:` line, so a tally recovered
-          from `logs.txt` reads zero where this reads four. This reads the enforcer.
+          from `logs.txt` reads zero where this reads one per stage from the aborting
+          one up to the deliverable. How many that is depends on where the abort
+          landed, not on the branch: four from Stage 03, which is the case
+          `TheSkipPoolComesFromTheEnforcerTest` pins, and six from Stage 01. The log
+          says nothing in either. This reads the enforcer.
         * A resumed run starts the list empty because the manager does, and the
           allowance it will actually enforce is the fresh one. Reporting the
           pre-resume spend would be reporting a budget nothing consults.

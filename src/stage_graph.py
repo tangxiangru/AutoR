@@ -1018,6 +1018,28 @@ def worst_case(move: Move, budget: WalkBudget) -> str:
     It is a ceiling and it says so. A re-run stage that passes first time spends a
     step and no skip, which is the ordinary case and the reason this is not
     presented as a price.
+
+    The skip half saturates once the pool is low, and a reader should know that
+    before reading the column. ``min(runs, skips_left)`` is ``skips_left`` for every
+    move that re-runs at least that many stages, so with one skip left every row of
+    the adaptive menu out of `06_analysis` — the advance and every revisit alike —
+    reads `up to 1 of the 1 auto-skip left`, and only `finish` differs. That is the
+    honest number, because the run really can lose its last skip to any of them; it
+    does mean the column tells moves apart through its step term and not its skip
+    term. `WorstCaseTest.test_the_skip_ceiling_saturates_once_the_pool_is_low` in
+    ``tests/test_router_budget.py`` is where that is pinned rather than asserted here.
+
+    "Does not fit" is said about the step pool and about nothing else, and the
+    narrowness is deliberate rather than missed. :attr:`Move.stage_runs` counts what
+    the move commits to "before the run is back here", and the run may also fail to
+    get back here because this node is at its own visit cap — that wall is the second
+    of the three lines :func:`describe_budget_for_prompt` prints, in the section the
+    prompt puts under this table, and folding it into a per-row verdict would restate
+    one number in as many rows as the menu has. The cap on the *target* is not silent
+    either: :meth:`StageGraph.moves` has already marked the move unavailable, with its
+    own reason and its own block kind, before the row is rendered. So the omission
+    here is one arithmetic the reader has to do across two lines, not a wall nobody
+    named.
     """
     runs = move.stage_runs
     if runs == 0:

@@ -23,14 +23,18 @@ without ever learning what it was missing.
 **And what the run has left to spend.** The same argument reaches one step further
 than it used to. The prompt showed every move and what each one discards, and then
 told the agent in as many words not to weigh the cost — right in the abstract, and
-wrong under a budget the agent could not see. Measured on the first live paired
-trial: the step budget never bound, and the auto-skip allowance did. Three skips
-went, the next exhaustion landed at the stage that writes the deliverable, and the
-run ended `cancelled` with the deliverable truncated. A backward move re-runs
-stages and a re-run stage can exhaust its attempts like any other, so revisiting
-and reaching the deliverable were drawing on one allowance while the routing prompt
-named neither. :class:`src.stage_graph.WalkBudget` now puts all three pools next to
-the menu — the graph's own two off :class:`~src.stage_graph.GraphState`, and the
+wrong under a budget the agent could not see. Measured on every finished run of the
+first live paired trial — the population and the figures are pinned in the module
+docstring of ``tests/test_router_budget.py`` — the step budget never bound and the
+auto-skip allowance did. On `Astronomy_000_20260814_175426` three skips went, the
+next exhaustion landed at the stage that writes the deliverable, and the run ended
+`cancelled`: its manifest has `07_writing` as `failed`, its `stages/` holds a
+`07_writing.tmp.md` and no `07_writing.md`, and one stage of the eight is `approved`.
+A backward move re-runs stages and a re-run stage can exhaust its attempts like any
+other, so revisiting and reaching the deliverable were drawing on one allowance while
+the routing prompt named neither. :class:`src.stage_graph.WalkBudget` now puts all
+three pools next to the menu — the graph's own two off
+:class:`~src.stage_graph.GraphState`, and the
 auto-skip pool from ``skip_budget``, the counters the manager enforces it with — so
 "an expensive correction is worth it" has a denominator. It is still not a price
 list: what changed is that "cost is not the criterion" is now said to an agent that
@@ -146,7 +150,9 @@ class StageRouter:
         # with `bypassPermissions`, so it is a file the displayed party can write; and
         # it is incomplete — `_route_to_deliverable` extends the tally the budget test
         # reads without writing an `auto_skip_used:` line, so a run routed off the
-        # approval gate reports four skips consumed in memory and none on the record.
+        # approval gate reports every stage from the aborting one up to the deliverable
+        # as consumed in memory — four when it aborts at Stage 03, six at Stage 01 —
+        # and none of them on the record.
         # A provider asks the enforcer, which cannot disagree with itself.
         #
         # Optional because the router runs without a manager in tests and in
