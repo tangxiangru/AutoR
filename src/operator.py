@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Sequence, TextIO
 
+from .call_cost import CallCost, RECORD_FIELD, cost_from_stream_meta, is_result_event
 from .terminal_ui import TerminalUI
 from .utils import (
     DEFAULT_REFINEMENT_SUGGESTIONS,
@@ -133,6 +134,11 @@ class ClaudeOperator:
             mode="real_continue" if continue_session else "real_start",
             stdin_text=stdin_text,
         )
+        # Accumulated rather than read off the last `stream_meta`, because the resume
+        # fallback below rebinds that name. A resume that failed and was retried from a
+        # fresh session made two backend calls and the run paid for both; charging only the
+        # second would lose whatever the failed resume had already spent before it broke.
+        call_cost = cost_from_stream_meta(stream_meta)
         stage_file = paths.stage_tmp_file(stage)
 
         if (
@@ -171,6 +177,7 @@ class ClaudeOperator:
                 mode="real_continue_fallback_start",
                 stdin_text=fallback_stdin_text,
             )
+            call_cost = call_cost + cost_from_stream_meta(stream_meta)
             session_id = fallback_session_id
             active_command = fallback_command
 
@@ -206,6 +213,7 @@ class ClaudeOperator:
                 "stdout_excerpt": stdout_text[-2000:] if stdout_text else "",
                 "stderr_excerpt": stderr_text[-1000:] if stderr_text else "",
                 "stream_meta": stream_meta,
+                RECORD_FIELD: call_cost.to_dict(),
                 "finished_at": self._now(),
             },
         )
@@ -217,6 +225,7 @@ class ClaudeOperator:
             stderr=stderr_text,
             stage_file_path=stage_file,
             session_id=effective_session_id,
+            call_cost=call_cost,
         )
 
     def repair_stage_summary(
@@ -351,6 +360,9 @@ Original stderr:
             mode="repair",
             stdin_text=stdin_text,
         )
+        # Same accumulation as `_run_real`, for the same reason: the repair path has its
+        # own resume fallback and rebinds `stream_meta` when it takes it.
+        call_cost = cost_from_stream_meta(stream_meta)
         if (
             session_id
             and exit_code != 0
@@ -388,6 +400,7 @@ Original stderr:
                 mode="repair_fallback_start",
                 stdin_text=fallback_stdin_text,
             )
+            call_cost = call_cost + cost_from_stream_meta(stream_meta)
             session_id = fallback_session_id
             command = fallback_command
 
@@ -423,6 +436,7 @@ Original stderr:
                 "stdout_excerpt": stdout_text[-2000:] if stdout_text else "",
                 "stderr_excerpt": stderr_text[-1000:] if stderr_text else "",
                 "stream_meta": stream_meta,
+                RECORD_FIELD: call_cost.to_dict(),
                 "finished_at": self._now(),
             },
         )
@@ -434,6 +448,7 @@ Original stderr:
             stderr=stderr_text,
             stage_file_path=stage_file,
             session_id=effective_session_id,
+            call_cost=call_cost,
         )
 
     def _run_streaming_command(
@@ -481,6 +496,12 @@ Original stderr:
         observed_session_id: str | None = None
         tool_names: dict[str, str] = {}
         malformed_json_count = 0
+        # The backend's own account of what this invocation cost, accumulated as the stream
+        # arrives rather than reconstructed from `logs_raw.jsonl` afterwards. Summed over
+        # result events because `total_cost_usd` is a per-call charge; see
+        # `src/call_cost.py` for the measurement that settles that, and for why the count
+        # of result events is not the count of invocations.
+        spend = CallCost()
         timed_out = threading.Event()
         start_time = time.monotonic()
 
@@ -528,6 +549,8 @@ Original stderr:
                     continue
 
                 append_jsonl(paths.logs_raw, payload)
+                if is_result_event(payload):
+                    spend = spend + CallCost.from_result_event(payload)
                 if observed_session_id is None:
                     observed_session_id = self._extract_session_id(payload)
                 extracted_fragments.extend(extract_stream_text_fragments(payload))
@@ -581,12 +604,17 @@ Original stderr:
                 non_json_lines=non_json_lines,
                 raw_lines=raw_lines,
             )
+            # The cost rides out on the timeout path too. A stage that ran for four hours
+            # and was killed is the invocation whose bill matters most, and an earlier
+            # shape of this that only reported spend on the clean return would have
+            # recorded exactly nothing for it.
             return -1, stdout_text, "Stage timed out", observed_session_id, {
                 "raw_line_count": len(raw_lines),
                 "non_json_line_count": len(non_json_lines),
                 "malformed_json_count": malformed_json_count,
                 "observed_session_id": observed_session_id,
                 "timed_out": True,
+                RECORD_FIELD: spend.to_dict(),
             }
 
         exit_code = process.wait()
@@ -604,6 +632,7 @@ Original stderr:
             "non_json_line_count": len(non_json_lines),
             "malformed_json_count": malformed_json_count,
             "observed_session_id": observed_session_id,
+            RECORD_FIELD: spend.to_dict(),
         }
 
     def _compose_stdout_text(

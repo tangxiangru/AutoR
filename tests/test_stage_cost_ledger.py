@@ -102,6 +102,7 @@ from src.approval_agent import (
     AutomatedReviewer,
     ReviewDecision,
 )
+from src.call_cost import CallCost
 from src.cross_reviewer import CrossVerdict
 from src.evolution import EvolutionConfig
 from src.manager import ResearchManager
@@ -466,33 +467,54 @@ class TheRowIsCompleteTests(unittest.TestCase):
         self.assertEqual(row.operator_invocations, 3)
         self.assertEqual(row.review_invocations, 1)
 
-    def test_no_token_or_cost_field_is_published(self) -> None:
-        """Nothing reaches the manager to publish, so nothing is claimed.
+    def test_the_row_publishes_no_bare_token_or_price_field(self) -> None:
+        """The spend lives in one nested record, not scattered across the row.
 
-        A guessed number in a spend record is worse than a missing one: a reader cannot
-        tell which of the fields were measured.
+        This test used to say the row published *nothing* about money, on the grounds that
+        no return type carried it. That is no longer true and the check it leaves behind is
+        the one still worth holding: a bare ``tokens``, ``cost`` or ``price`` key at the top
+        of the row would be a figure with no statement of which fields it sums, which is
+        the second of the two traps in :mod:`src.call_cost`.
         """
         keys = set(_meter().close().to_dict())
         for forbidden in ("tokens", "input_tokens", "output_tokens", "cost", "usd", "price"):
             self.assertNotIn(forbidden, keys)
 
-    def test_the_reason_the_cost_is_missing_is_the_return_type_and_not_the_backend(
+    def test_the_cost_reaches_the_row_through_the_return_types_and_not_the_raw_log(
         self,
     ) -> None:
-        """Pins the justification, so it cannot outlive the thing that justified it.
+        """The wire this module's own note asked for, pinned where the note used to be.
 
-        The backend reports its own spend: every invocation ends with a ``result`` event
-        carrying ``total_cost_usd`` and a ``usage`` block, and ``logs_raw.jsonl`` keeps
-        them. The ledger omits it because :class:`~src.utils.OperatorResult` -- the only
-        thing the manager gets back from a stage run -- carries no field it could be read
-        from. When that stops being true this test fails, which is the point: the omission
-        is then no longer justified and the row should carry the number.
+        The header said: *"Do not derive one from ``logs_raw.jsonl`` inside the supervisor;
+        wire it through ``OperatorResult`` and ``ReviewDecision`` first."* Both carry it
+        now, and the row's figure is the sum of what they reported --
+        ``tests/test_cost_is_recorded_and_unread.py`` holds the rest, including that nothing
+        decides on it. What is checked here is the shape this module depends on: the field
+        exists on the carrier, and the meter adds rather than replaces.
         """
         fields = {field.name for field in dataclasses.fields(OperatorResult)}
         self.assertEqual(
             fields,
-            {"success", "exit_code", "stdout", "stderr", "stage_file_path", "session_id"},
+            {
+                "success", "exit_code", "stdout", "stderr", "stage_file_path",
+                "session_id", "call_cost",
+            },
         )
+        meter = _meter()
+        meter.note_call_cost(CallCost(1, 1, None, None, None, None, 1.5))
+        meter.note_call_cost(CallCost(1, 1, None, None, None, None, 2.5))
+        self.assertEqual(meter.close().call_cost.total_cost_usd, 4.0)
+
+    def test_a_visit_nobody_priced_closes_unmeasured_rather_than_free(self) -> None:
+        """Absent, not zero, at the point the row is built.
+
+        A meter that was never told a price closes with every measured field ``None``. The
+        alternative -- a row of zeroes -- says the visit was free, which is a claim about
+        the backend rather than about the record.
+        """
+        row = _meter().close()
+        self.assertIsNone(row.call_cost.total_cost_usd)
+        self.assertEqual(row.call_cost.result_events, 0)
 
     def test_an_unknown_outcome_is_not_silently_a_success(self) -> None:
         meter = _meter()
@@ -1883,13 +1905,13 @@ MUTATIONS: tuple[tuple[str, str, str, str], ...] = (
      "        except BaseException:\n            meter.note_outcome(OUTCOME_RAISED)\n            raise\n",
      "        except BaseException:\n            raise\n"),
     ("the run never logs its own spend", MANAGER,
-     "        self._log_stage_cost_summary(paths)\n\n"
-     "        # A run that concluded it cannot answer its question reached the end of the\n",
-     "\n        # A run that concluded it cannot answer its question reached the end of the\n"),
+     "        self._log_stage_cost_summary(paths)\n"
+     "        # Terminal only, and after the log entry rather than before it",
+     "        # Terminal only, and after the log entry rather than before it"),
     ("the aborted run never logs its own spend", MANAGER,
      "                self._log_stage_cost_summary(paths)\n"
-     '                self._print("Run aborted.")\n',
-     '                self._print("Run aborted.")\n'),
+     "                # On the abort branch as well as the clean one",
+     "                # On the abort branch as well as the clean one"),
     # -- the outcomes nothing read -----------------------------------------
     # Four of the visit's nine possible endings were recorded by the manager and asserted
     # by nobody, so the call that recorded them could be deleted with this module green.

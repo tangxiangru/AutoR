@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping, Sequence
+
+from .call_cost import CallCost
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE_REGISTRY_PATH = REPO_ROOT / "templates" / "registry.yaml"
@@ -276,6 +278,15 @@ class OperatorResult:
     stderr: str
     stage_file_path: Path
     session_id: str | None = None
+    #: What the backend said this invocation cost. Defaults to the *unmeasured* report,
+    #: not to zero: an operator that reports nothing -- the fake one, a stub, a backend
+    #: whose stream carries no usage block -- must not be recorded as having spent
+    #: nothing. See :mod:`src.call_cost`, and note that this field is why
+    #: ``src/stage_cost.py`` can carry a dollar figure at all: its ledger row used to say
+    #: "wire it through ``OperatorResult`` and ``ReviewDecision`` first", and this is that
+    #: wire. Nothing decides on it; ``tests/test_cost_is_recorded_and_unread.py`` is the
+    #: gate that keeps it that way.
+    call_cost: CallCost = field(default_factory=CallCost)
 
 
 INTAKE_STAGE = StageSpec(0, "00_intake", "Research Intake")

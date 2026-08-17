@@ -75,7 +75,12 @@ class _ScriptedPanel:
         remaining = {key: list(values) for key, values in script.items()}
 
         def make(label_key: str, member):
-            def run_prompt(*, paths, stage, attempt_no, prompt, label):
+            # `spend` is the cost sink `AutomatedReviewer.run_prompt` grew when the
+            # ledger learned to charge what a review cost. A panel seat's fan-out is
+            # below the boundary the row counts, so nothing here fills it -- but
+            # `parse_with_retry` forwards the argument either way and a double that
+            # refuses it is a double with the wrong signature.
+            def run_prompt(*, paths, stage, attempt_no, prompt, label, spend=None):
                 self.calls.append((label_key, label))
                 queue = remaining.get(label_key)
                 if not queue:
@@ -95,7 +100,7 @@ class _ScriptedPanel:
         chair_queue = list(script.get("__chair__", []))
         member_run = chair_member.run_prompt
 
-        def chair_aware_run(*, paths, stage, attempt_no, prompt, label):
+        def chair_aware_run(*, paths, stage, attempt_no, prompt, label, spend=None):
             # `panel_chair_verdict` is the chair's verdict-only re-ask, so it draws
             # from the chair's script rather than a seat's.
             if label.startswith("panel_chair"):
@@ -106,7 +111,10 @@ class _ScriptedPanel:
                 if response == "__FAIL__":
                     return 1, "", "chair exploded"
                 return 0, response, ""
-            return member_run(paths=paths, stage=stage, attempt_no=attempt_no, prompt=prompt, label=label)
+            return member_run(
+                paths=paths, stage=stage, attempt_no=attempt_no, prompt=prompt,
+                label=label, spend=spend,
+            )
 
         chair_member.run_prompt = chair_aware_run
 

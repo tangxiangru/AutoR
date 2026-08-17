@@ -44,7 +44,7 @@ class _Harness(unittest.TestCase):
         seen: list[str] = []
         reviewer = self._reviewer(unattended=unattended)
 
-        def run_prompt(*, paths, stage, attempt_no, prompt, label):
+        def run_prompt(*, paths, stage, attempt_no, prompt, label, spend=None):
             seen.append(label)
             return (0, replies[len(seen) - 1], "")
 
@@ -131,7 +131,7 @@ class ReAskFailureTest(_Harness):
         reviewer = self._reviewer(unattended=True)
         calls: list[str] = []
 
-        def run_prompt(*, paths, stage, attempt_no, prompt, label):
+        def run_prompt(*, paths, stage, attempt_no, prompt, label, spend=None):
             calls.append(label)
             return (0, PROSE, "") if label == "review" else (1, "", "boom")
 

@@ -25,17 +25,18 @@ place the product actually starts from, including ``studio.py``, without which t
 ``src/backend/`` package would read as dead.
 
 ``tests/`` and ``tools/`` are deliberately *not* roots. A test is the thing that keeps a
-dead symbol green -- twenty of the thirty symbols listed below have one -- so counting
-a test as wiring would make the gate assert nothing. An instrument is not evidence:
+dead symbol green -- twenty-one of the thirty-one symbols listed below have one -- so
+counting a test as wiring would make the gate assert nothing. An instrument is not evidence:
 ``archive_sample_complexity`` was importing ``RunRecord`` and crashing on it at the same
 time. A symbol that only ``tools/`` reaches is still exempt, but by a line somebody wrote,
 and :attr:`Exempt.reached_from` makes that line checkable.
 
-That twenty is :func:`allowlisted_symbols_with_a_test`, printed by the census and pinned
-against this sentence by
+That twenty-one is :func:`allowlisted_symbols_with_a_test`, printed by the census and
+pinned against this sentence by
 :meth:`AllowlistIsHonestTests.test_the_stated_count_of_tested_symbols_is_the_measured_one`,
-because the first version of the sentence said twenty-one and no instrument could
-contradict it.
+because two earlier versions of the sentence were wrong: it said twenty-one when the
+measurement said twenty, and then twenty when the measurement had moved to twenty-one.
+Neither could be contradicted by anything in the file.
 
 Why a flat reference check, and what it costs
 ---------------------------------------------
@@ -64,15 +65,15 @@ the answer, when it happens, is an allowlist entry naming the framework that cal
 
 Measured precision
 ------------------
-1326 public definitions over 1190 distinct names in ``src/``, and 30 referenced by nothing
+1472 public definitions over 1330 distinct names in ``src/``, and 31 referenced by nothing
 outside ``tests/`` and ``tools/``. One of them was ``DATA_DIRNAME`` until a one-line wiring
 fix in ``src/rcb.py`` took it off the list, so reverting that line puts the population back
 up by one -- stated as a delta rather than as the absolute it used to be, because the
 absolute drifts with the tree and the sentence outlived two of them.
 
-Each of those 30 has exactly one *executable* occurrence of its name across ``main.py``,
+Each of those 31 has exactly one *executable* occurrence of its name across ``main.py``,
 ``studio.py``, ``rcb_agent.py`` and ``src/`` -- its own definition -- and every other
-textual hit is a comment or a docstring. **False-positive rate 0/30.** That is not the scan
+textual hit is a comment or a docstring. **False-positive rate 0/31.** That is not the scan
 marking its own homework. :func:`code_lines_naming` re-reads the roots with ``tokenize``,
 which cannot see inside a string or a comment and knows nothing about reference units;
 :func:`accusations_with_a_second_code_line` is where the two readers are made to agree, and
@@ -84,11 +85,12 @@ The census prints the rate and the evidence under it, every occurrence labelled 
 
     python3 -m tests.test_declared_symbols_are_wired --census
 
-Its header carries 1326, 1190, 30, 20 and the rate, so those drift with the tree and none of
-them has to be believed. The 32 is the only figure here that is not in the header, because
-it is the population before the fix in ``src/rcb.py``.
+Its header carries 1472, 1330, 31, 21 and the rate, so those drift with the tree and none
+of them has to be believed. The 32 is the only figure here that is not in the header,
+because it is the population before the fix in ``src/rcb.py``.
 :meth:`AllowlistIsHonestTests.test_the_allowlist_is_exactly_what_the_scan_finds` keeps the
-31 honest.
+allowlist exactly the scan's output, so none of the four can go stale in one direction
+only.
 """
 
 from __future__ import annotations
@@ -163,6 +165,19 @@ _DRIVER_ONLY = (
 #: wrote down rather than a prefix that quietly grew to cover its neighbours. Seeded from
 #: the census described in this module's docstring.
 ALLOWLIST: dict[str, Exempt] = {
+    # -- declared for a gate, and wiring it would be the defect --------------------------
+    "src/call_cost.py::INERT_NAMES": Exempt(
+        "The list of names no condition under `src/` may read. Production must not "
+        "reference it, and that is the whole point rather than an oversight: a module "
+        "that imported it would be a module consulting the do-not-decide list at runtime, "
+        "which is one refactor away from deciding on the thing the list protects. It is "
+        "declared beside the fields it names so a field added to `COST_FIELDS` joins the "
+        "gate automatically, and read by "
+        "`tests/test_cost_is_recorded_and_unread.py`, which is the only reader it should "
+        "ever have. Wiring it means giving a runtime component an opinion about cost, "
+        "which is the change this repository refused.",
+        ("tests/test_cost_is_recorded_and_unread.py",),
+    ),
     # -- declared for an instrument, not for a run ---------------------------------------
     "src/rcb_trial.py::collect_rcb_pairs": Exempt(_DRIVER_ONLY, ("tools/rcb_trial.py",)),
     "src/rcb_trial.py::count_quota_hits": Exempt(_DRIVER_ONLY, ("tools/rcb_trial.py",)),

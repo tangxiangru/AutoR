@@ -83,31 +83,43 @@ same failure *again and again*" are different claims and only the second can be 
 from a sequence. No threshold is applied to any of them here: how many repeats is too
 many is a decision, this module is the record it will be taken from.
 
-What is *not* here, and exactly what would have to change
----------------------------------------------------------
-No token count and no dollar figure, and the reason is worth stating precisely rather
-than as "we cannot know". The backend *does* publish one: it emits a
-``{"type": "result"}`` event carrying ``total_cost_usd`` and a ``usage`` block, and
-``ClaudeOperator._run_streaming_command`` writes every stream line to ``logs_raw.jsonl``
-under the run root, so the money figure is on disk today — the three finished trial runs
-named above hold 82, 99 and 100 ``result`` events and every one of the 281 carries both
-keys. (The fourth run is excluded here for the reason it is excluded everywhere else in
-this docstring, and it is the reason this sentence quotes three numbers rather than four:
-its ``logs_raw.jsonl`` grew while it was being counted.) What does not exist is a path
-from the money figure to the manager.
-``_run_streaming_command``
-summarises the stream into ``stream_meta`` — ``raw_line_count``, ``non_json_line_count``,
-``malformed_json_count``, ``observed_session_id``, and ``timed_out`` on the timeout path —
-and drops the rest; :class:`~src.utils.OperatorResult` carries none of it, and
-``AutomatedReviewer`` returns a ``ReviewDecision`` that carries none of it either. So a
-cost field here would have to be derived by a second reader of the raw log, and a
-derived number in a spend record is the thing this module exists to stop.
-:attr:`StageCostRow.operator_invocations` and :attr:`StageCostRow.review_invocations`
-count what the manager itself dispatched, which is the one call figure the harness can
-state without inference; a reviewer's internal verdict re-ask and a panel's fan-out to its
-seats happen below that boundary and are deliberately not claimed. Surfacing the
-backend's own report through those two return types is the next thing to build here, and
-it is a change to the operator layer rather than to this one.
+What the visit cost, and where the number comes from
+----------------------------------------------------
+The row used to carry no token count and no dollar figure, with a note saying exactly what
+would have to change: *"Do not derive one from ``logs_raw.jsonl`` inside the supervisor;
+wire it through ``OperatorResult`` and ``ReviewDecision`` first."* That is done, and
+:attr:`StageCostRow.call_cost` is the result. The path is
+``ClaudeOperator._run_streaming_command`` → ``stream_meta`` →
+:attr:`~src.utils.OperatorResult.call_cost` and
+:attr:`~src.approval_agent.ReviewDecision.call_cost` →
+:meth:`StageCostMeter.note_call_cost` → the row. Nothing reads the raw log a second time,
+which matters because there are two traps in that data and :mod:`src.call_cost` documents
+both: ``total_cost_usd`` is a per-call charge whose values sum, and ``input_tokens`` is the
+uncached remainder of a four-way split. A second reader is a second chance to get either
+one wrong, and both are wrong in a direction that looks plausible.
+
+**Which calls it covers.** The ones this row already counts and no others:
+:attr:`StageCostRow.operator_invocations`, :attr:`StageCostRow.review_invocations` and the
+adversarial validity pass, all dispatched by the manager inside the visit. Three other
+places in ``src/`` reach the backend — the router's two, and the benchmark front end's —
+and none of them is inside a stage visit, so none of them can be charged to one.
+``tests/test_cost_is_recorded_and_unread.py`` derives that population from the syntax and
+fails when a new dispatch site joins the tree unclassified, and
+:func:`format_run_cost_report` prints the boundary beside the total rather than leaving a
+reader to assume it is the whole bill.
+
+**Absent is not zero.** A backend that reports nothing leaves every field ``None``, and the
+formatter prints ``not measured`` rather than ``$0.00``. The fake operator is the case that
+makes this concrete: it makes no call at all, and a run smoke-tested with it must not
+publish a measured zero. See :mod:`src.call_cost`.
+
+**And nothing decides on it.** The fields may appear in this record, in
+:func:`summarize_stage_cost` and in :func:`format_run_cost_report`, and in no condition
+anywhere under ``src/`` — no comparison, no boolean operator, no ``if``, no comprehension
+filter, no ``sorted`` key, no ``max``. That is asserted over the syntax, in the shape
+``tests/test_router_budget.py`` uses for ``StageRouter.choose``, and the run supervisor is
+asserted twice over: once by the same walk and once by replaying its rulings against two
+ledgers that differ only in what they cost.
 """
 
 from __future__ import annotations
@@ -115,18 +127,29 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from .approval_agent import CRASHED_REASON, UNREADABLE_REASON, UNSUPPORTED_REASON
+from .call_cost import (
+    RECORD_FIELD,
+    CallCost,
+    call_cost_of,
+    describe_coverage,
+    format_call_cost,
+)
 from .utils import RunPaths, StageSpec
 
 
 #: Bumped when a row grows or loses a field, so a reader that predates the change can say
 #: so instead of reading a missing key as a zero.
-STAGE_COST_LEDGER_VERSION = 1
+#:
+#: 2 since the row carries :data:`~src.call_cost.RECORD_FIELD`. The bump is what stops a
+#: reader of a version-1 ledger concluding that its visits were free: the key is absent
+#: there, and absent is not zero.
+STAGE_COST_LEDGER_VERSION = 2
 
 # ---------------------------------------------------------------------------
 # Why an attempt did not settle the stage
@@ -373,6 +396,16 @@ class StageCostRow:
     #: evaluated without it. No reason text here — that lives once, in :attr:`failures`.
     attempt_digests: list[dict[str, Any]]
     note: str = ""
+    #: What the backend charged for this visit, summed over the operator and review calls
+    #: the manager dispatched inside it. Absent, not zero, on a backend that reports
+    #: nothing: see :mod:`src.call_cost`, and :func:`bypassed_row` for the stage nobody
+    #: called at all.
+    #:
+    #: Recorded and inert. It is on the row, in :func:`summarize_stage_cost`, and in
+    #: :func:`format_run_cost_report`, and in no condition anywhere under ``src/`` --
+    #: ``tests/test_cost_is_recorded_and_unread.py`` walks the syntax and fails if it
+    #: reaches one, the run supervisor included.
+    call_cost: CallCost = field(default_factory=CallCost)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -398,6 +431,7 @@ class StageCostRow:
             "failures": [dict(item) for item in self.failures],
             "attempt_digests": [dict(item) for item in self.attempt_digests],
             "note": self.note,
+            RECORD_FIELD: self.call_cost.to_dict(),
         }
 
 
@@ -431,6 +465,9 @@ class StageCostMeter:
         self.outcome = OUTCOME_UNKNOWN
         self.note = ""
         self.costs: list[AttemptCost] = []
+        #: What the backend has charged this visit so far. Starts unmeasured rather than
+        #: at zero, so a visit whose every call reported nothing closes as unmeasured.
+        self.call_cost = CallCost()
 
     # -- what the manager tells it -----------------------------------------
     def note_attempt(self) -> None:
@@ -442,6 +479,24 @@ class StageCostMeter:
 
     def note_review_call(self) -> None:
         self.review_invocations += 1
+
+    def note_call_cost(self, cost: Any) -> None:
+        """Add one backend call's own report of what it cost to this visit.
+
+        Takes whatever the operator layer handed back rather than a
+        :class:`~src.call_cost.CallCost`, and normalises through
+        :func:`~src.call_cost.call_cost_of`. The manager charges the result of
+        ``run_stage``, ``repair_stage_summary``, ``review_stage`` and the validity pass,
+        and an operator that predates the field -- a third-party backend, a stub, a test
+        double -- hands back an attribute that is not a report. The two things to do with
+        it are to publish a number nobody measured or to record that nothing was measured,
+        and this records that nothing was measured.
+
+        Summed, because ``total_cost_usd`` is a per-call charge and not a running total.
+        That is trap one in :mod:`src.call_cost`, and it is settled by the field not being
+        monotone within a session id rather than by the field's name.
+        """
+        self.call_cost = self.call_cost + call_cost_of(cost)
 
     def note_polish_round(self, attempt_no: int) -> None:
         self.polish_rounds += 1
@@ -597,6 +652,7 @@ class StageCostMeter:
             failures=groups,
             attempt_digests=self.attempt_digests(),
             note=self.note,
+            call_cost=self.call_cost,
         )
 
 
@@ -607,6 +663,13 @@ def bypassed_row(stage: StageSpec, *, note: str) -> StageCostRow:
     the row is that the stage appears in the ledger at all. A ledger missing its bypassed
     stages is flatter than the run and would let a reader conclude the run visited only
     what it paid for.
+
+    The one field that is *not* zeroed is :attr:`StageCostRow.call_cost`, which stays the
+    unmeasured report. Nothing here is a measurement of zero: no backend was asked, so no
+    backend answered, and writing ``$0.00`` in would be the derived number this module
+    refuses. It makes no difference to any total — an absent measurement adds nothing —
+    and it makes the difference to a reader, who can tell a stage that was free from a
+    stage that was never called.
     """
     return StageCostRow(
         stage=stage.slug,
@@ -739,7 +802,23 @@ def summarize_stage_cost(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             sum(_number(row.get("attempts_with_a_recorded_cause")) for row in rows)
         ),
         "failure_census": census,
+        # Summed rather than maximised or last-taken; see trap one in `src/call_cost.py`.
+        # A row that recorded nothing contributes nothing and does not turn the total into
+        # a measured zero.
+        RECORD_FIELD: run_call_cost(rows).to_dict(),
     }
+
+
+def run_call_cost(rows: Sequence[Mapping[str, Any]]) -> CallCost:
+    """Every row's cost report, summed into one.
+
+    Separate from :func:`summarize_stage_cost` so the run report and the ledger summary do
+    one addition rather than two -- the same reason the summary itself is not done twice.
+    """
+    total = CallCost()
+    for row in rows:
+        total = total + CallCost.from_mapping(row.get(RECORD_FIELD))
+    return total
 
 
 def format_stage_cost_summary(rows: Sequence[Mapping[str, Any]]) -> str:
@@ -793,3 +872,57 @@ def _number(value: Any) -> float:
         return float(value)
     except (TypeError, ValueError):
         return 0.0
+
+
+# ---------------------------------------------------------------------------
+# What the run cost, for a human, once, at the end
+# ---------------------------------------------------------------------------
+
+#: The sentence that bounds the total. Printed every time the total is, because a bill that
+#: does not say what it covers is read as covering everything, and this one does not: the
+#: router's two backend calls happen at a stage *exit*, after
+#: ``ResearchManager._run_stage`` has closed the meter, so there is no visit to charge them
+#: to. ``tests/test_cost_is_recorded_and_unread.py`` derives the dispatch sites from the
+#: syntax and fails when a new one appears in neither column.
+COST_SCOPE_NOTE = (
+    "Covers the operator, review and validity calls the manager dispatched inside a stage "
+    "visit. The routing agent's calls happen at a stage exit, outside any visit, and are "
+    "not in this total."
+)
+
+#: The line a run with nothing to report prints. Says which of the two it is: a run whose
+#: ledger is empty and a run whose backend priced nothing look the same in a table of
+#: dashes.
+NO_COST_RECORDED = (
+    "No backend reported a cost for this run. Nothing here is a measured zero."
+)
+
+
+def format_run_cost_report(rows: Sequence[Mapping[str, Any]]) -> str:
+    """What the run cost: one line per stage visit, then the total. Terminal output.
+
+    This is the one place the numbers are for a person, and the whole of what "report
+    tokens and dollars at the end of the run" asks for. It is not written into
+    ``workspace/report/``, not into the PDF, and not into ``logs.txt``: the deliverable does
+    not change, and the machine-readable copy is the ledger itself.
+    ``tests/test_cost_is_recorded_and_unread.py`` pins all three.
+
+    Every line names the four token fields separately and the sum with its addends spelled
+    out, because ``input_tokens`` alone is the uncached remainder and is five orders of
+    magnitude below the truth on the measured runs -- see :mod:`src.call_cost`. There is
+    deliberately no bare "tokens used" figure anywhere in this output.
+    """
+    if not rows:
+        return NO_COST_RECORDED
+    lines: list[str] = []
+    for row in rows:
+        cost = CallCost.from_mapping(row.get(RECORD_FIELD))
+        lines.append(
+            f"{row.get('stage', '?')} visit {row.get('visit', '?')}: {format_call_cost(cost)}"
+        )
+    total = run_call_cost(rows)
+    lines.append("")
+    lines.append(f"Run total: {format_call_cost(total)}")
+    lines.append(describe_coverage(total))
+    lines.append(COST_SCOPE_NOTE)
+    return "\n".join(lines)
