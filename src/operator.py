@@ -1484,6 +1484,20 @@ Original stderr:
         continue_session: bool,
         allow_create: bool = True,
     ) -> str | None:
+        # A persisted id is good for a *continuation* and for nothing else. `--session-id`
+        # accepts a uuid once; the second time the CLI answers `Error: Session ID <uuid>
+        # is already in use.`, which matches none of `_looks_like_resume_failure`'s
+        # patterns, so no fallback fires and the attempt burns with nothing written.
+        #
+        # A stage can be entered more than once -- a revisit edge, `--redo-stage`,
+        # `--resume-run` into an unapproved stage -- and every entry starts the attempt
+        # loop at `continue_session = False` in `_run_stage`, with `build_prompt` rather
+        # than `build_continuation_prompt`. That is a new conversation and it needs a new
+        # id. The one entry that deliberately resumes, Studio's pending feedback, sets the
+        # flag to True and still gets the persisted id and `--resume`.
+        if not continue_session:
+            return str(uuid.uuid4())
+
         broken_session_id: str | None = None
         session_state_path = paths.stage_session_state_file(stage)
         if session_state_path.exists():
