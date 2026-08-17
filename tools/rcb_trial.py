@@ -90,9 +90,9 @@ from src.trial_driver import (  # noqa: E402,F401
     autor_pids,
     boot_id,
     claim_stale_lock,
-    contrast_log,
     digest_bytes,
     foreign_runs,
+    git_contrast_log,
     git_dirty,
     git_head,
     heartbeat,
@@ -106,6 +106,23 @@ from src.trial_driver import (  # noqa: E402,F401
     watch,
     write_json,
 )
+
+#: What one of *this* driver's own children looks like in ``/proc``, for
+#: :func:`src.trial_driver.autor_pids`.
+#:
+#: Deliberately this driver's two and not :data:`src.trial_driver.AGENT_SCRIPT_NAMES`.
+#: The question here is "is the child I recorded still alive", asked as a membership test
+#: against a pid this driver wrote down itself, so another benchmark's live agent has no
+#: business in the set -- and the set is narrow rather than a bare ``/proc`` listing
+#: because the operating system hands a dead driver's pid to somebody else's process,
+#: which is the ordinary case and not the rare one. Also not written inside the shared
+#: kernel: a benchmark's literals frozen into shared code are a default that cannot even
+#: be overridden, and the second driver would have got a set that never contains its own
+#: children.
+#:
+#: ``fake-run`` is a subcommand of this file rather than an agent, and it is here because
+#: the dry run launches it as a child exactly like a real run.
+OUR_RUN_MARKERS = ("rcb_agent.py", "rcb_trial.py fake-run")
 
 #: Extensions the benchmark's image sweep recognises. Duplicated here on purpose: the
 #: admission clause has to count what the scorer would show the judge, and importing
@@ -711,7 +728,9 @@ def build_report(plan: TrialPlan) -> str:
     observed = sorted({item.env.judge_model for item in evidences if item.env.judge_model})
     return format_rcb_trial_report(
         trial,
-        contrast_log=contrast_log(Path(plan.treatment.worktree), plan.control.sha, plan.treatment.sha),
+        contrast_log=git_contrast_log(
+            Path(plan.treatment.worktree), plan.control.sha, plan.treatment.sha
+        ),
         plan_digest=plan.digest,
         judge_model=", ".join(observed) or plan.judge_model,
         planned_judge_model=plan.judge_model,
@@ -847,10 +866,12 @@ def cmd_run(plan: TrialPlan) -> int:
                 plan,
                 states,
                 now=time.time(),
-                # Only AutoR-shaped pids. A bare `/proc` listing would abort the trial on
-                # any pid the kernel happened to hand to somebody else's process after
-                # the driver died, which is the ordinary case rather than the rare one.
-                live_pids=autor_pids(),
+                # Only this driver's own shape of child. A bare `/proc` listing would
+                # abort the trial on any pid the kernel happened to hand to somebody
+                # else's process after the driver died, which is the ordinary case rather
+                # than the rare one; and the markers are named here, by the driver that
+                # knows what it launches, rather than assumed by the shared kernel.
+                live_pids=autor_pids(markers=OUR_RUN_MARKERS),
                 final_pass_done=done_marker.exists(),
             )
             print(f"[{time.strftime('%H:%M:%S')}] {action}")

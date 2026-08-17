@@ -70,14 +70,17 @@ they are, and both are stated as what goes wrong rather than as a principle:
    ends and the goal entry point -- and read by the function, which the constant it
    replaced was not.
 
-``autor_pids`` sits closest to that line and is on this side of it by a hair, so the
-hair is written down: it answers "is a pid I launched still alive", which is a different
-question from ``is_backed_run``'s "is somebody else spending the quota", and it answers
-it with the script names of *the driver asking*. It is not widened to
-:data:`AGENT_SCRIPT_NAMES`, because a driver that counted another benchmark's agent as
-one of its own live children would read a dead run as running and wait forever. A second
-driver needs its own census, not this one; what it shares is the ``/proc`` reading
-underneath.
+``autor_pids`` answers a third question -- "is a pid *I* launched still alive" -- and it
+is neither of the two above. It is not :data:`AGENT_SCRIPT_NAMES`, because a driver that
+counted another benchmark's agent as one of its own live children would read a dead run
+as running and wait forever; and it is not one benchmark's script names either, which is
+what it was until the second driver was written. Its markers are a required keyword, for
+the same reason ``marker`` is: the first version had ``rcb_agent.py`` frozen into its
+body under a docstring that said it answered for anybody, so a FrontierScience driver
+calling it would have got a set that never contains its own children, read every live
+run as dead, and -- per the abandon path -- relaunched beside processes that were still
+executing. A hardcoded list is worse than a default, because it cannot even be
+overridden.
 """
 
 from __future__ import annotations
@@ -163,16 +166,27 @@ def lock_is_live(payload: Mapping[str, Any], *, marker: str) -> bool:
     and after a reboot a pid *and* a matching cmdline can both be somebody else's
     process entirely, which is why the boot id is in the lock file.
 
-    *marker* is what the holder's command line has to contain, and it has no default on
-    purpose. It used to default to ``rcb_trial.py``, which was invisibly correct while
-    one driver existed and silently catastrophic the moment a second one did: a driver
-    called ``fs_trial.py`` asked whether an ``rcb_trial.py`` held the lock, was told no,
-    and took over a lock a live sibling was holding. Every caller now names itself.
+    The cmdline condition asks about the *holder*, so the string it looks for is the
+    holder's own, read back out of the lock file that holder wrote. Asking whether the
+    holder's command line contains the *asker's* name answers a different question --
+    "is this lock mine" -- and answers it False for every live lock a driver of the other
+    kind is holding, which is a takeover of a running sibling. That is the same escape
+    the required *marker* closes, relocated from "fs versus fs" to "fs versus rcb", and a
+    shared ``state_dir`` is one copy-pasted plan field away.
+
+    *marker* is therefore the fallback and not the question: it is what a lock file with
+    no recorded marker is read with, i.e. one written by a driver from before
+    :func:`acquire_lock` recorded it. It stays required and has no default, because the
+    fallback is the case where getting it wrong is invisible -- it used to default to
+    ``rcb_trial.py``, so a driver called ``fs_trial.py`` asked whether an
+    ``rcb_trial.py`` held the lock, was told no, and took over a lock a live sibling was
+    holding.
     """
     pid = int(payload.get("pid") or 0)
     if pid <= 0 or not Path(f"/proc/{pid}").exists():
         return False
-    if marker not in process_cmdline(pid):
+    wanted = str(payload.get("marker") or marker)
+    if wanted not in process_cmdline(pid):
         return False
     recorded = str(payload.get("boot_id") or "")
     return not recorded or recorded == boot_id()
@@ -212,10 +226,11 @@ def acquire_lock(state_dir: Path, *, marker: str) -> Path:
     """``os.link``, because ``O_CREAT|O_EXCL`` is not reliably atomic on NFS.
 
     *marker* names the calling driver -- ``"rcb_trial.py"``, ``"fs_trial.py"`` -- and is
-    required for the reason :func:`lock_is_live` gives: the liveness question is "is a
-    process of my kind still holding this", and a driver that lets the answer default
-    asks it about somebody else's kind. It is recorded in the lock file too, so an
-    operator reading a lock can see which driver wrote it without decoding ``argv``.
+    required for the reason :func:`lock_is_live` gives: the liveness question is "is the
+    process that wrote this lock still running", and it cannot be answered without
+    knowing what that process is called. So the marker is *recorded*, and that field is
+    what the next driver reads; it is load-bearing rather than an operator convenience,
+    and ``TwoDriversOnOneBoxTests`` fails if it stops being written.
     """
     state_dir.mkdir(parents=True, exist_ok=True)
     lock = state_dir / "driver.lock"
@@ -258,14 +273,31 @@ def release_lock(lock: Path) -> None:
         lock.unlink(missing_ok=True)
 
 
-def autor_pids() -> frozenset[int]:
-    """Live pids whose command line is an agent run — ours or anybody's."""
+def autor_pids(*, markers: Sequence[str]) -> frozenset[int]:
+    """Live pids whose command line contains one of *markers* — the caller's own children.
+
+    This is "is a pid I launched still alive", not :func:`is_backed_run`'s "is somebody
+    else spending the quota", and the two must not be folded: the caller compares this
+    set against a child pid it recorded itself, so widening it to every benchmark's agent
+    would make a driver wait forever on a run that had already died and left its pid to
+    be reused.
+
+    *markers* is required and has no default because the answer is different for every
+    driver and the wrong answer is silent. It used to be ``rcb_agent.py`` and
+    ``rcb_trial.py fake-run``, written into this body -- so a second driver's children
+    were never in the set, every live run of its own read as dead, and the caller's next move
+    on a dead run is to abandon it and start a fresh one beside the one still executing.
+    Substring matching on the joined command line is deliberate here and wrong in
+    :func:`is_backed_run`: a marker like ``rcb_trial.py fake-run`` is a subcommand, and
+    the caller is asking about pids it launched rather than trusting an arbitrary
+    process's argv.
+    """
     found: set[int] = set()
     for entry in Path("/proc").iterdir():
         if not entry.name.isdigit():
             continue
         line = process_cmdline(int(entry.name))
-        if "rcb_agent.py" in line or "rcb_trial.py fake-run" in line:
+        if any(marker in line for marker in markers):
             found.add(int(entry.name))
     return frozenset(found)
 
@@ -287,7 +319,10 @@ def autor_pids() -> frozenset[int]:
 #: This replaces ``_RUN_SCRIPTS``, which held the same two names, was correct, and was
 #: read by nothing for the whole life of the driver -- the predicate had the list
 #: inlined. ``tests/test_trial_driver.py`` iterates this table rather than hard-coding
-#: the names, so a name added here without being wired fails.
+#: the names, so an entry :func:`is_backed_run` does not consult fails. Adding a key is
+#: *not* what that test catches -- the function reads the table generically, so a new key
+#: is recognised by construction -- and the keys are pinned separately by
+#: ``test_the_constant_names_both_agents_and_the_goal_entry_point``.
 AGENT_SCRIPT_NAMES: dict[str, tuple[str, ...]] = {
     "rcb_agent.py": (),
     "fs_agent.py": (),
@@ -431,7 +466,16 @@ def git_dirty(worktree: Path) -> bool:
     return out.returncode != 0 or bool(out.stdout.strip())
 
 
-def contrast_log(worktree: Path, control: str, treatment: str) -> str:
+def git_contrast_log(worktree: Path, control: str, treatment: str) -> str:
+    """The commits the treatment arm has and the control arm does not.
+
+    Named like ``git_head`` and ``git_dirty`` beside it, and renamed off
+    ``contrast_log`` because that is also a keyword parameter of ``src/rcb_trial.py``'s
+    report formatter. ``tests/test_declared_symbols_are_wired.py`` matches bare
+    identifiers, so that unrelated local made this function look referenced from inside
+    ``src/`` and kept it out of the ledger of symbols only a tool reaches. It is not
+    referenced there: ``tools/rcb_trial.py`` is the only caller.
+    """
     out = subprocess.run(
         ["git", "-C", str(worktree), "log", "--oneline", f"{control}..{treatment}"],
         capture_output=True, text=True, check=False,
