@@ -218,7 +218,7 @@ rest of the run.
 
 ### 4.1 The declared topology already existed; nothing read it for this
 
-AutoR declares eighteen typed information channels. Each names the stage that produces it
+AutoR declares twenty typed information channels. Each names the stage that produces it
 and the set of stages that read it — a producer→consumer topology, written down rather than
 approximated. It was used to assemble prompts, and for nothing else.
 
@@ -539,6 +539,17 @@ stages would add first.
 The corollary is worth keeping in view: the finest grain at which this design can currently
 withdraw is one stage, and the finest grain at which it can withdraw *exactly* is one
 instrumented write. Between those two lies everything an uninterruptible stage does.
+
+**What would give it a caller, and what that costs.** A harness that starts a fresh process
+for every step and rebuilds the step's whole context from disk has the boundary this
+mechanism needs at every step, for free — the rewind and the continuation stop being opposed
+because there is no continuation to oppose. AMAP-ML's LongHorizon-Harness is built that way,
+and [round-loop-and-stage-graph.md](round-loop-and-stage-graph.md) reads it against this
+design. The trade is legible: it pays a full context rebuild per step and gains a
+preemption point per step, while AutoR pays nothing per attempt and has no preemption point
+at all. The same document records what the rebuild discipline is worth on its own — a
+harness that never reconstructs its state does not find out which parts of it are
+unreconstructable, and two of AutoR's are not.
 
 ### Three states, not two
 
