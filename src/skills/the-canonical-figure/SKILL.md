@@ -31,6 +31,16 @@ is right to show it. But an original figure answers a question the reader did
 not ask yet. The standard one answers "did the thing work, in the way this field
 checks that". Publish both, standard first.
 
+## The trace has to be written down while it exists
+
+A training curve is the standard figure that is easiest to lose, because the numbers exist only
+while the loop is running. Append `(epoch, train_loss, val_loss, val_metric)` to a CSV under
+`results/` inside the loop, before it returns. A list held in memory, or a per-seed dict collected
+at the end of a function, is not a trace — it is a variable that goes out of scope. Measured
+across one 40-task batch and its two comparators, 135 Python files contained **zero** plots with
+an epoch axis, and the requirement asking for one scored 0 on the task where it carried half the
+weight.
+
 ## How to decide
 
 At design time, before any results exist, ask: what figures does a paper making
