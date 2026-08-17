@@ -866,6 +866,48 @@ will do — which is the cheapest way to see what the adapter writes where.
 
 ---
 
+## About a tenth of the weight asks about a paper the workspace does not contain
+
+A task-by-task study of the 2026-08-16 arm found 16 criteria, **4.00 of 40.0 total weight
+(10.0%)**, where AutoR's new code, AutoR's pre-fix code and a bare agent all score at or
+below 10. The study called that the remaining headroom. It is not headroom, and the
+correction is worth more than the original claim.
+
+Every one of those criteria names something specific — an analysis (`SHAP`), a dataset
+(`TextVQA`), a model (`Qwen2.5-3B`), a tool (`HADDOCK3`), an event (CAPRI round 57,
+target 268), a pipeline (`FlyWire`, `FAFB`). Those names come from the **target paper**,
+and the benchmark does not ship it. `related_work/` holds *other* papers. Searching only
+what the agent is given — `related_work/` and `data/`, nothing the run wrote —
+**2 of 30 distinctive identifiers from these criteria appear anywhere**:
+
+| task | supplied text | absent from it |
+|:---|---:|:---|
+| Neuroscience_000 #1–#3 | 3,463,517 chars | `SHAP`, `Lab1`, `Lab2`, `CSDS` |
+| Chemistry_002 #3–#4 | 1,602,208 chars | `CAPRI`, `HADDOCK3`, `VoroIF` |
+| Life_001 #0, #3 | 2,462,557 chars | `NeoAgDT`, `NetMHCpan` |
+| Information_001 #2 | **0 chars** | `Qwen2.5-3B`, `TextVQA` |
+| Neuroscience_002 #0, #4 | **0 chars** | `FlyWire`, `FAFB`, `FFN`, `EmbedNet` |
+| Information_003 #4 | **0 chars** | `DIDS`, `MFL` |
+
+Four of those tasks supply no readable text at all: their `related_work/` and `data/` are
+tensors and images. Three and a half million characters of Neuroscience_000's supplied
+papers contain the string "SHAP" zero times.
+
+So this is not a gap a skill or a gate can close. It is the benchmark's floor for an agent
+that is not given the document it is graded against, and any claim about how much of
+ResearchClawBench is reachable should be quoted against **90%**, not 100%.
+
+The one route that would reach it is fetching the target paper from the web and reading
+its methods section. That is a research-integrity question rather than an engineering one
+— on a reproduction benchmark, reading the target's results and restating them is close to
+copying the answer — and it is recorded here rather than taken.
+
+`python tools/unreachable_criteria.py --arms <score dirs> --runs <workspace root>`
+re-derives all of it. Two earlier attempts at this measurement were wrong in the same
+direction: one searched the criterion's words in a corpus that included `_score.json`, the
+judge's own output, which contains the criteria verbatim, and got 30 of 30 "present". A
+search for a criterion's words that includes the criterion answers yes by construction.
+
 ## Measuring a change against the benchmark score
 
 AutoR's own rubric cannot answer "did this PR make the research better" — it is AutoR
