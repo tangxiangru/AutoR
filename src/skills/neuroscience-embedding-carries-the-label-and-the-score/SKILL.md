@@ -1,0 +1,22 @@
+---
+name: neuroscience-embedding-carries-the-label-and-the-score
+description: Use when a low-dimensional embedding — UMAP, t-SNE, PHATE, diffusion map, PCA — is about to become a results figure, and you are choosing what colours it and what its caption says. Covers colouring by the discrete annotation the claim is about rather than by a continuous ramp, and the separation statistics the panel owes in its own caption.
+applies_when: continuous cellular trajector
+stages: 03_study_design, 06_analysis, 07_writing
+---
+
+# The embedding is coloured by the label the claim is about, and carries its score
+
+An embedding panel is not decoration. It is the claim that the structure your method kept is the structure the biology has, and a reader tests it one way: by looking for the *annotated groups* and asking whether they land in separate places. That test only exists if the annotation is what colours the points.
+
+So colour by the discrete variable the claim is about — cell-cycle phase, cell type, treatment, region, lineage, whatever categorical column sits in the observation table — one colour per level, a legend naming the levels, and the level counts in the caption. A continuous ramp cannot answer a grouping question. It shows a gradient, and a gradient in an embedding built to be smooth is close to guaranteed; this holds whether the ramp is a pseudotime your pipeline inferred or a genuine clock that shipped with the file, so a real ground-truth variable is not an excuse for it. When the continuous variable matters too — and a ground-truth clock usually does — draw both, in adjacent panels, on the same coordinates, rather than choosing one. Before you settle, list every categorical column the file ships and say, for each one that is not colouring a panel, why not. A column present in the data, used only for a composition bar chart, and absent from every embedding is an axis nobody looked at.
+
+Then give the panel its numbers, in its own caption, computed on exactly the cells and the feature set the panel shows. Three of them, because these are what the field quotes for a claim of this shape: how well a simple classifier recovers the discrete label from that feature set, with the fold count; how well unsupervised clustering of that embedding agrees with the same label, as NMI or ARI; and how strongly the recovered ordering correlates with whatever continuous ground truth exists, as Kendall or Spearman. Print each beside the same quantity for the untreated baseline panel — all features, no selection — so the reader gets the contrast without doing arithmetic. The contrast is the point: a good number alone says nothing about what the method bought.
+
+A caption that describes only geometry — "a smooth arc", "tight clusters", "more dispersion" — is an assertion about a picture, and it is the sentence a failed run would write too. The statistics are what make it checkable, and they belong in the caption and in the paragraph that introduces the figure, not only in a ladder table in an appendix. A figure and its qualifying numbers are one object; a reader who has to go looking for the second half will read the first half alone.
+
+Hold the coordinates, the point size and the colour mapping fixed across panels meant to be compared, so a difference in the picture is a difference in the result.
+
+## Why this is here
+
+On this task the run's PHATE panel — its direct answer to what the brief asked for — was coloured by the shipped continuous age variable on a viridis ramp with lineage drawn as a marker outline, while the four-level phase annotation the same file ships was loaded in the same figure module and spent on a composition bar chart. The reviewer read the colouring as inferred age, wrote that tight phase clustering "cannot be assessed visually", and added that the panel's accuracy, NMI and pseudotime correlation were never stated for that embedding nor compared to the all-feature baseline. The run had all three: 0.9620, 0.5788 and 0.6587 occur three, three and two times in its 56,830-character report, the earliest at line 109 of 308, none within the first 10,000 characters and none anywhere near the figure — the section that owns the panel states no metric at all. The comparator carried its equivalents in its opening pages and scored 53.7 on that criterion against this run's 26.0, at a weight of 0.20.
