@@ -487,6 +487,12 @@ class RecoveryReport:
     accumulated: RevertReport = field(default_factory=RevertReport)
     observed: RevertReport = field(default_factory=RevertReport)
     emissions_discarded: int = 0
+    #: Files whose creator was inside the withdrawn range. Counted from the plan rather
+    #: than from the applied list, so a file the recovery could not remove is still
+    #: reported as one the withdrawal was owed.
+    deleted: int = 0
+    #: Files that existed before the range and were returned to an earlier version.
+    rewound: int = 0
 
     @property
     def touched(self) -> bool:
@@ -554,6 +560,8 @@ def recover_to_stage(paths: RunPaths, stage: StageSpec, reason: str = "") -> Rec
         accumulated=accumulated,
         observed=observed,
         emissions_discarded=len(discarded),
+        deleted=sum(1 for item in plan if item.deletes),
+        rewound=sum(1 for item in plan if not item.deletes),
     )
 
 

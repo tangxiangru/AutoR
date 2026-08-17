@@ -57,6 +57,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable
 
+from .stage_graph import REVISIT_EDGES
 from .utils import RunPaths, StageSpec
 
 
@@ -278,6 +279,12 @@ def _idea_pool(context: ChannelContext) -> str | None:
     return manager._build_idea_pool(context.paths, context.stage, context.attempt_no)  # noqa: SLF001
 
 
+def _withdrawal_history(context: ChannelContext) -> str | None:
+    from .withdrawal_ledger import format_withdrawal_history_for_prompt
+
+    return format_withdrawal_history_for_prompt(context.paths, context.stage)
+
+
 def _settled_reasoning(context: ChannelContext) -> str | None:
     from .settled_reasoning import build_block
 
@@ -347,6 +354,13 @@ def _verdicts(context: ChannelContext) -> str | None:
     from .preregistration import format_outcomes_for_prompt
 
     return format_outcomes_for_prompt(context.paths)
+
+
+#: Every stage a backward edge can land on. Derived rather than listed: the withdrawal
+#: history has to reach whoever can repeat the withdrawn decision, and that set is already
+#: written down as the targets of ``REVISIT_EDGES``. A new backward edge brings its target
+#: into the readership with it.
+_REVISIT_TARGETS: frozenset[str] = frozenset(edge.target for edge in REVISIT_EDGES)
 
 
 CHANNELS: tuple[Channel, ...] = (
@@ -650,5 +664,28 @@ CHANNELS: tuple[Channel, ...] = (
         consumed_by=frozenset({"07_writing", "08_dissemination"}),
         build=_verdicts,
         rationale="Writing may only claim what came out supported; dissemination reports the same.",
+    ),
+    Channel(
+        key="withdrawal_history",
+        heading="## What This Run Has Already Withdrawn",
+        produced_by=None,
+        consumed_by=_REVISIT_TARGETS,
+        build=_withdrawal_history,
+        preface=(
+            "These are decisions this run made, acted on, and then took back. The work "
+            "they produced is no longer on disk. Do not redo what was withdrawn without "
+            "addressing the reason it was."
+        ),
+        rationale=(
+            "A withdrawal returns the workspace to what preceded it, which is what makes a "
+            "backward edge safe to take and also what makes the same mistake cheap to "
+            "repeat: a stage re-entered after its work was taken back arrives at a "
+            "workspace that looks exactly as it did the first time. The state is supposed "
+            "to leave no trace; the reason is not. Delivered to the seven stages a backward "
+            "edge can land on, because those are the ones that can repeat a withdrawn "
+            "decision. Stage 00 and Stage 08 are no edge's target -- intake runs once "
+            "before any withdrawal can have happened, and dissemination packages a result "
+            "it cannot revisit."
+        ),
     ),
 )
