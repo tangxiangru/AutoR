@@ -401,6 +401,31 @@ class NothingUnderSrcDecidesOnTheCostTests(unittest.TestCase):
 #: whichever reader needs it. An exemption is a decision somebody wrote down, and there is
 #: exactly one.
 LITERAL_EXEMPTIONS: dict[str, str] = {
+    "src/frontierscience.py": (
+        "Counts a foreign API's `output_tokens` out of a transcript and out of a judge "
+        "response. Neither is a result event in the sense `is_result_event` matches, and "
+        "neither ever becomes a CallCost. The number is written into `_meta.json` and into "
+        "the benchmark's score document so a reader can see what an answer cost to "
+        "produce; nothing in the FrontierScience path branches on it, and the front end "
+        "opens no stage-cost meter at all. Reading `TOKEN_FIELDS` here would tie AutoR's "
+        "billing vocabulary to two external schemas on the strength of one name agreeing."
+    ),
+    "src/fs_scoring.py": (
+        "Names `output_tokens` while reading the FrontierScience judge's usage block off "
+        "the OpenAI Responses API. That is a grading call made after a run has finished, "
+        "by a separate program, against a separate account; it is not a stage, it charges "
+        "no meter, and no CallCost is built from it. The figure is recorded beside the "
+        "verdict because a judge that spent its whole budget on reasoning and returned "
+        "nothing is a refusal, and the token count is how that is told apart from a zero."
+    ),
+    "src/fs_trial.py": (
+        "Names `output_tokens` in the cost column the paired-trial report prints beside "
+        "each arm's score, summed from the per-run metadata the front end already wrote. "
+        "A benchmark difference quoted without what it cost is half a result; a pipeline "
+        "arm makes several times a single call's tokens by construction, and the reader "
+        "is owed that beside the win. The trial decides nothing on it: no admission "
+        "clause reads it, and the publication ceiling is a refusal rate, not a price."
+    ),
     "src/terminal_ui.py": (
         "Renders the Codex backend's `turn_completed` panel, which is a different event "
         "with a different vocabulary: it carries `cached_input_tokens`, a key no measured "
@@ -1083,6 +1108,15 @@ DISPATCH_SITES: tuple[Dispatch, ...] = (
         "classified and a call site somebody excused look identical from outside.",
     ),
     Dispatch(
+        "src/frontierscience.py::invoke",
+        False,
+        "The FrontierScience front end's own operator loop, the sibling of `src/rcb.py`'s. "
+        "It answers one written question with one call and never enters the stage graph, "
+        "so there is no visit open to charge and no meter to charge it to. What it spends "
+        "is written into the run's `_meta.json` instead, which is where the benchmark's "
+        "own cost column comes from.",
+    ),
+    Dispatch(
         "src/rcb.py::_attempt",
         False,
         "The benchmark front end's own operator loop, which does not run the stage graph "
@@ -1141,7 +1175,7 @@ class EveryBackendDispatchIsClassifiedTests(unittest.TestCase):
         against :data:`DISPATCH_SITES`, which is itself checked against the tree.
         """
         uncharged = [site for site in DISPATCH_SITES if not site.charged]
-        self.assertEqual(len(uncharged), 3)
+        self.assertEqual(len(uncharged), 4)
         self.assertEqual(len(DISPATCH_SITES) - len(uncharged), 4)
         source = REPO.joinpath("src", "stage_cost.py").read_text(encoding="utf-8")
         self.assertIn(
@@ -1801,6 +1835,18 @@ COST_AWARE_MODULES: dict[str, str] = {
     "src/utils.py": "declares the field on OperatorResult, which is the wire itself",
     "src/stage_cost.py": "records it on the visit row, sums it over the run, formats it",
     "src/manager.py": "charges each call to the open meter and prints the total to the terminal",
+    "src/frontierscience.py": (
+        "counts a transcript's output tokens into the benchmark run's `_meta.json`, and "
+        "names the field while reading a foreign usage block; see LITERAL_EXEMPTIONS"
+    ),
+    "src/fs_scoring.py": (
+        "records the judge's own token usage beside its verdict, so a judge that spent "
+        "its budget on reasoning is a refusal rather than a zero; see LITERAL_EXEMPTIONS"
+    ),
+    "src/fs_trial.py": (
+        "prints the cost column beside each arm's score in the paired-trial report and "
+        "decides nothing on it; see LITERAL_EXEMPTIONS"
+    ),
     "src/terminal_ui.py": (
         "names two of the field strings in the Codex `turn_completed` panel, which is a "
         "different backend's usage vocabulary and never becomes a CallCost; see "
@@ -2114,8 +2160,8 @@ MUTATIONS: tuple[tuple[str, str, str, str], ...] = (
      '                "timed_out": True,\n                RECORD_FIELD: spend.to_dict(),\n',
      '                "timed_out": True,\n'),
     ("the reviewer's verdict carries no price", APPROVAL,
-     "        return replace(decision, call_cost=spend.total)",
-     "        return decision"),
+     "        decision = replace(decision, call_cost=spend.total)",
+     "        pass  # the cost is dropped"),
     ("the reviewer's sink is never filled", APPROVAL,
      "        if spend is not None:\n            spend.add(cost_from_stream_meta(stream_meta))\n",
      ""),

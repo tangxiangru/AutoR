@@ -75,8 +75,10 @@ from .experiment_manifest import write_experiment_manifest
 from .hypothesis_manifest import write_hypothesis_manifest
 from .information_flow import CHANNELS, ChannelContext, render_inbound
 from .prompt_fragments import compose_stage_template
+from .review_custody import CUSTODY_MODES, DEFAULT_CUSTODY_MODE
 from .validity_review import (
     RESTORE_WITNESS_HEADING,
+    TAMPERED as VALIDITY_TAMPERED,
     ValidityReviewer,
     ValidityReviewOutcome,
     restore_validity_review,
@@ -307,7 +309,13 @@ class ResearchManager:
         archive_steer: bool = False,
         archive: "Any | None" = None,
         cross_reviewer: GeminiCrossReviewer | None = None,
+        custody_mode: str = DEFAULT_CUSTODY_MODE,
     ) -> None:
+        #: Whether a reviewer episode is censused, and whether a breach demotes its
+        #: verdict. Held here as well as on the reviewer because the adversarial validity
+        #: pass is built per stage from ``self.operator`` and has no reviewer to read it
+        #: off. See :mod:`src.review_custody`.
+        self.custody_mode = custody_mode if custody_mode in CUSTODY_MODES else DEFAULT_CUSTODY_MODE
         self.project_root = project_root
         self.runs_dir = runs_dir
         self.operator = operator
@@ -4688,9 +4696,13 @@ class ResearchManager:
         self.ui.show_status(
             f"Adversarial validity review of {stage.stage_title}...", level="info"
         )
-        reviewer = ValidityReviewer(self.operator, ui=self.ui)
+        reviewer = ValidityReviewer(self.operator, ui=self.ui, custody_mode=self.custody_mode)
         outcome = self._attempt_validity_review(paths, stage, stage_markdown, reviewer, attempt_no=1)
-        if outcome.degraded:
+        # `and not tampered`: the re-ask exists for "a single 429 or a truncated stream",
+        # and a tamper is neither. A second call would hand a reviewer that already used
+        # one write window a second one, and there is nothing about a tamper that a
+        # retry repairs.
+        if outcome.degraded and outcome.completion != VALIDITY_TAMPERED:
             # Exactly once. A second failure is evidence about the backend, not about
             # this prompt, and a third call would buy the same empty list at the same
             # price. What the re-ask does buy back is the routine case: a single 429 or

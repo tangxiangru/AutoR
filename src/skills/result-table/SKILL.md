@@ -1,6 +1,7 @@
 ---
 name: result-table
 description: Use when turning measured results into a table or figure for the paper — building a LaTeX or markdown results table from workspace/results/*.json, deciding what uncertainty to report, choosing which baselines and ablations belong in the main table, or writing a caption that stands alone.
+stages: 03_study_design, 06_analysis, 07_writing
 ---
 
 # Results tables

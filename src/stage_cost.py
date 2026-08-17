@@ -100,9 +100,10 @@ one wrong, and both are wrong in a direction that looks plausible.
 
 **Which calls it covers.** The ones this row already counts and no others:
 :attr:`StageCostRow.operator_invocations`, :attr:`StageCostRow.review_invocations` and the
-adversarial validity pass, all dispatched by the manager inside the visit. Three other
-places in ``src/`` reach the backend — the router's two, and the benchmark front end's —
-and none of them is inside a stage visit, so none of them can be charged to one.
+adversarial validity pass, all dispatched by the manager inside the visit. Four other
+places in ``src/`` reach the backend — the router's two, and one for each of the two
+benchmark front ends — and none of them is inside a stage visit, so none of them can be
+charged to one.
 ``tests/test_cost_is_recorded_and_unread.py`` derives that population from the syntax and
 fails when a new dispatch site joins the tree unclassified, and
 :func:`format_run_cost_report` prints the boundary beside the total rather than leaving a

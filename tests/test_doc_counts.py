@@ -80,9 +80,27 @@ NUMBER_WORDS = {
     49: "forty-nine", 50: "fifty",
 }
 
+#: Above fifty the table stops and the prose switches to numerals. The skill pack passed
+#: fifty in one merge; extending the table to a hundred and twenty would be a hundred and
+#: twenty rows kept in sync with nothing, and "one hundred and twenty skills ship today"
+#: is not how the rest of this README writes a count that size anyway. A value with no
+#: spelling is checked against its numeral instead, which is the same gate on a different
+#: surface -- and a document that spells a number this table cannot is still caught,
+#: because the numeral it should have used is absent.
+SPELLED_UP_TO = max(NUMBER_WORDS)
 
-def spelled(value: int) -> str:
-    return NUMBER_WORDS[value]
+
+def spelled(value: int) -> str | None:
+    return NUMBER_WORDS.get(value)
+
+
+def _mentions(text: str, noun: str) -> bool:
+    """Whether the document talks about this noun at all.
+
+    A document that never mentions the noun is not stale about it, and every tracked
+    document mentions only some of them.
+    """
+    return re.search(r"\s+".join(re.escape(w) for w in noun.split()), text, re.I) is not None
 
 
 def _adaptive_edges() -> int:
@@ -293,11 +311,22 @@ class CountsInProseMatchTheSymbolTests(unittest.TestCase):
                     word = match.group(1).lower()
                     if word not in NUMBER_WORDS.values():
                         continue
+                    # A spelled count where the symbol is past the table is wrong twice
+                    # over: stale, and spelled at a size this document writes in numerals.
                     if word != spelled(value):
                         line = text[: match.start()].count("\n") + 1
+                        expected = spelled(value) or f"the numeral {value}"
                         wrong.append(
                             f"{name}:{line} says '{match.group(0)}' but the symbol "
-                            f"counts {value} ({spelled(value)})"
+                            f"counts {value} ({expected})"
+                        )
+                if value > SPELLED_UP_TO:
+                    numeral = re.compile(r"\b" + str(value) + r"\s+" + spaced + r"\b", re.I)
+                    spelled_out = pattern.search(text)
+                    if spelled_out is None and not numeral.search(text) and _mentions(text, noun):
+                        wrong.append(
+                            f"{name} states a count for '{noun}' that is neither the "
+                            f"numeral {value} nor a spelling this table knows"
                         )
         self.assertEqual(wrong, [], "\n".join(wrong))
 

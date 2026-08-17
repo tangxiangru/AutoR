@@ -1,6 +1,7 @@
 ---
 name: record-what-you-learned
 description: Use when a run is finished and the report is written, after the report is written, to record one reusable lesson for the next run in this field. Covers what counts as a lesson worth passing on, what must never be passed on, and how to write it.
+stages: 07_writing
 ---
 
 # Leave one note for the next run in this field

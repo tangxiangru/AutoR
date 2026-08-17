@@ -1,6 +1,7 @@
 ---
 name: run-the-conditions-the-source-ran
 description: Use at study design, before any experiment of your own is costed, on reproduction and method-evaluation tasks. Covers enumerating the systems, scenarios, stress sweeps and case studies the source names, running each one by name, measuring the preconditions the method declares it needs, and what to do when one of them fails.
+stages: 01_literature_survey, 03_study_design, 05_experimentation
 ---
 
 # The source's own systems, scenarios and stress tests are your experiment list

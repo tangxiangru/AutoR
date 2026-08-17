@@ -7,8 +7,11 @@ The commands AutoR is meant to be run with, each with a section below:
 | `python main.py` | The terminal research workflow. ([source](../main.py)) |
 | `python studio.py` | The local browser workspace. ([source](../src/backend/studio_http.py)) |
 | `python rcb_agent.py` | The unattended ResearchClawBench agent. ([source](../rcb_agent.py)) |
+| `python fs_agent.py` | The unattended FrontierScience-Research agent. ([source](../fs_agent.py)) |
 | `python tools/web_search.py` | Gemini-backed web search. ([source](../src/web_search.py)) |
 | `python tools/score_rcb_run.py` | Scores a finished benchmark workspace. ([source](../tools/score_rcb_run.py)) |
+| `python tools/score_fs_run.py` | Scores one FrontierScience answer against its rubric. ([source](../tools/score_fs_run.py)) |
+| `python tools/fs_trial.py` | Runs and reports a paired FrontierScience trial. ([source](../tools/fs_trial.py)) |
 | `python tools/archive_sample_complexity.py` | How many runs the archive needs before it can steer. ([source](../tools/archive_sample_complexity.py)) |
 
 Two further modules are executable and are deliberately not listed as commands,
@@ -18,17 +21,20 @@ Claude operator launches for itself (see [How the agent reaches
 it](#how-the-agent-reaches-it)), and `docs/ui-design/generate_progress_docx.py`
 regenerates one design document and needs `python-docx`.
 
-Every flag on those six is named below: `main.py`'s 61, `studio.py`'s 5,
-`tools/web_search.py`'s 4 and `tools/score_rcb_run.py`'s 9 each get their own
-table row, and `rcb_agent.py`'s 37 are covered as the six that are its own plus
-the 31 it shares with `main.py`, every one of the 31 spelled out by name.
+Every flag on those commands is named below: `main.py`'s 61, `studio.py`'s 5,
+`tools/web_search.py`'s 4, `tools/score_rcb_run.py`'s 9, `fs_agent.py`'s 31 and
+`tools/score_fs_run.py`'s 13 each get their own table row; `rcb_agent.py`'s 37
+are covered as the six that are its own plus the 31 it shares with `main.py`,
+every one of the 31 spelled out by name; and `tools/fs_trial.py` is four
+subcommands, one of which is a child process the dry run launches for itself.
 `tools/archive_sample_complexity.py` has none.
 
-Two of the six synopsis blocks are **subsets** — the common flags — and say so
-underneath: `main.py`'s and `rcb_agent.py`'s. The other four are not. `studio.py`,
-`tools/web_search.py` and `tools/score_rcb_run.py` show every flag their command
-declares, and `tools/archive_sample_complexity.py` has nothing to omit. Either
-way the tables are the surface.
+Two of the synopsis blocks are **subsets** — the common flags — and say so
+underneath: `main.py`'s and `rcb_agent.py`'s. The others are not. `studio.py`,
+`tools/web_search.py`, `tools/score_rcb_run.py`, `fs_agent.py` and
+`tools/score_fs_run.py` show every flag their command declares, and
+`tools/archive_sample_complexity.py` has nothing to omit. Either way the tables
+are the surface.
 
 For a task-oriented introduction, read the [English Guide](tutorial_en.md)
 instead.
@@ -252,6 +258,7 @@ approval. See [Stage Contract](stage-contract.md#2-the-artifact-gate).
 | `--panel-rounds N` | `2` | Maximum deliberation rounds. Round 1 is always independent; later rounds run only on disagreement. |
 | `--panel-models ROLE=MODEL...` | — | Assign a model per seat, as `role=model` or `role=backend:model` (`pi=opus skeptic=codex:default`). Heterogeneity is the lever with the best evidence behind it. |
 | `--persona PATH` | — | Markdown description of the researcher the panel stands in for, injected into every seat so they hold one consistent bar. |
+| `--review-custody {off,record,demote}` | `record` | <a id="reviewer-custody"></a>What to do about a reviewer that writes to the run root while judging it. Every reviewer is the same CLI the doer is, under `bypassPermissions`, with the `mcp_write` server mounted and the run root as its working directory; *"Do not edit files"* is prompt text. `record` takes a content census of the run root around every reviewer subprocess and writes [`review_custody.jsonl`](run-artifacts.md#directory-layout). `demote` additionally converts that episode's approval into a send-back — and only that: a refusal is left as the reviewer wrote it and an abort is never touched. `off` takes no census. The default is `record` rather than `demote` because the demotion's blast radius is bounded *above* by an archive replay (`tools/review_custody_replay.py`: 4 of 138 reviewer episodes, 2 of 27 approvals) and not measured below it — every one of those four was a reviewer re-running the doer's producer to check it reproduces, which a content census does not charge and an mtime replay cannot tell apart. |
 | `--cross-review {auto,gemini,off}` | `auto` | Independent second opinion on each approval, from a different model family. It can veto an approval it cannot defend and can never override a refusal, so it only makes the gate stricter. `auto` enables it when a Gemini backend is configured. Refused behind `--fake-operator` — see below. |
 | `--cross-review-model MODEL` | `gemini-3.1-pro-preview` | Model for the cross-model reviewer (`DEFAULT_CROSS_REVIEW_MODEL`, `src/cross_reviewer.py`). |
 
@@ -642,6 +649,113 @@ Full setup, the `agents.json` entry, and the output contract are in
 
 ---
 
+## `fs_agent.py`
+
+Answers **one** [FrontierScience-Research](frontierscience.md) question, in one of
+two ways, and writes `answer.md` plus a `_meta.json` the exit code is computed
+from. Never reads stdin. A set of questions is the trial driver's job.
+
+```
+python fs_agent.py [--task KEY] [--workspace PATH] [--dataset PATH]
+                   [--profile {direct,ideate}]
+                   [--answer-guidance {paper,minimal,coverage}]
+                   [--operator {claude,codex}] [--model MODEL]
+                   [--review-operator {claude,codex}] [--review-model MODEL]
+                   [--codex-command BIN] [--codex-sandbox MODE]
+                   [--answer-timeout SECONDS] [--stage-timeout SECONDS]
+                   [--first-stage STAGE] [--final-stage STAGE]
+                   [--max-attempts N] [--max-auto-skips N]
+                   [--ideation-panel | --no-ideation-panel]
+                   [--ideation-lenses LENS ...] [--ideation-models LENS=MODEL ...]
+                   [--ideas-per-proposer N]
+                   [--web-search {auto,gemini,native,off}]
+                   [--disallowed-tools TOOL ...]
+                   [--cross-review {auto,gemini,off}] [--cross-review-model MODEL]
+                   [--runs-dir PATH] [--output-format {markdown,md,latex,tex}]
+                   [--attempt-index N] [--print-goal] [--export-only]
+                   [--fake-operator]
+```
+
+Not a subset: those are all 31 flags its `parse_args` declares.
+
+### The question and where the run happens
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--task KEY` | read off the workspace directory name | Which question to answer, as a row index (`43`) or a key (`fs:043`). Addressed by row index and never by `task_group_id`, because two rows of the split are byte-identical. A workspace named `fs043_<anything>` carries the key, which is what the trial driver relies on; with neither, the run is **refused** rather than defaulted to row zero. |
+| `--workspace PATH` | a fresh `<task>_<profile>_<timestamp>` directory under the current one | Where the run happens. The timestamp carries microseconds and the directory is created with `exist_ok=False`: two arms of one task launched inside the same second must not land in one directory, which on the sibling trial produced a paired difference of exactly zero. |
+| `--dataset PATH` | `$FRONTIERSCIENCE_DATASET`, then `~/.cache/frontierscience/research_test.jsonl` | The split. Checked against two pinned digests on every load and refused if either disagrees. **Never downloaded.** |
+| `--runs-dir PATH` | `<workspace>/.autor` | Where the AutoR run tree goes. Inside the workspace by default, so a trial can archive or delete one directory. |
+
+### The two arms
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--profile {direct,ideate}` | `direct` | `direct` makes one operator call and keeps the reply — the paired control. `ideate` runs AutoR entered at Stage 02 and stopped there. |
+| `--answer-guidance {paper,minimal,coverage}` | `minimal` | How much the agent is told about what an answer is. `paper` is the fenced problem and nothing else, the published setup. `minimal` adds the task instruction. `coverage` additionally describes the rubric's shape and is a **declared experimental intervention**: it must be applied to both arms or to neither, and the trial plan refuses at freeze time if the arms disagree. |
+| `--first-stage STAGE` | `02_hypothesis_generation` | Where the `ideate` walk begins. Above Stage 01 on purpose: under a no-browsing protocol the literature survey's evidence ledger can only be satisfied by invented citations, and the rubric pays for named literature values, so a fabricated one displaces a real one. |
+| `--final-stage STAGE` | `02_hypothesis_generation` | Where the walk stops. Nothing after it produces anything the examiner reads — and Stage 07's figure floor is never consulted, so no benchmark constant has to move. |
+| `--attempt-index N` | `0` | Which repeat of this (task, arm) this run is, recorded in the metadata so between-attempt variance can be estimated instead of assumed. |
+
+### Backend and reviewer
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--operator {claude,codex}` | `claude` | Execution backend. |
+| `--model MODEL` | the backend default (`sonnet` for claude, `default` for codex) | Always pass it together with `--review-model`: an arm is the pair, and an arm that names one leaves the panels on whatever the backend defaults to. |
+| `--review-operator {claude,codex}` | the execution backend | Backend for the reviewer agent. |
+| `--review-model MODEL` | the backend default | Model for the reviewer that replaces the human approval gate. |
+| `--codex-command BIN` | `codex` | Executable to invoke as the Codex CLI. Read only under `--operator codex`. |
+| `--codex-sandbox MODE` | `workspace-write` | Codex CLI sandbox mode. Read only under `--operator codex`. |
+| `--fake-operator` | off | Use the fake operator instead of a real backend, for smoke-testing the adapter. The answer it writes is marked in its first line **and** in `_meta.json`, because a smoke artifact clears every length and format check. |
+
+### Budgets
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--answer-timeout SECONDS` | `1800` | Wall limit for the `direct` arm's single call. Not the stage timeout: there is no stage, and one number for two things is how a knob ends up tuned for the wrong one. |
+| `--stage-timeout SECONDS` | `3600` | Per stage attempt in the `ideate` arm. Three times the interactive default, and load-bearing: the only per-stage duration ever measured here for a comparable configuration was 2,100 s, and a sibling trial at 1,800 s had 28 of 40 arms hit the ceiling. A timeout below the distribution converts an arm into a refusal rather than slowing it down. |
+| `--max-attempts N` | `2` | Attempts per stage before it is auto-skipped. Bounded where `main.py` is not: the stuck detector fires only on three *identical* consecutive validation errors, and artifact errors carry filenames and counts. |
+| `--max-auto-skips N` | `0` | How many stages may be auto-skipped. Zero, and this is the point of the adapter: an auto-skipped Stage 02 in a run whose only stage is Stage 02 is a run that produced nothing while reporting that it finished. |
+
+### Ideation panel
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--ideation-panel` / `--no-ideation-panel` | **on** | Widen Stage 02's hypotheses with a panel of proposers. On by default here, unlike everywhere else in this repository: the coverage hypothesis this adapter exists to test is a hypothesis about the panel, so a run without it is the control arm with extra steps. |
+| `--ideation-lenses LENS ...` | all five | Seat only these lenses. |
+| `--ideation-models LENS=MODEL ...` | — | Assign a model per lens, as `lens=model` or `lens=backend:model`. |
+| `--ideas-per-proposer N` | `2` | Candidate hypotheses each proposer may return. |
+
+### Browsing, which the protocol forbids
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--web-search {auto,gemini,native,off}` | **`off`** | Default inverted relative to the rest of the repository. `off` offers no search tool *and* names the browsing tools to the Claude CLI as denied — for every seat the run builds: the executor, the reviewer and each ideation proposer. The codex backend has no denied-tool parameter, so a codex run records that it denied nothing rather than claiming it did. |
+| `--disallowed-tools TOOL ...` | whatever `--web-search` implies | Tool names to deny, overriding that. Both arms must be given the same list. The metadata records three fields — what was asked for, what every seat actually carries (the intersection), and the per-seat breakdown — because a backend without the knob makes the first two differ. |
+| `--cross-review {auto,gemini,off}` | **`off`** | Also inverted: a second model family auditing each approval is a second thing changing beside the thing being measured, and it is not part of either arm's description. |
+| `--cross-review-model MODEL` | the cross reviewer's own default | Model for that auditor. |
+
+### Reading and recovering
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--print-goal` | off | Print the goal the agent would be given and exit, creating nothing. The prompt is the instrument, so it has to be readable without spending a run — and a directory left behind by a `--print-goal` is a directory a trial sweep would later count as a run that was started. |
+| `--export-only` | off | Skip the answer-producing step and re-export the most recent run in the workspace. `pipeline_completed` stays false, so the exit code is non-zero: a recovered workspace is evidence to look at, not a scored result. |
+| `--output-format {markdown,md,latex,tex}` | `markdown` | Recorded on the run config. The examiner reads `answer.md` either way. |
+
+### Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | All six `FS_EXIT_CLAUSES` hold: the answer file exists, its length is inside the band, it came from a model rather than from the deterministic fallback, the answer-producing procedure completed, no stage was auto-skipped, and the answer is an answer rather than a plan for one. `--print-goal` also exits `0`. |
+| `1` | Any clause failed, or the adapter raised. The failing clause names are in `_meta.json` under `exit_clause_failures`, and the code is a pure function of that same dictionary, so it is re-derivable from the artifact by anyone holding it. |
+
+The two profiles, the prompt contract and what each clause is defending against
+are in [frontierscience.md](frontierscience.md).
+
+---
+
 ## `tools/web_search.py`
 
 Grounded web search backed by the Gemini API, for deployments where the coding
@@ -815,6 +929,111 @@ no third-party runtime dependency.
 
 The same tool is described from the benchmark's side, with the worked example, in
 [researchclawbench.md](researchclawbench.md#scoring-a-run-locally).
+
+---
+
+## `tools/score_fs_run.py`
+
+Scores one FrontierScience answer against that task's own rubric, using the
+paper's Appendix B judge prompt verbatim. Standard library only — one endpoint,
+one JSON body, one JSON response, all of which `urllib.request` already does —
+so unlike `tools/score_rcb_run.py` it runs on a bare interpreter and its
+end-to-end test drives the real request path against a real `http.server` stub.
+
+```
+python tools/score_fs_run.py --task KEY --answer PATH --out PATH
+                             [--answer-meta PATH] [--dataset PATH]
+                             [--model MODEL] [--endpoint URL] [--key-file PATH]
+                             [--reasoning-effort {low,medium,high}]
+                             [--judge-max-tokens N] [--judge-timeout SECONDS]
+                             [--draws N] [--raw-dir PATH]
+```
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--task KEY` | **required** | The task to grade against, as `fs:043` or `43`. Row index, never `task_group_id`: rows 6 and 11 of the split are byte-identical, so the group id addresses fifty-nine of the sixty rows. |
+| `--answer PATH` | **required** | The file holding the answer. Read as UTF-8 and sent verbatim. |
+| `--out PATH` | **required** | Where the `fs_score/1` result goes. **Nothing is written when the total is refused**, so a driver inherits the refusal from the file's absence. |
+| `--answer-meta PATH` | `_meta.json` beside the answer, when it exists | JSON merged into the result's `answer` block, for the facts only the producer knows — which arm wrote it, whether the pipeline completed, whether a stage was auto-skipped. Never fatal: an unreadable file yields nothing rather than an invention. |
+| `--dataset PATH` | `$FRONTIERSCIENCE_DATASET`, then `~/.cache/frontierscience/research_test.jsonl` | The split, digest-pinned and refused on a mismatch. |
+| `--model MODEL` | `gpt-5.1` (`FS_JUDGE_MODEL`) | The judge. What the paper grades with is GPT-5, which returns 404 on this endpoint, as does `gpt-5.2`. The tool prints that on the first two lines of every run: **no total it produces is comparable to the paper's table.** |
+| `--endpoint URL` | `FS_JUDGE_ENDPOINT` | OpenAI-compatible base URL, without `/responses`. |
+| `--key-file PATH` | `~/api.txt` (`DEFAULT_KEY_FILE`) | File holding the judge's key, outside any repository on purpose. **There is deliberately no flag that takes the key itself** — an argument lands in the shell history and in the process table — and every exception is passed through `redact` before it is printed. A bare token, `KEY=token` and a quoted value all read the same. |
+| `--reasoning-effort {low,medium,high}` | `high` | What the paper grades at. Anything else is a different instrument, not a saving: the reasoning is where this judge does the per-item work that produces a decimal total. |
+| `--judge-max-tokens N` | `32000` | The output budget, which is charged for the **thinking** rather than for the answer. At 4,096 and again at 2,048 the judge spent the whole budget on reasoning and returned no visible characters and no verdict; the largest total output observed was 20,004 tokens, 15,202 of them reasoning. |
+| `--judge-timeout SECONDS` | `600` | Wall limit for one call. The 29 judge calls observed here averaged 72.9 s and the longest took 322.3 s. |
+| `--draws N` | `1` | Grade the same answer N times and report the mean. Every draw runs even after one has failed — the remaining draws are what say whether it was one flaky call or the whole judge. At `1` the dispersion prints as **unmeasured**, never `0.0`, and carries the measured noise band with it. |
+| `--raw-dir PATH` | not saved | Where to save each raw judge response, for regression and audit. **Point it outside this repository**: the judge quotes rubric items verbatim while it reasons, and the dataset card asks that this text stay out of crawlable corpora. |
+
+There is no concurrency and no flag to add any. Concurrent judge calls were the
+measured cause of most scoring failures on ResearchClawBench; 34 of 34 serial
+calls here succeeded with zero retries.
+
+### Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Every requested draw was a measurement. The total is printed with the judge's name beside it and written to `--out`. |
+| `1` | The dataset was refused, **or** the total is not a measurement — a draw failed, no draw was recorded, or fewer were recorded than requested. Each reason is printed and **nothing is written to `--out`**. A failed draw is never a zero: a deliberately bad answer scores exactly 0.000 here, so recording a failure as 0 would make the two indistinguishable. |
+| `2` | `--draws` below 1, or no file at `--answer`. |
+
+---
+
+## `tools/fs_trial.py`
+
+Runs a paired FrontierScience trial — several answers at a time, one judge call
+at a time — and survives being killed. Four subcommands:
+
+```
+python tools/fs_trial.py plan   --plan PATH      # freeze it, print the digest
+python tools/fs_trial.py run    --plan PATH      # launch, watch, grade, report
+python tools/fs_trial.py report --plan PATH      # rebuild from the state dir alone
+python tools/fs_trial.py fake-run --workspace PATH --task KEY --arm LABEL [...]
+```
+
+`plan`, `run` and `report` take one flag, `--plan PATH`, and it is **required**:
+there is no default plan, because a default would be a trial nobody chose the
+parameters of. Everything else about the trial lives in that file —
+`configs/fs_trial_001.json` is the shipped one — and its digest is written into
+the state directory at freeze time and checked on every later command, because
+an apparatus that can be edited while it runs is an apparatus that can be
+stopped when the sign looks good.
+
+`fake-run` is not something a person types. It is the child process the dry run
+launches for itself, and it declares 15 flags of its own: `--workspace`,
+`--task` and `--arm` (all required), `--kind`, `--model`, `--review-model`,
+`--profile`, `--answer-guidance`, `--dataset-sha256`, `--disallowed-tools`,
+`--attempt-index`, `--quality`, and the three fault injectors `--no-transcript`,
+`--browse N` and `--truncate`. The fault injectors exist so that the admission
+clauses which refuse a run are reachable **end to end** rather than only from a
+unit test holding a hand-written dictionary — a clause exercised only against a
+dictionary somebody wrote to make it fire is a clause tested against its own
+statement. `--no-transcript` is the sharpest of the three: it produces a run
+with a perfectly ordinary `_meta.json` and no witness behind it, which is the
+state a `browsing_tool_calls == 0` clause would admit if the metadata recorded
+zero instead of null.
+
+A dry run is a plan with `"operator": "fake"` and `"judge_kind": "fake"`. It
+exercises the real lock, the real children, the real state machine, the real
+metadata builder, the real transcript witness, the real admission gate, the real
+scorer's pure half and the real report; it fabricates the two things that cost
+money. **Every number it prints is a property of the fake operator**, and it
+still sets each child's working directory to the arm's `worktree`. That path has
+to exist on disk, and `run` refuses before taking the lock if it does not,
+naming every `autor` arm and its missing directory rather than reaching `Popen`
+and dying there with a bare `FileNotFoundError`.
+
+### Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | The command finished. For `run` that means every planned `(task, arm)` reached a terminal state and the report was written to `<state_dir>/report.md` and printed. |
+| `1` | An unhandled failure, including a plan the freeze-time refusals rejected, and `run` against an `autor` arm whose `worktree` is not a directory here. |
+| `2` | `run` found somebody else's AutoR already running on this box, and refused to start. Two trials is the concurrency that exhausts the quota that then kills both. |
+
+The arms, the ten admission clauses, the publication ceiling and what the report
+refuses to print are in
+[frontierscience.md](frontierscience.md#the-paired-trial).
 
 ---
 

@@ -1,6 +1,7 @@
 ---
 name: reproducibility-check
 description: Use in Stage 08 (Dissemination) when assembling the release or submission bundle — auditing whether the run's code, data, results and figures are actually reproducible by someone else, writing the readiness checklist and threats-to-validity notes, or deciding what has to be disclosed as not verified.
+stages: 06_analysis, 07_writing
 ---
 
 # Reproducibility check

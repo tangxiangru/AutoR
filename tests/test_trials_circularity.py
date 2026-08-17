@@ -179,7 +179,16 @@ class TheRefusalIsKeyedOnTheMeasureTests(unittest.TestCase):
         """"Score it on something the ratchet does not read" is advice; the list is
         the answer. Derived from the registry the refusal itself fires off, so a
         measure added there appears here without anyone editing prose."""
-        self.assertEqual([item.key for item in outcomes_free_of("polish_rounds")], ["rcb_total"])
+        # Every declared measure except the rubric, which is the one the ratchet reads.
+        # Written as a set difference rather than as a literal list: the point of the
+        # sentence above is that a measure added to the registry appears here without
+        # anyone editing prose, and a hard-coded `["rcb_total"]` made that false -- it is
+        # what `fs_research_total` had to come and edit.
+        self.assertEqual(
+            sorted(item.key for item in outcomes_free_of("polish_rounds")),
+            sorted(set(DECLARED_OUTCOMES) - {"rubric_total"}),
+        )
+        self.assertIn("rcb_total", [item.key for item in outcomes_free_of("polish_rounds")])
         self.assertEqual(
             sorted(item.key for item in outcomes_free_of("effort_tiers")),
             sorted(DECLARED_OUTCOMES),

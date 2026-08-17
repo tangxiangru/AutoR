@@ -1704,13 +1704,19 @@ class TheDocIsNotLyingTests(unittest.TestCase):
 
         Both halves matter: the numeral, and that the ledger is one of the files the
         sentence lists. Counting the names in the sentence rather than trusting the
-        numeral is what makes adding a seventh file fail here.
+        numeral is what makes adding a ninth file fail here.
+
+        ``.jsonl`` as well as ``.json`` since the run root grew two append-only ledgers,
+        ``supervisor_ledger.jsonl`` and ``review_custody.jsonl``. They are run-root files
+        by exactly the argument the sentence makes -- records *about* the run rather than
+        part of its answer -- and an extension the regex could not see is the cheapest
+        way there is to be absent from a check over declared names.
         """
         text = self.DOC.read_text(encoding="utf-8")
         sentence = text.split("sit at the run root rather than under", 1)
         self.assertEqual(len(sentence), 2, "the run-root justification sentence is gone")
         claimed = sentence[0].rsplit("\n\n", 1)[-1].strip().split()[0].lower()
-        listed = re.findall(r"`([a-z_]+\.json)`", sentence[1].split("are records", 1)[0])
+        listed = re.findall(r"`([a-z_]+\.jsonl?)`", sentence[1].split("are records", 1)[0])
         self.assertEqual(claimed, NUMBER_WORDS[len(listed)], f"the sentence lists {listed}")
         self.assertIn("stage_cost_ledger.json", listed)
 
@@ -1979,11 +1985,11 @@ MUTATIONS: tuple[tuple[str, str, str, str], ...] = (
     # -- the page that promises completeness -------------------------------
     # This module's own arrival broke that promise, and nothing went red. Each entry below
     # is the page going stale in one of the ways a *later* change would make it go stale.
-    ("the run-root sentence goes back to counting five", RUN_ARTIFACTS,
-     "Six files sit at the run root", "Five files sit at the run root"),
+    ("the run-root sentence goes back to counting six", RUN_ARTIFACTS,
+     "Eight files sit at the run root", "Six files sit at the run root"),
     ("the ledger drops out of the run-root sentence", RUN_ARTIFACTS,
-     "`validity_review_stamp.json` and\n`stage_cost_ledger.json` are records",
-     "`validity_review_stamp.json` are records"),
+     "`stage_cost_ledger.json`, `supervisor_ledger.jsonl` and `review_custody.jsonl`\nare records",
+     "`stage_cost_ledger.json` are records"),
     ("the ledger drops out of the layout tree", RUN_ARTIFACTS,
      "├── stage_cost_ledger.json      # what each stage visit spent, "
      "and why each attempt failed\n", ""),

@@ -223,7 +223,7 @@ class PanelRunTests(unittest.TestCase):
         )
 
         def make(key):
-            def run_prompt(*, paths, stage, attempt_no, prompt, label):
+            def run_prompt(*, paths, stage, attempt_no, prompt, label, watch=None):
                 response = script.get("__score__" if label == "ideate_score" else key)
                 if response == "__FAIL__":
                     return 1, "", "boom"

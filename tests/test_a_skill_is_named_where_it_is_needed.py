@@ -52,7 +52,12 @@ import re
 import unittest
 from pathlib import Path
 
-from src.run_skills import discipline_of, read_skill_pack
+from src.run_skills import (
+    DEFAULT_PINS_FILENAME,
+    discipline_of,
+    load_task_pins,
+    read_skill_pack,
+)
 from src.utils import STAGES, resolve_output_format
 
 
@@ -190,12 +195,27 @@ class SkillNamingTest(unittest.TestCase):
             for entry in read_skill_pack(SKILL_PACK)
             if entry.task_scoped and entry.stages
         }
+        # The third route, and the strongest. A pinned skill is installed for its task
+        # whatever the two filters say, and `format_skills_for_prompt`'s `by_pin` branch
+        # names it imperatively in the prompt of every stage it declares -- under a
+        # heading saying a previous run of this exact task lost the thing it describes.
+        # It needs no `applies_when`, because the pin *is* the predicate: an observed
+        # outcome for one identifier rather than an inference about task shape.
+        # Unconditional on stages, unlike `by_channel`. A pin that declares stages is
+        # announced at those; a pin that declares none falls back to all seven, so every
+        # pin is announced somewhere and this set is the whole table. The stage
+        # declaration is a *budget* rule rather than a reachability one -- announcing a
+        # pin seven times over costs every other description in each of those prompts --
+        # and `validate_task_pins` is where it is enforced, on tables over three.
+        pin_table = load_task_pins(REPO_ROOT / "configs" / DEFAULT_PINS_FILENAME)
+        by_pin = {name for names in pin_table.values() for name in names}
         missing = sorted(
             name
             for name in self.known
             if not discipline_of(name)
             and name not in named_rendered
             and name not in by_channel
+            and name not in by_pin
             and name not in unreachable_by_construction
         )
         self.assertEqual(
@@ -204,8 +224,8 @@ class SkillNamingTest(unittest.TestCase):
             "general skills no prompt this configuration renders tells the operator to "
             f"read: {missing}. Name each one at the stage whose decision it covers, give "
             "it an `applies_when` predicate plus a `stages` field so the "
-            "`task_shaped_skills` channel names it, give it a field prefix so the "
-            "installer routes it, or delete it.",
+            "`task_shaped_skills` channel names it, pin it to the tasks a scored arm says "
+            "need it, give it a field prefix so the installer routes it, or delete it.",
         )
 
     def test_a_prompt_does_not_name_a_skill_most_runs_will_not_have(self) -> None:

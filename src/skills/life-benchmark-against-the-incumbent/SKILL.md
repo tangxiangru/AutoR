@@ -1,6 +1,7 @@
 ---
 name: life-benchmark-against-the-incumbent
 description: Use at study design when a life-science method result is about to be reported on its own numbers. Covers the head-to-head against the incumbent tool, the cost table that goes with it, and finding an orthogonal truth set the method was not fitted to.
+stages: 03_study_design, 05_experimentation, 06_analysis
 ---
 
 # A life-science method result is a head-to-head, a cost table, and an orthogonal truth set

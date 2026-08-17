@@ -1,6 +1,7 @@
 ---
 name: mine-the-papers-you-were-given
 description: Use when the task ships PDFs in related_work/, at literature stage and before the study plan is costed. Covers reading those papers for the named tools, benchmarks, events and metrics the work will be judged against — as a work list rather than as background — and what to record for each one.
+stages: 01_literature_survey, 03_study_design, 07_writing
 ---
 
 # The papers in `related_work/` are a work list, not background reading

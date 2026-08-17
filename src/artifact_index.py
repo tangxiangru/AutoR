@@ -323,10 +323,42 @@ def _scan_artifacts(paths: RunPaths) -> list[ArtifactRecord]:
 
 
 def _infer_schema(path: Path, category: str, workspace_root: Path) -> dict[str, object]:
+    """A description of `path`, or a description of why there is not one. Never raises.
+
+    This walks every file the agent has written, of any type, in any encoding, at any
+    moment -- including while it is being written. It is called from `_scan_artifacts`,
+    which is called from `write_artifact_index`, which is called by the `artifact_index`
+    channel while a stage prompt is being built. So an exception here does not spoil an
+    index entry; it propagates out of `_build_stage_prompt` and ends the run.
+
+    That is not hypothetical. On the `full40_pins` arm, Life_002 wrote a CSV containing
+    byte 0xb0 -- a degree sign in the platform encoding -- and `_infer_tabular_schema`
+    read it as strict UTF-8. The `UnicodeDecodeError` travelled through `_scan_artifacts`,
+    `write_artifact_index`, `render_inbound` and `_run_stage_attempts` and killed the
+    pipeline at Stage 03 of 7, nine hours in. The adapter caught it at the top, exported a
+    synthesised report, and the batch runner recorded the task as `completed`; it was
+    scored, and the score entered the arm. One unreadable byte in a file nobody reads cost
+    a whole run and produced a number that looked like a result.
+
+    The lenient decoding below is the first half of the fix. This is the second, and it is
+    the one that generalises: schema inference is a convenience, and a convenience may not
+    have the power to end a run.
+    """
+    try:
+        return _infer_schema_or_raise(path, category, workspace_root)
+    except (OSError, UnicodeError, ValueError, csv.Error, RecursionError) as exc:
+        return {
+            "source": "inferred",
+            "kind": "unreadable",
+            "error": f"{type(exc).__name__}",
+        }
+
+
+def _infer_schema_or_raise(path: Path, category: str, workspace_root: Path) -> dict[str, object]:
     sidecar_path = path.parent / f"{path.name}.schema.json"
     if sidecar_path.exists():
         try:
-            declared = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            declared = json.loads(sidecar_path.read_text(encoding="utf-8", errors="replace"))
             return {
                 "source": "declared",
                 "sidecar_path": str(sidecar_path.relative_to(workspace_root)),
@@ -361,7 +393,7 @@ def _infer_schema(path: Path, category: str, workspace_root: Path) -> dict[str, 
 
 def _infer_json_schema(path: Path) -> dict[str, object]:
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8", errors="replace"))
     except json.JSONDecodeError:
         return {"source": "inferred", "kind": "json", "error": "invalid_json"}
 
@@ -393,7 +425,7 @@ def _infer_json_schema(path: Path) -> dict[str, object]:
 def _infer_jsonl_schema(path: Path) -> dict[str, object]:
     row_count = 0
     keys: set[str] = set()
-    with path.open("r", encoding="utf-8") as handle:
+    with path.open("r", encoding="utf-8", errors="replace") as handle:
         for raw_line in handle:
             line = raw_line.strip()
             if not line:
@@ -417,7 +449,10 @@ def _infer_jsonl_schema(path: Path) -> dict[str, object]:
 
 
 def _infer_tabular_schema(path: Path, delimiter: str) -> dict[str, object]:
-    with path.open("r", encoding="utf-8", newline="") as handle:
+    # `errors="replace"`, because this is describing a file the agent wrote and has no
+    # say over. A degree sign written by pandas in the platform's own encoding is not a
+    # reason to stop reading the table, and it certainly is not a reason to end the run.
+    with path.open("r", encoding="utf-8", errors="replace", newline="") as handle:
         reader = csv.reader(handle, delimiter=delimiter)
         rows = list(reader)
 

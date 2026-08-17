@@ -1,194 +1,377 @@
 {
   "_what": "Skills forced into a run by its task identifier. Everything else AutoR routes on is derived from the task statement; this is derived from a previous run's SCORE, so it names identifiers and generalises to nothing outside them.",
-  "_provenance": "Built from the ResearchClawBench arm pinned at 2ffaeb4 (/rmeng_data/robtang/rcb_runs/arm_2ffaeb4), scored with gpt-5.1 under the 15-image window: AutoR 31.35 against bare Claude Code 31.53 over 40 tasks. Each entry was assigned criterion by criterion from that arm's per-criterion scores and the judge's written reasoning for BOTH arms, then adversarially re-checked against the skill bodies. 23 tasks that scored below 26 or lost to the bare agent were assessed; 8 were given no pin, because their remaining gap is below the 3.4-point single-draw rescoring noise or the shipped data cannot support the criteria at all. Three pins across Material_001 and Life_001 were left unverified when their checking agent died mid-response; a later pass dropped all three -- two as already installed and already named at the right stage, one as aimed 1.01 sd below the rescoring noise at a criterion of a task AutoR had won. Life_001 came out of the table entirely.",
+  "_provenance": "Rebuilt from the ResearchClawBench arm pinned at 1069e77 (/rmeng_data/robtang/rcb_runs/full40_v220), scored with gpt-5.1 under the 15-image window: AutoR 27.23 against bare Claude Code 27.44 over 40 tasks. 25 tasks were assessed -- the 12 that scored below the pre-fix arm and the 20 that lost to the bare agent. Each was re-scored per checklist item for BOTH arms (rcb_results/items_v220, items_control), so a pin is assigned against a named criterion and its recoverable weight rather than against a total. Across those 25 tasks the paired per-item comparison recovers 176.3 weighted points on image criteria and 92.1 on text: the loss is mostly figures, and not for lack of them -- on every task whose image criteria lost badly AutoR published MORE figures than the control, usually twice as many, all planned and almost none dropped. It draws its own workflow diagnostics and omits the figure the field expects. Each task's three new skills were written from its per-item losses, then adversarially reviewed for whether they hand over an answer rather than a method, whether an agent that has never seen the rubric could act on them, and whether they restate a shipped skill. 17 of 69 were told to drop and 45 to rewrite; all were revised against those verdicts. The existing skills each entry also names are the ones that review said already carry the advice for that task's losses -- pinned because being in the pack was demonstrably not enough: over 40 runs the pack offered 16 skills and the model opened a median of 1, with 27% of runs opening none and a single skill (citation-discipline) taking half of all reads.",
   "_declares_itself": "A run that matches an entry writes `skill_pins` into its run_config.json and a `skills pinned_by_task_id` line into its log. A pinned arm and an unpinned arm are two configurations; a score from one is not a score from the other, and the artifact says so without anyone having to remember.",
-  "_maximum": "Three per task. The measured failure of this pack is that a run reads 1.75 skills out of about thirty offered; handing one eight more descriptions reproduces the problem a pin is meant to solve.",
+  "_maximum": "Fifteen per task, and they must name their stages. Three was the number while a pin was announced in every stage prompt: at that size the listing cost was 3 lines x 7 prompts and the alternative -- handing a run eight more descriptions to read past -- reproduced the problem a pin is meant to solve. `format_skills_for_prompt` now routes a pin to the stages its SKILL.md names, so the cost is the pin count times its stage span divided by seven rather than the pin count itself. At the pack's measured 3.2 stages per skill that is 7 announcements per stage prompt at fifteen pins, against 9.3 at twenty, which is back on the curve this cap exists to stay off. The read rate is what makes fifteen worth having: over a 40-task arm the one skill a prompt told the operator to READ fired in 31 of 40 runs, and the three a prompt said were 'installed for this stage' fired in none. A pin is announced imperatively, so fifteen pins at 78% is about twelve skills actually read per run against the 1.75 the undifferentiated listing produced. A pin that names no stage still falls back to every stage, so raising the cap cannot make a pin silent -- but a pin written without stages spends the whole budget it was routed to save, and a table of fifteen stageless pins is the old problem with a new number.",
   "_columns": "task id -> skill names. Commentary per task is in _rationale: `autor` and `control` are that task's two scores, `net` is autor - control over the whole task, `recoverable` is the sum of weight x (control - autor) over only the criteria where the control scored higher, `headroom` is the sum of weight x (100 - autor) over every criterion, and `new_to_this_run` lists the pins the two routing filters would not have installed. `recoverable` and `net` differ whenever AutoR wins some criteria and loses others, which is most tasks; `net` is the number that says whether the task was lost.",
   "_rationale": {
-    "Physics_000": {
-      "autor": 18.7,
-      "control": 53.4,
-      "new_to_this_run": [],
-      "net": -34.7,
-      "recoverable": 34.7,
-      "headroom": 81.3
+    "Astronomy_000": {
+      "pins": 13
     },
-    "Information_002": {
-      "autor": 9,
-      "control": 33.1,
-      "new_to_this_run": [],
-      "net": -24.1,
-      "recoverable": 24.1,
-      "headroom": 91.0
-    },
-    "Neuroscience_003": {
-      "autor": 35.25,
-      "control": 55.55,
-      "new_to_this_run": [],
-      "net": -20.3,
-      "recoverable": 22.1,
-      "headroom": 64.8
-    },
-    "Chemistry_003": {
-      "autor": 24.5,
-      "control": 39.3,
-      "new_to_this_run": [],
-      "net": -14.8,
-      "recoverable": 16.3,
-      "headroom": 75.5
-    },
-    "Material_000": {
-      "autor": 4.5,
-      "control": 17.9,
-      "new_to_this_run": [],
-      "net": -13.4,
-      "recoverable": 13.4,
-      "headroom": 95.5
-    },
-    "Material_003": {
-      "autor": 35.7,
-      "control": 47.2,
-      "new_to_this_run": [
-        "life-full-study-skeleton-including-the-wet-lab-half"
-      ],
-      "net": -11.5,
-      "recoverable": 11.5,
-      "headroom": 64.3
-    },
-    "Life_002": {
-      "autor": 17,
-      "control": 26.5,
-      "new_to_this_run": [
-        "information-exhibit-the-intermediate-objects"
-      ],
-      "net": -9.5,
-      "recoverable": 15.5,
-      "headroom": 83.0
-    },
-    "Energy_000": {
-      "autor": 20.3,
-      "control": 27.8,
-      "new_to_this_run": [
-        "material-as-specified-run-and-stage-diagnostics"
-      ],
-      "net": -7.5,
-      "recoverable": 7.5,
-      "headroom": 79.7
+    "Astronomy_003": {
+      "pins": 12
     },
     "Chemistry_000": {
-      "autor": 36,
-      "control": 41.3,
-      "new_to_this_run": [],
-      "net": -5.3,
-      "recoverable": 13.0,
-      "headroom": 64.0
+      "pins": 7
     },
-    "Math_003": {
-      "autor": 23.75,
-      "control": 27.25,
-      "new_to_this_run": [],
-      "net": -3.5,
-      "recoverable": 5.25,
-      "headroom": 76.2
+    "Chemistry_001": {
+      "pins": 10
+    },
+    "Chemistry_003": {
+      "pins": 11
+    },
+    "Earth_000": {
+      "pins": 7
+    },
+    "Earth_001": {
+      "pins": 9
     },
     "Earth_002": {
-      "autor": 33,
-      "control": 35.4,
-      "new_to_this_run": [
-        "information-fill-the-whole-results-grid"
-      ],
-      "net": -2.4,
-      "recoverable": 10.6,
-      "headroom": 67.0
+      "pins": 8
     },
-    "Material_002": {
-      "autor": 48.45,
-      "control": 49.22,
-      "new_to_this_run": [],
-      "net": -0.77,
-      "recoverable": 9.9,
-      "headroom": 51.6
+    "Energy_001": {
+      "pins": 12
+    },
+    "Energy_002": {
+      "pins": 13
+    },
+    "Energy_003": {
+      "pins": 11
+    },
+    "Information_000": {
+      "pins": 9
+    },
+    "Information_001": {
+      "pins": 7
+    },
+    "Information_002": {
+      "pins": 11
+    },
+    "Life_002": {
+      "pins": 10
+    },
+    "Life_003": {
+      "pins": 10
+    },
+    "Material_000": {
+      "pins": 15
     },
     "Material_001": {
-      "autor": 11.9,
-      "control": 12,
-      "new_to_this_run": [],
-      "net": -0.1,
-      "recoverable": 9.55,
-      "headroom": 88.1,
-      "note": "Net -0.10: a tie, not a loss, and it is here for one criterion. Index 1 (weight 0.35, AutoR 2, control 25, 8.05 recoverable) wanted the generated lattice parameters in angstrom with a KL divergence and a coverage fraction; AutoR reported an entropy in bits instead, and the shipped file's two 101-value lattice arrays -- which it parsed -- are plotted nowhere. The pinned skill is the only one in the pack that says to print the landmark scalar in the property's own physical unit, it is a material skill so a Material run installs it anyway, and no prompt names it -- so the pin is the only channel that puts it in front of this run."
+      "pins": 8
     },
-    "Neuroscience_000": {
-      "autor": 14,
-      "control": 9.4,
-      "new_to_this_run": [],
-      "net": 4.6,
-      "recoverable": 0,
-      "headroom": 86.0,
-      "note": "Recoverable is 0.00: there is no criterion here where the control scored higher. The pin aims at uncontested zero instead -- criteria both arms scored 0 on, worth 0.60 of Neuroscience_000's weight and 0.40 of Astronomy_001's. That is the best target on the board for raising a score and the worst for demonstrating anything, because there is no second measurement to compare against."
+    "Material_002": {
+      "pins": 13
     },
-    "Astronomy_001": {
-      "autor": 26,
-      "control": 20.2,
-      "new_to_this_run": [],
-      "net": 5.8,
-      "recoverable": 0,
-      "headroom": 74.0,
-      "note": "Recoverable is 0.00: there is no criterion here where the control scored higher. The pin aims at uncontested zero instead -- criteria both arms scored 0 on, worth 0.60 of Neuroscience_000's weight and 0.40 of Astronomy_001's. That is the best target on the board for raising a score and the worst for demonstrating anything, because there is no second measurement to compare against."
+    "Material_003": {
+      "pins": 9
+    },
+    "Math_002": {
+      "pins": 9
+    },
+    "Neuroscience_001": {
+      "pins": 13
+    },
+    "Neuroscience_003": {
+      "pins": 10
+    },
+    "Physics_000": {
+      "pins": 3
+    },
+    "Physics_001": {
+      "pins": 3
     }
   },
-  "Physics_000": [
+  "Astronomy_000": [
+    "publish-the-input-summary-in-its-measured-unit",
+    "every-variant-persists-the-same-object",
+    "do-not-grade-your-own-result-down",
+    "a-value-you-did-not-measure-still-has-a-source",
+    "astronomy-error-budget-is-the-audit-trail",
+    "astronomy-figure-is-the-unit-of-result",
+    "reproduce-then-extend",
+    "evidence-not-assertion",
+    "close-the-gap-to-the-published-number",
+    "draw-the-source-figure-panel-for-panel",
+    "publish-what-the-run-already-computed",
+    "the-canonical-figure",
+    "the-supplied-item-is-the-graded-unit"
+  ],
+  "Astronomy_003": [
+    "the-supplied-arm-owns-figure-one",
+    "every-claim-in-the-data-description-is-a-result",
+    "presence-before-consistency-in-the-final-review",
+    "chemistry-canonical-units-thresholds-incumbent",
+    "citation-discipline",
+    "information-fill-the-whole-results-grid",
+    "use-the-sources-own-names",
+    "run-the-requested-analysis",
+    "close-the-gap-to-the-published-number",
+    "cover-what-the-task-named",
+    "publish-what-the-run-already-computed",
+    "the-supplied-item-is-the-graded-unit"
+  ],
+  "Chemistry_000": [
+    "price-the-grid-in-wall-clock-and-fill-it-breadth-first",
+    "rebuild-the-sources-headline-table-row-for-row",
+    "chemistry-group-attribution-over-the-split-and-the-baseline-model",
+    "the-attribution-is-the-deliverable",
+    "result-table",
+    "information-fill-the-whole-results-grid",
+    "train-the-named-architecture"
+  ],
+  "Chemistry_001": [
+    "chemistry-interaction-inventory-of-the-modelled-complex",
+    "chemistry-ablations-and-curves-without-an-accelerator",
+    "chemistry-fill-every-row-of-the-comparator-table",
+    "math-canonical-curve-on-the-cost-counter",
+    "chemistry-ranked-entities-and-property-curves",
+    "math-equal-effort-baselines-and-knob-sweeps",
+    "material-as-specified-run-and-stage-diagnostics",
+    "train-the-named-architecture",
+    "publish-what-the-run-already-computed",
+    "the-canonical-figure"
+  ],
+  "Chemistry_003": [
+    "query-the-checkpoint-off-its-own-split",
+    "keep-the-pipeline-vocabulary-off-the-canvas",
+    "the-limiting-component-not-the-step-count",
+    "chemistry-canonical-units-thresholds-incumbent",
+    "chemistry-ranked-entities-and-property-curves",
+    "use-the-sources-own-names",
+    "train-the-named-architecture",
+    "close-the-gap-to-the-published-number",
+    "draw-the-source-figure-panel-for-panel",
+    "the-canonical-figure",
+    "the-supplied-item-is-the-graded-unit"
+  ],
+  "Earth_000": [
+    "earth-window-mismatch-is-an-alignment-problem",
+    "earth-shape-of-the-record-and-share-of-the-budget",
+    "earth-inter-technique-spread-is-a-result-not-a-caveat",
+    "earth-comparator-set-lives-outside-the-supplied-archive",
+    "earth-report-the-lattice-and-show-the-field",
+    "result-table",
+    "publish-what-the-run-already-computed"
+  ],
+  "Earth_001": [
+    "reconstruct-the-figure-layer-you-cannot-source",
+    "disclose-by-construction-not-by-absence",
+    "verify-against-the-publication-not-the-authors-code",
+    "earth-report-the-lattice-and-show-the-field",
+    "paper-writing",
+    "evidence-not-assertion",
+    "cover-what-the-task-named",
+    "draw-the-source-figure-panel-for-panel",
+    "the-canonical-figure"
+  ],
+  "Earth_002": [
+    "read-the-pilot-run-as-a-result",
+    "late-budget-goes-to-the-task-not-the-method",
+    "a-null-test-bounds-the-instrument-not-the-answer",
+    "earth-report-the-lattice-and-show-the-field",
+    "paper-writing",
+    "reproduce-then-extend",
+    "close-the-gap-to-the-published-number",
+    "draw-the-source-figure-panel-for-panel"
+  ],
+  "Energy_001": [
+    "energy-dispatch-quantities-on-the-native-time-index",
+    "energy-utilisation-per-named-element-when-a-limit-binds",
+    "energy-the-terms-behind-the-rate",
+    "the-attribution-is-the-deliverable",
+    "energy-counterfactual-pair-and-hierarchy-closure",
+    "energy-canonical-configuration-before-the-enhanced-variant",
+    "use-the-sources-own-names",
+    "run-the-requested-analysis",
+    "cover-what-the-task-named",
+    "draw-the-source-figure-panel-for-panel",
+    "the-canonical-figure",
+    "the-supplied-item-is-the-graded-unit"
+  ],
+  "Energy_002": [
+    "energy-build-the-domain-the-question-names",
+    "energy-cost-surface-before-the-verdict-map",
+    "energy-publish-the-ordering-when-the-level-fails",
+    "earth-comparator-set-lives-outside-the-supplied-archive",
+    "energy-counterfactual-pair-and-hierarchy-closure",
+    "mine-the-papers-you-were-given",
+    "energy-canonical-configuration-before-the-enhanced-variant",
+    "use-the-sources-own-names",
+    "close-the-gap-to-the-published-number",
+    "cover-what-the-task-named",
+    "publish-what-the-run-already-computed",
+    "the-canonical-figure",
+    "the-supplied-item-is-the-graded-unit"
+  ],
+  "Energy_003": [
+    "energy-inject-the-defect-the-algorithm-claims-to-fix",
+    "energy-dependence-statistics-move-with-the-averaging-window",
+    "energy-spend-the-figure-budget-on-the-named-checks",
+    "citation-discipline",
+    "energy-counterfactual-pair-and-hierarchy-closure",
+    "energy-canonical-configuration-before-the-enhanced-variant",
+    "run-the-conditions-the-source-ran",
+    "material-landmark-scalars-in-physical-units",
+    "run-the-requested-analysis",
+    "close-the-gap-to-the-published-number",
+    "the-supplied-item-is-the-graded-unit"
+  ],
+  "Information_000": [
+    "extract-the-pdf-text-layer-then-read-every-figure",
+    "the-headline-entry-is-the-canonical-outcome",
+    "price-the-missing-object-before-you-deepen-an-arm",
+    "astronomy-figure-is-the-unit-of-result",
+    "information-exhibit-the-intermediate-objects",
+    "evidence-not-assertion",
+    "draw-the-source-figure-panel-for-panel",
+    "the-canonical-figure",
+    "the-supplied-item-is-the-graded-unit"
+  ],
+  "Information_001": [
+    "price-the-queue-and-preempt-your-own-arms",
+    "information-a-training-free-method-owes-a-second-backbone",
+    "put-the-study-controls-in-the-demo-panel",
+    "information-fill-the-whole-results-grid",
+    "information-exhibit-the-intermediate-objects",
     "run-the-conditions-the-source-ran",
     "draw-the-source-figure-panel-for-panel"
   ],
   "Information_002": [
+    "information-transformation-ledger-for-a-multi-step-derivation",
+    "information-state-the-technique-and-what-it-discards",
+    "information-check-the-steps-yourself-not-only-their-scores",
+    "reproducibility-check",
+    "the-reproduction-is-a-hypothesis",
+    "information-exhibit-the-intermediate-objects",
+    "use-the-sources-own-names",
+    "evidence-not-assertion",
+    "run-the-requested-analysis",
+    "cover-what-the-task-named",
     "the-supplied-item-is-the-graded-unit"
   ],
-  "Neuroscience_003": [
-    "run-the-conditions-the-source-ran"
-  ],
-  "Chemistry_003": [
+  "Life_002": [
+    "life-the-correspondence-is-a-table-not-a-score",
+    "time-the-operation-not-the-invocation",
+    "the-firing-instance-gets-the-full-record",
+    "life-benchmark-against-the-incumbent",
+    "earth-comparator-set-lives-outside-the-supplied-archive",
+    "neuroscience-comparator-ladder-and-per-unit-predictions",
+    "run-the-conditions-the-source-ran",
     "close-the-gap-to-the-published-number",
-    "draw-the-source-figure-panel-for-panel"
+    "publish-what-the-run-already-computed",
+    "the-supplied-item-is-the-graded-unit"
+  ],
+  "Life_003": [
+    "a-refutation-banner-over-a-confirming-panel",
+    "a-detection-score-is-a-claim-about-its-population",
+    "write-the-result-sentence-before-the-statistic",
+    "life-benchmark-against-the-incumbent",
+    "the-reproduction-is-a-hypothesis",
+    "information-exhibit-the-intermediate-objects",
+    "reproduce-then-extend",
+    "run-the-requested-analysis",
+    "close-the-gap-to-the-published-number",
+    "publish-what-the-run-already-computed"
   ],
   "Material_000": [
+    "write-the-model-section-from-the-code",
+    "the-figure-plan-is-a-purchase-order",
+    "measure-every-clause-of-the-data-description",
+    "reproducibility-check",
+    "paper-writing",
+    "result-table",
+    "information-exhibit-the-intermediate-objects",
+    "material-as-specified-run-and-stage-diagnostics",
+    "evidence-not-assertion",
+    "material-landmark-scalars-in-physical-units",
+    "train-the-named-architecture",
+    "run-the-requested-analysis",
+    "publish-what-the-run-already-computed",
+    "the-canonical-figure",
+    "the-supplied-item-is-the-graded-unit"
+  ],
+  "Material_001": [
+    "material-decode-the-stub-into-its-reference-runs",
+    "material-object-over-reference-figure-gate",
+    "material-front-load-one-result-block-per-deliverable",
+    "mine-the-papers-you-were-given",
+    "material-as-specified-run-and-stage-diagnostics",
+    "material-landmark-scalars-in-physical-units",
+    "run-the-requested-analysis",
+    "the-canonical-figure"
+  ],
+  "Material_002": [
+    "material-same-estimator-same-slot",
+    "material-power-the-contrast-you-invented",
+    "material-trajectory-health-is-a-panel",
+    "math-equal-effort-baselines-and-knob-sweeps",
+    "energy-canonical-configuration-before-the-enhanced-variant",
+    "material-as-specified-run-and-stage-diagnostics",
+    "reproduce-then-extend",
+    "evidence-not-assertion",
+    "material-landmark-scalars-in-physical-units",
+    "cover-what-the-task-named",
+    "draw-the-source-figure-panel-for-panel",
+    "publish-what-the-run-already-computed",
+    "the-supplied-item-is-the-graded-unit"
+  ],
+  "Material_003": [
+    "material-design-targets-span-the-property-range",
+    "material-deliver-a-candidate-a-chemist-could-make",
+    "material-draw-the-framework-and-rebuild-its-corpus",
+    "life-full-study-skeleton-including-the-wet-lab-half",
+    "chemistry-ranked-entities-and-property-curves",
+    "material-as-specified-run-and-stage-diagnostics",
+    "material-landmark-scalars-in-physical-units",
     "train-the-named-architecture",
     "the-canonical-figure"
   ],
-  "Material_003": [
-    "a-value-you-did-not-measure-still-has-a-source",
-    "life-full-study-skeleton-including-the-wet-lab-half"
+  "Math_002": [
+    "math-budget-the-grid-before-the-cell",
+    "math-register-every-metric-a-run-emits",
+    "math-train-distribution-is-a-reporting-axis",
+    "the-unit-of-analysis",
+    "math-equal-effort-baselines-and-knob-sweeps",
+    "neuroscience-stratify-and-report-detection-metrics",
+    "information-fill-the-whole-results-grid",
+    "run-the-conditions-the-source-ran",
+    "train-the-named-architecture"
   ],
-  "Life_002": [
-    "the-supplied-item-is-the-graded-unit",
-    "information-exhibit-the-intermediate-objects"
-  ],
-  "Energy_000": [
-    "material-as-specified-run-and-stage-diagnostics",
-    "run-the-conditions-the-source-ran"
-  ],
-  "Chemistry_000": [
-    "the-attribution-is-the-deliverable"
-  ],
-  "Math_003": [
-    "run-the-conditions-the-source-ran"
-  ],
-  "Earth_002": [
+  "Neuroscience_001": [
+    "tuning-curves-report-the-argmax-and-its-error",
+    "the-expected-negatives-are-the-discrimination",
+    "draw-the-system-not-your-study",
+    "the-unit-of-analysis",
+    "citation-discipline",
+    "neuroscience-comparator-ladder-and-per-unit-predictions",
+    "neuroscience-stratify-and-report-detection-metrics",
+    "material-landmark-scalars-in-physical-units",
+    "cover-what-the-task-named",
     "draw-the-source-figure-panel-for-panel",
-    "information-fill-the-whole-results-grid"
-  ],
-  "Material_002": [
-    "draw-the-source-figure-panel-for-panel",
-    "close-the-gap-to-the-published-number"
-  ],
-  "Material_001": [
-    "material-landmark-scalars-in-physical-units"
-  ],
-  "Neuroscience_000": [
-    "the-attribution-is-the-deliverable"
-  ],
-  "Astronomy_001": [
+    "publish-what-the-run-already-computed",
     "the-canonical-figure",
+    "the-supplied-item-is-the-graded-unit"
+  ],
+  "Neuroscience_003": [
+    "plant-decoys-and-report-what-each-method-admits",
+    "neuroscience-colour-the-embedding-by-the-shipped-labels",
+    "claims-before-harness-forensics",
+    "mine-the-papers-you-were-given",
+    "neuroscience-comparator-ladder-and-per-unit-predictions",
+    "neuroscience-stratify-and-report-detection-metrics",
+    "reproduce-then-extend",
+    "run-the-conditions-the-source-ran",
+    "cover-what-the-task-named",
     "draw-the-source-figure-panel-for-panel"
+  ],
+  "Physics_000": [
+    "a-supplied-parameter-file-is-a-list-of-questions",
+    "the-process-deliverable-is-the-labelled-state-at-every-step",
+    "the-axis-carries-the-observable-not-the-verdict"
+  ],
+  "Physics_001": [
+    "every-supplied-array-is-a-series-in-a-results-panel",
+    "physics-plot-the-named-quantity-and-declare-the-calibration",
+    "the-results-panel-is-not-where-the-run-argues-with-itself"
   ]
 }

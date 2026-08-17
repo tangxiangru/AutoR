@@ -10,9 +10,9 @@ nothing on the only front-end where effort tiering is unconditionally on.
 It was found by an audit of the documentation, not by a test, which is the wrong way round.
 The scan below is a few lines and would have caught it the day it landed.
 
-The two front-ends are checked together on purpose. `main.py` and `rcb_agent.py` declare
-overlapping flag sets and have diverged before; a gate that covered only one of them would
-be the same defect written fresh.
+The front ends are checked together on purpose. `main.py`, `rcb_agent.py` and `fs_agent.py`
+declare overlapping flag sets and have diverged before; a gate that covered only one of them
+would be the same defect written fresh.
 """
 
 from __future__ import annotations
@@ -34,6 +34,7 @@ REPO = Path(__file__).resolve().parent.parent
 KNOWN_UNWIRED: dict[str, set[str]] = {
     "main.py": set(),
     "rcb_agent.py": set(),
+    "fs_agent.py": set(),
 }
 
 

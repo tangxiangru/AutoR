@@ -398,6 +398,11 @@ authoritative list.
 | stage timeout | `main.py` argparse default | 14400 s (4 h) | `--stage-timeout` |
 | auto-skip budget | `main.py` argparse default | 3 stages | `--max-auto-skips` |
 | rounds of Stages 03–06 | `main.py` argparse default | 1 | `--max-rounds` |
+| `DEFAULT_FS_STAGE_TIMEOUT` | `fs_agent.py` | 3600 s | `--stage-timeout` on the FrontierScience adapter. Three times the interactive default: the only per-stage duration measured here for a comparable configuration was 2,100 s, and a sibling trial at 1,800 s had 28 of 40 arms hit the ceiling. A timeout below the distribution converts an arm into a refusal. |
+| `DEFAULT_FS_ANSWER_TIMEOUT` | `fs_agent.py` | 1800 s | `--answer-timeout` — the `direct` arm's single call. Deliberately not the stage timeout; there is no stage. |
+| `DEFAULT_FS_MAX_ATTEMPTS` | `fs_agent.py` | 2 | `--max-attempts` there. Bounded where `main.py` is not. |
+| `DEFAULT_FS_MAX_AUTO_SKIPS` | `fs_agent.py` | 0 | `--max-auto-skips` there. The run has one stage; skipping it produces a workspace that looks finished and holds nothing. |
+| `DEFAULT_FS_PROFILE` / `DEFAULT_FS_ANSWER_GUIDANCE` | `frontierscience.py` | `direct` / `minimal` | `--profile`, `--answer-guidance`. `coverage` is an experimental condition rather than a setting: it tells the agent the rubric's shape and must be applied to both arms of a trial or to neither. |
 
 ### The Stage 07 deliverable
 
@@ -434,6 +439,31 @@ No `main.py` flag reaches any of these; they are the shape of the deliverable.
 | `MAX_EXACT_PAIRS` | `trials.py` | 18 | Pairs up to which `sign_flip_p` enumerates every sign assignment. 2¹⁸ takes 0.27 s; above it the null is sampled instead. `sign_flip_estimator` is the only line that compares against it, so which computation ran is one answer and the report reads that one. It used to decide how many differences the test looked at as well, which returned p = 0.0 at sixty pairs. |
 | `SAMPLED_SIGN_ASSIGNMENTS` | `trials.py` | 200,000 | Size of the sampled reference set above `MAX_EXACT_PAIRS`, and therefore the floor the report prints there (5e-6). Costs 0.08 s at sixty pairs. |
 | `SIGN_FLIP_SEED` | `trials.py` | 20260817 | Seed for that sample, printed in the report. A Monte-Carlo p that moves between two renderings of the same trial is a number a reader cannot check. |
+
+### FrontierScience-Research
+
+No flag reaches any of these. They are the shape of the benchmark and of the
+measurement taken on it; [frontierscience.md](frontierscience.md) is the account
+of what each one is defending against.
+
+| Constant | Module | Value | Meaning |
+| --- | --- | --- | --- |
+| `FS_DATASET_SHA256` / `FS_DATASET_BLOB_SHA1` | `frontierscience.py` | two digests over 372,607 bytes | The pinned split. Checked on every load; a mismatch is refused and there is no fallback to a second copy. The dataset is not committed — its card carries a canary GUID — and not downloaded, because this tree has no network dependency and a failed download invites a fall back to whatever is already on disk. |
+| `FS_DATASET_ROWS` / `FS_DATASET_SUBJECT_ROWS` | `frontierscience.py` | 60 / 20 per subject | Asserted rather than trusted: two rows are byte-identical, so a silently deduplicating read produces 59 and looks fine. |
+| `FS_DATASET_RUBRIC_ITEMS` | `frontierscience.py` | 635 | What the strict grammar parses the whole split into. A load-time assertion, because the three plausible wrong parsers all fail quietly with a believable item count. |
+| `FS_DATASET_POINTS_PER_ROW` / `FS_POINTS_TOLERANCE` | `frontierscience.py` | 10.0 / 1e-6 | Every row's rubric sums to ten. The tolerance is five orders of magnitude below the smallest sub-bullet weight in the split, so nothing it tolerates could hide a lost item. |
+| `FS_MIN_ANSWER_CHARS` | `frontierscience.py` | 200 | Below this an answer is not an answer. Deliberately not the report floor of 1200: an 800-character correct derivation is a complete answer here. |
+| `FS_MAX_ANSWER_CHARS` | `frontierscience.py` | 150,000 | A **refusal** threshold, not a truncation — truncating would hand the judge a sentence that stops mid-clause and score it. About twice the largest report the pipeline has ever produced (75,263 B over forty real sibling runs), so an answer past it is a runaway. |
+| `FS_IDEATE_STAGE` | `frontierscience.py` | `02_hypothesis_generation` | Both ends of the `ideate` walk. Starting above Stage 01 is the protocol: under no browsing its evidence ledger can only be satisfied by invented citations. Stopping there keeps Stage 07's figure floor out of the picture entirely. |
+| `FS_JUDGE_MODEL` / `FS_JUDGE_REASONING_EFFORT` | `score_fs_run.py` | `gpt-5.1` / `high` | The paper's GPT-5 returns 404 on this endpoint. Judge choice moved a sibling total by about sixteen points on identical artifacts, so this is a substitution rather than a configuration and every total says so. |
+| `FS_JUDGE_MAX_OUTPUT_TOKENS` | `score_fs_run.py` | 32,000 | The budget buys thinking, not answer: at 4,096 and at 2,048 the judge spent it all on reasoning and returned no verdict at all. Largest total output observed 20,004 tokens, 15,202 of them reasoning. |
+| `FS_JUDGE_TIMEOUT_SECONDS` | `score_fs_run.py` | 600 s | Nearly twice the longest call observed (322.3 s). The cost of a timeout is a refused pair; the cost of waiting is five minutes. |
+| `FS_JUDGE_WORKERS` | `score_fs_run.py` | 1 | Serial, with no flag to change it. 34 of 34 serial calls succeeded here with zero retries, and concurrent judge calls were the measured cause of most sibling scoring failures. |
+| `FS_JUDGE_SAMPLING_SD` | `fs_scoring.py` | 0.326 points / 10 | Pooled over 23 draws on two tasks, both scoring 2.5–3.3. **The sd at 7 points, where the pass threshold sits, is unmeasured**, and `FS_JUDGE_NOISE_NOTE` prints that in the same breath so the two cannot be quoted apart. |
+| `FS_PASS_THRESHOLD` | `fs_scoring.py` | 7.0 | The paper's correctness threshold. Recorded beside a total, never folded into it. |
+| `FS_MAX_REFUSAL_RATE` | `fs_trial.py` | 0.20 | Above this share of refused runs in **either** arm, the paired difference is withheld and the refusal rates are the only published result. Refusals are not random with respect to arm. |
+| `FS_MINIMUM_EFFECT` | `fs_trial.py` | 0.5 rubric points | Declared before the trial rather than read off it. About a fifth of the across-task sd of a measured direct arm, and about 1.5 times the judge's own sampling sd at the scores where that sd was measured. |
+| `FS_MAX_ATTEMPTS` / `FS_STALL_SECONDS` | `fs_trial.py` | 2 / 2700 s | Attempts per `(task, arm)`, applied identically to both arms, and the heartbeat window on the raw log. There is deliberately no per-run wall clock: with real durations from 11.9 to 26.5 hours, any cap short enough to catch a hang is short enough to kill a run that was going to finish. |
 
 ### Prompt assembly
 
