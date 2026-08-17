@@ -175,7 +175,9 @@ from .utils import (
     DEFAULT_STAGE_GRAPH,
     FIXED_STAGE_OPTIONS,
     INTAKE_STAGE,
+    MAX_AUTOMATED_SENDBACKS,
     MAX_STAGE_ATTEMPTS,
+    REVISION_CHOICES,
     STUCK_AFTER_IDENTICAL_FAILURES,
     attempts_exhausted,
     is_stuck,
@@ -209,6 +211,7 @@ from .utils import (
     parse_refinement_suggestions,
     read_attempt_count,
     read_polish_count,
+    read_sendback_count,
     read_text,
     required_stage_output_template,
     selected_output_format,
@@ -217,6 +220,7 @@ from .utils import (
     validate_stage_markdown,
     write_attempt_count,
     write_polish_count,
+    write_sendback_count,
     write_stage_handoff,
     write_text,
 )
@@ -2120,6 +2124,10 @@ class ResearchManager:
         polish_rounds = read_polish_count(paths, stage)
         entry_polish_rounds = polish_rounds
         is_polish_round = False
+        # Only read on a directed round, and a directed round is only reached after the
+        # assignment below. Bound here anyway: the first attempt of a stage is neither a
+        # polish round nor directed, and it reaches `consider` before either is set.
+        directed_by = "reviewer" if self.reviewer is not None else "human"
         if self.evolution is not None:
             self.evolution.begin_stage(paths, stage)
         revision_feedback: str | None = None
@@ -2448,6 +2456,7 @@ class ResearchManager:
                     attempt_no=attempt_no,
                     draft_path=result.stage_file_path,
                     is_polish_round=is_polish_round,
+                    directed_by=directed_by,
                 )
                 if outcome.reverted:
                     # `consider` wrote the champion back over the draft; everything
@@ -2474,8 +2483,11 @@ class ResearchManager:
                         continue
 
             # Anything from here is a human or reviewer decision, so the next
-            # attempt it produces is directed rather than self-initiated.
+            # attempt it produces is directed rather than self-initiated. Which of
+            # the two it was decides whether the ratchet may overrule the result:
+            # see `EvolutionController.consider`.
             is_polish_round = False
+            directed_by = "reviewer" if self.reviewer is not None else "human"
             mark_stage_human_review_manifest(
                 paths,
                 stage,
@@ -2896,6 +2908,27 @@ class ResearchManager:
             stage_markdown=stage_markdown,
             suggestions=suggestions,
         )
+        # Before anything downstream reads the verdict. `_settle_obligations` branches on
+        # `decision.choice == "5"` to record what this stage deferred, and the effort plan
+        # counts a refusal as a contest -- a promotion patched in after the return would be
+        # invisible to both, and the run would carry an approval nobody accounted for.
+        overruled = self._sendback_is_out_of_budget(paths=paths, stage=stage, choice=decision.choice)
+        if overruled is not None:
+            append_log_entry(
+                paths.logs,
+                f"{stage.slug} attempt {attempt_no} sendback_refused",
+                f"{overruled}.\nThe automated reviewer asked for choice "
+                f"{decision.choice}; the stage was promoted instead.\n"
+                f"reviewer reason: {decision.reason or '(none recorded)'}\n"
+                f"reviewer feedback:\n{decision.feedback or '(none recorded)'}",
+            )
+            self.ui.show_status(
+                f"{stage.stage_title}: {overruled}; promoting.", level="info"
+            )
+            decision = replace(decision, choice="5", comments=[], feedback="")
+        elif decision.choice in REVISION_CHOICES:
+            write_sendback_count(paths, stage, read_sendback_count(paths, stage) + 1)
+
         self._render_review_decision(decision)
         log_body = [
             f"mode: automated",
@@ -2937,6 +2970,55 @@ class ResearchManager:
         # the refine path can send back a passage instead of the whole stage.
         self._pending_comments = list(decision.comments or [])
         return decision.choice, decision.feedback or None
+
+    def _sendback_is_out_of_budget(
+        self, *, paths: RunPaths, stage: StageSpec, choice: str
+    ) -> str | None:
+        """Why this automated send-back may not be spent, or None to let it through.
+
+        Two stops, and neither applies to a human. A person who asks for a change is
+        exercising judgement AutoR has no standing to overrule. An automated reviewer is
+        another instance of the same model reading the same draft, and an unbounded
+        deference to it is a deference to nothing -- measured over 41 ResearchClawBench
+        runs it refused 890 times and approved 496, and its refusals produced 1115
+        revisions of which 71% moved the rubric by exactly 0.000.
+
+        The first stop is the saturated one. The ratchet already refuses to spend its
+        *own* round on a stage scoring 1.000, because a rubric at its ceiling cannot
+        register an improvement and a round aimed at one buys churn -- that is
+        `should_continue`, and it has been there since the ratchet landed. The reviewer
+        was never subject to it, and 59% of its send-backs were aimed at stages already
+        at 1.000.
+
+        The reviewer's *first* look is exempt from that stop even at 1.000, and it has to
+        be: the rubric is nine mechanical criteria and the reviewer is the only reader of
+        the prose, so a stage whose counts and ratios are all green is exactly where the
+        reviewer might have the only thing to say. Refusing that read to save the last
+        11 percentage points would trade the one part of the loop that could be load
+        bearing for the part measured not to be.
+
+        The second stop is the budget, and it exists because the first cannot bound a
+        stage the rubric never saturates. It promotes rather than skips: nothing is
+        discarded, the draft that stands is the one the reviewer had already scored
+        acceptable on every mechanical criterion, and the run keeps its stage.
+        """
+        if self.reviewer is None or choice not in REVISION_CHOICES:
+            return None
+        spent = read_sendback_count(paths, stage)
+        if spent >= MAX_AUTOMATED_SENDBACKS:
+            return (
+                f"the automated reviewer has already sent this stage back "
+                f"{spent} time(s), which is its budget of {MAX_AUTOMATED_SENDBACKS}"
+            )
+        if spent >= 1 and self.evolution is not None and self._evolution_measures(stage):
+            champion = self.evolution.state(paths, stage).champion
+            if champion is not None and champion.total >= 1.0 - 1e-9:
+                return (
+                    "the draft already scores 1.000 on every rubric criterion and the "
+                    "reviewer has had its look, so another round has nothing measurable "
+                    "left to move"
+                )
+        return None
 
     def _settle_obligations(
         self,

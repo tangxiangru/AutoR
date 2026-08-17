@@ -785,7 +785,10 @@ class GraphWalkTests(unittest.TestCase):
             self.assertIn(row["stage"], {stage.slug for stage in STAGES})
             self.assertIn(
                 row["verdict"],
-                {"first", "promoted", "frontier", "regressed", "directed", "verdict_drift"},
+                {
+                    "first", "promoted", "frontier", "regressed", "directed",
+                    "directed_regressed", "verdict_drift",
+                },
             )
 
         summary = json.loads(read_text(paths.evolution_dir / "summary.json"))
