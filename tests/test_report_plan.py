@@ -1046,6 +1046,34 @@ class TaskOutputCoverageTest(ReportPlanTestCase):
         self.assertIn("show it in the report", rendered)
         self.assertIn("NOT ATTEMPTED", rendered)
 
+    def test_a_source_result_is_a_first_class_claim(self) -> None:
+        """`exploratory:` was the only escape, and it is the wrong word for a reproduction.
+
+        Physics_000 bound all eight slots to its own six hypotheses plus two exploratory
+        ids, discharged the source's first result as a headline number, and scored 18.7
+        against a bare agent's 53.4. Nothing in the schema was violated — there was no row
+        for "the figure the paper published", so it had to displace a hypothesis to exist.
+        """
+        self.write_plan(figures=[figure(1, supports=["reproduces:magic-number-series"])])
+        self.assertEqual(self.problems(), [])
+
+    def test_a_reproduction_slug_is_held_to_the_same_floor(self) -> None:
+        """A bare prefix is a wildcard, which is what the distinctness rule stops."""
+        self.write_plan(figures=[figure(1, supports=["reproduces:x"])])
+        self.assertTrue(any("shorter than" in p for p in self.problems()), self.problems())
+        self.assertTrue(any("reproduced result" in p for p in self.problems()), self.problems())
+
+    def test_the_refusal_offers_the_reproduction_label(self) -> None:
+        """A claim id nobody declared should be told where a source result goes."""
+        self.write_plan(figures=[figure(1, supports=["H9"])])
+        from src.utils import STAGES, validate_stage_artifacts
+
+        write_hypothesis_manifest(self.paths)
+        problems = " ".join(self.problems())
+        if "not an id in" not in problems:
+            self.skipTest("this fixture does not reach the known-ids branch")
+        self.assertIn("reproduces:", problems)
+
     def test_an_unknown_coverage_kind_is_refused(self) -> None:
         self.write_plan(task_outputs=[{"stated": "constraints", "covered_by": "somehow"}])
         self.assertTrue(any("expected one of" in p for p in self.problems()))

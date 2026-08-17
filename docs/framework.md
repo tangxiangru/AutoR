@@ -169,7 +169,7 @@ with a `previous_digest` is a record of the change rather than an erasure of it.
 
 ### 2.4 The improvement loop is scored by something it cannot influence
 
-`src/rubric.py` scores a draft on nine weighted criteria, **never calls a backend**, and is
+`src/rubric.py` scores a draft on ten weighted criteria, **never calls a backend**, and is
 **verdict-blind**: a refuted hypothesis with clean evidence outscores a supported one resting on an
 assertion. `src/evolution.py` keeps the champion and reverts a round that scores worse. On top of
 that, `verdict_digest()` hashes the `(id, verdict)` set, and any AutoR-initiated polish round that
@@ -193,7 +193,7 @@ exists to prevent, reached by a route the design did not consider. Declining to 
 fabrication is not the same as declining to *pay* for it. `_cap_quantification_by_fidelity` now caps
 the first criterion at the second wherever both apply, which makes the middle row 0.0; the cap is
 recorded in `observed` so a stage can still tell which half to fix, and Stage 04 is exempt because
-fidelity does not apply before there are results. `RUBRIC_VERSION` is `7` — it went to 3 when
+fidelity does not apply before there are results. `RUBRIC_VERSION` is `8` — it went to 3 when
 that cap landed, to 4 when the length gradient came out of `commitment`, to 5 when
 `artifact_breadth` learned to read the four workspace directories Stages 01, 02, 07 and 08 are
 told to write and `reproducibility` gained its Stage 02-03 link, to 6 when
@@ -589,7 +589,7 @@ An explicit `--flag`/`--no-flag` always beats the level. The validity chain is n
 
 | Module | Owns |
 | --- | --- |
-| [`rubric.py`](../src/rubric.py) | Nine weighted criteria over a draft and the artifacts it names. Backend-free, verdict-blind, versioned. |
+| [`rubric.py`](../src/rubric.py) | Ten weighted criteria over a draft and the artifacts it names. Backend-free, verdict-blind, versioned. |
 | [`evolution.py`](../src/evolution.py) | The champion ratchet, the polish budget, the revert, and the `verdict_drift` rejection. |
 | [`pareto.py`](../src/pareto.py) | Non-dominated drafts kept beside the champion. |
 | [`ideation_panel.py`](../src/ideation_panel.py) | Five divergent Stage 02 proposers, Jaccard-deduplicated into a scored candidate pool. It decides nothing. |

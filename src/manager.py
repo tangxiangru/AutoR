@@ -58,7 +58,12 @@ from .emissions import (
     release as release_emissions,
     withhold as withhold_emission,
 )
-from .provenance import format_withdrawal_plan, observe as observe_artifacts, plan_withdrawal
+from .provenance import (
+    format_withdrawal_plan,
+    observe as observe_artifacts,
+    paths_written_by,
+    plan_withdrawal,
+)
 from .walk_ratchet import (
     begin as ratchet_begin,
     settle as ratchet_settle,
@@ -3792,6 +3797,29 @@ class ResearchManager:
         previous = approved_stage_summaries(read_text(paths.memory))
         previous_block = "_None yet._" if previous == "None yet." else previous
         stage_rel_path = str(paths.stage_file(stage).relative_to(paths.run_root)).replace("\\", "/")
+
+        # What the stage actually left in the workspace. Two sentences below used to be
+        # false together: "its work was never done", under a heading reading "Files
+        # Produced" that listed only this summary. A stage that ran out of attempts after
+        # writing three result files published a record denying both the work and the
+        # files, while the files sat on disk being counted by every forward gate.
+        #
+        # The files are not withdrawn -- an auto-skip is a decision to continue past a
+        # failure, not to repudiate it, and across the run archive skipping is how most
+        # runs get past a stage that stalls. So the record is what changes: the work was
+        # not *accepted*, and here is what it left.
+        produced = paths_written_by(paths, stage)
+        left_behind_note = (
+            f"- It did leave {len(produced)} file(s) in the workspace. They are real and "
+            "no reviewer accepted them; treat them as unreviewed rather than as absent.\n"
+            if produced
+            else ""
+        )
+        left_behind_list = (
+            "".join(f"- `workspace/{item}` (unreviewed)\n" for item in produced)
+            if produced
+            else ""
+        )
         if kind == "human":
             directive = "it was intentionally skipped at human direction so the run could continue"
             did = "- Recorded an explicit human-directed skip for this stage.\n"
@@ -3813,11 +3841,15 @@ class ResearchManager:
             "- Preserved the workflow timeline so downstream stages can continue with a clear audit trail.\n"
             "- Marked this stage as intentionally incomplete rather than silently fabricating missing work.\n\n"
             "## Key Results\n\n"
-            f"- This stage was skipped ({kind}) and its work was never done.\n"
+            f"- This stage was skipped ({kind}) and its work was not accepted.\n"
             "- Downstream stages should treat this stage as missing or provisional context, not as completed evidence.\n"
-            f"- Skip reason: {reason}\n\n"
+            f"- Skip reason: {reason}\n"
+            + left_behind_note +
+            "\n"
             "## Files Produced\n\n"
-            f"- `{stage_rel_path}`\n\n"
+            f"- `{stage_rel_path}`\n"
+            + left_behind_list +
+            "\n"
             "## Decision Ledger\n\n"
             "- **Open Questions**: Which downstream claims now need extra scrutiny because this stage was skipped?\n"
             f"- **Locked Decisions**: {stage.stage_title} was skipped to keep the run moving.\n"
