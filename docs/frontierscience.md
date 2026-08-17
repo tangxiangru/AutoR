@@ -147,10 +147,19 @@ genuinely has to merge the two — a paired analysis, where two answers to one q
 two independent observations — can see it instead of rediscovering it. Everything else keeps
 a sixty-row population.
 
-`resolve_task_keys` implements a subset grammar over those keys — row indices, keys, inclusive
-ranges, a subject intersection and a seeded `--sample` — and `FS_TASK_SELECTION_HELP` is the
-single sentence both its argparse help and its refusals are written from. **No front end
-exposes the subject or sample flags today.** `fs_agent.py` and `tools/score_fs_run.py` each
+`resolve_task_keys` implements a subset grammar over those keys. Row indices, keys and
+inclusive ranges are in `FS_TASK_SELECTION_HELP`, which reaches a reader as the `--task` help on
+both `fs_agent.py` and `tools/score_fs_run.py` and as the tail of every refusal. The subject
+intersection and the seeded draw are in `FS_TASK_SUBSET_ARGUMENTS`, and they are **keyword
+arguments** — `subject=`, `sample=`, `sample_seed=` — not flags. **No front end exposes them
+today.**
+
+Which is a promise a gate keeps rather than a sentence: every flag spelled in
+`FS_TASK_SELECTION_HELP` must be declared by one of the three front ends, so the help can never
+describe a flag that does not exist. It fails the day somebody documents `--subject` without
+adding it, which is how prose becomes a specification here instead of a wish. The draw's
+algorithm is named in full — `random.Random(S).sample(sorted(keys), N)` — so a subset can be
+reproduced by hand, and a `sample` without a `sample_seed` is refused rather than defaulted. `fs_agent.py` and `tools/score_fs_run.py` each
 take one `--task` and refuse anything that resolves to more or fewer than one row; the trial
 driver's population is the explicit `tasks` list in the plan, written out in full and never
 re-derived downstream.
@@ -446,7 +455,7 @@ mentions one.
 
 The scorer is serial and has no concurrency flag. Concurrent judge calls were the measured
 cause of most scoring failures on ResearchClawBench, 34 of 34 serial calls succeeded here, and
-sixty tasks by two arms at one draw each is about 2.6 hours of judging — which does not buy
+sixty tasks by two arms at one draw each is about 2.4 hours of judging — which does not buy
 enough to be worth challenging that lesson.
 
 The key is never a command-line argument. `--api-key` does not exist and must not be added; the
@@ -475,9 +484,9 @@ rules this repository's scorer applies.
 | physics | mean 3.028, passed 2/20 |
 | answer latency | mean 120.1 s, median 115.9 s, longest 290.1 s |
 
-(Several constants in the code quote an answer latency of 134.5 s. That is the mean over the
-earlier balanced twenty-one-task draw, recorded as such in the shipped plan's cost note; 120.1 s
-is the whole-split figure.)
+(Three constants in the code quoted an answer latency of 134.5 s until they were reconciled
+against this table. That figure was the mean over an earlier balanced twenty-one-task draw. It
+survives only where a sentence marks it superseded, and a gate refuses it anywhere else.)
 
 ### The corroboration, stated carefully
 
@@ -561,7 +570,7 @@ stage is Stage 02 is a run that produced nothing while reporting that it finishe
 ### The cost estimate, framed as an estimate
 
 Judging is the only measured cost: at a mean of 72.9 s per serial call, sixty tasks by two arms
-at one draw each is about 2.6 hours.
+at one draw each is about 2.4 hours.
 
 For the answer side there is no measurement, only a neighbour. Thirty-nine real
 ResearchClawBench runs on this box had a **median wall clock of 15.2 h** (p25 11.9, p75 19.4,
@@ -620,11 +629,17 @@ for, under the message "the two arms measured no stage in common".
 
 ### The environment digest
 
-`FsRunEnvironment` carries nine fields, and each is **observed off the artifacts** rather than
+`FsRunEnvironment` carries nine fields. Eight are **observed off the artifacts** rather than
 copied from the plan — a field filled from the plan agrees by construction and is therefore not
 the field the contract names. They are: `dataset_sha256`, `judge_model`,
 `judge_reasoning_effort`, `answer_model`, `answer_guidance`, `task_instruction_sha256`,
-`disallowed_tools`, `answer_attempts` and `judge_replicates`.
+`disallowed_tools` and `judge_replicates`.
+
+The ninth, `answer_attempts`, is not observed and never was: it is the literal `1`. Rather than
+let a constant sit in a list whose stated property is that nothing in it is a constant, the
+freeze refuses any plan declaring another value, and both the field and the record that fills
+it say so. A driver that produced one evidence per run while accepting `answer_attempts: 3`
+would spend the whole plan before disclosing that it had pooled nothing.
 
 The digest is folded into the single `stage_fitness` key, `"<task_key>|<digest[:12]>"`, so a
 pair whose two arms were measured in different environments dies on `collect_pairs`' existing
@@ -740,7 +755,12 @@ Five things the report **refuses** to print, each absence a decision:
 - **no score taken while the trial was in flight** — every published total comes from one
   continuous final pass with one judge, which is the only arrangement under which the first
   task's total and the last task's were produced by the same instrument;
-- **no pair carrying a named exclusion reason.** That raises rather than publishing.
+- **no pair whose two arms `compare_fs_arms` can tell apart.** That raises rather than
+  publishing. The raise is over cross-arm confounds only, and the distinction is load-bearing:
+  after the duplicate-row fold a surviving pair carries the group's key, which is also one
+  member's own key, so a refusal filed against that member is not a confound reaching the
+  difference. Conflating the two turned an ordinary refusal into an `AssertionError` that
+  blamed the environment digest and produced no report at all.
 
 The report ends with an upper bound on its own claim: what it measures is the difference
 between these two named arms, under this judge, over this many distinct questions, with
@@ -776,10 +796,14 @@ arms of one task launched inside the same second landed in one directory, overwr
 other's deliverable, and produced a paired difference of exactly zero — a null result
 manufactured by a filename.
 
-One operational note found while writing this page: the dry run sets each child's working
-directory to the arm's `worktree`, so a dry-run plan whose treatment worktree does not exist on
-disk fails at `Popen` with `FileNotFoundError` before the fake operator is ever reached. Point
-it at a real checkout.
+A dry run still needs the treatment arm's checkout on disk, and `run` says so before it takes
+the lock: `missing_worktrees` names every `autor` arm whose directory is absent and refuses.
+`operator: "fake"` fabricates the operator and the judge and nothing else — each child's working
+directory is still the arm's worktree, and `producer_matches_arm` compares a real `git rev-parse`
+against the arm's label. The check lives at `run` rather than at freeze on purpose: a plan is a
+value that `report` also loads, and a filesystem probe at freeze would make rebuilding last
+month's report depend on a checkout since deleted. Before the refusal existed this was a bare
+`FileNotFoundError` out of `Popen`, after the lock was taken.
 
 ---
 

@@ -1017,15 +1017,17 @@ exercises the real lock, the real children, the real state machine, the real
 metadata builder, the real transcript witness, the real admission gate, the real
 scorer's pure half and the real report; it fabricates the two things that cost
 money. **Every number it prints is a property of the fake operator**, and it
-still sets each child's working directory to the arm's `worktree`, so that path
-has to exist on disk.
+still sets each child's working directory to the arm's `worktree`. That path has
+to exist on disk, and `run` refuses before taking the lock if it does not,
+naming every `autor` arm and its missing directory rather than reaching `Popen`
+and dying there with a bare `FileNotFoundError`.
 
 ### Exit codes
 
 | Code | Meaning |
 | --- | --- |
 | `0` | The command finished. For `run` that means every planned `(task, arm)` reached a terminal state and the report was written to `<state_dir>/report.md` and printed. |
-| `1` | An unhandled failure, including a plan the freeze-time refusals rejected. |
+| `1` | An unhandled failure, including a plan the freeze-time refusals rejected, and `run` against an `autor` arm whose `worktree` is not a directory here. |
 | `2` | `run` found somebody else's AutoR already running on this box, and refused to start. Two trials is the concurrency that exhausts the quota that then kills both. |
 
 The arms, the ten admission clauses, the publication ceiling and what the report
