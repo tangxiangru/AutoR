@@ -1209,8 +1209,10 @@ What a reader can take from this system, in descending order of how transferable
    a channel that withholds itself without an argument. It makes "what did this stage actually see?"
    a diffable topology instead of a reconstruction from `if` statements.
 
-6. **A statistically literate archive.** Paired trials with an exact sign-flip p-value, the
-   attainable-p floor printed beside it, an explicit `underpowered` label below six pairs, and a
+6. **A statistically literate archive.** Paired trials with a sign-flip p-value — enumerated
+   exactly up to eighteen pairs and a seeded sample of sign assignments above that — the
+   attainable-p floor of the estimator that ran printed beside it, an explicit `underpowered`
+   label below six pairs, and a
    sample-complexity tool that says how many runs an edge needs before it is believable. This is
    apparatus, not evidence — see §8.
 

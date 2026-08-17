@@ -517,9 +517,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help=(
             "Print what the paired trials in the archive show, and exit. Reports the mean "
-            "within-pair difference, an exact two-sided sign-flip p-value, the smallest p that "
-            "sample size could have produced, and the per-criterion decomposition — a capability "
-            "whose whole effect sits in one criterion is a flag, not a result."
+            "within-pair difference, a two-sided sign-flip p-value (enumerated exactly up to "
+            "eighteen pairs, and above that a seeded sample of sign assignments, which the report "
+            "says and prints the seed for), the smallest p the estimator that ran could have "
+            "produced, and the per-criterion decomposition — a capability whose whole effect sits "
+            "in one criterion is a flag, not a result."
         ),
     )
     parser.add_argument(

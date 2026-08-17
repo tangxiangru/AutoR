@@ -65,15 +65,46 @@ the reading that the capability was tested and found wanting. The floor is print
 next to the p-value so the difference between *did not show an effect* and *could
 not have shown one* stays visible.
 
-**A known crack, recorded here because it is invisible where it lives.** Above
-``MAX_EXACT_PAIRS`` the enumeration truncates ``usable[:18]`` while
-:attr:`TrialResult.floor` still divides by the untruncated *n*. At n = 19 the printed
-p is computed from eighteen pairs and the floor printed beside it is ``2 / 2**19`` —
-lower than that p can reach, which breaks the third refusal above at exactly the
-point it matters. Unreachable at the sample sizes anyone has run (a paired
-ResearchClawBench trial is three to six pairs), and deliberately left alone; the next
-reader extending a trial to forty tasks walks straight into it and should fix the
-floor, or sample the sign assignments, in a change of its own.
+**Above eighteen pairs the null is sampled, and it used to be truncated.** The
+crack this paragraph used to describe has been closed, and what it was is worth
+keeping because the shape recurs: ``sign_flip_p`` computed ``observed`` as the mean
+of all *n* differences and then, past ``MAX_EXACT_PAIRS``, enumerated the sign
+assignments of ``usable[:18]`` — an eighteen-pair permuted mean compared against a
+sixty-pair observed one, which is not a null distribution for anything. Three numbers
+measured on this tree before the fix: ``sign_flip_p([0.01]*18 + [5.0]*42)`` returned
+exactly ``0.0``, which no permutation test can produce; the *same sixty differences*
+in the other order, ``[5.0]*42 + [0.01]*18``, returned ``0.0013``; and
+``[5.0]*18 + [0.01]*42`` — a different sample, with a mean difference of 1.507 against
+the first one's 3.503 — returned ``0.2379``, so the weaker effect got the healthier
+looking p purely because its large values landed in the eighteen slots the
+enumeration read. Beside all three :attr:`TrialResult.floor` divided by the
+untruncated *n* and printed ``2 / 2**60`` = 1.7e-18, so an unattainable p sat next to
+an unattainable floor at exactly the point the refusal above matters. Nothing had run
+into it because a paired ResearchClawBench trial is three to six pairs; a sixty-task
+benchmark walks straight in.
+
+Past :data:`MAX_EXACT_PAIRS` the null is now a seeded sample of
+:data:`SAMPLED_SIGN_ASSIGNMENTS` sign assignments drawn over *all n* differences —
+observed statistic and null distribution taken from one sample — and
+:attr:`TrialResult.floor` reports the resolution of the estimator that ran
+(:func:`attainable_p_floor`) rather than of the exact test that did not. At or below
+the threshold nothing moved: the enumeration is the same enumeration, value for
+value, because the trials this module already serves live down there and their
+numbers were not this change's to touch.
+
+**Which computation ran is asked once, of :func:`sign_flip_estimator`.** The first
+version of that answer was ``TrialResult.p_is_sampled = n > MAX_EXACT_PAIRS``, which
+says which estimator *would* run at that sample size rather than which one *did*, and
+the two disagree on an input a sixty-task benchmark can produce: differences that sum
+to exactly zero return 1.0 from :func:`sign_flip_p` before either branch is reached, so
+a twenty-pair trial of that shape printed a seed, a 5e-6 floor and the sentence "that p
+is a Monte-Carlo estimate over 200,000 of them" beside a number no draw produced. That
+is this module's own defect — a floor describing a computation nobody ran — reappearing
+one level up in the report. There is now one branch statement for the whole module,
+:func:`sign_flip_estimator`; :func:`sign_flip_p` obeys its answer instead of restating
+it, the report keys its p-line on the same answer, and
+``TheLabelNamesTheComputationThatRanTests`` instruments the random number generator and
+the enumeration to check that the label names the code that actually executed.
 
 What this measures is the rubric score, and the rubric is a proxy for rigour rather
 than a measure of insight. A capability can raise it without making the research
@@ -85,6 +116,7 @@ accepting it.
 from __future__ import annotations
 
 import itertools
+import random
 from dataclasses import dataclass
 from typing import Iterable, Mapping, Sequence
 
@@ -201,21 +233,109 @@ def outcomes_free_of(capability: str) -> tuple[Outcome, ...]:
 
 
 #: Above this, the exact enumeration is replaced by the same arithmetic on a
-#: sampled basis. 2**18 is a quarter of a million sign assignments, which is
-#: instant; there is no reason to go further and every reason not to hang a report.
+#: sampled basis. 2**18 is a quarter of a million sign assignments and takes 0.27 s
+#: on this tree; 2**19 doubles that and 2**60 is not a computation. The value is a
+#: wall-clock choice, and the only thing that may depend on it is which of the two
+#: estimators runs. It used to decide something else as well — *how many of the
+#: differences the test looked at* — which is the defect the module docstring
+#: records. :func:`sign_flip_estimator` is the only line that compares against it, so
+#: "which estimator ran" is one answer rather than one answer per reader.
 MAX_EXACT_PAIRS = 18
+
+#: Size of the sampled reference set: the observed sign assignment plus
+#: ``SAMPLED_SIGN_ASSIGNMENTS - 1`` drawn ones. Two hundred thousand puts the
+#: estimator's resolution at 5e-6 — four orders of magnitude below the 0.05 any
+#: reader of this report is looking at — and its standard error at a true p of 0.05
+#: at 0.0005, small enough that resampling cannot move a verdict. It costs 0.08 s at
+#: n = 60, measured, which is what stops a property from being expensive to read.
+SAMPLED_SIGN_ASSIGNMENTS = 200_000
+
+#: Fixed, and printed in the report, so a sampled p-value is a number a reader can
+#: reproduce rather than one that moves every time the report is rendered. The value
+#: is the date the sampled branch replaced the truncation; nothing depends on it
+#: beyond its being the same on the next run. It is deliberately *not* an argument of
+#: :func:`sign_flip_p`: a call site that can choose the seed can choose the p.
+SIGN_FLIP_SEED = 20260817
+
+#: Differences per block of the sampled draw, chosen so ``2**_SAMPLE_BLOCK`` signed
+#: sums fit in a list worth precomputing — 32,768 entries built once against 200,000
+#: draws that then cost one index each. Bigger is worse in both directions: at n = 60,
+#: 15 builds four tables of 32,768 and does four lookups a draw, while 20 would build
+#: three of 1,048,576 — a twenty-four-fold build for a quarter off the draw, and three
+#: lists of a million Python floats to hold it.
+_SAMPLE_BLOCK = 15
+
+
+#: Every sign assignment enumerated. The floor beside a p from here is ``2 / 2**n``.
+ESTIMATOR_EXACT = "exact"
+#: :data:`SAMPLED_SIGN_ASSIGNMENTS` of them drawn with :data:`SIGN_FLIP_SEED`. The floor
+#: beside a p from here is the sample's own resolution and has nothing to do with *n*.
+ESTIMATOR_SAMPLED = "sampled"
+#: The mean difference is exactly zero, so every sign assignment ties the observed one
+#: and the answer is 1 at any sample size. Neither estimator runs, and this is not a
+#: shortcut with the same properties as the branch it skips: what a floor answers is
+#: "how small could this p have been", and here the answer is 1.0 rather than either
+#: estimator's resolution. Reachable, not exotic — the ResearchClawBench rubric is
+#: scored in quarter points, so a sixty-pair trial whose differences sum to 0.0 in
+#: float is an ordinary outcome, and it is the input on which "sampled" and
+#: "``n`` is above the threshold" stop being the same statement.
+ESTIMATOR_CANCELLED = "cancelled"
+#: No pairs at all. Separate from ``cancelled`` because a trial with nothing in it and a
+#: trial whose arms tied are different things to a reader, and the report prints no
+#: p-line for the first.
+ESTIMATOR_NO_PAIRS = "no pairs"
+
+#: The registry, for the same reason :data:`DECLARED_OUTCOMES` is one: the failure mode
+#: of a label nothing recognises is silence. ``format_trial_report`` keys its p-line on
+#: this value, so a fifth estimator added without a branch there would drop the p-value
+#: out of the report rather than raise.
+SIGN_FLIP_ESTIMATORS: frozenset[str] = frozenset(
+    {ESTIMATOR_EXACT, ESTIMATOR_SAMPLED, ESTIMATOR_CANCELLED, ESTIMATOR_NO_PAIRS}
+)
 
 
 def min_attainable_p(pairs: int) -> float:
     """The smallest two-sided p an exact sign-flip test over ``pairs`` can produce.
 
-    Printed beside every p-value. "p = 0.25 with a floor of 0.25" and "p = 0.25 with
-    a floor of 0.008" are completely different statements about a capability, and
-    only the first is a fact about the sample size rather than about the effect.
+    "p = 0.25 with a floor of 0.25" and "p = 0.25 with a floor of 0.008" are
+    completely different statements about a capability, and only the first is a fact
+    about the sample size rather than about the effect.
+
+    A question about the *exact* test, and no longer the number a report prints —
+    that is :func:`attainable_p_floor`, which agrees with this up to
+    :data:`MAX_EXACT_PAIRS` and departs from it above, because above it the exact
+    test is not the one that ran. This one is still what
+    :data:`MIN_PAIRS_FOR_SIGNIFICANCE` is derived from: six pairs is where 2/2**n
+    first clears 0.05, and that is a fact about six pairs whatever estimator a
+    sixty-pair trial ends up using.
     """
     if pairs <= 0:
         return 1.0
     return min(1.0, 2.0 / (2**pairs))
+
+
+def attainable_p_floor(pairs: int) -> float:
+    """The smallest p :func:`sign_flip_p` can actually return for this many pairs.
+
+    Split from :func:`min_attainable_p` because the two answers stopped agreeing the
+    moment the enumeration stopped being what runs. At sixty pairs the exact floor is
+    ``2 / 2**60`` = 1.7e-18 and the estimator's is one in
+    :data:`SAMPLED_SIGN_ASSIGNMENTS` = 5e-6, twelve orders of magnitude apart, and
+    the report printing the first beside a p produced by the second is the same
+    mistake the module docstring records in the other direction: it says the sample
+    could have shown something it could not.
+
+    Which of the two a reader wants depends on the question, so both are exported and
+    the report takes this one. There is no branch here for "the sample happens to be
+    large enough that the exact floor is lower": above the threshold the exact floor
+    is *always* lower, and it is always the wrong number, because it describes a
+    computation nobody ran.
+    """
+    if pairs <= 0:
+        return 1.0
+    if pairs > MAX_EXACT_PAIRS:
+        return 1.0 / SAMPLED_SIGN_ASSIGNMENTS
+    return min_attainable_p(pairs)
 
 
 def min_attainable_concentration(criteria: int) -> float:
@@ -234,34 +354,130 @@ def min_attainable_concentration(criteria: int) -> float:
     return 1.0 / criteria
 
 
+def _sampled_sign_flip_p(
+    usable: Sequence[float],
+    observed: float,
+    *,
+    assignments: int = SAMPLED_SIGN_ASSIGNMENTS,
+    seed: int = SIGN_FLIP_SEED,
+) -> float:
+    """The same statistic as the enumeration, over a sample of the sign assignments.
+
+    Private, and the seed is a parameter *here* and not on :func:`sign_flip_p`,
+    because a call site that can choose the seed can choose the p-value. The
+    resolution is 5e-6 and the standard error near 0.05 is 0.0005, so seed-shopping
+    could not move a verdict — but a knob whose only use is to redraw a published
+    number is the kind of thing this module refuses on principle elsewhere, and the
+    tests that have to vary the seed can reach in here for it.
+
+    **The observed assignment is counted, not drawn.** It is a member of the null's
+    reference set — "every sign assignment is equally likely" includes the one that
+    happened — so the estimate is ``(1 + extreme among assignments - 1 draws) /
+    assignments``. That is the textbook Monte-Carlo permutation p-value, and here it
+    is also what keeps the answer off zero: a sampled ``0.0`` would be the same
+    unattainable number the truncation this replaced used to print, and it would sit
+    below the floor printed beside it.
+
+    **The draw is blocked**, which looks like an optimisation and is also why the
+    sample is exactly uniform rather than approximately so. A sign assignment over
+    *n* differences is a sign assignment over ``ceil(n / _SAMPLE_BLOCK)`` independent
+    blocks; the ``2**_SAMPLE_BLOCK`` signed sums of one block are worth enumerating
+    once, after which a draw is one uniform index per block plus an addition.
+    ``getrandbits(k)`` is uniform over ``2**k`` exactly — no modulo, no rejection —
+    and independent blocks compose, so the product is uniform over all ``2**n``. At
+    n = 60 it is 0.08 s against 0.46 s for the same draw taken one difference at a
+    time — ``getrandbits(1)`` per difference, three runs each, measured on this tree;
+    the ratio is the claim and the second figure moves with how that loop is written.
+    The reason to care is that
+    :attr:`TrialResult.p_value` is a property and a report reads it without thinking
+    about what it costs.
+    """
+    count = len(usable)
+    tables: list[list[float]] = []
+    for start in range(0, count, _SAMPLE_BLOCK):
+        table = [0.0]
+        for value in usable[start : start + _SAMPLE_BLOCK]:
+            table = [partial + value for partial in table] + [partial - value for partial in table]
+        tables.append(table)
+    widths = tuple(len(table).bit_length() - 1 for table in tables)
+    blocks = tuple(zip(tables, widths))
+
+    getrandbits = random.Random(seed).getrandbits
+    threshold = observed - 1e-12
+    at_least_as_extreme = 1
+    for _ in range(assignments - 1):
+        total = 0.0
+        for table, width in blocks:
+            total += table[getrandbits(width)]
+        if abs(total / count) >= threshold:
+            at_least_as_extreme += 1
+    return at_least_as_extreme / assignments
+
+
+def sign_flip_estimator(differences: Sequence[float]) -> str:
+    """Which computation :func:`sign_flip_p` runs on these differences.
+
+    The dispatcher, and not a description of one. :func:`sign_flip_p` has no branch of
+    its own — it asks this and obeys the answer — so the label a report prints and the
+    code that produced the number it prints cannot come apart. That is the whole reason
+    this is a function rather than a comparison written wherever it is needed: the
+    comparison was written twice, once in ``sign_flip_p`` as ``count > MAX_EXACT_PAIRS``
+    and once in ``TrialResult.p_is_sampled`` as ``n > MAX_EXACT_PAIRS``, and the second
+    copy could not see the early return that makes the first one moot. A twenty-pair
+    trial whose differences cancel then rendered as a Monte-Carlo estimate over 200,000
+    assignments, seed and 5e-6 floor included, with no assignment ever drawn.
+
+    Returns a member of :data:`SIGN_FLIP_ESTIMATORS`. Cheap on purpose: it is one pass
+    over the differences and no permutation, because ``TrialResult.floor`` and the
+    report's branch both read it and neither should cost an enumeration.
+    """
+    usable = [float(value) for value in differences]
+    if not usable:
+        return ESTIMATOR_NO_PAIRS
+    if abs(sum(usable) / len(usable)) == 0.0:
+        return ESTIMATOR_CANCELLED
+    return ESTIMATOR_SAMPLED if len(usable) > MAX_EXACT_PAIRS else ESTIMATOR_EXACT
+
+
 def sign_flip_p(differences: Sequence[float]) -> float:
-    """Exact two-sided paired permutation test on the mean difference.
+    """Two-sided paired permutation test on the mean difference.
 
     The null is that the sign of each pair's difference is arbitrary — which is what
-    "the capability did nothing" means for a paired design. Enumerating the sign
-    assignments is exact and needs no distributional assumption, which matters at
-    the sample sizes a multi-hour research run permits.
+    "the capability did nothing" means for a paired design. Permuting the sign
+    assignments needs no distributional assumption, which matters at the sample sizes
+    a multi-hour research run permits.
+
+    Exact by enumeration up to :data:`MAX_EXACT_PAIRS` pairs and a seeded sample of
+    :data:`SAMPLED_SIGN_ASSIGNMENTS` assignments above it. Both branches take the
+    observed statistic and the null distribution from the *same n* differences, which
+    is the whole of what the sampled branch fixed: it used to enumerate the first
+    eighteen while comparing against the mean of all sixty. Which branch ran is
+    :func:`sign_flip_estimator`'s answer, which this function dispatches on rather than
+    deciding for itself, and the floor printed beside the p is
+    :func:`attainable_p_floor`, not :func:`min_attainable_p`.
 
     Zero differences are kept rather than dropped. Under this statistic a tie is
     neutral — flipping its sign changes no mean, so the p-value is the same either
     way — which is not true of the classical sign test, where dropping ties shrinks
     *n* and moves the answer. What keeping them changes here is the gap between the
-    achieved p and :func:`min_attainable_p`: six pairs of which two were ties report
-    p = 0.125 against a floor of 0.031, and that gap is the honest signal that two
-    of the six carried no information. Dropping them would report n = 4 and a floor
-    of 0.125, making a sample that told you less look maximally informative.
+    achieved p and the floor: six pairs of which two were ties report p = 0.125
+    against a floor of 0.031, and that gap is the honest signal that two of the six
+    carried no information. Dropping them would report n = 4 and a floor of 0.125,
+    making a sample that told you less look maximally informative.
     """
     usable = [float(value) for value in differences]
-    if not usable:
-        return 1.0
-    observed = abs(sum(usable) / len(usable))
-    if observed == 0.0:
+    estimator = sign_flip_estimator(usable)
+    if estimator in (ESTIMATOR_NO_PAIRS, ESTIMATOR_CANCELLED):
+        # Both answers are 1.0 and neither is a test result: with nothing to permute, or
+        # with an observed mean of zero that every sign assignment ties, the reference
+        # set is the whole space and the p is 1 by definition. The label says so, so the
+        # report does not have to guess from `n` which of these it is looking at.
         return 1.0
 
     count = len(usable)
-    if count > MAX_EXACT_PAIRS:
-        usable = usable[:MAX_EXACT_PAIRS]
-        count = MAX_EXACT_PAIRS
+    observed = abs(sum(usable) / count)
+    if estimator == ESTIMATOR_SAMPLED:
+        return _sampled_sign_flip_p(usable, observed)
 
     at_least_as_extreme = 0
     total = 0
@@ -408,8 +624,36 @@ class TrialResult:
         return sign_flip_p(self.differences)
 
     @property
+    def estimator(self) -> str:
+        """Which computation produced :attr:`p_value`, as :func:`sign_flip_p` dispatched it.
+
+        Read off the same function the estimator obeys, rather than recomputed from
+        ``n``. Which one ran decides what the floor beside the p means, and a reader
+        cannot recover it from the two numbers: 5e-6 is a plausible-looking exact floor
+        for a sample somewhere in the low twenties.
+
+        This replaced a boolean ``p_is_sampled = self.n > MAX_EXACT_PAIRS``, which is the
+        sample size's answer to a question about the code. ``sign_flip_p`` returns 1.0
+        before either estimator when the differences cancel, so a twenty-pair trial
+        summing to exactly zero reported a Monte-Carlo estimate, a seed and a 5e-6 floor
+        for a draw that never happened. A boolean could not have carried the third answer
+        either — "not sampled" would have gone on reading as "enumerated".
+        """
+        return sign_flip_estimator(self.differences)
+
+    @property
     def floor(self) -> float:
-        return min_attainable_p(self.n)
+        """The smallest p this trial's estimator could have returned.
+
+        :func:`attainable_p_floor` and not :func:`min_attainable_p`, so that above
+        :data:`MAX_EXACT_PAIRS` the floor describes the sampled estimator that ran
+        rather than the enumeration that did not — and 1.0 when neither ran, because
+        1.0 is then the only value the call could have produced and the sample size has
+        nothing to do with it.
+        """
+        if self.estimator in (ESTIMATOR_EXACT, ESTIMATOR_SAMPLED):
+            return attainable_p_floor(self.n)
+        return 1.0
 
     @property
     def underpowered(self) -> bool:
@@ -543,6 +787,23 @@ def declared_trials(records: Iterable[RunRecord]) -> dict[str, set[str]]:
     return found
 
 
+def _p_decimals(floor: float) -> int:
+    """Decimals for a p-line: enough that its own floor does not print as zero.
+
+    Four reads well and is what every trial report has ever printed, and at four
+    decimals anything below 5e-05 renders ``0.0000``. That is the shape the refusal in
+    the module docstring exists to stop — *it does not call an unattainable result "not
+    significant"* — a number the estimator can return, printed as one it cannot, and it
+    is not only the sampled branch's problem. The exact enumeration
+    reaches 1.5e-05 at seventeen pairs and 7.6e-06 at eighteen, so an eighteen-pair
+    trial used to render "p = **0.0000** (floor at n=18: 0.0000)" from two numbers that
+    are neither zero nor equal to each other at four decimals. Six is enough for both
+    branches: the sampled floor is 5e-06 and the smallest exact floor this side of the
+    threshold is 7.6e-06. Below sixteen pairs nothing changes.
+    """
+    return 4 if floor >= 5e-5 else 6
+
+
 def format_trial_report(result: TrialResult, *, unit: str | None = None) -> str:
     """Render a trial. ``unit`` names what the mean difference is measured in.
 
@@ -604,8 +865,49 @@ def format_trial_report(result: TrialResult, *, unit: str | None = None) -> str:
         f"- mean difference: **{result.mean_difference:+.4f}** {unit}",
         f"- won {result.wins}, lost {result.losses}, tied {result.ties}",
     ]
-    if result.n:
-        lines.append(f"- exact two-sided p: **{result.p_value:.4f}** (floor at n={result.n}: {result.floor:.4f})")
+    # Keyed on which computation ran, not on `result.n`. The three p-lines say different
+    # things about the same number, and the one that would be wrong is the one a reader
+    # cannot check: "Monte-Carlo estimate over 200,000 assignments, seed 20260817" is a
+    # claim about work that was done.
+    estimator = result.estimator
+    digits = _p_decimals(result.floor)
+    if estimator == ESTIMATOR_SAMPLED:
+        # Read once: `p_value` is a property and the sampled branch is a real
+        # computation, so two mentions of it in one report would be two samples.
+        sampled_p = result.p_value
+        lines.append(
+            f"- sampled two-sided p: **{sampled_p:.{digits}f}** "
+            f"(floor at {SAMPLED_SIGN_ASSIGNMENTS:,} sign assignments: {result.floor:.{digits}f})"
+        )
+        lines.append(
+            f"- above {MAX_EXACT_PAIRS} pairs the {2 ** result.n:.3g} sign assignments are past "
+            f"what this module enumerates, so that p is a Monte-Carlo estimate over "
+            f"{SAMPLED_SIGN_ASSIGNMENTS:,} of them drawn with seed `{SIGN_FLIP_SEED}` — same "
+            f"differences, same seed, same p. "
+            f"The floor beside it is the estimator's own resolution; an exact test over "
+            f"{result.n} pairs could have reached {min_attainable_p(result.n):.3g}, and did not run."
+        )
+    elif estimator == ESTIMATOR_EXACT:
+        lines.append(
+            f"- exact two-sided p: **{result.p_value:.{digits}f}** "
+            f"(floor at n={result.n}: {result.floor:.{digits}f})"
+        )
+    elif estimator == ESTIMATOR_CANCELLED:
+        lines.append(
+            f"- two-sided p: **{result.p_value:.{digits}f}** — the {result.n} differences cancel to a "
+            "mean of exactly zero, so every sign assignment ties the observed one and neither "
+            "the enumeration nor the sample ran. No floor beside it: 1 is the only value this "
+            "sample could have produced, at any number of pairs."
+        )
+    elif estimator != ESTIMATOR_NO_PAIRS:
+        # Not reachable today, and the alternative to raising is that it never will be:
+        # a label added to `SIGN_FLIP_ESTIMATORS` without a line here drops the p-value
+        # out of the report and leaves a mean difference standing on its own.
+        raise ValueError(
+            f"no report line for estimator {estimator!r}. Every member of "
+            f"{sorted(SIGN_FLIP_ESTIMATORS)} needs one, because this is where the p-value "
+            "reaches a reader."
+        )
     if result.underpowered:
         lines.append(
             f"- **underpowered.** Below {MIN_PAIRS_FOR_SIGNIFICANCE} pairs no result can reach "

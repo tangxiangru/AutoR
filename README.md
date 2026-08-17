@@ -438,9 +438,12 @@ is written down and reported, but the topology a run walks comes from the archiv
 ### Paired trials
 
 `--trial ID --capability NAME --arm LABEL` tags a run as one arm of a paired A/B trial in the
-archive; `--trial-report` prints the within-pair rubric difference with an **exact sign-flip
-p-value** and the smallest p-value that sample size could possibly reach
-([src/trials.py](src/trials.py), [src/inference.py](src/inference.py)). Below
+archive; `--trial-report` prints the within-pair rubric difference with a **two-sided sign-flip
+p-value** and the smallest p-value the estimator behind it could possibly reach
+([src/trials.py](src/trials.py), [src/inference.py](src/inference.py)). The p is exact by
+enumeration up to `MAX_EXACT_PAIRS = 18`; above that it is a seeded sample of
+`SAMPLED_SIGN_ASSIGNMENTS = 200,000` sign assignments over the same differences, and the report
+says so and prints the seed. Below
 `MIN_PAIRS_FOR_SIGNIFICANCE = 6` a trial is labelled `underpowered` rather than reported as a null.
 
 This is the apparatus for answering "does this mechanism help?", not the answer. No paired trial has
@@ -784,7 +787,7 @@ flowchart LR
 | [src/router.py](src/router.py) | The agent's choice among admissible moves; an off-menu choice is refused and logged |
 | [src/validity_review.py](src/validity_review.py) | The adversarial pass after Stages 05 and 06, and the response gate that follows it |
 | [src/research_rounds.py](src/research_rounds.py) | Stages 03-06 as a repeatable round, bounded by `--max-rounds` |
-| [src/trials.py](src/trials.py) | Paired A/B trials over archived runs, with an exact sign-flip p-value and its attainable floor |
+| [src/trials.py](src/trials.py) | Paired A/B trials over archived runs, with a sign-flip p-value — enumerated below 19 pairs, sampled above — and the attainable floor of whichever estimator ran |
 | [src/stage_comments.py](src/stage_comments.py) | Anchored review comments and the collateral-change diff |
 | [src/effort.py](src/effort.py) | Routine vs deliberative tiering, and the concentration of the strong model |
 | [src/scorecard.py](src/scorecard.py) | Reads all five self-measurement ledgers and says which features earned their cost |
