@@ -706,6 +706,7 @@ runs/<run_id>/
 ├── obligations.json    review_policy.json    # both per-run; nothing crosses runs
 ├── report_plan_stamp.json   preregistration_stamp.json   validity_review_stamp.json
 │                       # AutoR's copies, outside workspace/ on purpose
+├── stage_cost_ledger.json   # one row per stage visit: what it spent, why each attempt failed
 ├── logs.txt            logs_raw.jsonl
 ├── prompt_cache/       operator_state/       handoff/        stages/
 ├── .claude/skills/     # the skill pack, pulled on demand by the agent
@@ -729,7 +730,9 @@ record of how the run reached its answer, not part of the answer, and a benchmar
 it up would ship the losing drafts alongside the report"*. `report_plan_stamp.json`,
 `preregistration_stamp.json` and `validity_review_stamp.json` are outside `workspace/` for the same
 class of reason: the agent must not be able to backdate its own declaration, rewrite the commitment
-it is being held to, or edit the record of the objections it owes an answer to.
+it is being held to, or edit the record of the objections it owes an answer to. So is
+`stage_cost_ledger.json`, which is a run's account of what each stage visit cost and why each
+attempt failed — a receipt the payer prints is worth what it cost to print.
 
 The only state AutoR writes outside a run directory is the cross-run archive at `~/.autor/archive`
 (`--archive`, `--no-archive`).

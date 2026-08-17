@@ -145,6 +145,25 @@ from .stage_graph import (
     save_graph_state,
     stage_for_slug,
 )
+from .stage_cost import (
+    CROSS_REVIEW_VETOED,
+    CRUX_RAISED,
+    HUMAN_REFUSED,
+    OUTCOME_ABORTED,
+    OUTCOME_APPROVED,
+    OUTCOME_AUTO_SKIPPED,
+    OUTCOME_HUMAN_SKIPPED,
+    OUTCOME_RAISED,
+    OUTCOME_ROLLED_BACK,
+    OUTCOME_ROUTED_TO_DELIVERABLE,
+    VALIDATORS_REFUSED,
+    StageCostMeter,
+    append_stage_cost_row,
+    bypassed_row,
+    classify_refusal,
+    format_stage_cost_summary,
+    read_stage_cost_ledger,
+)
 from .diagram_gen import post_writing_diagram_hook
 from .scorecard import write_scorecard
 from .backend_health import BackendUnavailable, classify as classify_backend
@@ -317,6 +336,15 @@ class ResearchManager:
         self._commented_draft: str = ""
         self._comment_round_attempt: int = 0
         self._jump_target_stage: StageSpec | None = None
+        #: The open stage-visit meter, or None outside a stage visit. Set by `_run_stage`
+        #: and read by the handful of methods that know something the loop does not --
+        #: which reviewer refused, whether a skip was a human's or the budget's. Held on
+        #: the manager rather than threaded through every signature because the callers
+        #: that have the fact are two and three frames below the one that owns the row --
+        #: `_collect_review_decision` and `_skip_stage` under `_run_stage_attempts`,
+        #: `_apply_cross_review` under that -- and a parameter added to each of them would
+        #: have to be added again for the next one.
+        self._stage_cost: "StageCostMeter | None" = None
         self.unattended = unattended
         self.max_auto_skips = max_auto_skips
         #: How many times Stages 03-06 may run. 1 keeps the historical
@@ -673,6 +701,7 @@ class ResearchManager:
                     current_stage_slug=stage.slug,
                 )
                 save_graph_state(paths, state)
+                self._log_stage_cost_summary(paths)
                 self._print("Run aborted.")
                 return False
 
@@ -733,6 +762,12 @@ class ResearchManager:
         disclosure = self.validity_disclosure()
         if disclosure:
             append_log_entry(paths.logs, "validity_review_not_completed", disclosure)
+
+        # After the disclosure, not before it. What the run failed to review is the more
+        # urgent thing to meet in the log, and `test_validity_completion` reads a bounded
+        # window after that heading -- an entry inserted above it pushes the disclosure
+        # out of the window and turns a passing banner into a missing one.
+        self._log_stage_cost_summary(paths)
 
         # A run that concluded it cannot answer its question reached the end of the
         # graph legitimately, and it did not produce what it set out to produce.
@@ -2178,6 +2213,120 @@ class ResearchManager:
     # ------------------------------------------------------------------
 
     def _run_stage(self, paths: RunPaths, stage: StageSpec) -> bool:
+        """One visit to one stage, with a cost row written on every way out.
+
+        The visit, not the stage, is the unit: a backward edge re-runs a stage and the
+        second run is a separate purchase against the same budget. The whole body is
+        wrapped rather than each ``return`` annotated because `_run_stage_attempts` has
+        five of them and an exception is a sixth -- and a visit that raised is precisely
+        the one whose spend nobody can reconstruct afterwards.
+
+        The ``finally`` re-raises whatever it caught: closing the meter is bookkeeping,
+        and bookkeeping that replaces the cause of a failure with itself is worse than no
+        bookkeeping at all. :func:`append_stage_cost_row` swallows its own errors for the
+        same reason in the other direction -- a stage that produced good work is not lost
+        because the account of it could not be written.
+        """
+        meter = StageCostMeter(stage)
+        self._stage_cost = meter
+        try:
+            return self._run_stage_attempts(paths, stage)
+        except BaseException:
+            meter.note_outcome(OUTCOME_RAISED)
+            raise
+        finally:
+            self._stage_cost = None
+            self._record_stage_cost(paths, meter)
+
+    def _record_stage_cost(self, paths: RunPaths, meter: StageCostMeter) -> None:
+        """Close a meter into the ledger, saying so if it could not be written.
+
+        Two guards rather than one. :func:`append_stage_cost_row` swallows every way the
+        *file* can refuse, and this swallows every way closing the meter can -- the two
+        are different failures and only the first is inside the writer. Between them
+        nothing about the bookkeeping can reach the caller, which is the point: this runs
+        in the ``finally`` of a stage visit, and an exception raised there would replace
+        whatever the visit was actually doing.
+        """
+        try:
+            written = append_stage_cost_row(paths, meter.close())
+        except Exception:
+            written = False
+        if written:
+            return
+        try:
+            self.ui.show_status(
+                f"Could not record the stage cost row for {meter.stage.stage_title}. "
+                "The run continues; its spend for this visit is not in the ledger.",
+                level="warn",
+            )
+        except Exception:
+            pass
+
+    def _note_stage_failure(self, stage: StageSpec, attempt_no: int, kind: str, reason: str = "") -> None:
+        """Charge one consumed attempt to the open meter, if this stage owns it.
+
+        The stage check is not ceremony: `_collect_review_decision` is also reached from
+        intake and from the two bootstrap loops, which run outside any stage visit, and a
+        refusal there must not be charged to whichever stage happens to be open.
+        """
+        meter = self._stage_cost
+        if meter is None or meter.stage.slug != stage.slug:
+            return
+        meter.note_failure(attempt_no, kind, reason)
+
+    def _note_operator_call(self, stage: StageSpec) -> None:
+        """One backend launch dispatched to do the stage's work.
+
+        Counted at the manager's own call sites rather than inferred from the transcript,
+        and counted *before* the call rather than after, so a launch that then raises is
+        still on the row. The backend's own cost report never reaches here --
+        `OperatorResult` carries no usage block; see `src/stage_cost.py` for what would
+        have to change -- so this is the one figure about spend the harness can state
+        without guessing, and the row says exactly what it counts rather than implying a
+        bill.
+        """
+        meter = self._stage_cost
+        if meter is None or meter.stage.slug != stage.slug:
+            return
+        meter.note_operator_call()
+
+    def _note_review_call(self, stage: StageSpec) -> None:
+        """One backend launch dispatched to judge the stage's work.
+
+        The approval gate and the cross-model audit. A reviewer's internal verdict re-ask
+        and a panel's fan-out to its seats happen below this boundary and are not counted,
+        because the manager cannot see them and a number it cannot see is not one it may
+        publish.
+        """
+        meter = self._stage_cost
+        if meter is None or meter.stage.slug != stage.slug:
+            return
+        meter.note_review_call()
+
+    def _note_stage_outcome(self, stage: StageSpec, outcome: str, note: str = "") -> None:
+        meter = self._stage_cost
+        if meter is None or meter.stage.slug != stage.slug:
+            return
+        meter.note_outcome(outcome, note=note)
+
+    def _log_stage_cost_summary(self, paths: RunPaths) -> None:
+        """Put the run's own spend where a reader of ``logs.txt`` will meet it.
+
+        The ledger is the machine-readable copy and this is the human one. Written on the
+        way out of a run whether it completed or was cancelled, because a cancelled run is
+        the one whose spend is worth reading.
+        """
+        try:
+            append_log_entry(
+                paths.logs,
+                "stage_cost_ledger",
+                format_stage_cost_summary(read_stage_cost_ledger(paths)),
+            )
+        except Exception:
+            pass
+
+    def _run_stage_attempts(self, paths: RunPaths, stage: StageSpec) -> bool:
         attempt_no = read_attempt_count(paths, stage) + 1
         loop_attempts = 0
         # Polish rounds are AutoR improving work that already passed validation, so
@@ -2250,15 +2399,34 @@ class ResearchManager:
                 loop_attempts - (polish_rounds - entry_polish_rounds) + 1,
                 self.max_stage_attempts,
             ):
+                # What the attempts were spent on, from the meter rather than from
+                # `last_validation_errors`. That list is assigned at exactly one place --
+                # the branch where validation, repair and local normalisation all failed
+                # -- so on the three finished runs of the first live paired trial (see
+                # `src/stage_cost.py` for which three and why) five of the ten
+                # exhaustions printed "None recorded" while the record of what actually
+                # happened -- a `reviewer_choice` entry reading `choice: 4`, or a
+                # `cross_review` reading `agrees: False` -- sat two or three log entries
+                # above it. The validation errors stay in the message: when they are
+                # there they are the most specific thing in it.
+                spent_on = (
+                    self._stage_cost.describe_failures()
+                    if self._stage_cost is not None
+                    else "no attempt in this stage run recorded a cause"
+                )
+                if self._stage_cost is not None:
+                    self._stage_cost.note_exhausted()
                 if stuck:
                     error = (
                         f"{STUCK_AFTER_IDENTICAL_FAILURES} consecutive attempts failed in "
-                        f"exactly the same way, so another one cannot help. Repeated "
+                        f"exactly the same way, so another one cannot help. Attempts spent "
+                        f"on: {spent_on}. Repeated "
                         f"validation errors: {'; '.join(last_validation_errors) or 'None recorded.'}"
                     )
                 else:
                     error = (
                         f"Exceeded {self.max_stage_attempts} attempts in the current stage run. "
+                        f"Attempts spent on: {spent_on}. "
                         f"Last validation errors: {'; '.join(last_validation_errors) or 'None recorded.'}"
                     )
                 self.ui.show_status(
@@ -2283,6 +2451,8 @@ class ResearchManager:
                     last_validation_errors=last_validation_errors,
                 )
             loop_attempts += 1
+            if self._stage_cost is not None:
+                self._stage_cost.note_attempt()
             # The manifest's `attempt_count` means "how many tries did this stage
             # need" — a diagnostic for a gate the operator could not clear, and what
             # `test_no_stage_needed_a_retry` reads to notice a new artifact gate that
@@ -2302,6 +2472,7 @@ class ResearchManager:
                 prompt,
             )
 
+            self._note_operator_call(stage)
             result = self._operator_for(stage).run_stage(
                 stage,
                 prompt,
@@ -2337,6 +2508,7 @@ class ResearchManager:
                     f"{stage.slug} attempt {attempt_no} repair_triggered",
                     "Primary attempt did not produce stage summary draft. Triggering repair pass.",
                 )
+                self._note_operator_call(stage)
                 repair_result = self.operator.repair_stage_summary(
                     stage=stage,
                     original_prompt=prompt,
@@ -2395,6 +2567,7 @@ class ResearchManager:
                     f"{stage.slug} attempt {attempt_no} validation_failed",
                     "\n".join(validation_errors),
                 )
+                self._note_operator_call(stage)
                 repair_result = self.operator.repair_stage_summary(
                     stage=stage,
                     original_prompt=prompt,
@@ -2495,6 +2668,9 @@ class ResearchManager:
                         )
                         last_validation_errors = list(validation_errors)
                         recent_failures.append(list(validation_errors))
+                        self._note_stage_failure(
+                            stage, attempt_no, VALIDATORS_REFUSED, "; ".join(validation_errors)
+                        )
                         continue_session = True
                         attempt_no += 1
                         continue
@@ -2510,6 +2686,10 @@ class ResearchManager:
             # The agent may have stopped and asked for help on a specific question.
             crux_feedback = self._settle_cruxes(paths, stage, attempt_no)
             if crux_feedback is not None:
+                # Not a refusal -- the draft was fine and the agent asked a question --
+                # but it consumes an attempt from the same budget, so leaving it out of
+                # the census would make the attempts and the causes disagree.
+                self._note_stage_failure(stage, attempt_no, CRUX_RAISED, crux_feedback)
                 revision_feedback = crux_feedback
                 continue_session = True
                 attempt_no += 1
@@ -2544,6 +2724,8 @@ class ResearchManager:
                         self.evolution.begin_round(paths, stage)
                         polish_rounds += 1
                         write_polish_count(paths, stage, polish_rounds)
+                        if self._stage_cost is not None:
+                            self._stage_cost.note_polish_round(attempt_no)
                         is_polish_round = True
                         revision_feedback = directive
                         continue_session = True
@@ -2762,6 +2944,7 @@ class ResearchManager:
                     ),
                 )
                 self.ui.show_status(f"Approved {stage.stage_title}.", level="success")
+                self._note_stage_outcome(stage, OUTCOME_APPROVED)
                 return True
 
             if choice == "6":
@@ -2784,6 +2967,9 @@ class ResearchManager:
                     run_status="cancelled",
                     last_event="run.cancelled",
                     current_stage_slug=stage.slug,
+                )
+                self._note_stage_outcome(
+                    stage, OUTCOME_ABORTED, "aborted at the approval gate"
                 )
                 return False
 
@@ -2958,6 +3144,10 @@ class ResearchManager:
         if self.reviewer is None:
             choice = self._ask_choice(suggestions)
             append_log_entry(paths.logs, f"{stage.slug} attempt {attempt_no} user_choice", f"choice: {choice}")
+            if choice in REVISION_CHOICES:
+                self._note_stage_failure(
+                    stage, attempt_no, HUMAN_REFUSED, f"the operator chose option {choice}"
+                )
             return choice, None
 
         self.ui.show_status(
@@ -2969,6 +3159,7 @@ class ResearchManager:
             # A panel deliberating over execution work is the expensive configuration landing
             # where its benefit does not.
             reviewer = self.solo_reviewer
+        self._note_review_call(stage)
         decision = reviewer.review_stage(
             paths=paths,
             stage=stage,
@@ -3032,7 +3223,33 @@ class ResearchManager:
             stage_markdown=stage_markdown,
         )
         if cross is not None:
+            # An approval the primary gave and a second model family took back. Filed as
+            # its own cause: it is a disagreement between two reviewers rather than a
+            # stage falling short, and on the trial two of the five exhaustions that
+            # recorded nothing were reached this way.
+            self._note_stage_failure(
+                stage,
+                attempt_no,
+                classify_refusal(cross[1] or "", cross_review=True),
+                cross[1] or "",
+            )
             return cross
+
+        # Charged before the choice is returned, where the verdict is still in hand: the
+        # loop above sees only the digit, and "the reviewer asked for changes", "the
+        # reviewer crashed" and "the reviewer's answer could not be parsed" all arrive
+        # unattended as the same digit "4". `classify_refusal` reads the reason prefixes
+        # `approval_agent` writes, which is the same test `is_degraded_verdict` makes.
+        # `REVISION_CHOICES` rather than a second spelling of it, so a send-back promoted
+        # by `_sendback_is_out_of_budget` above -- already rewritten to choice "5" -- is
+        # not charged as a refusal, and so the two readers cannot drift apart.
+        if decision.choice in REVISION_CHOICES:
+            self._note_stage_failure(
+                stage,
+                attempt_no,
+                classify_refusal(decision.reason),
+                decision.reason or decision.feedback or "",
+            )
 
         # The tuple contract is (choice, feedback); anchored comments ride alongside it so
         # the refine path can send back a passage instead of the whole stage.
@@ -3158,6 +3375,7 @@ class ResearchManager:
             return None
 
         self.ui.show_status("Cross-model reviewer is auditing the approval...", level="info")
+        self._note_review_call(stage)
         verdict = self.cross_reviewer.audit(
             paths=paths,
             stage=stage,
@@ -3660,6 +3878,19 @@ class ResearchManager:
         )
         self.ui.show_status(reason, level="warn")
 
+        # A bypassed stage is in the run's not-completed list and cost nothing, and both
+        # halves of that are worth a row: a ledger holding only the stages the run paid
+        # for is flatter than the run and cannot be compared against the route. Written
+        # here because these stages never enter `_run_stage`, so no meter is ever opened
+        # for them.
+        for slug in bypassed:
+            skipped_stage = stage_for_slug(slug)
+            if skipped_stage is None:
+                continue
+            append_stage_cost_row(
+                paths, bypassed_row(skipped_stage, note=f"stepped over: {reason}")
+            )
+
         # The stage that failed still gets its skip summary, so the writing stage reads
         # what was missing rather than inferring it from an absence.
         self.auto_skipped_stages.append(stage.slug)
@@ -3670,6 +3901,11 @@ class ResearchManager:
             reason=reason,
             kind="auto",
         )
+        # `_skip_stage` filed this visit as an auto-skip, which it is; the route is the
+        # more specific thing that happened to it and is what distinguishes "the budget
+        # skipped one stage and carried on" from "the budget ran out and the run went
+        # straight to writing up".
+        self._note_stage_outcome(stage, OUTCOME_ROUTED_TO_DELIVERABLE, reason)
         self._jump_reason = reason
         self._jump_target_stage = target
         return True
@@ -3682,6 +3918,7 @@ class ResearchManager:
         reason: str,
     ) -> None:
         rollback_to_stage(paths, target_stage, reason=reason)
+        self._note_stage_outcome(current_stage, OUTCOME_ROLLED_BACK, reason)
         # Carried so the graph path records why the run moved. Both callers reach
         # here — a `/back` from the operator and a research round that decided to
         # refine its design — and recording either as the other would make the
@@ -3719,6 +3956,15 @@ class ResearchManager:
         reason: str,
         kind: str,
     ) -> bool:
+        # An auto-skip is the expensive outcome -- the stage burned its whole attempt
+        # budget and then a slot from the run's auto-skip pool -- so its row is the one a
+        # ledger most needs. Recorded here rather than at each caller because all four
+        # reach this method and only this method knows whose decision it was.
+        self._note_stage_outcome(
+            stage,
+            OUTCOME_AUTO_SKIPPED if kind == "auto" else OUTCOME_HUMAN_SKIPPED,
+            reason,
+        )
         # A skipped Stage 06 never reaches `record_round`, so its declaration is
         # never consumed and never unlinked. Left on disk, the *next* Stage 06 closes
         # its round from the previous visit's file — inheriting a conclusion drawn
