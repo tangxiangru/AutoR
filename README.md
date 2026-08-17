@@ -635,7 +635,7 @@ Alongside the prompt, AutoR installs an agent skill pack from [src/skills/](src/
 `runs/<run_id>/.claude/skills/` — the operator's working directory — so the agent can *pull*
 long-form craft guidance when it needs it. A skill costs nothing in the prompts that do not use it.
 
-121 skills ship today: 66 general ones and 55 field-specific ones. Seventy-five of them were written against a scored arm's per-criterion losses on the
+124 skills ship today: 66 general ones and 58 field-specific ones. Seventy-five of them were written against a scored arm's per-criterion losses on the
 twenty-five ResearchClawBench tasks that lost, three per task. **A run is not offered all of
 them.** Two filters narrow the pack, and a skill has to survive both:
 
