@@ -37,6 +37,8 @@ from pathlib import Path
 from typing import Any
 
 from .approval_agent import extract_json_payload
+from .obligations import load_ledger
+from .preregistration import load_hypothesis_outcomes
 from .rubric import StageScore, format_score_for_prompt
 from .stage_graph import FINISH, GraphState, Move, StageGraph, block_census
 from .utils import (
@@ -471,6 +473,22 @@ class StageRouter:
         if score is not None:
             sections += ["", "## Measured standing of the stage you just finished", "",
                          format_score_for_prompt(score)]
+            if score.total >= 1.0 - 1e-9:
+                # A ceiling is not a verdict on the research. The ratchet stops at 1.000
+                # and most stages reach it, so a router told only the total is told the
+                # same thing at almost every node -- see `unfinished_business`.
+                sections += [
+                    "",
+                    "This is the rubric's ceiling, and the ratchet polishes every stage "
+                    "towards it, so most stages arrive here reporting 1.000. It means the "
+                    "mechanical checks pass — references resolve, numbers trace to files, "
+                    "the contract is met. It does not mean the research question was "
+                    "answered, and it is not evidence for advancing.",
+                ]
+
+        unsettled = unfinished_business(paths, stage)
+        if unsettled:
+            sections += ["", unsettled]
 
         evidence = self._archive_evidence(stage.slug, [move.target for move in moves if move.admissible])
         if evidence:
@@ -510,6 +528,83 @@ class StageRouter:
                 "- Choose `finish` only if the run has produced what it set out to produce."
             )
         return "\n".join(sections)
+
+
+#: Verdicts that mean the hypothesis was settled. Everything else -- ``inconclusive``,
+#: ``not_tested``, a blank, a verdict the schema does not know -- is a question the run
+#: asked and did not answer, which is the strongest reason there is to go back.
+_SETTLED_VERDICTS = frozenset({"supported", "refuted"})
+
+
+def unfinished_business(paths: RunPaths, stage: StageSpec) -> str:
+    """What is still owed, rendered for the routing prompt. Empty when nothing is.
+
+    The router used to be handed the stage's rubric total and nothing else, and the
+    ratchet grinds that total to 1.000 before the router ever sees it -- measured over
+    41 ResearchClawBench runs, 71% of routing decisions were made against a stage
+    reporting a perfect score with every criterion at 1.00 and the "where the points
+    are" list empty. The prompt asks for a `reason` grounded in "what in *this stage's
+    results* makes that the right move" and then shows results with nothing wrong in
+    them, so the only defensible answer is the forward one. The router departed at 16 of
+    252 decision points (6.3%) and 31 of 41 runs walked a straight line.
+
+    It was not being blocked. Guards refused 48 moves across those runs and 46 of them
+    were `finish`, which is the terminal edge being closed rather than a departure being
+    denied. The router had the moves; it had no grounds.
+
+    These are the grounds, and they were on disk the whole time. 30% of hypotheses came
+    back `inconclusive` or `not_tested` and 84% of runs held at least one -- the prompt's
+    own worked example of a good reason is "H2 is inconclusive because only one seed was
+    run", and the run knew which hypotheses those were and never said. Obligations are
+    the same shape from the reviewer's side: a debt it recorded, still open, and a stage
+    it named to pay it.
+
+    Facts, not advice. Nothing here tells the router to go back -- it lists what is
+    unsettled and lets the move follow, because an instruction to depart more often is a
+    thumb on the scale and would be obeyed on the runs that had nothing to go back for.
+    """
+    lines: list[str] = []
+
+    unsettled = [
+        outcome
+        for outcome in load_hypothesis_outcomes(paths)
+        if outcome.verdict not in _SETTLED_VERDICTS
+    ]
+    if unsettled:
+        lines += [
+            f"**{len(unsettled)} hypothesis verdict(s) are not settled.** A hypothesis the "
+            "run could not decide is a question it asked and did not answer. Writing up "
+            "around one is the failure this graph exists to avoid; going back to the stage "
+            "that could settle it is a first-class move.",
+            "",
+        ]
+        for outcome in unsettled:
+            verdict = outcome.verdict or "(no verdict recorded)"
+            rationale = truncate_text(outcome.rationale, max_chars=400)
+            lines.append(f"- `{outcome.identifier or '(unnamed)'}` — **{verdict}**: {rationale}")
+        lines.append("")
+
+    ledger = load_ledger(paths)
+    # The reviewer's own record of what it let through on the promise that a later stage
+    # would settle it. `open_for` asks the ledger which of those this stage is on the hook
+    # for, which is the same question the routing decision is about to answer.
+    owed = ledger.open_for(stage)
+    if owed:
+        lines += [
+            f"**{len(owed)} obligation(s) the reviewer recorded are still open against "
+            "this stage.**",
+            "",
+        ]
+        for obligation in owed:
+            lines.append(
+                f"- `{obligation.obligation_id}` (raised at {obligation.origin_stage}, "
+                f"deferred {obligation.deferrals}x): {truncate_text(obligation.text, max_chars=400)}"
+            )
+        lines.append("")
+
+    if not lines:
+        return ""
+    return "\n".join(["## What is still unsettled", "", *lines]).rstrip()
 
 
 def _default_reason(default: Move, moves: list[Move]) -> str:

@@ -679,12 +679,18 @@ removes the *incentive* to improve the answer; drift rejection removes the *rewa
 refused and a `verdict_drift` row is written. It does not undo the edit: `_revert` copies the
 champion markdown back over the draft and touches nothing else, so a polish round that rewrote
 `hypothesis_outcomes.json` leaves it rewritten, and the promoted summary and the outcomes file end
-up disagreeing. Detection is real; restoration is not implemented. Nor is the exemption human-only —
-`consider` returns "directed" for any attempt with `is_polish_round=False`, and the manager sets
-that for a *reviewer's* decision as well as a human's, its own comment reading "a human or reviewer
-decision". Unattended, the reviewer is a model, so a model-directed revision can move a verdict
-without meeting the drift check at all. A revision a **human** asked for is exempt by design: the
-ratchet governs AutoR's own rounds, not the direction it is given.
+up disagreeing. Detection is real; restoration is not implemented.
+
+The exemption is now human-only. It used to cover an automated reviewer too — `consider` returned
+"directed" for any attempt with `is_polish_round=False`, and the manager set that for a reviewer's
+decision as well as a person's — so unattended, which is the only mode the benchmark uses, a model
+could move a verdict without meeting the drift check and promote a draft the rubric scored worse.
+Measured over 41 ResearchClawBench runs it did the second 142 times and the first 4. `consider`
+now takes `directed_by`, and a round directed by anything other than a human is measured: a drift
+is refused, a regression is reverted, and a flat round still stands because a request the rubric
+cannot see is not a request that failed. A revision a **human** asked for is exempt by design and
+unchanged: the ratchet governs AutoR's own rounds, not the direction it is given by the person
+whose project this is.
 
 ### 5.3 Machinery that reports on itself, in the unflattering direction
 
@@ -1052,6 +1058,23 @@ a node with a decision at it. **The graph was quiet because the runs were dying,
 controller was mis-wired** — which is the opposite of the first diagnosis this section reached, and
 the reason it is written down.
 
+**"The agent decided" is not "the agent departed", and the second number is much smaller.** Over a
+later 41-run batch the router faced 252 decision points, answered at essentially all of them, and
+chose something other than the default at **16 — 6.3%**. 31 of the 41 runs walked a straight line;
+`graph_effect.json` says so in its own words on each of them. It was not being blocked: guards
+refused 48 moves across the batch and 46 of those were `finish`, the terminal edge closing rather
+than a departure being denied. It had no grounds. The prompt asks for a reason drawn from "what in
+*this stage's results* makes that the right move" and then showed it results with nothing wrong in
+them — the ratchet polishes every stage towards 1.000 and 71% of routing decisions were taken
+against a stage reporting exactly that, with the rubric's "where the points are" list empty. The
+grounds were on disk and unread: 30% of hypotheses came back `inconclusive` or `not_tested` and 84%
+of runs held at least one, and the prompt's own worked example of a good reason is "H2 is
+inconclusive because only one seed was run". `unfinished_business` now puts the unsettled verdicts
+and the open obligations in front of the router, and a saturated total is labelled as the ceiling it
+is rather than left to read as a verdict on the research. Whether that moves the departure rate is
+unmeasured — it changes what the router is shown, not what it is told to choose, and a prompt that
+instructed it to depart more often would be obeyed on the runs that had nothing to go back for.
+
 Four narrower suppressors were real and are fixed (#191). The largest by far:
 `--final-stage 07_writing` is the benchmark's default, the advance past the requested final stage was
 recorded as a *pruned* move, and a node with no live forward move makes `default_move` return None —
@@ -1246,10 +1269,22 @@ any.
 - **A rejected polish round is not undone, only refused.** `_revert` restores the champion stage
   summary and nothing else, so a round that rewrote `hypothesis_outcomes.json` and was rejected for
   `verdict_drift` leaves the new verdicts on disk, disagreeing with the summary that was promoted.
-- **The drift check exempts a reviewer, not just a human.** `consider` returns "directed" whenever
-  `is_polish_round` is false, and the manager sets that for a reviewer's decision as well as a
-  person's. Unattended — the only mode the benchmark uses — the reviewer is a model, so a
-  model-directed revision can move a verdict without meeting the check.
+- **The reviewer's send-backs are bounded, and its judgement is not deferred to.** An automated
+  reviewer is another instance of the same model reading the same draft, so there is no authority
+  here to defer to. Measured over 41 ResearchClawBench runs it refused 890 times and approved 496;
+  first approval arrived at a median of attempt 4 and the per-stage tail reached 18. 59% of the
+  1115 revisions it directed were aimed at stages already scoring 1.000 on the rubric, where no
+  improvement can register, and 71% moved the total by exactly 0.000. Three bounds now apply to it
+  and to none of them a human: `MAX_AUTOMATED_SENDBACKS` converts its fourth refusal of a stage
+  into an approval, a second refusal of a stage already at 1.000 is refused the same way
+  `should_continue` refuses AutoR's own round there, and `consider` measures what it directs. All
+  three promote rather than skip — unlike `MAX_STAGE_ATTEMPTS`, whose own comment records a run
+  that skipped its literature survey and wrote a report standing on nothing.
+- **The reviewer's *first* look at a saturated stage is never refused.** The rubric is nine
+  mechanical criteria and the reviewer is the only reader of the prose, so a stage whose counts and
+  ratios are green is where the reviewer might hold the only thing worth saying. Refusing that read
+  would cut 59% of directed rounds against the present rule's 48%, and would trade the one part of
+  the loop that could be load bearing for the part measured not to be.
 - **The router does not close the edge into Writing.** `_guard_validity_chain` removes it from the
   agent's menu, but `default_move` takes a guard-blocked advance as a last resort. The refusal that
   actually stops an unadjudicated Stage 07 is `validate_stage_artifacts`. This is deliberate — see

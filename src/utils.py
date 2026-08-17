@@ -101,6 +101,27 @@ MAX_STAGE_ATTEMPTS: int | None = None
 STUCK_AFTER_IDENTICAL_FAILURES = 3
 
 
+#: Send-backs an *automated* reviewer may spend on one stage before its next refusal is
+#: converted into an approval.
+#:
+#: Not :data:`MAX_STAGE_ATTEMPTS`, and deliberately not: that ceiling ends a stage by
+#: auto-skipping it, which is the expensive failure its own comment records. This one
+#: never discards anything. It ends the *argument* by promoting the draft the stage
+#: already has, which is the draft the reviewer had already scored acceptable on every
+#: mechanical criterion.
+#:
+#: Measured over 41 ResearchClawBench runs before the bound existed: the automated
+#: reviewer refused 890 times and approved 496, first approval arrived at a median of
+#: attempt 4, and the per-stage distribution ran out to 18. 72% of stages were sent back
+#: more than twice. Three is above the median and below the tail.
+#:
+#: A human reviewer is not bounded here. A person who asks for a change is exercising
+#: judgement AutoR has no standing to overrule; an automated reviewer is another
+#: instance of the same model, and deferring to it without limit is deferring to
+#: nothing.
+MAX_AUTOMATED_SENDBACKS = 3
+
+
 def is_stuck(recent_failures: Sequence[Sequence[str]]) -> bool:
     """Whether the last :data:`STUCK_AFTER_IDENTICAL_FAILURES` attempts failed identically.
 
@@ -287,6 +308,14 @@ FIXED_STAGE_OPTIONS = [
     "5. Approve and continue",
     "6. Abort",
 ]
+
+#: The options above that send the stage back rather than settling it. Derived from the
+#: menu rather than written out again: 1-3 take a suggestion, 4 supplies feedback, and
+#: all four produce another attempt. Five approves and six aborts, and neither is a
+#: send-back. Existing call sites spell out `{"1", "2", "3"}` and `== "4"` separately
+#: because they branch differently on each; a caller that only needs "was this a
+#: send-back" should not have to know that.
+REVISION_CHOICES = frozenset(option[0] for option in FIXED_STAGE_OPTIONS[:4])
 
 APPROVED_STAGE_ENTRY_PATTERN = re.compile(r"^#{1,6}\s*Stage\s+(\d{2}):.*$", flags=re.MULTILINE)
 
@@ -2373,6 +2402,30 @@ def read_polish_count(paths: RunPaths, stage: StageSpec) -> int:
 
 def write_polish_count(paths: RunPaths, stage: StageSpec, count: int) -> None:
     write_text(_polish_count_path(paths, stage), str(count))
+
+
+def _sendback_count_path(paths: RunPaths, stage: StageSpec) -> Path:
+    return paths.operator_state_dir / f"{stage.slug}.sendback_count.txt"
+
+
+def read_sendback_count(paths: RunPaths, stage: StageSpec) -> int:
+    """Send-backs the automated reviewer has spent on this stage.
+
+    Persisted beside the polish count and for the same reason: a stage can be entered
+    more than once, and a budget that resets on a graph revisit is not a budget. It is
+    counted separately from both of them because it is spent by a different party --
+    the polish count is AutoR's own rounds and the attempt count is every operator
+    call including the ones a validation error caused.
+    """
+    path = _sendback_count_path(paths, stage)
+    if not path.exists():
+        return 0
+    text = read_text(path).strip()
+    return int(text) if text.isdigit() else 0
+
+
+def write_sendback_count(paths: RunPaths, stage: StageSpec, count: int) -> None:
+    write_text(_sendback_count_path(paths, stage), str(count))
 
 
 def read_attempt_count(paths: RunPaths, stage: StageSpec) -> int:

@@ -15,7 +15,16 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.router import ROUTING_MODES, RoutingDecision, StageRouter, format_decision, routing_summary
+from src.obligations import ledger_path
+from src.router import (
+    ROUTING_MODES,
+    RoutingDecision,
+    StageRouter,
+    format_decision,
+    routing_summary,
+    unfinished_business,
+)
+from src.rubric import RUBRIC_VERSION, CriterionScore, StageScore
 from src.stage_graph import FINISH, GraphState, StageGraph, Visit, enter, leave
 from src.utils import STAGES, build_run_paths, ensure_run_layout, read_text, write_text
 from tests import prereg_support
@@ -611,3 +620,151 @@ class RouterTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UnfinishedBusinessTests(unittest.TestCase):
+    """What the router is shown, and why the old prompt could not produce a departure.
+
+    Over 41 ResearchClawBench runs the router faced 252 decision points and departed
+    from the default at 16 (6.3%); 31 of 41 runs walked a straight line. It was not
+    being blocked -- guards refused 48 moves and 46 of those were `finish`, the
+    terminal edge closing rather than a departure being denied. It had no grounds:
+    71% of those decisions were taken against a stage reporting a perfect 1.000 with
+    the rubric's own "where the points are" list empty, while 30% of hypotheses came
+    back unsettled and 84% of runs held at least one. The prompt's worked example of
+    a good reason is "H2 is inconclusive because only one seed was run", and the run
+    knew which hypotheses those were and never said.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.paths = build_run_paths(Path(self._tmp.name) / "run")
+        ensure_run_layout(self.paths)
+        write_text(self.paths.user_input, "goal")
+
+    def outcomes(self, *verdicts: str) -> None:
+        write_text(
+            self.paths.hypothesis_outcomes,
+            json.dumps({
+                "outcomes": [
+                    {"id": f"H{index}", "verdict": verdict,
+                     "rationale": f"Reason {index}.", "evidence": []}
+                    for index, verdict in enumerate(verdicts, start=1)
+                ]
+            }),
+        )
+
+    def ledger(self, *obligations: dict) -> None:
+        write_text(
+            ledger_path(self.paths),
+            json.dumps({"version": 1, "obligations": list(obligations)}),
+        )
+
+    def test_an_inconclusive_hypothesis_is_named(self) -> None:
+        self.outcomes("supported", "inconclusive", "refuted")
+        text = unfinished_business(self.paths, STAGE_06)
+        self.assertIn("1 hypothesis verdict(s) are not settled", text)
+        self.assertIn("`H2`", text)
+        self.assertIn("Reason 2.", text)
+
+    def test_a_settled_run_says_nothing_at_all(self) -> None:
+        """Silence is the point. A section that always appears is a section the model
+        learns to skip, and an instruction to depart more often would be obeyed on the
+        runs that had nothing to go back for."""
+        self.outcomes("supported", "refuted")
+        self.assertEqual(unfinished_business(self.paths, STAGE_06), "")
+
+    def test_a_run_with_no_outcomes_file_says_nothing(self) -> None:
+        self.assertEqual(unfinished_business(self.paths, STAGE_06), "")
+
+    def test_not_tested_counts_as_unsettled(self) -> None:
+        """`not_tested` is a hypothesis the run froze and never reached. Reading only
+        `inconclusive` would let the emptier failure through."""
+        self.outcomes("not_tested")
+        self.assertIn("not settled", unfinished_business(self.paths, STAGE_06))
+
+    def test_a_blank_verdict_counts_as_unsettled(self) -> None:
+        """The allowlist is on settled verdicts, not a denylist of unsettled ones: a
+        verdict the schema does not know must not read as an answer."""
+        self.outcomes("")
+        self.assertIn("not settled", unfinished_business(self.paths, STAGE_06))
+
+    def test_an_open_obligation_naming_this_stage_is_listed(self) -> None:
+        self.outcomes("supported")
+        self.ledger({"obligation_id": "O001", "text": "Report the null.",
+                     "origin_stage": "05_experimentation", "target_stage": STAGE_06.slug,
+                     "status": "open", "deferrals": 2})
+        text = unfinished_business(self.paths, STAGE_06)
+        self.assertIn("`O001`", text)
+        self.assertIn("Report the null.", text)
+        self.assertIn("deferred 2x", text)
+
+    def test_a_discharged_obligation_is_not_listed(self) -> None:
+        self.outcomes("supported")
+        self.ledger({"obligation_id": "O001", "text": "Report the null.",
+                     "origin_stage": "05_experimentation", "target_stage": STAGE_06.slug,
+                     "status": "discharged"})
+        self.assertEqual(unfinished_business(self.paths, STAGE_06), "")
+
+    def test_an_obligation_aimed_at_another_stage_is_not_listed(self) -> None:
+        self.outcomes("supported")
+        self.ledger({"obligation_id": "O001", "text": "Report the null.",
+                     "origin_stage": "05_experimentation", "target_stage": "07_writing",
+                     "status": "open"})
+        self.assertEqual(unfinished_business(self.paths, STAGE_06), "")
+
+
+class RoutingPromptCarriesTheGroundsTests(RouterTests):
+    def prompt(self) -> str:
+        _decision, operator = self.choose(
+            json.dumps({"target": "07_writing", "reason": "Done."})
+        )
+        return operator.prompts[0]
+
+    def test_the_prompt_names_the_unsettled_hypothesis(self) -> None:
+        prereg_support.write_hypothesis_manifest(self.paths)
+        prereg_support.freeze_preregistration(self.paths)
+        write_text(
+            self.paths.hypothesis_outcomes,
+            json.dumps({"outcomes": [
+                {"id": "H1", "verdict": "inconclusive",
+                 "rationale": "Only one seed was run.", "evidence": []}
+            ]}),
+        )
+        text = self.prompt()
+        self.assertIn("What is still unsettled", text)
+        self.assertIn("Only one seed was run.", text)
+
+    def test_a_settled_run_gets_no_unsettled_section(self) -> None:
+        self.adjudicate()
+        self.assertNotIn("What is still unsettled", self.prompt())
+
+    def test_a_perfect_score_is_labelled_as_a_ceiling(self) -> None:
+        """A router told only the total is told the same thing at almost every node."""
+        operator = FakeRoutingOperator(json.dumps({"target": "07_writing", "reason": "Done."}))
+        router = StageRouter(operator, mode="agent")
+        router.choose(
+            paths=self.paths, stage=STAGE_06, graph=self.graph, state=GraphState(),
+            score=StageScore(
+                stage_slug=STAGE_06.slug, attempt_no=1, rubric_version=RUBRIC_VERSION,
+                criteria=(CriterionScore("contract", "Contract", 2.0, 1.0, "ok", ""),),
+                total=1.0,
+            ),
+        )
+        text = operator.prompts[0]
+        self.assertIn("rubric's ceiling", text)
+        self.assertIn("is not evidence for advancing", text)
+
+    def test_a_score_below_the_ceiling_is_not_labelled(self) -> None:
+        operator = FakeRoutingOperator(json.dumps({"target": "07_writing", "reason": "Done."}))
+        router = StageRouter(operator, mode="agent")
+        router.choose(
+            paths=self.paths, stage=STAGE_06, graph=self.graph, state=GraphState(),
+            score=StageScore(
+                stage_slug=STAGE_06.slug, attempt_no=1, rubric_version=RUBRIC_VERSION,
+                criteria=(CriterionScore("contract", "Contract", 2.0, 0.8, "thin", "add one"),),
+                total=0.8,
+            ),
+        )
+        self.assertNotIn("rubric's ceiling", operator.prompts[0])

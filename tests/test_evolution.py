@@ -73,7 +73,9 @@ class RatchetTests(unittest.TestCase):
             ),
         )
 
-    def offer(self, markdown: str, attempt_no: int, *, polish: bool = True):
+    def offer(
+        self, markdown: str, attempt_no: int, *, polish: bool = True, directed_by: str = "human"
+    ):
         draft = self.paths.stage_tmp_file(STAGE_06)
         write_text(draft, markdown)
         return self.controller.consider(
@@ -82,6 +84,7 @@ class RatchetTests(unittest.TestCase):
             attempt_no=attempt_no,
             draft_path=draft,
             is_polish_round=polish,
+            directed_by=directed_by,
         )
 
     # -- the ratchet ---------------------------------------------------------
@@ -146,6 +149,126 @@ class RatchetTests(unittest.TestCase):
         self.assertFalse(outcome.reverted)
         self.assertLess(outcome.delta, 0)
         self.assertEqual(read_text(self.paths.stage_tmp_file(STAGE_06)).strip(), weak.strip())
+
+    def test_an_automated_reviewers_worse_revision_is_reverted(self) -> None:
+        """The exemption above is a human's, and a bot was spending it.
+
+        Measured over 41 ResearchClawBench runs, the automated reviewer directed 1115
+        revisions; 142 of them scored *below* the draft they replaced and every one was
+        promoted, because the branch could not tell a person's judgement from another
+        instance of the same model reading the same draft.
+        """
+        strong = stage_markdown(STAGE_06)
+        self.offer(strong, 1, polish=False)
+        weak = stage_markdown(STAGE_06, key_results="Things improved.")
+        outcome = self.offer(weak, 2, polish=False, directed_by="reviewer")
+
+        self.assertEqual(outcome.verdict, "directed_regressed")
+        self.assertTrue(outcome.reverted)
+        self.assertLess(outcome.delta, 0)
+        self.assertEqual(read_text(self.paths.stage_tmp_file(STAGE_06)).strip(), strong.strip())
+
+    def test_an_automated_reviewers_flat_revision_still_stands(self) -> None:
+        """71% of those 1115 rounds measured exactly 0.000, and those are the case the
+        exemption is for: a request the rubric cannot see is not a request that failed.
+        Reverting them would make the rubric the reviewer."""
+        markdown = stage_markdown(STAGE_06)
+        self.offer(markdown, 1, polish=False)
+        outcome = self.offer(markdown, 2, polish=False, directed_by="reviewer")
+
+        self.assertEqual(outcome.delta, 0.0)
+        self.assertEqual(outcome.verdict, "directed")
+        self.assertFalse(outcome.reverted)
+
+    def test_an_automated_reviewers_better_revision_stands(self) -> None:
+        weak = stage_markdown(STAGE_06, key_results="Things improved.")
+        self.offer(weak, 1, polish=False)
+        strong = stage_markdown(STAGE_06)
+        outcome = self.offer(strong, 2, polish=False, directed_by="reviewer")
+
+        self.assertEqual(outcome.verdict, "directed")
+        self.assertFalse(outcome.reverted)
+        self.assertGreater(outcome.delta, 0)
+
+    def test_the_reverted_reviewer_round_spends_patience(self) -> None:
+        """Otherwise a reviewer could hold a stage open forever: `should_continue` stops
+        on `flat_rounds >= patience`, and a round that resets the counter is a round that
+        buys the next one."""
+        self.offer(stage_markdown(STAGE_06), 1, polish=False)
+        before = self.controller.state(self.paths, STAGE_06).flat_rounds
+        self.offer(
+            stage_markdown(STAGE_06, key_results="Things improved."),
+            2, polish=False, directed_by="reviewer",
+        )
+        self.assertEqual(self.controller.state(self.paths, STAGE_06).flat_rounds, before + 1)
+
+    def test_a_reverted_reviewer_round_does_not_move_the_recorded_verdict(self) -> None:
+        """The champion is what stands, so the digest that describes it must not advance
+        past it -- a drift check comparing against a digest no draft on disk holds would
+        fire on the next round for a change this one already undid."""
+        strong = stage_markdown(STAGE_06)
+        self.offer(strong, 1, polish=False)
+        digest = self.controller.state(self.paths, STAGE_06).verdict_digest
+        self.offer(
+            stage_markdown(STAGE_06, key_results="Things improved."),
+            2, polish=False, directed_by="reviewer",
+        )
+        self.assertEqual(self.controller.state(self.paths, STAGE_06).verdict_digest, digest)
+
+    def test_an_automated_reviewer_may_not_move_a_verdict_either(self) -> None:
+        """The exemption covered the drift check too, and `docs/framework.md` §5.4 lists
+        that as a known hole: "a model-directed revision can move a verdict without
+        meeting the check". Verdict-blindness removes the incentive to improve the answer
+        and drift rejection removes the reward; a party that steps around one makes both
+        decorative. Measured, this fires on 4 of 388 adjacent candidate pairs."""
+        self.offer(stage_markdown(STAGE_06), 1, polish=False)
+        self.write_outcomes("refuted")
+        outcome = self.offer(stage_markdown(STAGE_06), 2, polish=False, directed_by="reviewer")
+
+        self.assertEqual(outcome.verdict, "verdict_drift")
+        self.assertTrue(outcome.reverted)
+
+    def test_a_human_may_still_move_a_verdict(self) -> None:
+        """Unchanged, and deliberately: the ratchet governs AutoR's own rounds, not the
+        direction it is given by the person whose project this is."""
+        self.offer(stage_markdown(STAGE_06), 1, polish=False)
+        self.write_outcomes("refuted")
+        outcome = self.offer(stage_markdown(STAGE_06), 2, polish=False)
+
+        self.assertEqual(outcome.verdict, "directed")
+        self.assertFalse(outcome.reverted)
+
+    def test_a_flat_reviewer_round_does_not_reset_autors_patience(self) -> None:
+        """`should_continue` stops a stage on `flat_rounds >= patience`. A directed round
+        used to reset that counter unconditionally, so an automated reviewer sending a
+        stage back every other round switched the stop off as a side effect -- and 71% of
+        its rounds measured exactly 0.000, which makes that the usual case."""
+        markdown = stage_markdown(STAGE_06)
+        self.offer(markdown, 1, polish=False)
+        self.offer(stage_markdown(STAGE_06, key_results="Things improved."), 2)
+        flat = self.controller.state(self.paths, STAGE_06).flat_rounds
+        self.assertGreater(flat, 0)
+
+        self.offer(markdown, 3, polish=False, directed_by="reviewer")
+        self.assertEqual(self.controller.state(self.paths, STAGE_06).flat_rounds, flat)
+
+    def test_a_human_round_still_resets_patience(self) -> None:
+        markdown = stage_markdown(STAGE_06)
+        self.offer(markdown, 1, polish=False)
+        self.offer(stage_markdown(STAGE_06, key_results="Things improved."), 2)
+        self.assertGreater(self.controller.state(self.paths, STAGE_06).flat_rounds, 0)
+
+        self.offer(markdown, 3, polish=False)
+        self.assertEqual(self.controller.state(self.paths, STAGE_06).flat_rounds, 0)
+
+    def test_a_reviewer_round_that_gains_resets_patience(self) -> None:
+        weak = stage_markdown(STAGE_06, key_results="Things improved.")
+        self.offer(weak, 1, polish=False)
+        self.offer(weak, 2)
+        self.assertGreater(self.controller.state(self.paths, STAGE_06).flat_rounds, 0)
+
+        self.offer(stage_markdown(STAGE_06), 3, polish=False, directed_by="reviewer")
+        self.assertEqual(self.controller.state(self.paths, STAGE_06).flat_rounds, 0)
 
     def test_every_candidate_is_kept_including_the_ones_that_lost(self) -> None:
         """A discarded candidate is the only evidence that anything was discarded."""

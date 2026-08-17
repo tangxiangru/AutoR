@@ -13,15 +13,19 @@ from src.intake import load_intake_context
 from src.evolution import EvolutionConfig
 from src.manager import ResearchManager
 from src.manifest import load_run_manifest
+from src.rubric import RUBRIC_VERSION, CriterionScore, StageScore
 from src.project_bootstrap import StageAssessment
 from src.utils import (
     DEFAULT_REFINEMENT_SUGGESTIONS,
     INTAKE_STAGE,
+    MAX_AUTOMATED_SENDBACKS,
     STAGES,
     OperatorResult,
     approved_stage_summaries,
     build_run_paths,
     load_run_config,
+    read_sendback_count,
+    write_sendback_count,
     read_text,
     relative_to_run,
     selected_output_format,
@@ -904,6 +908,183 @@ class ManagerSmokeTests(unittest.TestCase):
             self.assertEqual(reviewer.calls, 2)
             self.assertEqual(operator.continue_modes[STAGE_01.slug], [False, True])
             self.assertIn("Invocation marker: 2", read_text(paths.stage_file(STAGE_01)))
+
+    def _reviewer_manager(self, tmp_dir: str, reviewer, **kwargs):
+        manager = ResearchManager(
+            project_root=REPO_ROOT,
+            runs_dir=Path(tmp_dir) / "runs",
+            operator=ScriptedSmokeOperator(),
+            output_stream=io.StringIO(),
+            reviewer=reviewer,
+            approval_mode="agent",
+            review_operator="claude",
+            review_model="sonnet",
+            evolution=kwargs.pop("evolution_override", EvolutionConfig(rounds=0)),
+            **kwargs,
+        )
+        return manager, manager._create_run("Smoke-test send-back budget.", venue="neurips_2025")
+
+    @staticmethod
+    def _refusals(count: int) -> list[ReviewDecision]:
+        return [
+            ReviewDecision(
+                choice="4",
+                decision_token="custom_feedback",
+                reason=f"Refusal {index + 1}.",
+                feedback=f"Sharpen paragraph {index + 1}.",
+            )
+            for index in range(count)
+        ]
+
+    def test_the_automated_reviewer_runs_out_of_send_backs(self) -> None:
+        """Measured over 41 ResearchClawBench runs the automated reviewer refused 890
+        times and approved 496, first approval landing at a median of attempt 4 and the
+        per-stage distribution running out to 18. Unbounded deference to another instance
+        of the same model is deference to nothing."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            reviewer = ScriptedReviewer(self._refusals(20))
+            manager, paths = self._reviewer_manager(tmp_dir, reviewer)
+
+            self.assertTrue(manager._run_stage(paths, STAGE_01))
+
+            self.assertEqual(reviewer.calls, MAX_AUTOMATED_SENDBACKS + 1)
+            self.assertEqual(read_sendback_count(paths, STAGE_01), MAX_AUTOMATED_SENDBACKS)
+            self.assertIn("sendback_refused", read_text(paths.logs))
+
+    def test_running_out_of_send_backs_promotes_rather_than_skips(self) -> None:
+        """`MAX_STAGE_ATTEMPTS` ends a stage by auto-skipping it, and its own comment
+        records a ResearchClawBench run that skipped its literature survey that way and
+        wrote a report standing on nothing. This bound must not be that bound: the draft
+        the reviewer had already scored acceptable on every mechanical criterion is the
+        one that stands."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            manager, paths = self._reviewer_manager(tmp_dir, ScriptedReviewer(self._refusals(20)))
+
+            self.assertTrue(manager._run_stage(paths, STAGE_01))
+
+            manifest = load_run_manifest(paths.run_manifest)
+            assert manifest is not None
+            entry = next(item for item in manifest.stages if item.slug == STAGE_01.slug)
+            self.assertTrue(entry.approved)
+            self.assertFalse(entry.skipped)
+            self.assertTrue(paths.stage_file(STAGE_01).exists())
+            self.assertEqual(manager.auto_skipped_stages, [])
+
+    def test_the_budget_survives_a_second_entry_into_the_stage(self) -> None:
+        """A graph revisit, a rollback and a resume all re-enter a stage. A budget that
+        resets there is not a budget -- that per-entry reset is why the measured tail
+        reached 18 send-backs on one stage under a ceiling of 8."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            reviewer = ScriptedReviewer(self._refusals(20))
+            manager, paths = self._reviewer_manager(tmp_dir, reviewer)
+
+            manager._run_stage(paths, STAGE_01)
+            spent = read_sendback_count(paths, STAGE_01)
+            manager._run_stage(paths, STAGE_01)
+
+            self.assertEqual(read_sendback_count(paths, STAGE_01), spent)
+            self.assertEqual(reviewer.calls, MAX_AUTOMATED_SENDBACKS + 2)
+
+    def test_an_approval_never_spends_the_budget(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            reviewer = ScriptedReviewer(
+                [ReviewDecision(choice="5", decision_token="approve", reason="Fine.")]
+            )
+            manager, paths = self._reviewer_manager(tmp_dir, reviewer)
+
+            self.assertTrue(manager._run_stage(paths, STAGE_01))
+            self.assertEqual(read_sendback_count(paths, STAGE_01), 0)
+
+    def test_a_human_reviewer_is_not_bounded(self) -> None:
+        """The budget is on the automated reviewer. A person asking for a change is
+        exercising judgement AutoR has no standing to overrule, and `_ask_choice` is the
+        path a person takes."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            runs_dir = Path(tmp_dir) / "runs"
+            manager = ResearchManager(
+                project_root=REPO_ROOT,
+                runs_dir=runs_dir,
+                operator=ScriptedSmokeOperator(),
+                output_stream=io.StringIO(),
+                evolution=EvolutionConfig(rounds=0),
+            )
+            paths = manager._create_run("Smoke-test human refusals.", venue="neurips_2025")
+            asks = ["1"] * (MAX_AUTOMATED_SENDBACKS + 2) + ["5"]
+
+            with patch.object(manager, "_ask_choice", side_effect=asks):
+                self.assertTrue(manager._run_stage(paths, STAGE_01))
+
+            self.assertEqual(read_sendback_count(paths, STAGE_01), 0)
+            manifest = load_run_manifest(paths.run_manifest)
+            assert manifest is not None
+            entry = next(item for item in manifest.stages if item.slug == STAGE_01.slug)
+            self.assertEqual(entry.attempt_count, len(asks))
+
+    def _score(self, total: float) -> StageScore:
+        return StageScore(
+            stage_slug=STAGE_01.slug, attempt_no=1, rubric_version=RUBRIC_VERSION,
+            criteria=(CriterionScore("contract", "Contract compliance", 2.0, total, "", ""),),
+            total=total, verdict_digest="d",
+        )
+
+    def _saturated_manager(self, tmp_dir: str, reviewer, total: float, spent: int):
+        manager, paths = self._reviewer_manager(
+            tmp_dir, reviewer, evolution_override=EvolutionConfig(rounds=2)
+        )
+        write_sendback_count(paths, STAGE_01, spent)
+        manager.evolution.state(paths, STAGE_01).champion = self._score(total)
+        return manager, paths
+
+    def test_a_second_send_back_at_the_rubric_ceiling_is_refused(self) -> None:
+        """`should_continue` has refused AutoR's *own* round at 1.000 since the ratchet
+        landed, because a rubric at its ceiling cannot register an improvement. The
+        reviewer was never subject to it: 59% of its 1115 directed rounds were aimed at
+        stages already scoring 1.000, and 71% moved the total by exactly 0.000."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            reviewer = ScriptedReviewer(self._refusals(4))
+            manager, paths = self._saturated_manager(tmp_dir, reviewer, 1.0, spent=1)
+
+            refusal = manager._sendback_is_out_of_budget(paths=paths, stage=STAGE_01, choice="4")
+
+            self.assertIsNotNone(refusal)
+            assert refusal is not None
+            self.assertIn("1.000", refusal)
+
+    def test_the_reviewers_first_look_is_never_refused_for_being_at_the_ceiling(self) -> None:
+        """The rubric is nine mechanical criteria and the reviewer is the only reader of
+        the prose, so a stage whose counts and ratios are all green is exactly where the
+        reviewer might hold the only thing worth saying. Refusing that read would trade
+        the one part of the loop that could be load bearing for the part measured not to
+        be -- and it buys only 11 percentage points: strict refusal cuts 59% of directed
+        rounds against this rule's 48%."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            reviewer = ScriptedReviewer(self._refusals(4))
+            manager, paths = self._saturated_manager(tmp_dir, reviewer, 1.0, spent=0)
+
+            self.assertIsNone(
+                manager._sendback_is_out_of_budget(paths=paths, stage=STAGE_01, choice="4")
+            )
+
+    def test_a_stage_below_the_ceiling_keeps_its_send_backs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            reviewer = ScriptedReviewer(self._refusals(4))
+            manager, paths = self._saturated_manager(tmp_dir, reviewer, 0.94, spent=2)
+
+            self.assertIsNone(
+                manager._sendback_is_out_of_budget(paths=paths, stage=STAGE_01, choice="4")
+            )
+
+    def test_an_approval_is_never_out_of_budget(self) -> None:
+        """The predicate is asked on every verdict, and one that refused an approval
+        would hold a stage open with no way out at all."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            reviewer = ScriptedReviewer(self._refusals(4))
+            manager, paths = self._saturated_manager(tmp_dir, reviewer, 1.0, spent=9)
+
+            for choice in ("5", "6"):
+                self.assertIsNone(
+                    manager._sendback_is_out_of_budget(paths=paths, stage=STAGE_01, choice=choice)
+                )
 
     def test_stage_can_be_skipped_after_exhausted_retries(self) -> None:
         class DummyTTY:

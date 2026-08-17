@@ -147,7 +147,9 @@ class StageEvolutionState:
 @dataclass(frozen=True)
 class RoundOutcome:
     #: ``first`` | ``promoted`` | ``frontier`` | ``regressed`` | ``verdict_drift``
-    #: | ``directed`` (a human or the reviewer asked for this one; it stands).
+    #: | ``directed`` (someone asked for this one; it stands)
+    #: | ``directed_regressed`` (an automated reviewer asked for it and it measured
+    #: worse, so the champion was restored — a human's direction never lands here).
     verdict: str
     score: StageScore
     champion: StageScore | None
@@ -253,6 +255,7 @@ class EvolutionController:
         attempt_no: int,
         draft_path: Path,
         is_polish_round: bool = False,
+        directed_by: str = "human",
     ) -> RoundOutcome:
         """Measure the draft at ``draft_path`` and decide whether it may stand.
 
@@ -278,19 +281,67 @@ class EvolutionController:
         # 0. Was this round asked for by a person?
         #
         # The ratchet governs AutoR's own polish rounds. It does not govern a
-        # reviewer or a human who asked for a change: that is direction, and a
-        # measurement is not entitled to overrule it. AutoR would otherwise
-        # silently revert a requested edit because a rubric preferred the previous
-        # wording, which is the opposite of the arrangement this project is built
-        # on. The delta is still measured and recorded, so the ledger shows whether
-        # the requested change helped — the human keeps the decision and gets the
-        # number.
-        if not is_polish_round and champion is not None:
+        # human who asked for a change: that is direction, and a measurement is
+        # not entitled to overrule it. AutoR would otherwise silently revert a
+        # requested edit because a rubric preferred the previous wording, which is
+        # the opposite of the arrangement this project is built on. The delta is
+        # still measured and recorded, so the ledger shows whether the requested
+        # change helped — the human keeps the decision and gets the number.
+        #
+        # An *automated* reviewer is not that person, and this branch used to treat
+        # it as one. It is another instance of the same model reading the same
+        # draft, so there is no judgement here to defer to and no one who keeps the
+        # decision — the exemption written to protect a human's authority was being
+        # spent by a bot. Measured over 41 ResearchClawBench runs it was spent 1115
+        # times, of which 930 (83%) measured at or below zero and 142 (13%) measured
+        # *negative*: a draft the rubric scored worse than the one it replaced,
+        # promoted anyway because the sentence said it stood regardless.
+        #
+        # Zero still stands. 71% of these rounds moved the total by exactly 0.000,
+        # and a reviewer's request that the rubric cannot see is the case the
+        # exemption is for; reverting those would make the rubric the reviewer. Only
+        # a measured regression is refused, and it is refused the same way a polish
+        # round's regression is: the champion is restored and the ledger says so.
+        # Computed before the exemption below rather than after it, because a round
+        # that moved a verdict is the one thing no exemption may cover for anything
+        # that is not a person: `verdict_blind` removes the incentive to improve the
+        # answer and this removes the reward, and a bot that can step around it makes
+        # both decorative. Measured over 41 ResearchClawBench runs a directed round
+        # moved a verdict 4 times in 388 -- rare, and the whole point of the design.
+        drifted = (
+            (is_polish_round or directed_by != "human")
+            and bool(state.verdict_digest)
+            and bool(score.verdict_digest)
+            and score.verdict_digest != state.verdict_digest
+        )
+
+        if not is_polish_round and champion is not None and not drifted:
+            if directed_by != "human" and delta < 0:
+                state.flat_rounds += 1
+                outcome = RoundOutcome(
+                    "directed_regressed",
+                    score,
+                    champion,
+                    delta,
+                    self._revert(paths, stage, draft_path),
+                    f"An automated reviewer directed this revision and it measured worse "
+                    f"({delta:+.3f}); the champion was restored. A person's direction would "
+                    f"have stood.",
+                )
+                self._record(paths, stage, attempt_no, outcome, state, is_polish_round)
+                return outcome
             update = insert(state.frontier, score)
             state.frontier = list(update.members) if update.verdict != "incomparable" else [score]
             state.champion = score
             state.verdict_digest = score.verdict_digest
-            state.flat_rounds = 0
+            if delta > 0 or directed_by == "human":
+                # Resetting unconditionally let an automated reviewer switch off AutoR's
+                # own patience stop as a side effect: `should_continue` halts a stage on
+                # `flat_rounds >= patience`, and a send-back every other round meant the
+                # count could never accumulate. 71% of the reviewer's rounds measured
+                # exactly 0.000, so this was the usual case rather than the edge one. A
+                # round that moved the number earned the reset; a flat one did not.
+                state.flat_rounds = 0
             self._persist(paths, stage, state, markdown)
             outcome = RoundOutcome(
                 "directed",
@@ -304,12 +355,6 @@ class EvolutionController:
             return outcome
 
         # 1. Did this round move what the run concludes?
-        drifted = (
-            is_polish_round
-            and bool(state.verdict_digest)
-            and bool(score.verdict_digest)
-            and score.verdict_digest != state.verdict_digest
-        )
         if drifted:
             outcome = RoundOutcome(
                 verdict="verdict_drift",
@@ -318,9 +363,10 @@ class EvolutionController:
                 delta=delta,
                 reverted=self._revert(paths, stage, draft_path),
                 note=(
-                    "This round changed a hypothesis verdict. An improvement round may "
-                    "strengthen the evidence for a finding; it may not change the finding. "
-                    "The previous draft was restored."
+                    "This round changed a hypothesis verdict. A round AutoR or an "
+                    "automated reviewer asked for may strengthen the evidence for a "
+                    "finding; it may not change the finding. The previous draft was "
+                    "restored."
                 ),
             )
             state.flat_rounds += 1
