@@ -388,8 +388,8 @@ GATES: tuple[Gate, ...] = (
     # ------------------------------------------------- the run supervisor's rules
     #
     # Not gates in the sense the rest of this table is -- none of them lets anything
-    # through, and by construction none of them can: `AttemptAllowance.ceiling` is a `min`
-    # against the run's own `--max-attempts` and there is no path from a ruling to an
+    # through, and by construction none of them can: `AttemptAllowance.visit_ceiling` is a
+    # `min` against the run's own `--max-attempts` and there is no path from a ruling to an
     # approval. They are here because they *refuse* spending, and the question this file
     # asks of a refusal is who wrote the field it turns on. Every one of them reads
     # `stage_cost_ledger.json` or an in-memory meter the harness fills, and nothing else.

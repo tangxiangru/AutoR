@@ -43,7 +43,7 @@ validator, or raise any budget's total. It may stop, it may reallocate inside a 
 never increases, and it may choose among moves the guards have already left open. Three
 things in the code, not in this paragraph, are what hold that:
 
-* :meth:`AttemptAllowance.ceiling` is a :func:`min` against the run's own
+* :meth:`AttemptAllowance.visit_ceiling` is a :func:`min` against the run's own
   ``--max-attempts``. No state of the allowance ledger can return a larger number than the
   run already allows, so no intervention can buy an attempt the run had not already
   bought. A run that declared no ceiling gets ``None`` back and no pool: the supervisor
@@ -65,33 +65,54 @@ supervisor that cannot add cannot make that mistake, and this one cannot add.
 
 Every threshold here was measured, and what against
 ----------------------------------------------------
-The replay is ``tools/supervisor_threshold_replay.py``. The population is the first live
-paired trial under ``/rmeng_data/robtang/rcb-trial-graph``: its three finished runs, which
-are 22 stage visits and 141 attempt-loop iterations, reconstructed from each run's
-``logs.txt``. A fourth run was still walking when this was measured; it fires no rule and
-pointing the replay at all four reports a larger population and the same firings. The
-replay calls the predicates below rather than reimplementing them, so a threshold that
-moves here moves there, and the numbers in this docstring describe what this code does
-rather than what a second copy of it did.
+The replay is ``tools/supervisor_threshold_replay.py`` and the population is
+``tools.supervisor_threshold_replay.MEASURED_RUNS``: the three *finished* runs of the
+first live paired trial under ``/rmeng_data/robtang/rcb-trial-graph``, named rather than
+globbed, which reconstruct to 22 stage visits and 141 attempt-loop iterations from each
+run's ``logs.txt``. Every population figure below is one of those two numbers, they are
+``MEASURED_VISITS`` and ``MEASURED_ITERATIONS``, and running the replay on that invocation
+prints ``population: as recorded`` or says which way it drifted. Do not quote the glob
+``workspaces/*/.autor/*/``: a fourth run under the same directory is still being written,
+it gave 26 visits and 166 iterations the day this branch was opened and 27 and 167 the
+next, and an earlier version of this docstring claimed a denominator of 162 that no
+invocation ever printed. The replay calls the predicates below rather than reimplementing
+them, so a threshold that moves here moves there.
 
-:data:`STOP_AFTER_IDENTICAL_FAILURES` **= 2.** Two identical failure digests in a row
-happened three times over the 22 visits, three in a row once, and four in a row never.
-The three at ``N=2`` are Astronomy_000 linear ``03_study_design`` and Chemistry_000
-adaptive ``03_study_design`` -- both repeating the same ``report_plan.json task output N
-states nothing`` refusal, both cut after attempt 2 where the visit ran to attempt 10 and
-was auto-skipped anyway -- and Astronomy_000 linear ``07_writing``, the one visit the
-existing :func:`~src.utils.is_stuck` also ends. **None of the three went on to be
-approved**, so no measured visit that reached an approval loses an attempt, and 17 of the
-141 iterations are not bought for the same three outcomes. ``N=3`` fires only on the visit
-``is_stuck`` already ends, and buys nothing.
+:data:`STOP_AFTER_IDENTICAL_FAILURES` **= 3.** On this population that is near-inert, which
+is the honest answer and a finding about the population rather than about the rule.
 
-Two honest limits on that. Every repeat in the three runs was a *validator* error -- a
-reviewer's and a cross-reviewer's reasons are model prose and never repeat byte for byte
--- so reading the whole census rather than only the validation errors moved no firing on
-this data, and what changed the count was 2 rather than 3. And the looser rule of
-repeating the failure *kind* is refused by the same replay, which prints it as a control:
-13 of 22 visits at two, and at three only 2 visits for a single iteration, because a kind
-repeats three times only at the end of a visit where there is nothing left to save.
+Two identical failure digests in a row happened three times over the 22 visits, three in a
+row once, and four in a row never. The replay's original report stopped there and read
+``N=2`` as saving 17 iterations, which is what the rule *stops* rather than what it
+*saves*. With :func:`~tools.supervisor_threshold_replay.bought` beside it, the same three
+firings read: 17 iterations cut, **12 inert and 5 productive**. The five are a repair that
+put the draft back inside the gate on attempt 3, and a promoted draft with obligations
+discharged on attempt 5, in each of the two ``03_study_design`` visits that carry 16 of
+the 17. And the decisive column is neither: in all three firings the draft on disk is
+*outside* the gate at the moment of the cut, because a repeated **validator** refusal is
+by construction a moment at which validation is failing. Both ``03_study_design`` visits
+went on to end auto-skipped with a draft that did validate, so
+``_validated_draft_for_skip`` kept it -- 49,347 and 23,513 bytes of stage summary. Cut at
+attempt 2 and that call returns ``None`` and the 1,911-byte ``.skip_stub.md`` beside each
+of them becomes Stage 03's output for every downstream stage. ``N=2`` does not buy 17
+iterations; it buys 12 inert ones and pays two stage summaries for them.
+
+So ``N=2`` is refused, and no larger value does useful work on this data either: ``N=3``
+fires on 1 of the 22 visits and cuts **0** iterations, ``N=4`` and ``N=5`` fire on nothing
+at all. Three is shipped as the safe value -- the smallest at which the measured cost is
+zero on both columns -- and the finding recorded beside it is about the population:
+**every repeat in these three runs is a validator error** (four repeat events, all
+``validators_refused``, no other kind ever repeating), and a repeated validator error is
+what :func:`~src.utils.is_stuck` already ends at the same count of three. What this rule
+adds over ``is_stuck`` is real and unmeasurable here: ``is_stuck`` reads only
+``last_validation_errors``, which the attempt loop assigns at one place, so it is blind to
+a reviewer refusing identically, a cross-model veto repeating, or a backend failing the
+same way; this reads the whole census. Three runs containing no such repeat cannot say
+what that is worth, and the number to raise it against is a population that contains one.
+
+The looser rule of repeating the failure *kind* is refused by the same replay, which
+prints it as a control: 13 of 22 visits at two, cutting 43 iterations of which 9 were
+productive; at three only 2 visits and a single iteration, and that one was productive.
 
 :data:`DISPROPORTIONATE_MULTIPLE` **= 2** and
 :data:`MIN_CLOSED_STAGES_FOR_A_DISTRIBUTION` **= 3.** The comparison is against the run's
@@ -100,29 +121,40 @@ its visits, against the median of the stages that have closed. At ``2x`` with th
 stages the rule fires on 2 of the 22 visits, both the *second* visit to a stage in
 Astronomy_000 adaptive -- the one run in the trial that took a real backward edge --
 ``06_analysis`` at 5 charged against a median of 2, and ``07_writing`` at 5 against 2.
-``2.5x`` and ``3x`` fire on nothing. ``1.5x`` fires on three, one of them the *first*
-visit to ``07_writing``, which went on to be approved. Requiring only two closed stages
-rather than three changes nothing at ``2x`` on this data and adds two more firings at
-``1.5x``; three is the minimum anyway, because a median over a run's first two stages is a
-median over its two cheapest. Both firings survive the replay's ``after_stop_spending``
-column, which re-runs the sweep with the visits :data:`STOP_SPENDING` has already cut
-removed -- a proportionality rule that counts those is taking credit for another rule's
-work, and at ``1.5x`` with two closed stages it does.
+``2.5x`` and ``3x`` fire on nothing. ``1.5x`` with two closed stages fires on five, and
+the replay's ``binds`` column says what the extra ones cost: Astronomy_000 linear
+``03_study_design`` would have been rationed to 6 in a visit that charged 7, so that
+firing shortens a visit and the two at ``2x`` shorten nothing. At ``2x`` itself, two
+closed stages and three fire identically, so the population does not distinguish them and
+the case for three is the structural one -- a median over a run's first two stages is a
+median over its two cheapest. Both ``2x`` firings survive the replay's
+``after_stop_spending`` column, which re-runs the sweep with the visits
+:data:`STOP_SPENDING` has already cut removed -- a proportionality rule that counts those
+is taking credit for another rule's work. At the shipped ``N`` that column removes nothing
+anywhere, which is another way of saying the stop rule is inert on this population.
 
-In both firings the ration :func:`ration` leaves -- 5 charged plus the run's median of 2,
-so 7 -- is above the 5 either stage charged in total, so no attempt would have been taken
-from a visit that was later approved, and one unit of allowance would have moved to
-``08_dissemination``, the only stage that run had not entered. A stage that has already
+Neither firing costs the run anything, and that is measured rather than argued: the ration
+:func:`ration` leaves is 5 for ``06_analysis`` and 3 for ``07_writing``, those visits
+charged 3 and 1, and no later visit to either stage charged more, so the replay prints
+``the narrowed per-visit allowance binds nothing`` for both. What moves is 3 and 5 units
+to ``08_dissemination``, the only stage that run had not entered. A stage that has already
 charged more than its allowance less the median has no unspent units at all and gets a
 ``continue``: budget that is spent cannot be reallocated, which is arithmetic rather than
 policy, and it is why the rule is checked for a surplus before it is recorded.
 
-:data:`UNSETTLED_VISITS_BEFORE_A_REDIRECT` **= 2**, and it fires on none of the 22. Two is
-the first count at which "this stage failed the same way twice" can be said at all, and
-the replay finds no stage in the trial reaching it: the only stage pair visited twice --
-``06_analysis`` and ``07_writing`` in Astronomy_000 adaptive -- had an approved first
-visit each. That is the number worth reporting about this rule, because it is the one that
-says the trial's single backward edge would have been left alone.
+:data:`UNSETTLED_VISITS_BEFORE_A_REDIRECT` **= 2**, and it is reached at none of the 22
+stage exits. This is the replay's ``redirect`` column, which did not exist until the
+threshold was questioned -- two sentences here credited the instrument with a finding it
+had no column for, which is the same defect as a number nobody ran. It now imports
+:func:`unsettled_visits` and evaluates it where the manager does, over the ledger rows
+closed including the visit just ended: at one unsettled visit 10 of the 22 exits reach the
+threshold, at two none do, at three none do. The only stage pair visited twice --
+``06_analysis`` and ``07_writing`` in Astronomy_000 adaptive -- had an approved first visit
+each. The count is an upper bound, because the replay cannot reconstruct which forward
+edges the guards left open at each exit and requiring one can only remove firings; zero is
+therefore zero for the whole rule. Two is the first count at which "this stage failed the
+same way twice" can be said at all, and the number worth reporting is that the trial's
+single backward edge would have been left alone.
 
 :data:`NO_RECOVERY_LEFT` fires on 1 of the 22 and takes one iteration away, at
 Astronomy_000 linear ``07_writing`` with all three auto-skips already spent -- the visit
@@ -140,15 +172,16 @@ reason recorded names which precondition was short. :data:`UNCHANGING_FAILURE` n
 distribution -- it is a repeat count inside one visit -- so it is live from the first
 visit of the run. A guess standing in for the distribution is the thing not on offer.
 
-The pool cost the measured runs nothing, which is also measured. Reconstructed charged
-attempts came to 22, 21 and 31 per run against a total of 64 for a benchmark run's eight
-stages at ``--max-attempts 8``, so the run-level half was never near binding. The
-per-stage half can only bind on a revisit, and the trial contains exactly one revisit pair
--- ``06_analysis`` and ``07_writing`` in Astronomy_000 adaptive -- whose first visits
-charged 2 and 4, leaving 6 and 4 for the second visits, which charged 3 and 1. Neither
-would have been shortened. An envelope nothing pressed against is an envelope that cost
-nothing; it is here because :data:`REALLOCATE` has to have a total to conserve, and a
-total invented at the moment of the first transfer would be one the run never agreed to.
+The pool cost the measured runs nothing, which is also measured, and it is a *per-visit*
+pool: see :class:`AttemptAllowance` for why an earlier lifetime-per-stage version of it
+was a budget cut nobody asked for. Reconstructed charged attempts came to 22, 21 and 31
+per run against 64 for one round of a benchmark run's eight stages at ``--max-attempts
+8``. The per-visit half binds only where a transfer has already narrowed a stage, and the
+two transfers the trial would have seen narrow ``06_analysis`` to 5 and ``07_writing`` to
+3 in a run whose later visits to them charged 3 and 1. An envelope nothing pressed against
+is an envelope that cost nothing; it is here because :data:`REALLOCATE` has to have a
+total to conserve, and a total invented at the moment of the first transfer would be one
+the run never agreed to.
 """
 
 from __future__ import annotations
@@ -255,9 +288,10 @@ SUPERVISOR_RULES: tuple[str, ...] = (
 #: standing to overrule. :data:`~src.utils.MAX_AUTOMATED_SENDBACKS` draws that line in
 #: those words for the reviewer's budget; this is the same line drawn on the attempt
 #: budget, and without it a supervisor built to bound an automated loop would be bounding
-#: a person instead. Measured cost: none. All four trial runs ran ``approval_mode: agent``,
-#: so no human refusal appears anywhere in the population the thresholds were measured
-#: over, and excluding the kind moves no firing in the replay.
+#: a person instead. Measured cost: none. All three runs of ``MEASURED_RUNS`` ran
+#: ``approval_mode: agent`` -- as does the fourth, still-walking one -- so no human refusal
+#: appears anywhere in the population the thresholds were measured over, and excluding the
+#: kind moves no firing in the replay.
 NOT_COUNTED_AS_A_REPEAT: tuple[str, ...] = (HUMAN_REFUSED,)
 
 #: Attempts that must still be at stake for :data:`STOP_SPENDING` to be worth taking.
@@ -266,45 +300,62 @@ NOT_COUNTED_AS_A_REPEAT: tuple[str, ...] = (HUMAN_REFUSED,)
 #: from ending the visit, stopping it now renames an event the exhaustion path is about to
 #: record at the next boundary anyway, and the run already has a name for that event.
 #:
-#: Measured cost on the trial: none, and the replay prints both columns to show it. The
-#: four runs walked under ``--max-attempts 8`` and all three firings land at attempt 2
-#: with six still at stake, so the rule fires identically with the condition and without
-#: it. What the condition changes is a run whose ceiling is tight: at ``--max-attempts 3``
-#: the second identical failure arrives with one attempt left, and there the supervisor
-#: would be relabelling the exhaustion rather than preventing it.
+#: Measured cost on the trial: none, and the replay prints the sweep with and without the
+#: condition to show it. ``MEASURED_RUNS`` walked under ``--max-attempts 8``, and at every
+#: candidate ``N`` from 2 to 5 the two columns are identical -- at the shipped 3 the single
+#: firing lands at attempt 3 with five still at stake. What the condition changes is a run
+#: whose ceiling is tight: at ``--max-attempts 3`` the third identical failure arrives with
+#: nothing left, and there the supervisor would be relabelling the exhaustion rather than
+#: preventing it.
 MIN_ATTEMPTS_AT_STAKE = 2
 
 #: Identical failure digests in a row before :data:`STOP_SPENDING`.
 #:
-#: Measured, not chosen. Over the 26 stage visits of the first live paired trial two in a
-#: row happened three times, three once and four never; at two the rule fires on three
-#: visits, none of which went on to be approved, and saves 17 of the run set's 162
-#: attempt-loop iterations. At three it fires only on the visit
-#: :func:`~src.utils.is_stuck` already ends. ``tools/supervisor_threshold_replay.py`` is
-#: the replay and prints both columns.
-STOP_AFTER_IDENTICAL_FAILURES = 2
+#: Measured, and the measurement says the safe value. Over the 22 stage visits of
+#: ``MEASURED_RUNS`` (141 attempt-loop iterations; see the module docstring for the
+#: invocation) two in a row happened three times, three once and four never. At **2** the
+#: rule cuts 17 iterations of which only 12 produced nothing, and all three cuts land at a
+#: moment when the draft is outside the gate, so the two visits that ended auto-skipped
+#: with a rescued 49,347-byte and 23,513-byte stage summary would instead have published
+#: the 1,911-byte skip stub. At **3** it fires on one visit and cuts 0 iterations; at 4 and
+#: 5 it fires on nothing. Three is shipped: the smallest value whose measured cost on both
+#: columns is zero. That it is also near-inert here is a fact about the population -- all
+#: four repeat events in these runs are ``validators_refused``, which
+#: :func:`~src.utils.is_stuck` already ends at the same count -- and this rule reads the
+#: whole failure census rather than only ``last_validation_errors``, so what it adds is a
+#: reviewer or a cross-model reviewer or a backend repeating, which these three runs never
+#: do. ``tools/supervisor_threshold_replay.py`` prints both columns.
+STOP_AFTER_IDENTICAL_FAILURES = 3
 
 #: How many times the run's own median a stage may consume before :data:`REALLOCATE`.
 #:
-#: Measured against the same 26 visits: at ``2x`` the rule fires twice, both on a second
-#: visit in the one run that took a backward edge; ``2.5x`` and ``3x`` fire on nothing and
-#: ``1.5x`` reaches a visit that was approved.
+#: Measured against the same 22 visits: at ``2x`` the rule fires twice, both on a second
+#: visit in the one run that took a backward edge, and the replay's ``binds`` column says
+#: neither narrowed allowance would have shortened any visit. ``2.5x`` and ``3x`` fire on
+#: nothing. ``1.5x`` adds a firing that rations a visit to 6 which went on to charge 7.
 DISPROPORTIONATE_MULTIPLE = 2
 
 #: Closed stages needed before there is a distribution to be disproportionate against.
 #:
-#: Three, measured: at two, the rule picks up two further visits that
-#: :data:`STOP_SPENDING` has already cut, and the median is being taken over a run's first
-#: two stages, which are its cheapest. Below this the supervisor does nothing rather than
-#: guessing what a typical stage of this run costs.
+#: Three. At the shipped ``2x`` the measured population does not distinguish two from
+#: three -- both fire on the same 2 of 22 visits -- and the docstring says so rather than
+#: claiming a difference. Where the population does speak is at ``1.5x``: two closed stages
+#: gives 5 firings against three's 3, and one of the two extra is Astronomy_000 linear
+#: ``03_study_design``, rationed to 6 in a visit that went on to charge 7, which the
+#: replay's ``binds`` column marks. The structural half is the reason three is the minimum
+#: anyway: a median over a run's first two stages is a median over its two cheapest. Below
+#: this the supervisor does nothing rather than guessing what a typical stage costs.
 MIN_CLOSED_STAGES_FOR_A_DISTRIBUTION = 3
 
 #: Visits that ended without an approval before a stage stops being funded for another
 #: one. Two rather than a measured larger number because two is the first count at which
-#: "this stage failed the same way twice" can be said at all, and the replay finds no
-#: stage in the trial reaching even that: the only stage pair visited twice
+#: "this stage failed the same way twice" can be said at all, and the replay's ``redirect``
+#: column -- which imports :func:`unsettled_visits` and evaluates it at each stage exit
+#: over the rows closed so far -- reaches it at none of the 22: 10 exits reach one
+#: unsettled visit, none reach two, none reach three. The only stage pair visited twice
 #: (``06_analysis`` and ``07_writing`` in Astronomy_000 adaptive) had an approved first
-#: visit, so :data:`UNFUNDED_REVISIT` fires on none of the 26.
+#: visit. That is an upper bound, since the replay cannot see which forward edges the
+#: guards left open and requiring one only removes firings.
 UNSETTLED_VISITS_BEFORE_A_REDIRECT = 2
 
 #: Where the rulings go. Run root, beside the stage cost ledger and for the same reason:
@@ -453,16 +504,33 @@ class AllowanceError(RuntimeError):
 
 
 class AttemptAllowance:
-    """A run-wide attempt pool, denominated in the run's own ``--max-attempts``.
+    """A pool of **per-visit** attempt allowances, denominated in ``--max-attempts``.
 
-    The status quo has no run total at all: the ceiling is *per stage visit*, so a graph
-    walk of ``--graph-max-steps`` steps may buy ``steps x --max-attempts`` attempts. This
-    pool is ``stages x --max-attempts``, which for a benchmark run is 64 against the 160
-    the walk could otherwise spend, and :meth:`ceiling` hands out
-    ``min(--max-attempts, what is left)`` -- a :func:`min` against the status quo, so no
-    state of this ledger can produce a visit ceiling larger than the run already allows.
-    Both halves matter: the pool is what :data:`REALLOCATE` moves inside, and the ``min``
-    is why moving inside it cannot buy an attempt.
+    One unit is one attempt of one *visit*, not one attempt of a stage's whole lifetime.
+    That is what the run itself buys: ``_run_stage_attempts`` counts from zero on every
+    entry to a stage, so without a supervisor a stage entered three times gets
+    ``--max-attempts`` three times. :meth:`visit_ceiling` hands back
+    ``min(--max-attempts, what this stage holds)`` -- a :func:`min` against the status
+    quo, so no state of this ledger can hand a visit a larger ceiling than the run
+    already allows, and a stage nothing has moved budget away from gets exactly what it
+    would have got with no supervisor at all.
+
+    **This is not a run total, and it must not be turned into one.** An earlier shape of
+    this class charged a stage's closed visits against a single lifetime allowance, which
+    read as a tighter run budget and was in fact a rule that funded the first visit and
+    starved every one after it: a stage whose first visit charged the ceiling got
+    ``remaining = 0``, ``attempt_ceiling`` returned 0, and the revisit died before buying
+    an attempt with the ledger recording ``continue / nothing_to_decide``. The capability
+    that narrows to zero is the backward edge, which is the one thing this project has
+    that a plain agent loop does not. The invariant is "never above what the run would
+    have had", and what the run would have had is ``--max-attempts`` *per visit*.
+
+    What :attr:`total` conserves is therefore the run's per-visit envelope --
+    ``stages x --max-attempts``, the budget for one round of visits -- and
+    :meth:`transfer` is the only method that moves anything inside it. Narrowing one
+    stage's per-visit allowance is a real narrowing that persists across its later visits;
+    widening another's is capped by the ``min`` and can only ever restore a stage that had
+    been narrowed. Both directions lower or leave the run where it was; neither raises it.
     """
 
     def __init__(self, stage_slugs: Sequence[str], per_stage: int) -> None:
@@ -475,18 +543,19 @@ class AttemptAllowance:
     def conserved(self) -> bool:
         return sum(self.allowance.values()) == self.total
 
-    def remaining(self, stage_slug: str, spent: int) -> int:
-        """Units left for *stage_slug* after *spent* charged attempts, never negative."""
-        return max(self.allowance.get(stage_slug, self.per_stage) - spent, 0)
-
-    def ceiling(self, stage_slug: str, spent: int) -> int:
-        """This visit's attempt ceiling: the run's own, or what is left, whichever is less.
+    def visit_ceiling(self, stage_slug: str) -> int:
+        """What one visit to *stage_slug* may charge: the run's own ceiling, or less.
 
         The ``min`` is the invariant. Whatever the allowance ledger has been moved to, the
         number handed back is bounded above by the ceiling the run was started with, so
         the supervisor can only ever lower it.
+
+        Note what is *not* subtracted here: anything a previous visit charged. The attempt
+        loop counts from zero on every entry, so this is the number that loop compares
+        against, and subtracting a closed visit's spend from it would charge the same
+        attempts twice -- once to the visit that spent them and once to every visit after.
         """
-        return min(self.per_stage, self.remaining(stage_slug, spent))
+        return min(self.per_stage, self.allowance.get(stage_slug, self.per_stage))
 
     def transfer(self, donor: str, recipients: Sequence[str], units: int) -> int:
         """Move *units* from *donor*, split as evenly as the units allow.
@@ -495,13 +564,24 @@ class AttemptAllowance:
         or nobody to move it to. The total is asserted on the way out rather than trusted:
         this is the one method in the module that can change a budget, and a conservation
         law nobody checks is a comment.
+
+        A donor may not give away everything it holds, and that bound is here rather than
+        in the rule that calls it. A stage at zero per-visit allowance is a stage that
+        fails on entry with "Exceeded 0 attempts" before it has run once -- which is the
+        regression this class was reshaped to remove, arrived at from the other side.
+        Making a stage impossible to enter is the mirror of opening a guarded edge, and
+        neither is on offer. The *policy* floor is higher and lives in
+        :meth:`RunSupervisor._rule_on_attempt`, which leaves the donor
+        :func:`ration`'s "this visit's spend plus the run's own median"; this is the
+        structural floor under it, checkable without knowing the median.
         """
         if units <= 0 or not recipients:
             return 0
         held = self.allowance.get(donor)
-        if held is None or units > held:
+        if held is None or units >= held:
             raise AllowanceError(
-                f"{donor} holds {held} allowance unit(s) and cannot give away {units}"
+                f"{donor} holds {held} allowance unit(s) and cannot give away {units}: a "
+                "donor must keep enough to fund one more visit"
             )
         self.allowance[donor] = held - units
         for index in range(units):
@@ -672,18 +752,25 @@ class RunSupervisor:
             self.allowance = AttemptAllowance(self.stage_slugs, per_stage)
         return self.allowance
 
-    def attempt_ceiling(self, paths: RunPaths, stage_slug: str, per_stage: int | None) -> int | None:
-        """This visit's ceiling: *per_stage*, or what the stage has left, whichever is less.
+    def attempt_ceiling(self, stage_slug: str, per_stage: int | None) -> int | None:
+        """This visit's ceiling: *per_stage*, or what this stage holds, whichever is less.
 
         The value handed to ``attempts_exhausted`` in place of ``--max-attempts``. It is a
         :func:`min` against the ceiling the caller passed in, so it can differ from it only
-        downwards, and only on a stage the run has already visited: on a first visit
-        nothing has been charged and the two are equal.
+        downwards, and only on a stage :data:`REALLOCATE` has already moved budget away
+        from. Every visit is funded, including the second and third: a backward edge is
+        the capability this component exists beside, not one for it to price out.
+
+        It takes no ``RunPaths``, and that absence is the fix rather than a tidy-up. The
+        version that read the closed cost ledger here subtracted a stage's finished visits
+        from its per-visit ceiling, so a stage whose first visit charged ``--max-attempts``
+        was handed 0 on its second and died before buying an attempt. A ceiling that
+        cannot see what previous visits spent cannot make that mistake again.
         """
         pool = self._pool(per_stage)
         if pool is None:
             return per_stage
-        return min(per_stage, pool.remaining(stage_slug, self.closed_spend(paths).get(stage_slug, 0)))
+        return pool.visit_ceiling(stage_slug)
 
     # -- the attempt boundary ------------------------------------------------
 
@@ -750,7 +837,7 @@ class RunSupervisor:
     ) -> Intervention:
         digests = countable_digests(meter.attempt_digests()) if meter is not None else []
         live_charged = max(meter.attempts - meter.polish_rounds, 0) if meter is not None else 0
-        ceiling = self.attempt_ceiling(paths, stage_slug, per_stage_ceiling)
+        ceiling = self.attempt_ceiling(stage_slug, per_stage_ceiling)
         at_stake = None if ceiling is None else max(ceiling - live_charged, 0)
         closed = self.closed_spend(paths)
         stage_spend = closed.get(stage_slug, 0) + live_charged
@@ -827,7 +914,21 @@ class RunSupervisor:
         unentered = [
             slug for slug in self.stage_slugs if slug not in closed and slug != stage_slug
         ]
-        keep = ration(stage_spend, others) if others else 0
+        # Two different spends, on purpose, because the rule asks two different questions.
+        #
+        # The *trigger* below is `stage_spend`: what this stage has charged over all its
+        # visits, against the median of the stages that have closed. Lifetime against
+        # lifetime is what "disproportionate on the run's own terms" means, and it is the
+        # comparison the replay swept.
+        #
+        # The *amount* is `keep`, and it is computed from `live_charged` -- this visit --
+        # because the pool is denominated in per-visit allowances and a per-visit
+        # allowance can only be compared with a per-visit spend. Using the lifetime figure
+        # here would make `surplus` zero on every second visit, which is to say the rule
+        # would stand down on exactly the revisits it was written to notice. On a first
+        # visit the two numbers are equal, which is why nothing in the replay's sweep of
+        # the trial's first visits moves.
+        keep = ration(live_charged, others) if others else 0
         surplus = (
             max(pool.allowance.get(stage_slug, 0) - keep, 0) if pool is not None else 0
         )
@@ -853,11 +954,16 @@ class RunSupervisor:
                 because=(
                     f"{stage_slug} has charged {stage_spend} attempt(s) against a median of "
                     f"{statistics.median(others)} for the {len(others)} stage(s) this run has "
-                    f"closed, which is more than {DISPROPORTIONATE_MULTIPLE}x; it keeps the run's "
-                    f"own ration and the surplus goes to the stages that have not run"
+                    f"closed, which is more than {DISPROPORTIONATE_MULTIPLE}x; this visit keeps "
+                    f"the {live_charged} it has charged plus the run's own median, so {keep} "
+                    f"per visit, and the surplus goes to the stages that have not run"
                 ),
                 evidence={
                     "stage_charged_attempts": stage_spend,
+                    # Both spends, because the trigger reads one and the amount reads the
+                    # other, and a reader recomputing the decision from this row needs
+                    # whichever of the two the number in front of them came from.
+                    "visit_charged_attempts": live_charged,
                     "closed_stage_charges": sorted(others),
                     "median": statistics.median(others),
                     "multiple": DISPROPORTIONATE_MULTIPLE,
@@ -868,6 +974,10 @@ class RunSupervisor:
                     "to": list(unentered),
                     "run_total": pool.total,
                     "total_conserved": pool.conserved(),
+                    #: What this stage's later visits are now funded at. The narrowing is
+                    #: the point of the intervention, so it is recorded rather than left
+                    #: to be inferred from `units_moved`.
+                    "visit_ceiling_after": pool.visit_ceiling(stage_slug),
                 },
             )
 

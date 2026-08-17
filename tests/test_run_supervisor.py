@@ -4,9 +4,10 @@ Three questions this file answers, in the order a reviewer asks them.
 
 **Can it ever make a gate pass?** No, and not because the docstring says so. The three
 things that hold it are checkable and each has a test that dies when the rule is reverted:
-:meth:`~src.supervisor.AttemptAllowance.ceiling` is a ``min`` against the run's own
+:meth:`~src.supervisor.AttemptAllowance.visit_ceiling` is a ``min`` against the run's own
 ``--max-attempts``, so ``NoInterventionRaisesABudgetTests`` sweeps every allowance state
-reachable by transfer and finds none that hands back a larger number;
+reachable by transfer and finds none that hands back a larger number -- and, since the
+first version of this class starved every revisit instead, none that hands back zero;
 :meth:`~src.supervisor.AttemptAllowance.transfer` asserts conservation on the way out, so
 a transfer that would not conserve raises rather than clamps; and the manager's only
 response to a ruling that ends a visit is the stage-exhaustion recovery path that already
@@ -21,11 +22,31 @@ under ``workspace/`` -- the directory every stage prompt sends an operator runni
 scan catching it, because a scan that finds nothing and a scan that looks for nothing are
 the same green.
 
+**Does every visit get funded?** ``EveryVisitIsFundedTests`` drives
+``ResearchManager._run_stage`` twice into one stage, because the defect it exists for was
+arithmetic that read correctly and starved every revisit: a stage whose first visit
+charged ``--max-attempts`` was handed a ceiling of 0 on its second and died before buying
+an attempt. The backward edge is the one thing this project has that a plain agent loop
+does not, so a supervisor that prices it out is worse than no supervisor, and no
+assertion on the pool's arithmetic could have caught it -- the arithmetic was self
+consistent and about the wrong quantity.
+
 **Are the thresholds measured?** The values are pinned to the module docstring's account
-of what they were measured against, and the replay that produced them,
-``tools/supervisor_threshold_replay.py``, is pinned to importing the shipped predicates
-rather than reimplementing them. An instrument that reimplements the rule it measures
-reports on a program that does not exist.
+of what they were measured against; every ``:data:`NAME` **= V**`` phrase has to name the
+shipped constant, no stale population figure may survive anywhere in the module, and the
+replay's own ``population_matches`` self-check is exercised on all three of its answers.
+``tools/supervisor_threshold_replay.py`` is pinned to importing the shipped predicates
+rather than reimplementing them, and to actually computing the two columns the docstring
+credits it with -- the outcome of a cut iteration, and the redirect count -- because
+naming an instrument as the source of a claim it has no column for is the same defect as
+a number nobody ran.
+
+**And is any of that held?** :data:`SUPERVISOR_MUTATIONS` is the answer as an instrument
+rather than as a sentence. Fifteen one-anchor edits, the first of which puts the revisit
+regression back exactly as it was::
+
+    git worktree add --detach /tmp/sweep HEAD
+    cd /tmp/sweep && python3 -m tests.test_run_supervisor --mutations
 """
 
 from __future__ import annotations
@@ -33,16 +54,21 @@ from __future__ import annotations
 import ast
 import json
 import re
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock
 
 from src.stage_cost import (
     OUTCOME_APPROVED,
     OUTCOME_AUTO_SKIPPED,
+    REVIEWER_REFUSED,
     StageCostMeter,
     append_stage_cost_row,
     failure_digest,
+    read_stage_cost_ledger,
 )
 from src.supervisor import (
     CONTINUE,
@@ -74,9 +100,20 @@ from src.supervisor import (
     unchanging_failure,
     unsettled_visits,
 )
+from src.approval_agent import ReviewDecision
+from src.manifest import load_run_manifest
 from src.router import StageRouter
 from src.stage_graph import GraphState, StageGraph
-from src.utils import STAGES, RunPaths, build_run_paths, ensure_run_layout, write_text
+from src.utils import (
+    STAGES,
+    STUCK_AFTER_IDENTICAL_FAILURES,
+    RunPaths,
+    build_run_paths,
+    ensure_run_layout,
+    is_stuck,
+    write_text,
+)
+from tests.test_stage_cost_ledger import ManagerLoopFixture, _StubReviewer
 
 REPO = Path(__file__).resolve().parent.parent
 SUPERVISOR_SOURCE = (REPO / "src" / "supervisor.py").read_text(encoding="utf-8")
@@ -214,19 +251,46 @@ class NoInterventionRaisesABudgetTests(unittest.TestCase):
         can defeat it, and a single example would leave that as a hope.
         """
         allowance = AttemptAllowance(["a", "b", "c"], 8)
-        for donor, recipient, units in (("a", ["b"], 8), ("b", ["c"], 5), ("c", ["a", "b"], 4)):
+        for donor, recipient, units in (("a", ["b"], 7), ("b", ["c"], 5), ("c", ["a", "b"], 4)):
             allowance.transfer(donor, recipient, units)
             for slug in ("a", "b", "c"):
-                for spent in range(0, 20):
-                    with self.subTest(slug=slug, spent=spent):
-                        self.assertLessEqual(allowance.ceiling(slug, spent), 8)
+                with self.subTest(slug=slug):
+                    self.assertLessEqual(allowance.visit_ceiling(slug), 8)
+
+    def test_no_state_of_the_pool_can_starve_a_visit_of_every_attempt(self) -> None:
+        """The other direction of the same invariant, and the one that regressed.
+
+        A per-visit ceiling of zero is a stage that fails on entry with "Exceeded 0
+        attempts" before it has run once. Swept over the same reachable states, because
+        the first version of this class produced exactly that on any second visit and the
+        pool is the only thing that can produce it now.
+        """
+        allowance = AttemptAllowance(["a", "b", "c"], 8)
+        for donor, recipient, units in (("a", ["b"], 7), ("b", ["c"], 5), ("c", ["a", "b"], 4)):
+            allowance.transfer(donor, recipient, units)
+            for slug in ("a", "b", "c"):
+                with self.subTest(slug=slug):
+                    self.assertGreaterEqual(allowance.visit_ceiling(slug), 1)
+
+    def test_a_donor_may_not_give_away_everything_it_holds(self) -> None:
+        """A stage the run can never enter again is the mirror of a guarded edge opened.
+
+        The structural floor under the policy floor: :meth:`AttemptAllowance.transfer` is
+        the only method that can lower an allowance, so refusing the emptying transfer
+        there is what makes a zero per-visit ceiling unreachable by any caller.
+        """
+        allowance = AttemptAllowance(["a", "b"], 8)
+        with self.assertRaises(AllowanceError):
+            allowance.transfer("a", ["b"], 8)
+        self.assertEqual(allowance.allowance["a"], 8)
+        self.assertTrue(allowance.conserved())
 
     def test_a_recipient_that_holds_more_than_the_ceiling_still_gets_the_ceiling(self) -> None:
         """The case the ``min`` exists for: allowance above ``--max-attempts``."""
         allowance = AttemptAllowance(["a", "b"], 8)
-        allowance.transfer("a", ["b"], 8)
-        self.assertEqual(allowance.allowance["b"], 16)
-        self.assertEqual(allowance.ceiling("b", 0), 8)
+        allowance.transfer("a", ["b"], 7)
+        self.assertEqual(allowance.allowance["b"], 15)
+        self.assertEqual(allowance.visit_ceiling("b"), 8)
 
     def test_a_transfer_conserves_the_total(self) -> None:
         allowance = AttemptAllowance(SLUGS, 8)
@@ -266,24 +330,12 @@ class NoInterventionRaisesABudgetTests(unittest.TestCase):
         """The supervisor does not invent a bound the operator declined."""
         supervisor = a_supervisor()
         self.assertIsNone(supervisor.allowance)
-        with tempfile.TemporaryDirectory() as tmp:
-            paths = fresh_paths(tmp)
-            self.assertIsNone(supervisor.attempt_ceiling(paths, WRITING, None))
-            self.assertIsNone(supervisor.allowance)
+        self.assertIsNone(supervisor.attempt_ceiling(WRITING, None))
+        self.assertIsNone(supervisor.allowance)
 
     def test_a_first_visit_gets_exactly_what_the_run_allows(self) -> None:
         supervisor = a_supervisor()
-        with tempfile.TemporaryDirectory() as tmp:
-            paths = fresh_paths(tmp)
-            self.assertEqual(supervisor.attempt_ceiling(paths, "03_study_design", CEILING), 8)
-
-    def test_a_second_visit_gets_what_the_stage_has_left_and_not_a_fresh_ceiling(self) -> None:
-        """The status quo hands every visit a fresh ``--max-attempts``; the pool does not."""
-        supervisor = a_supervisor()
-        with tempfile.TemporaryDirectory() as tmp:
-            paths = fresh_paths(tmp)
-            close_a_visit(paths, "06_analysis", charged=6)
-            self.assertEqual(supervisor.attempt_ceiling(paths, "06_analysis", CEILING), 2)
+        self.assertEqual(supervisor.attempt_ceiling("03_study_design", CEILING), 8)
 
     def test_reallocating_never_lifts_a_ceiling_above_the_runs_own(self) -> None:
         """End to end: the one intervention that moves budget, then the ceiling."""
@@ -303,7 +355,7 @@ class NoInterventionRaisesABudgetTests(unittest.TestCase):
             self.assertTrue(supervisor.allowance.conserved())
             for slug in SLUGS:
                 with self.subTest(slug=slug):
-                    self.assertLessEqual(supervisor.attempt_ceiling(paths, slug, CEILING), 8)
+                    self.assertLessEqual(supervisor.attempt_ceiling(slug, CEILING), 8)
 
 
 # ---------------------------------------------------------------------------
@@ -365,7 +417,41 @@ class SupervisorReadsOnlyHarnessFieldsTests(unittest.TestCase):
 
 class UnchangingFailureTests(unittest.TestCase):
     def test_the_threshold_is_the_shipped_one(self) -> None:
-        self.assertEqual(STOP_AFTER_IDENTICAL_FAILURES, 2)
+        self.assertEqual(STOP_AFTER_IDENTICAL_FAILURES, 3)
+
+    def test_the_rule_is_not_a_second_copy_of_the_stuck_check(self) -> None:
+        """Same count, wider population, and the docstring says so -- so pin the width.
+
+        The two numbers agreeing is not a coincidence to hide: ``is_stuck`` reads
+        ``recent_failures``, which ``_run_stage_attempts`` appends to at exactly one place
+        -- the branch where validation, repair and local normalisation all failed -- so it
+        cannot see a reviewer refusing identically three times, a cross-model veto
+        repeating, or a backend failing the same way. This rule reads the whole census. On
+        ``MEASURED_RUNS`` every repeat is a validator error, so the difference is invisible
+        there and has to be pinned here instead.
+        """
+        refusals = [["the reviewer says no"]] * STUCK_AFTER_IDENTICAL_FAILURES
+        self.assertTrue(is_stuck(refusals), "the fixture is not a run of identical failures")
+        # The same three attempts, charged to the reviewer rather than the validators, are
+        # invisible to `is_stuck` because nothing appends them to `recent_failures`.
+        supervisor = a_supervisor()
+        stage = next(item for item in STAGES if item.slug == "03_study_design")
+        meter = StageCostMeter(stage)
+        for number in range(1, STOP_AFTER_IDENTICAL_FAILURES + 1):
+            meter.note_attempt()
+            meter.note_failure(number, REVIEWER_REFUSED, "the reviewer says no")
+        self.assertFalse(is_stuck([]), "the loop's own list stays empty for a reviewer refusal")
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = fresh_paths(tmp)
+            ruling = rule_on(
+                supervisor,
+                paths,
+                "03_study_design",
+                meter=meter,
+                attempt=STOP_AFTER_IDENTICAL_FAILURES + 1,
+            )
+        self.assertEqual(ruling.kind, STOP_SPENDING)
+        self.assertEqual(ruling.rule, UNCHANGING_FAILURE)
 
     def test_it_fires_at_the_threshold_and_not_one_short(self) -> None:
         digest = failure_digest("validators_refused", "report_plan.json task output 1 states nothing")
@@ -385,12 +471,24 @@ class UnchangingFailureTests(unittest.TestCase):
         supervisor = a_supervisor()
         with tempfile.TemporaryDirectory() as tmp:
             paths = fresh_paths(tmp)
-            meter = a_meter("03_study_design", failures=["report_plan.json task output 1 states nothing"] * 2)
-            ruling = rule_on(supervisor, paths, "03_study_design", meter=meter, attempt=3)
+            meter = a_meter(
+                "03_study_design",
+                failures=["report_plan.json task output 1 states nothing"]
+                * STOP_AFTER_IDENTICAL_FAILURES,
+            )
+            ruling = rule_on(
+                supervisor,
+                paths,
+                "03_study_design",
+                meter=meter,
+                attempt=STOP_AFTER_IDENTICAL_FAILURES + 1,
+            )
             self.assertEqual(ruling.kind, STOP_SPENDING)
             self.assertEqual(ruling.rule, UNCHANGING_FAILURE)
             self.assertTrue(ruling.ends_the_visit)
-            self.assertEqual(ruling.evidence["longest_unchanged_run"], 2)
+            self.assertEqual(
+                ruling.evidence["longest_unchanged_run"], STOP_AFTER_IDENTICAL_FAILURES
+            )
 
     def test_a_visit_failing_differently_is_left_alone(self) -> None:
         supervisor = a_supervisor()
@@ -405,12 +503,14 @@ class UnchangingFailureTests(unittest.TestCase):
         """Polish rounds are not failures, and the meter leaves them out of the digests."""
         stage = next(item for item in STAGES if item.slug == "03_study_design")
         meter = StageCostMeter(stage)
-        meter.note_attempt()
-        meter.note_failure(1, "validators_refused", "same")
-        meter.note_attempt()
-        meter.note_polish_round(2)
-        meter.note_attempt()
-        meter.note_failure(3, "validators_refused", "same")
+        number = 0
+        for index in range(STOP_AFTER_IDENTICAL_FAILURES):
+            number += 1
+            meter.note_attempt()
+            meter.note_failure(number, "validators_refused", "same")
+            number += 1
+            meter.note_attempt()
+            meter.note_polish_round(number)
         digests = [entry["digest"] for entry in meter.attempt_digests()]
         self.assertTrue(unchanging_failure(digests))
 
@@ -472,6 +572,34 @@ class DisproportionateSpendTests(unittest.TestCase):
             self.assertNotIn("03_study_design", ruling.effect["to"])
             for entered in ("01_literature_survey", "02_hypothesis_generation", "04_implementation"):
                 self.assertNotIn(entered, ruling.effect["to"])
+
+    def test_a_revisit_can_still_be_rationed_and_keeps_a_visits_worth(self) -> None:
+        """The half of the pool's per-visit turn that a first-visit test cannot see.
+
+        On a first visit the stage's lifetime spend and the open visit's spend are the
+        same number, so every assertion above passes whichever of the two the ration is
+        computed from. Here they differ: 6 charged in a closed visit, 1 in the open one.
+        Against a per-visit allowance of 8 the lifetime figure leaves ``8 - (6 + 2) = 0``
+        surplus and the rule stands down on exactly the revisits it exists to notice; the
+        visit figure leaves ``8 - (1 + 2) = 5`` and the stage keeps the run's own ration
+        for the visit it is in.
+        """
+        supervisor = a_supervisor()
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = fresh_paths(tmp)
+            for slug in ("01_literature_survey", "02_hypothesis_generation", "04_implementation"):
+                close_a_visit(paths, slug, charged=2)
+            close_a_visit(paths, "03_study_design", charged=6, outcome=OUTCOME_AUTO_SKIPPED)
+            meter = a_meter("03_study_design", failures=["one"])
+            ruling = rule_on(supervisor, paths, "03_study_design", meter=meter, attempt=2)
+            self.assertEqual(ruling.kind, REALLOCATE)
+            self.assertEqual(ruling.evidence["stage_charged_attempts"], 7)
+            self.assertEqual(ruling.evidence["visit_charged_attempts"], 1)
+            self.assertEqual(ruling.evidence["ration"], 3)
+            self.assertEqual(ruling.effect["units_moved"], 5)
+            self.assertEqual(ruling.effect["visit_ceiling_after"], 3)
+            # And the narrowing it leaves is still a fundable visit, not a starved one.
+            self.assertGreaterEqual(supervisor.attempt_ceiling("03_study_design", CEILING), 1)
 
     def test_it_rations_a_stage_once_and_not_at_every_boundary_after(self) -> None:
         supervisor = a_supervisor()
@@ -601,8 +729,19 @@ class NoRecoveryLeftTests(unittest.TestCase):
         supervisor = a_supervisor(skips=3)
         with tempfile.TemporaryDirectory() as tmp:
             paths = fresh_paths(tmp)
-            meter = a_meter(WRITING, failures=["requires at least one closed research round"] * 2)
-            ruling = rule_on(supervisor, paths, WRITING, meter=meter, skips_spent=3, attempt=3)
+            meter = a_meter(
+                WRITING,
+                failures=["requires at least one closed research round"]
+                * STOP_AFTER_IDENTICAL_FAILURES,
+            )
+            ruling = rule_on(
+                supervisor,
+                paths,
+                WRITING,
+                meter=meter,
+                skips_spent=3,
+                attempt=STOP_AFTER_IDENTICAL_FAILURES + 1,
+            )
             self.assertEqual(ruling.kind, ESCALATE)
             self.assertEqual(ruling.rule, NO_RECOVERY_LEFT)
             self.assertTrue(ruling.needs_a_human)
@@ -640,8 +779,15 @@ class NoRecoveryLeftTests(unittest.TestCase):
         supervisor = a_supervisor(skips=3)
         with tempfile.TemporaryDirectory() as tmp:
             paths = fresh_paths(tmp)
-            meter = a_meter(WRITING, failures=["same"] * 2)
-            ruling = rule_on(supervisor, paths, WRITING, meter=meter, skips_spent=2, attempt=3)
+            meter = a_meter(WRITING, failures=["same"] * STOP_AFTER_IDENTICAL_FAILURES)
+            ruling = rule_on(
+                supervisor,
+                paths,
+                WRITING,
+                meter=meter,
+                skips_spent=2,
+                attempt=STOP_AFTER_IDENTICAL_FAILURES + 1,
+            )
             self.assertEqual(ruling.kind, STOP_SPENDING)
 
     def test_an_earlier_stage_still_has_somewhere_to_be_routed(self) -> None:
@@ -650,9 +796,14 @@ class NoRecoveryLeftTests(unittest.TestCase):
         supervisor = a_supervisor(skips=3)
         with tempfile.TemporaryDirectory() as tmp:
             paths = fresh_paths(tmp)
-            meter = a_meter("03_study_design", failures=["same"] * 2)
+            meter = a_meter("03_study_design", failures=["same"] * STOP_AFTER_IDENTICAL_FAILURES)
             ruling = rule_on(
-                supervisor, paths, "03_study_design", meter=meter, skips_spent=3, attempt=3
+                supervisor,
+                paths,
+                "03_study_design",
+                meter=meter,
+                skips_spent=3,
+                attempt=STOP_AFTER_IDENTICAL_FAILURES + 1,
             )
             self.assertEqual(ruling.kind, STOP_SPENDING)
 
@@ -661,8 +812,19 @@ class NoRecoveryLeftTests(unittest.TestCase):
         supervisor = a_supervisor(skips=1)
         with tempfile.TemporaryDirectory() as tmp:
             paths = fresh_paths(tmp)
-            meter = a_meter(WRITING, failures=["requires at least one closed research round"] * 3)
-            ruling = rule_on(supervisor, paths, WRITING, meter=meter, skips_spent=1, attempt=4)
+            meter = a_meter(
+                WRITING,
+                failures=["requires at least one closed research round"]
+                * (STOP_AFTER_IDENTICAL_FAILURES + 1),
+            )
+            ruling = rule_on(
+                supervisor,
+                paths,
+                WRITING,
+                meter=meter,
+                skips_spent=1,
+                attempt=STOP_AFTER_IDENTICAL_FAILURES + 2,
+            )
             self.assertEqual(ruling.kind, ESCALATE)
 
 
@@ -691,13 +853,21 @@ class EveryRulingIsRecordedTests(unittest.TestCase):
         supervisor = a_supervisor()
         with tempfile.TemporaryDirectory() as tmp:
             paths = fresh_paths(tmp)
-            meter = a_meter("03_study_design", failures=["same"] * 2)
-            rule_on(supervisor, paths, "03_study_design", meter=meter, attempt=3)
+            meter = a_meter("03_study_design", failures=["same"] * STOP_AFTER_IDENTICAL_FAILURES)
+            rule_on(
+                supervisor,
+                paths,
+                "03_study_design",
+                meter=meter,
+                attempt=STOP_AFTER_IDENTICAL_FAILURES + 1,
+            )
             row = self.read(paths)[-1]
             self.assertEqual(row["intervention"], STOP_SPENDING)
             self.assertEqual(row["rule"], UNCHANGING_FAILURE)
-            self.assertEqual(row["attempt"], 3)
-            self.assertEqual(row["evidence"]["longest_unchanged_run"], 2)
+            self.assertEqual(row["attempt"], STOP_AFTER_IDENTICAL_FAILURES + 1)
+            self.assertEqual(
+                row["evidence"]["longest_unchanged_run"], STOP_AFTER_IDENTICAL_FAILURES
+            )
             self.assertEqual(row["permitted_effect"], INTERVENTION_EFFECTS[STOP_SPENDING])
 
     def test_a_stage_exit_ruling_says_which_boundary_it_came_from(self) -> None:
@@ -748,32 +918,116 @@ class EveryRulingIsRecordedTests(unittest.TestCase):
 class TheThresholdsAreMeasuredTests(unittest.TestCase):
     """Each value is pinned to the docstring's account of what it was measured against.
 
-    Not to the measurement's result -- the four trial runs are not in this repository and
-    a test that read them would be a test that only passes on one machine. What is pinned
-    is that the number in the code and the number in the sentence explaining it are the
-    same number, which is the half that rots.
+    Not to the measurement's result -- the trial runs are not in this repository and a
+    test that read them would be a test that only passes on one machine. What is pinned
+    here is the half that rots: that the number in the code and the number in the sentence
+    explaining it are the same number, that the population figure in the prose is the one
+    the instrument records, and that the instrument refuses to print a different one under
+    the invocation the prose names.
     """
 
     def test_the_docstring_states_the_population_the_thresholds_were_measured_over(self) -> None:
+        """And states the one the instrument records, not one nobody ran.
+
+        The number this replaces was ``162``, which neither invocation of the replay ever
+        printed -- the three-run command gives 141 and the four-run glob gave 166 and then
+        167 as the fourth run kept being written. The docstring is now pinned against
+        ``MEASURED_VISITS`` and ``MEASURED_ITERATIONS``, which the tool checks itself
+        against every time it runs.
+        """
         from src import supervisor
+        from tools.supervisor_threshold_replay import MEASURED_ITERATIONS, MEASURED_VISITS
 
         doc = supervisor.__doc__ or ""
-        self.assertIn("22 stage visits", doc)
-        self.assertIn("141 attempt-loop iterations", doc)
+        self.assertIn(f"{MEASURED_VISITS} stage visits", doc)
+        self.assertIn(f"{MEASURED_ITERATIONS} attempt-loop iterations", doc)
         self.assertIn("tools/supervisor_threshold_replay.py", doc)
+        self.assertIn("MEASURED_RUNS", doc)
 
-    def test_the_stop_threshold_in_the_prose_is_the_shipped_one(self) -> None:
+    def test_the_docstring_names_no_population_figure_that_is_not_the_recorded_one(self) -> None:
+        """The control the previous test cannot be: a stale figure left beside a fresh one.
+
+        ``assertIn`` passes whether or not the sentence it matched is the only one, and
+        the branch this fixes shipped ``22 stage visits`` in the module docstring and
+        ``26 stage visits`` in two constant docstrings at the same time. This reads every
+        ``<number> stage visit`` and ``<number> ... iteration`` in the whole module -- prose
+        and comments -- and refuses any that is not the recorded population.
+        """
+        from tools.supervisor_threshold_replay import MEASURED_ITERATIONS, MEASURED_VISITS
+
+        # The 26/166/167 sentence in the module docstring is the one place a different
+        # population is named on purpose, so it is named in words that this can exclude.
+        prose = "\n".join(
+            line
+            for line in SUPERVISOR_SOURCE.splitlines()
+            if "still being written" not in line and "and 27 and 167" not in line
+        )
+        visits = {int(value) for value in re.findall(r"(\d+) stage visits?\b", prose)}
+        iterations = {
+            int(value) for value in re.findall(r"(\d+) attempt-loop iterations?\b", prose)
+        }
+        self.assertLessEqual(visits, {MEASURED_VISITS}, f"a stale visit count survives: {visits}")
+        self.assertLessEqual(
+            iterations,
+            {MEASURED_ITERATIONS},
+            f"a stale iteration count survives: {iterations}",
+        )
+
+    def test_the_instrument_refuses_a_population_that_is_not_the_recorded_one(self) -> None:
+        """The self-check, exercised rather than described.
+
+        This is what makes the docstring's denominator re-derivable on a machine that has
+        the trial data: run the named invocation and the report either says ``as
+        recorded`` or says which way it drifted. Both wrong answers are checked here,
+        because a self-check that only ever returns the happy string is the same green as
+        no self-check.
+        """
+        from tools.supervisor_threshold_replay import (
+            MEASURED_ITERATIONS,
+            MEASURED_RUNS,
+            MEASURED_VISITS,
+            population_matches,
+        )
+
+        self.assertIn(
+            "as recorded",
+            population_matches(list(MEASURED_RUNS), MEASURED_VISITS, MEASURED_ITERATIONS),
+        )
+        self.assertIn(
+            "DRIFTED",
+            population_matches(list(MEASURED_RUNS), MEASURED_VISITS + 1, MEASURED_ITERATIONS),
+        )
+        self.assertIn(
+            "DRIFTED",
+            population_matches(list(MEASURED_RUNS), MEASURED_VISITS, MEASURED_ITERATIONS + 25),
+        )
+        self.assertIn(
+            "not the recorded one",
+            population_matches(
+                [*MEASURED_RUNS, "Chemistry_000_20260816_173127"],
+                MEASURED_VISITS + 5,
+                MEASURED_ITERATIONS + 26,
+            ),
+        )
+
+    def test_every_threshold_in_the_prose_is_the_shipped_one(self) -> None:
+        """One sweep over the table rather than one assertion per constant.
+
+        ``assertIn("**= 3.**")`` was satisfied by *any* threshold documented as three, so
+        the sentence checked and the constant checked did not have to be about the same
+        rule. The whole ``:data:`NAME` **= V**`` phrase cannot be.
+        """
         from src import supervisor
 
         doc = supervisor.__doc__ or ""
-        self.assertIn(f"**= {STOP_AFTER_IDENTICAL_FAILURES}.**", doc)
-
-    def test_the_proportionality_thresholds_in_the_prose_are_the_shipped_ones(self) -> None:
-        from src import supervisor
-
-        doc = supervisor.__doc__ or ""
-        self.assertIn(f"**= {DISPROPORTIONATE_MULTIPLE}**", doc)
-        self.assertIn(f"**= {MIN_CLOSED_STAGES_FOR_A_DISTRIBUTION}.**", doc)
+        for name, value in (
+            ("STOP_AFTER_IDENTICAL_FAILURES", STOP_AFTER_IDENTICAL_FAILURES),
+            ("DISPROPORTIONATE_MULTIPLE", DISPROPORTIONATE_MULTIPLE),
+            ("MIN_CLOSED_STAGES_FOR_A_DISTRIBUTION", MIN_CLOSED_STAGES_FOR_A_DISTRIBUTION),
+            ("UNSETTLED_VISITS_BEFORE_A_REDIRECT", UNSETTLED_VISITS_BEFORE_A_REDIRECT),
+        ):
+            with self.subTest(name=name):
+                self.assertRegex(doc, rf":data:`{name}` \*\*= {value}[.*]")
         self.assertIn(f"{DISPROPORTIONATE_MULTIPLE}x", doc)
 
     def test_the_replay_runs_the_shipped_rule_rather_than_a_copy(self) -> None:
@@ -783,7 +1037,16 @@ class TheThresholdsAreMeasuredTests(unittest.TestCase):
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.module == "src.supervisor":
                 imported |= {alias.name for alias in node.names}
-        for name in ("unchanging_failure", "disproportionate", "ration", "longest_unchanged_run"):
+        for name in (
+            "unchanging_failure",
+            "disproportionate",
+            "ration",
+            "longest_unchanged_run",
+            # The redirect column's predicate. Two sentences in `src/supervisor.py` used
+            # to credit this tool with a finding about `UNSETTLED_VISITS_BEFORE_A_REDIRECT`
+            # while it had no redirect column and did not import this at all.
+            "unsettled_visits",
+        ):
             with self.subTest(name=name):
                 self.assertIn(name, imported)
         defined = {
@@ -792,6 +1055,69 @@ class TheThresholdsAreMeasuredTests(unittest.TestCase):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         }
         self.assertEqual(defined & imported, set(), "the replay redefines a rule it imports")
+
+    def test_the_replay_computes_the_redirect_claim_the_docstring_credits_it_with(self) -> None:
+        """Naming the instrument as the source of a claim it cannot compute is the defect.
+
+        Driven rather than read: a hand-built walk in which one stage ends two visits
+        without an approval, so the column has to reach the threshold, and a second in
+        which the first visit was approved, so it must not.
+        """
+        from tools.supervisor_threshold_replay import redirect_fires
+
+        def walk(*outcomes: str) -> list[dict]:
+            return [
+                {"stage": "06_analysis", "outcome": outcome, "attempts": [], "stage_number": 6}
+                for outcome in outcomes
+            ]
+
+        twice_unsettled = redirect_fires([("run", walk("skipped", "skipped"))])
+        self.assertEqual(len(twice_unsettled), 1)
+        self.assertEqual(twice_unsettled[0]["unsettled"], UNSETTLED_VISITS_BEFORE_A_REDIRECT)
+        self.assertEqual(
+            redirect_fires([("run", walk("approved", "skipped"))]),
+            [],
+            "a stage with an approved visit was redirected away from",
+        )
+
+    def test_the_replay_reports_what_a_cut_iteration_produced(self) -> None:
+        """The column whose absence made ``N = 2`` look measured.
+
+        ``bought`` is the classifier and this is its contract: the entries the manager
+        writes when an attempt produced something, and an empty tuple when it did not. The
+        veto case is here because it is the one that flatters the rule -- an approval the
+        cross-model reviewer overrode is not an approval, and counting it as one would
+        have inflated the "productive" column by six attempts.
+        """
+        from tools.supervisor_threshold_replay import (
+            PRODUCED_APPROVAL,
+            PRODUCED_DRAFT,
+            PRODUCED_OBLIGATIONS,
+            PRODUCED_REPAIR,
+            bought,
+            draft_was_valid,
+        )
+
+        self.assertEqual(bought({"result": "", "prompt": ""}), ())
+        self.assertEqual(bought({"reviewer_choice": "choice: 5"}), (PRODUCED_APPROVAL,))
+        self.assertEqual(
+            bought({"reviewer_choice": "choice: 5", "cross_review": "agrees: False"}),
+            (),
+            "an approval the cross-model reviewer vetoed was counted as productive",
+        )
+        self.assertEqual(bought({"evolution_promoted": ""}), (PRODUCED_DRAFT,))
+        self.assertEqual(bought({"validation_failed": "bad"}), (PRODUCED_REPAIR,))
+        self.assertEqual(
+            bought({"validation_failed": "bad", "local_normalization_failed": "still bad"}),
+            (),
+            "a validation failure that was never repaired was counted as a repair",
+        )
+        self.assertEqual(bought({"obligation_recorded": ""}), ())
+        self.assertEqual(bought({"obligation_discharged": ""}), (PRODUCED_OBLIGATIONS,))
+        # And the column the harm turns on: after a repeated validator refusal there is
+        # nothing for `_validated_draft_for_skip` to rescue.
+        self.assertFalse(draft_was_valid({"local_normalization_failed": "still bad"}))
+        self.assertTrue(draft_was_valid({"reviewer_choice": "choice: 4"}))
 
     def test_the_replay_also_takes_its_digest_from_the_ledger_module(self) -> None:
         tree = ast.parse(REPLAY_SOURCE)
@@ -929,6 +1255,142 @@ class TheManagerIsWiredToTheSupervisorTests(unittest.TestCase):
         )
 
 
+class EveryVisitIsFundedTests(ManagerLoopFixture, unittest.TestCase):
+    """The backward edge has to be affordable, and only the real loop can say it is.
+
+    This is the regression that made the reviewer refuse the branch. The pool used to
+    charge a stage's *closed* visits against a single lifetime allowance, so a stage whose
+    first visit spent ``--max-attempts`` was handed ``remaining = 0`` on its second,
+    ``attempt_ceiling`` returned 0, and ``attempts_exhausted(1, 0)`` ended the visit before
+    it bought anything -- with the manifest reading ``Exceeded 0 attempts`` and the
+    supervisor's own ledger recording ``continue / nothing_to_decide``, which
+    :func:`~src.supervisor.ration`'s docstring forbids in as many words.
+
+    Driven through ``ResearchManager._run_stage`` twice rather than asserted on the
+    arithmetic, because the arithmetic is what was wrong: reading
+    ``min(per_stage, allowance - spent)`` and concluding it funds a revisit is exactly the
+    mistake, and only the loop knows that ``loop_attempts`` restarts at zero on every
+    entry and so already accounts for what the visit itself has spent.
+    """
+
+    STAGE = STAGES[0]
+
+    def _visit(self, decision: ReviewDecision) -> bool:
+        self._stub_operator(self._valid_draft(self.STAGE))
+        self.manager.reviewer = _StubReviewer([decision])
+        return self.manager._run_stage(self.paths, self.STAGE)
+
+    def _exhausting_visit(self) -> bool:
+        """One visit that spends the whole ceiling on validation failures.
+
+        Reviewer refusals cannot be used for this: ``MAX_AUTOMATED_SENDBACKS`` is counted
+        per *stage* and read from disk, so the second visit's first refusal is converted
+        into an approval and the visit ends after one attempt for a reason that has
+        nothing to do with funding. A draft the validators refuse is refused every time.
+        """
+        draft = self.paths.stage_tmp_file(self.STAGE)
+        draft.parent.mkdir(parents=True, exist_ok=True)
+        draft.write_text("# nothing useful here\n", encoding="utf-8")
+        self._stub_operator(draft)
+        self.operator.repair_stage_summary = MagicMock(
+            return_value=MagicMock(
+                success=True,
+                exit_code=0,
+                session_id="session-1",
+                stage_file_path=draft,
+                stdout="",
+                stderr="",
+            )
+        )
+        self.manager.reviewer = _StubReviewer(
+            [ReviewDecision(choice="5", decision_token="approve")]
+        )
+        return self.manager._run_stage(self.paths, self.STAGE)
+
+    def _rows(self) -> list[dict]:
+        return read_stage_cost_ledger(self.paths)
+
+    def _ledger(self) -> list[dict]:
+        text = supervisor_ledger_path(self.paths).read_text(encoding="utf-8")
+        return [json.loads(line) for line in text.splitlines() if line.strip()]
+
+    def _last_error(self) -> str:
+        manifest = load_run_manifest(self.paths.run_manifest)
+        entry = next(item for item in manifest.stages if item.slug == self.STAGE.slug)
+        return entry.last_error or ""
+
+    def test_a_second_visit_to_an_exhausted_stage_still_buys_attempts(self) -> None:
+        """The whole item, end to end: exhaust the ceiling, come back, get approved."""
+        self.manager.max_stage_attempts = 3
+        self.assertFalse(
+            self._visit(
+                ReviewDecision(
+                    choice="4", decision_token="revise", reason="no", feedback="again"
+                )
+            )
+        )
+        self.assertTrue(self._visit(ReviewDecision(choice="5", decision_token="approve")))
+        rows = self._rows()
+        self.assertEqual([row["visit"] for row in rows], [1, 2])
+        self.assertEqual(rows[0]["attempts"], 3, "the first visit charged the whole ceiling")
+        self.assertGreaterEqual(rows[1]["attempts"], 1, "the revisit bought no attempt at all")
+        self.assertFalse(rows[1]["exhausted"])
+        self.assertEqual(rows[1]["outcome"], OUTCOME_APPROVED)
+        self.assertNotIn("Exceeded 0 attempts", self._last_error())
+
+    def test_a_revisit_gets_the_whole_ceiling_and_not_one_attempt(self) -> None:
+        """"Floor it at one" is not the fix: one attempt is a revisit that cannot work.
+
+        Both visits fail the same way to exhaustion, so what each *charges* is the ceiling
+        it was funded at. Anything less on the second than on the first would mean the
+        supervisor still narrowed the revisit, and a floor of one would show up here as
+        ``[2, 1]``.
+        """
+        self.manager.max_stage_attempts = 2
+        self.assertFalse(self._exhausting_visit())
+        self.assertFalse(self._exhausting_visit())
+        self.assertEqual([row["attempts"] for row in self._rows()], [2, 2])
+        self.assertEqual(self.manager.supervisor.attempt_ceiling(self.STAGE.slug, 2), 2)
+
+    def test_no_visit_dies_at_a_boundary_the_ledger_calls_nothing_to_decide(self) -> None:
+        """A ration of zero is ``stop_spending``, and the ledger has to be able to say so.
+
+        The failure this pins is not "the ruling was wrong" -- ``continue`` was the right
+        ruling for every one of those boundaries -- it is that the visit died anyway, so
+        the audit trail could not name the rule that ended it. Checked as an invariant over
+        the whole two-visit run rather than at one boundary: no visit may end without
+        buying an attempt, and no ``continue`` may be the last word on one that did.
+        """
+        self.manager.max_stage_attempts = 2
+        self._exhausting_visit()
+        self._exhausting_visit()
+        starved = [row for row in self._rows() if row["attempts"] == 0]
+        self.assertEqual(starved, [], "a visit was funded at zero attempts")
+        acting = [row for row in self._ledger() if row["intervention"] != CONTINUE]
+        self.assertEqual(
+            acting,
+            [],
+            "the supervisor acted on a run where nothing should have moved it",
+        )
+        self.assertNotIn("Exceeded 0 attempts", self._last_error())
+
+    def test_the_manager_asks_for_a_per_visit_ceiling_and_gets_the_runs_own(self) -> None:
+        """The ceiling the loop enforces, read from the supervisor the manager built.
+
+        Two closed visits' worth of spend is on disk when this asks, which is the state
+        that used to return 0.
+        """
+        self.manager.max_stage_attempts = 2
+        self._exhausting_visit()
+        self._exhausting_visit()
+        self.assertEqual(
+            sum(row["attempts"] for row in self._rows()),
+            4,
+            "the fixture did not put two exhausted visits on disk",
+        )
+        self.assertEqual(self.manager.supervisor.attempt_ceiling(self.STAGE.slug, 2), 2)
+
+
 class TheRouterRefusesARedirectTheGuardsShutTests(unittest.TestCase):
     """``redirect`` may only name an edge the guards already leave open.
 
@@ -1024,5 +1486,160 @@ class TheRouterRefusesARedirectTheGuardsShutTests(unittest.TestCase):
         self.assertEqual(decision.target, live[0])
 
 
+# ---------------------------------------------------------------------------
+# The mutation sweep, as an instrument
+# ---------------------------------------------------------------------------
+
+SUPERVISOR = "src/supervisor.py"
+MANAGER_FILE = "src/manager.py"
+REPLAY = "tools/supervisor_threshold_replay.py"
+
+#: ``(what it breaks, file, the text to replace, what to replace it with)``.
+#:
+#: The same shape ``tests/test_stage_cost_ledger.MUTATIONS`` uses, and for the same
+#: reason: "N mutations, all killed" is a number a reader has to believe unless the sweep
+#: is a thing they can run::
+#:
+#:     git worktree add --detach /tmp/sweep HEAD
+#:     cd /tmp/sweep && python3 -m tests.test_run_supervisor --mutations
+#:
+#: What it covers is what this pass changed -- the per-visit funding rule, the floor under
+#: a transfer, the ration's spend, the shipped repeat count, and the three replay columns
+#: whose absence let a docstring claim things the instrument could not compute. The first
+#: entry is the regression itself, put back exactly: an ``attempt_ceiling`` that subtracts
+#: what the stage's closed visits charged.
+SUPERVISOR_MUTATIONS: tuple[tuple[str, str, str, str], ...] = (
+    ("the revisit regression, restored: the ceiling charges closed visits again", MANAGER_FILE,
+     "            ceiling = self.supervisor.attempt_ceiling(stage.slug, self.max_stage_attempts)",
+     "            ceiling = max(\n"
+     "                self.supervisor.attempt_ceiling(stage.slug, self.max_stage_attempts)\n"
+     "                - self.supervisor.closed_spend(paths).get(stage.slug, 0),\n"
+     "                0,\n"
+     "            )"),
+    ("visit_ceiling loses the min against --max-attempts", SUPERVISOR,
+     "        return min(self.per_stage, self.allowance.get(stage_slug, self.per_stage))",
+     "        return self.allowance.get(stage_slug, self.per_stage)"),
+    ("a donor may empty itself again", SUPERVISOR,
+     "        if held is None or units >= held:", "        if held is None or units > held:"),
+    ("the ration is computed from the stage's lifetime rather than the visit", SUPERVISOR,
+     "        keep = ration(live_charged, others) if others else 0",
+     "        keep = ration(stage_spend, others) if others else 0"),
+    ("the transfer stops conserving", SUPERVISOR,
+     "        if not self.conserved():", "        if False:"),
+    ("the repeat count goes back to the value the replay refused", SUPERVISOR,
+     "STOP_AFTER_IDENTICAL_FAILURES = 3", "STOP_AFTER_IDENTICAL_FAILURES = 2"),
+    ("the repeat rule stops requiring the repeats to be consecutive", SUPERVISOR,
+     "        run = run + 1 if digest == previous else 1", "        run = run + 1"),
+    ("the redirect threshold drops to one unsettled visit", SUPERVISOR,
+     "UNSETTLED_VISITS_BEFORE_A_REDIRECT = 2", "UNSETTLED_VISITS_BEFORE_A_REDIRECT = 1"),
+    ("an approval the cross-model reviewer vetoed counts as productive", REPLAY,
+     "    if not vetoed and (\"approved\" in entry or (gate is not None and _field(gate, \"choice\") == \"5\")):",
+     "    if \"approved\" in entry or (gate is not None and _field(gate, \"choice\") == \"5\"):"),
+    ("an obligation merely recorded counts as discharged", REPLAY,
+     '    if "obligation_discharged" in entry:',
+     '    if "obligation_discharged" in entry or "obligation_recorded" in entry:'),
+    ("a validation failure nothing repaired counts as a repair", REPLAY,
+     '    if "validation_failed" in entry and "local_normalization_failed" not in entry:',
+     '    if "validation_failed" in entry:'),
+    ("the draft is always reported as inside the gate", REPLAY,
+     '    return "local_normalization_failed" not in entry', "    return True"),
+    ("the redirect column never fires", REPLAY,
+     "            if unsettled >= unsettled_before:", "            if False:"),
+    ("the population self-check always says the population is the recorded one", REPLAY,
+     "    if tuple(names) != MEASURED_RUNS:", "    if False:"),
+    ("the recorded population goes back to the figure no invocation printed", REPLAY,
+     "MEASURED_ITERATIONS = 141", "MEASURED_ITERATIONS = 162"),
+)
+
+#: Tests that die under every mutation because applying one is what stops their own
+#: anchor from matching. Subtracting them is what keeps a kill an actual kill; see
+#: ``tests/test_stage_cost_ledger.SWEEP_SELF_TESTS``, which this mirrors.
+SUPERVISOR_SWEEP_SELF_TESTS = frozenset({"test_every_anchor_matches_its_file_exactly_once"})
+
+
+def _dead_tests(root: Path) -> set[str]:
+    proc = subprocess.run(
+        [sys.executable, "-m", "unittest", __spec__.name if __spec__ else __name__, "-v"],
+        cwd=root, capture_output=True, text=True,
+    )
+    out = proc.stdout + proc.stderr
+    dead = set(re.findall(r"^(\w+) \(tests\.[\w.]+\) \.\.\. (?:FAIL|ERROR)", out, re.M))
+    dead |= set(re.findall(r"^(?:FAIL|ERROR): (\w+) ", out, re.M))
+    return dead - SUPERVISOR_SWEEP_SELF_TESTS
+
+
+def run_mutations(root: Path | None = None) -> int:
+    """Apply each of :data:`SUPERVISOR_MUTATIONS` in turn; return the survivor count.
+
+    Restores every file in a ``finally``, so an interrupted sweep leaves the tree as it
+    found it -- but it does edit the tree, so run it in a scratch checkout.
+    """
+    root = root or Path(__file__).resolve().parent.parent
+    baseline = _dead_tests(root)
+    if baseline:
+        print(f"REFUSED: the tree is not green before mutating: {sorted(baseline)}")
+        return len(baseline)
+    print(f"baseline green; {len(SUPERVISOR_MUTATIONS)} mutations to try\n")
+    survivors: list[str] = []
+    for name, relative, old, new in SUPERVISOR_MUTATIONS:
+        path = root / relative
+        text = path.read_text(encoding="utf-8")
+        if text.count(old) != 1:
+            print(f"NOT APPLIED ({text.count(old)} anchor matches): {name}")
+            survivors.append(name)
+            continue
+        path.write_text(text.replace(old, new), encoding="utf-8")
+        try:
+            dead = _dead_tests(root)
+        finally:
+            path.write_text(text, encoding="utf-8")
+        if dead:
+            print(f"killed  {name}\n            by: {', '.join(sorted(dead))}")
+        else:
+            print(f"SURVIVED  {name}")
+            survivors.append(name)
+    print(f"\ntried {len(SUPERVISOR_MUTATIONS)}, "
+          f"killed {len(SUPERVISOR_MUTATIONS) - len(survivors)}, survivors {len(survivors)}")
+    for name in survivors:
+        print("   SURVIVOR:", name)
+    return len(survivors)
+
+
+class TheSweepIsRunnableTests(unittest.TestCase):
+    """The instrument, checked without running it: fifteen subprocess suites is not a unit test.
+
+    What goes stale without anyone noticing is an *anchor*, and an anchor that no longer
+    matches is a mutation silently not applied -- which reads in the output exactly like
+    one that was killed.
+    """
+
+    def test_every_anchor_matches_its_file_exactly_once(self) -> None:
+        for name, relative, old, _new in SUPERVISOR_MUTATIONS:
+            with self.subTest(mutation=name):
+                text = (REPO / relative).read_text(encoding="utf-8")
+                self.assertEqual(
+                    text.count(old), 1,
+                    f"{name}: anchor matches {text.count(old)} times in {relative}",
+                )
+
+    def test_no_mutation_leaves_the_file_unchanged(self) -> None:
+        for name, _relative, old, new in SUPERVISOR_MUTATIONS:
+            with self.subTest(mutation=name):
+                self.assertNotEqual(old, new, f"{name} is not a mutation")
+
+    def test_the_self_test_exclusion_names_a_test_that_exists(self) -> None:
+        """An exclusion pointing at nothing would silently stop excluding."""
+        for name in SUPERVISOR_SWEEP_SELF_TESTS:
+            self.assertTrue(hasattr(TheSweepIsRunnableTests, name), name)
+
+    def test_the_sweep_covers_all_three_files_this_pass_touched(self) -> None:
+        self.assertEqual(
+            {relative for _n, relative, _o, _w in SUPERVISOR_MUTATIONS},
+            {SUPERVISOR, MANAGER_FILE, REPLAY},
+        )
+
+
 if __name__ == "__main__":
+    if "--mutations" in sys.argv:
+        raise SystemExit(1 if run_mutations() else 0)
     unittest.main()

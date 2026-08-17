@@ -816,7 +816,16 @@ class _StubCrossReviewer:
         return self._verdict
 
 
-class ManagerWritesTheLedgerTests(unittest.TestCase):
+class ManagerLoopFixture:
+    """A real ``ResearchManager`` over a real run root, with the operator stubbed.
+
+    Split out of the test class below rather than copied, because
+    ``tests/test_run_supervisor.py`` needs the same apparatus to drive the attempt loop
+    twice into one stage and a second copy of a hundred lines of draft fixture is a second
+    thing to keep in step. Not a ``TestCase``: it carries no ``test_`` methods, so nothing
+    here is discovered or run twice.
+    """
+
     def setUp(self) -> None:
         self.tmp = tempfile.mkdtemp()
         self.runs_dir = Path(self.tmp) / "runs"
@@ -934,6 +943,8 @@ class ManagerWritesTheLedgerTests(unittest.TestCase):
             )
         )
 
+
+class ManagerWritesTheLedgerTests(ManagerLoopFixture, unittest.TestCase):
     def _run_until_exhausted(self, decision: ReviewDecision, *, attempts: int = 3):
         stage = STAGE_01
         self._stub_operator(self._valid_draft(stage))

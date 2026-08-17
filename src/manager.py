@@ -2556,10 +2556,10 @@ class ResearchManager:
             self._note_supervisor_ruling(paths, stage, ruling)
             # `attempt_ceiling` is a `min` against `--max-attempts`, so this can differ
             # from the ceiling the run was started with only downwards, and only on a
-            # stage a backward edge has already re-entered.
-            ceiling = self.supervisor.attempt_ceiling(
-                paths, stage.slug, self.max_stage_attempts
-            )
+            # stage `reallocate` has already moved budget away from. It is a *per-visit*
+            # ceiling, which is what `loop_attempts` counts against: every entry to a
+            # stage is funded, so a backward edge still buys a real visit.
+            ceiling = self.supervisor.attempt_ceiling(stage.slug, self.max_stage_attempts)
             if stuck or ruling.ends_the_visit or attempts_exhausted(
                 loop_attempts - (polish_rounds - entry_polish_rounds) + 1,
                 ceiling,
