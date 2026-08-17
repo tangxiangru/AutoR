@@ -647,6 +647,18 @@ not offered all of them.** Two filters narrow the pack, and a skill has to survi
 The predicate reads the brief, never the task's identifier: a table of benchmark ids would select
 the same tasks today and generalise to nothing.
 
+3. **Pin.** There is one exception, and it is deliberate.
+   [configs/task_skill_pins.json](configs/task_skill_pins.json) maps a task *identifier* to skills
+   that are installed for it whatever the two filters say. A pin is not an inference about a kind of
+   task — it is a record that this exact identifier already ran, already scored, and lost criteria
+   whose subject is those skills, so it is the one routing input that cannot be derived from the
+   task statement and does not generalise past the name it carries. Sixteen ResearchClawBench tasks
+   are pinned today, twenty-six pins between them, at most three per task; six of the twenty-six are
+   skills the two filters would have withheld, mostly a field skill whose content applies outside
+   its field. **A run that matches an entry writes `skill_pins` into its `run_config.json` and a
+   `skills pinned_by_task_id` line into its log**, because a pinned arm and an unpinned arm are two
+   configurations and a score from one is not a score from the other.
+
 Pull-based is not the same as discoverable. Measured over a 40-task arm, the pack drew **78 `Skill`
 calls in 789 hours of agent time**, 31 of them the one skill a stage prompt named imperatively —
 and stage 05 launched none in any of the forty runs. So every general skill is now named at the

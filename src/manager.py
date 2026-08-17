@@ -106,7 +106,16 @@ from .report_plan import (
     recorded_report_plan_stamp,
     stamp_report_plan,
 )
-from .run_skills import SkillPackEntry, install_run_skills, read_skill_pack
+from .run_skills import (
+    DEFAULT_PINS_FILENAME,
+    SkillPackEntry,
+    install_run_skills,
+    load_task_pins,
+    pinned_skills_note,
+    pins_for,
+    read_skill_pack,
+    validate_task_pins,
+)
 from .skill_evolution import install_learned_skill
 from .manifest import (
     ensure_run_manifest,
@@ -207,6 +216,8 @@ from .writing_manifest import (
     generate_report_review,
 )
 from .utils import (
+    save_run_config,
+    load_run_config,
     DEFAULT_REFINEMENT_SUGGESTIONS,
     DEFAULT_ROUTING_MODE,
     DEFAULT_STAGE_GRAPH,
@@ -301,10 +312,16 @@ class ResearchManager:
         #: Research field of this run, when the caller knows it. Narrows the field-specific
         #: half of the skill pack; None installs all of it.
         self.skill_discipline: str | None = None
+        #: The benchmark task identifier, when the caller knows one. Only the pin table
+        #: reads it: every other routing input is derived from the task statement, and
+        #: an identifier is not a property of the research question.
+        self.skill_task_id: str | None = None
         #: The pack entries this run was actually offered, kept so a stage prompt can
         #: name the ones a predicate selected for this brief. Empty until
         #: `_install_skills` has run.
         self._installed_skills: list[SkillPackEntry] = []
+        #: The subset of those that are there because this task id is pinned to them.
+        self._pinned_skills: frozenset[str] = frozenset()
         self.output_stream = output_stream
         self.ui = ui or TerminalUI(output_stream=output_stream)
         self.approval_mode = "agent" if reviewer is not None else "manual"
@@ -4853,9 +4870,17 @@ class ResearchManager:
         must not fail because a skill file is unreadable, since skills are
         guidance and every stage has a complete prompt without them.
         """
+        pin_table = load_task_pins(self.project_root / "configs" / DEFAULT_PINS_FILENAME)
+        # Checked here rather than only in the suite, because the way a pin table dies is
+        # silent: `select_run_skills` filters the pack by name, so a pin naming a renamed
+        # skill selects nothing and the run proceeds with the pack it would have had.
+        # No error, no missing file, and a table that still reads correctly in the diff.
+        for problem in validate_task_pins(pin_table, self.skills_dir):
+            append_log_entry(paths.logs, "skills pin_table_problem", problem)
+        pinned = pins_for(self.skill_task_id, pin_table)
         try:
             installed = install_run_skills(
-                paths, self.skills_dir, discipline=self.skill_discipline
+                paths, self.skills_dir, discipline=self.skill_discipline, pinned=pinned
             )
             # Kept, not discarded. Discarding it is why `format_skills_for_prompt`
             # had no caller and sat under a named exemption in
@@ -4867,6 +4892,27 @@ class ResearchManager:
             self._installed_skills = [
                 entry for entry in read_skill_pack(self.skills_dir) if entry.name in chosen
             ]
+            self._pinned_skills = frozenset(pinned & chosen)
+            # A pin is the one routing input that does not follow from the task
+            # statement, so a run that was pinned has to say so where a reader of its
+            # result will find it. Both the human-readable log and the machine-readable
+            # config, because the two are read by different people.
+            note = pinned_skills_note(self.skill_task_id, self._pinned_skills)
+            if note:
+                append_log_entry(
+                    paths.logs,
+                    "skills pinned_by_task_id",
+                    "This run received skills pinned to its task identifier, not chosen "
+                    "from its task statement. A score from this run is not comparable to "
+                    f"one from an unpinned run of the same task.\n{note}",
+                )
+                try:
+                    config = load_run_config(paths)
+                    config["skill_pins"] = sorted(self._pinned_skills)
+                    config["skill_pin_task_id"] = self.skill_task_id
+                    save_run_config(paths, config)
+                except (OSError, TypeError, ValueError):
+                    pass
             # The third layer: what earlier runs in this field wrote down for whoever came
             # next. Installed after the fixed pack so a field with no history costs nothing,
             # and best-effort like the rest -- guidance a run cannot read is guidance it does

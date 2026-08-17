@@ -1,0 +1,191 @@
+{
+  "_what": "Skills forced into a run by its task identifier. Everything else AutoR routes on is derived from the task statement; this is derived from a previous run's SCORE, so it names identifiers and generalises to nothing outside them.",
+  "_provenance": "Built from the ResearchClawBench arm pinned at 2ffaeb4 (/rmeng_data/robtang/rcb_runs/arm_2ffaeb4), scored with gpt-5.1 under the 15-image window: AutoR 31.35 against bare Claude Code 31.53 over 40 tasks. Each entry was assigned criterion by criterion from that arm's per-criterion scores and the judge's written reasoning for BOTH arms, then adversarially re-checked against the skill bodies. 23 losing tasks were assessed; 7 were given no pin, because their remaining gap is below the 3.4-point single-draw rescoring noise or the shipped data cannot support the criteria at all.",
+  "_declares_itself": "A run that matches an entry writes `skill_pins` into its run_config.json and a `skills pinned_by_task_id` line into its log. A pinned arm and an unpinned arm are two configurations; a score from one is not a score from the other, and the artifact says so without anyone having to remember.",
+  "_maximum": "Three per task. The measured failure of this pack is that a run reads 1.75 skills out of about thirty offered; handing one eight more descriptions reproduces the problem a pin is meant to solve.",
+  "_columns": "task id -> skill names. The commentary for each is in _rationale, keyed the same way: `autor` and `control` are that task's two scores, `addressed` is the sum of weight x (control - autor) over the criteria the pins aim at, `unreachable` is the same sum over criteria no skill can reach, and `new_to_this_run` lists the pins the two routing filters would not have installed.",
+  "_rationale": {
+    "Physics_000": {
+      "autor": 18.7,
+      "control": 53.4,
+      "addressed": 26.3,
+      "unreachable": 0,
+      "new_to_this_run": []
+    },
+    "Information_002": {
+      "autor": 9,
+      "control": 33.1,
+      "addressed": 12,
+      "unreachable": 0,
+      "new_to_this_run": []
+    },
+    "Neuroscience_003": {
+      "autor": 35.25,
+      "control": 55.55,
+      "addressed": 15,
+      "unreachable": 2,
+      "new_to_this_run": []
+    },
+    "Chemistry_003": {
+      "autor": 24.5,
+      "control": 39.3,
+      "addressed": 15,
+      "unreachable": 9.5,
+      "new_to_this_run": []
+    },
+    "Material_000": {
+      "autor": 4.5,
+      "control": 17.9,
+      "addressed": 12.4,
+      "unreachable": 17,
+      "new_to_this_run": []
+    },
+    "Material_003": {
+      "autor": 35.7,
+      "control": 47.2,
+      "addressed": 11.5,
+      "unreachable": 22.5,
+      "new_to_this_run": [
+        "life-full-study-skeleton-including-the-wet-lab-half"
+      ]
+    },
+    "Life_002": {
+      "autor": 17,
+      "control": 26.5,
+      "addressed": 15.5,
+      "unreachable": 37.5,
+      "new_to_this_run": [
+        "information-exhibit-the-intermediate-objects"
+      ]
+    },
+    "Energy_000": {
+      "autor": 20.3,
+      "control": 27.8,
+      "addressed": 7.5,
+      "unreachable": 0,
+      "new_to_this_run": [
+        "material-as-specified-run-and-stage-diagnostics"
+      ]
+    },
+    "Chemistry_000": {
+      "autor": 36,
+      "control": 41.3,
+      "addressed": 13,
+      "unreachable": 29.2,
+      "new_to_this_run": []
+    },
+    "Math_003": {
+      "autor": 23.75,
+      "control": 27.25,
+      "addressed": 3.2,
+      "unreachable": 52.5,
+      "new_to_this_run": []
+    },
+    "Earth_002": {
+      "autor": 33,
+      "control": 35.4,
+      "addressed": 10.6,
+      "unreachable": 27.2,
+      "new_to_this_run": [
+        "information-fill-the-whole-results-grid"
+      ]
+    },
+    "Material_002": {
+      "autor": 48.45,
+      "control": 49.22,
+      "addressed": 9.9,
+      "unreachable": 0,
+      "new_to_this_run": []
+    },
+    "Material_001": {
+      "autor": 11.9,
+      "control": 12,
+      "addressed": 9.6,
+      "unreachable": 32,
+      "new_to_this_run": [
+        "energy-canonical-configuration-before-the-enhanced-variant"
+      ]
+    },
+    "Life_001": {
+      "autor": 13,
+      "control": 9.7,
+      "addressed": 3.5,
+      "unreachable": 75.8,
+      "new_to_this_run": [
+        "material-as-specified-run-and-stage-diagnostics"
+      ]
+    },
+    "Neuroscience_000": {
+      "autor": 14,
+      "control": 9.4,
+      "addressed": 0,
+      "unreachable": 52,
+      "new_to_this_run": []
+    },
+    "Astronomy_001": {
+      "autor": 26,
+      "control": 20.2,
+      "addressed": 0,
+      "unreachable": 0,
+      "new_to_this_run": []
+    }
+  },
+  "Physics_000": [
+    "run-the-conditions-the-source-ran",
+    "draw-the-source-figure-panel-for-panel"
+  ],
+  "Information_002": [
+    "the-supplied-item-is-the-graded-unit"
+  ],
+  "Neuroscience_003": [
+    "run-the-conditions-the-source-ran"
+  ],
+  "Chemistry_003": [
+    "close-the-gap-to-the-published-number",
+    "draw-the-source-figure-panel-for-panel"
+  ],
+  "Material_000": [
+    "train-the-named-architecture",
+    "the-canonical-figure"
+  ],
+  "Material_003": [
+    "a-value-you-did-not-measure-still-has-a-source",
+    "life-full-study-skeleton-including-the-wet-lab-half"
+  ],
+  "Life_002": [
+    "the-supplied-item-is-the-graded-unit",
+    "information-exhibit-the-intermediate-objects"
+  ],
+  "Energy_000": [
+    "material-as-specified-run-and-stage-diagnostics",
+    "run-the-conditions-the-source-ran"
+  ],
+  "Chemistry_000": [
+    "the-attribution-is-the-deliverable"
+  ],
+  "Math_003": [
+    "run-the-conditions-the-source-ran"
+  ],
+  "Earth_002": [
+    "draw-the-source-figure-panel-for-panel",
+    "information-fill-the-whole-results-grid"
+  ],
+  "Material_002": [
+    "draw-the-source-figure-panel-for-panel",
+    "close-the-gap-to-the-published-number"
+  ],
+  "Material_001": [
+    "run-the-requested-analysis",
+    "energy-canonical-configuration-before-the-enhanced-variant"
+  ],
+  "Life_001": [
+    "material-as-specified-run-and-stage-diagnostics"
+  ],
+  "Neuroscience_000": [
+    "the-attribution-is-the-deliverable"
+  ],
+  "Astronomy_001": [
+    "the-canonical-figure",
+    "draw-the-source-figure-panel-for-panel"
+  ]
+}
