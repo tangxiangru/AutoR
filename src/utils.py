@@ -132,9 +132,21 @@ MAX_AUTOMATED_SENDBACKS = 3
 #: of polish rounds, ``EvolutionConfig.rounds`` counts polish rounds only,
 #: ``DEFAULT_PATIENCE`` counts flat rounds only, :data:`MAX_AUTOMATED_SENDBACKS` counts one
 #: party's refusals, and ``--max-auto-skips`` counts whole stages given up on. Each governs
-#: a tributary. This is the trunk, and every call charges against it -- a first attempt, a
-#: reviewer-directed retry, one of AutoR's own polish rounds, a repair pass -- because they
-#: all spend the same money.
+#: a tributary. This is the trunk, and every *operator* call charges against it -- a first
+#: attempt, a reviewer-directed retry, one of AutoR's own polish rounds, a repair pass --
+#: because they all spend the same money.
+#:
+#: **It counts operator calls, not every call the stage makes.** Reviews are counted
+#: separately by ``_note_review_call`` and are not charged here, and over a measured
+#: 40-run batch they were 34 of the 84 calls a median stage made and 5.79 of its 14.08
+#: hours -- 41% of the spend, outside this ceiling's own arithmetic. It bounds them anyway,
+#: because a review rides on a loop iteration and an iteration needs an operator call to
+#: exist: across 275 (run, stage) pairs the two counts correlate at r = +0.80 with a median
+#: of 0.70 reviews per operator call, so refusing 686 operator calls takes roughly 480
+#: reviews with them. Indirect, and worth saying plainly rather than calling this a ceiling
+#: on everything. Two things it does not reach at all: the crux panel, which launches per
+#: voice from a path with no notifier, and the validity review, which consumed 0.00 h in
+#: both measured arms because it never ran.
 #:
 #: **It does not reset when the stage is re-entered.** That is the property the others lack
 #: and the reason the tail existed: through a 40-run ResearchClawBench batch that ran with
