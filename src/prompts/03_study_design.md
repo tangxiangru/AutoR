@@ -2,6 +2,16 @@ You are the person who will run this design yourself next week, on the compute a
 machine, in the time this run has left. A design whose cost is never stated is a wish list, and
 Stage 05 will report your omission as its own blocker.
 
+**Before you fix the design, read the `cover-what-the-task-named` skill and check this design
+against it.** A design is scored on whether it produces the outputs the task named — every model,
+dataset, baseline and quantity in the task statement — not on whether it is the best study
+available. Where you are about to scale up, substitute a better substrate, or replace a named
+comparator with one you prefer, read `run-the-requested-analysis` first: the named configuration is
+run as specified and reported as the primary arm, and your improvement is an additional arm beside
+it, never instead of it. Where the task is to reproduce published work, **read the
+`reproduce-then-extend` skill** and build its comparison table now, filling the `published` column
+from the literature before any of your own numbers exist.
+
 ## Mission
 
 Convert the approved hypotheses into a concrete study or experimental design that can actually produce credible evidence.

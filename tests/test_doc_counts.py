@@ -53,6 +53,7 @@ from pathlib import Path
 
 from src.information_flow import ALL_STAGES, CHANNELS
 from src.rubric import CRITERIA
+from src.run_skills import discipline_of, read_skill_pack
 from src.stage_graph import _ADVANCE_GUARDS, REVISIT_EDGES, TERMINAL_EDGES, StageGraph
 from src.utils import REQUIRED_STAGE_HEADINGS, STAGES
 
@@ -140,6 +141,16 @@ def _reachable_validators() -> int:
 #: ``(noun, live value)``. Every spelled-out numeral immediately before *noun* in a
 #: tracked document must equal *value*. The noun is matched case-insensitively and
 #: must be the whole phrase, so "typed channels" does not also catch "channels".
+def _skill_pack_size() -> int:
+    return len(read_skill_pack(REPO / "src" / "skills"))
+
+
+def _skills_without_a_field() -> int:
+    return sum(
+        1 for entry in read_skill_pack(REPO / "src" / "skills") if not discipline_of(entry.name)
+    )
+
+
 COUNTED_NOUNS: tuple[tuple[str, int], ...] = (
     ("typed channels", len(CHANNELS)),
     ("typed information channels", len(CHANNELS)),
@@ -154,6 +165,14 @@ COUNTED_NOUNS: tuple[tuple[str, int], ...] = (
     ("forward edges", _forward_edges() - 1),  # the abandonment terminal aside
     ("guarded forward edges", len(_ADVANCE_GUARDS)),
     ("`validate_*` functions", _reachable_validators()),
+    # The README said "Six skills ship today" through the twenty-eight merges that took
+    # the pack past thirty, because no symbol was counting. These three rows are that
+    # symbol. `general` and `field` are the two halves `install_run_skills` routes
+    # differently, so a skill added without a field prefix moves a different number from
+    # one added with one.
+    ("skills ship today", _skill_pack_size()),
+    ("general ones", _skills_without_a_field()),
+    ("field-specific ones", _skill_pack_size() - _skills_without_a_field()),
 )
 
 #: Three documents state the channel count and ``docs/framework.md`` states it

@@ -1,5 +1,7 @@
 An engineering goal in hypothesis clothing is the failure here — a decision rule that no plausible outcome could fail. State, for each empirical hypothesis, what the literature would predict and what result would surprise you; if no outcome would surprise anyone, it is not a hypothesis.
 
+The failure that costs more is the opposite one: rejecting the task's own question because it looked like an engineering goal, and freezing a self-invented question in its place. **When the task names a reproduction, read the `the-reproduction-is-a-hypothesis` skill before you draft, and freeze the reproduction's hypotheses first.** "The published value is recoverable from the supplied inputs, within the source's stated uncertainty" is falsifiable, it fails often, and it is the contract the run was given. Your own question is an extension; it is frozen second.
+
 ## Mission
 
 Transform the approved literature-grounded context into strong, testable, non-trivial research hypotheses or claims worth investigating.

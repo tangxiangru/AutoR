@@ -60,6 +60,60 @@ class DemandExtractionTest(unittest.TestCase):
         self.assertEqual(len(found), 1)
         self.assertFalse(found[0].startswith("-"))
 
+    def test_an_output_written_as_a_noun_phrase_is_still_a_demand(self) -> None:
+        """Physics_000's brief, verbatim in shape.
+
+        Two of its three outputs are noun phrases with no demand verb in them, and the
+        two graded criteria they name carry 0.70 of that task's weight. Before the
+        `Output:` block was read, `task_demands` returned neither, so neither reached
+        `# What the Task Asks For` and neither could be a row in the coverage file.
+        """
+        brief = (
+            "Input:  1. Particle types and sizes: Atoms of varying sizes.  "
+            "2. Path rules: Shell sequence paths defined in the hexagonal lattice.  "
+            "Output:  1. Predicted stable multi-shell icosahedral structures for the alloy.  "
+            "2. Optimal size mismatch values between adjacent shells.  "
+            "3. Shell sequences and paths formed via self-assembly in growth simulations.  "
+            "Scientific Objective: To establish a universal theoretical framework."
+        )
+        found = demanding_sentences(brief)
+        self.assertIn("Optimal size mismatch values between adjacent shells.", found)
+        self.assertIn(
+            "Shell sequences and paths formed via self-assembly in growth simulations.", found
+        )
+        # The input side stays out: a description of what the run *has* is not a
+        # description of what it *owes*, which is the same line `_BRIEF_HEADINGS` holds.
+        self.assertFalse(any("Particle types and sizes" in s for s in found))
+        self.assertFalse(any("Path rules" in s for s in found))
+
+    def test_a_single_line_output_label_is_a_demand(self) -> None:
+        brief = (
+            "Input: Global atmospheric reanalysis data at 0.25 degree resolution.  "
+            "Output: 15-day global weather forecasts at 6-hour temporal resolution.  "
+            "Scientific Goal: Build a cascade forecasting system."
+        )
+        found = demanding_sentences(brief)
+        self.assertTrue(
+            any("15-day global weather forecasts" in s for s in found),
+            f"the labelled output was dropped: {found}",
+        )
+
+    def test_every_demand_is_a_verbatim_span_of_the_statement(self) -> None:
+        """The coverage gate refuses a `task_quote` that is not verbatim.
+
+        Admitting the output block must not change that: the block capture starts after
+        the label, and a quote reconstructed from it would not be findable in the source.
+        """
+        brief = (
+            "Output:  1. Predicted stable multi-shell icosahedral structures for the alloy.  "
+            "2. Optimal size mismatch values between adjacent shells.  "
+            "Scientific Objective: To establish a universal theoretical framework."
+        )
+        normalised = " ".join(brief.split())
+        for sentence in demanding_sentences(brief):
+            with self.subTest(sentence=sentence):
+                self.assertIn(sentence, normalised)
+
 
 class DemandsComeFromTheTaskNotTheWrapperTest(unittest.TestCase):
     """AutoR's own prose is not a requirement the report owes an answer to.
