@@ -45,7 +45,9 @@ overview and the operating manual.
 [The rigor dial](#the-rigor-dial) · [Self-improvement rounds](#self-improvement-rounds) ·
 [Review](#review-five-kinds-of-critic) · [The stage contract](#the-stage-contract-and-what-gets-validated) ·
 [Execution model](#execution-model) · [Run layout](#run-layout) · [Architecture](#architecture) ·
-[Benchmarks](#benchmarks) · [Documentation](#documentation) · [Limits](#limits) · [License](#license)
+[Benchmarks](#benchmarks) ([ResearchClawBench](#researchclawbench) ·
+[FrontierScience](#frontierscience-research)) ·
+[Documentation](#documentation) · [Limits](#limits) · [License](#license)
 
 ## What AutoR is
 
@@ -130,10 +132,10 @@ naming them.
 | Required stage-summary headings | `REQUIRED_STAGE_HEADINGS` | 7 |
 | Rubric criteria (weighted, backend-free) | `CRITERIA`, [src/rubric.py](src/rubric.py) | 10 |
 | Flags on `main.py` / `rcb_agent.py` | `parse_args` | 61 / 37 |
-| Python modules / lines / tests | the tree | 179 / 82 k / 2561 |
+| Python modules / lines / tests | the tree | 226 / 114 k / 3501 |
 
-`python -m unittest discover -s tests -p "test_*.py"` runs **2561 tests** across 111 test
-modules, with no third-party dependency.
+`python -m unittest discover -s tests -p "test_*.py"` runs **3501 tests in ~290 s across 134 test
+modules**, with no third-party dependency.
 
 ## Quick start
 
@@ -188,6 +190,8 @@ modules, with no third-party dependency.
 | Read the paired-trial analysis and exit | `python main.py --trial-report` |
 | Benchmark AutoR on ResearchClawBench | `python rcb_agent.py --workspace <WORKSPACE>` |
 | Score a finished benchmark run with the reference judge | `python tools/score_rcb_run.py --workspace <WORKSPACE> --bench <BENCH>` |
+| Answer one FrontierScience question, with AutoR or with one direct call | `python fs_agent.py --task fs:043 --profile ideate` · `--profile direct` |
+| Grade a FrontierScience answer against its rubric | `python tools/score_fs_run.py --task fs:043 --answer answer.md --out score.json` |
 
 Every flag, its default, and what is preserved on resume:
 **[docs/cli-reference.md](docs/cli-reference.md)**. Stage identifiers accept `03`, `3` or
@@ -865,6 +869,16 @@ is in **[docs/framework.md](docs/framework.md)**.
 
 ## Benchmarks
 
+AutoR is wired to two, and they measure different halves of it.
+[ResearchClawBench](#researchclawbench) hands the agent a workspace of raw data and reference
+papers and scores the report and figures it produces against the published paper — a test of
+conducting research. [FrontierScience-Research](#frontierscience-research) hands it one written
+examination question and grades the text of the answer against a ten-point rubric — no data, no
+reference paper, no figure, no reference answer, and a test of what the system knows and can
+derive. A change that moves one need not move the other.
+
+### ResearchClawBench
+
 `python rcb_agent.py --workspace <WORKSPACE>` runs AutoR against a
 [ResearchClawBench](https://github.com/InternScience/ResearchClawBench) workspace with no human in
 the loop and exports the benchmark's deliverables (`report/report.md`, `report/images/`, `code/`,
@@ -952,6 +966,39 @@ what the reported systems actually score and which of their numbers reproduce, s
 output contract and the export rules, see
 [docs/researchclawbench.md](docs/researchclawbench.md).
 
+### FrontierScience-Research
+
+`python fs_agent.py --task fs:043 --profile ideate` answers one of the sixty questions of
+[FrontierScience-Research](https://arxiv.org/abs/2601.21165) with AutoR entered at Stage 02 and
+stopped there; `--profile direct` answers the same question with one call to the same model and
+is the paired control. `tools/score_fs_run.py` grades an answer against the task's own rubric
+with the paper's verbatim judge prompt. The dataset is pinned by digest rather than committed,
+and is never downloaded automatically.
+
+**The reference point, measured here.** A bare `claude-opus-4-5` answering directly, no tools,
+one draw per task, all sixty tasks, graded by **gpt-5.1** at high reasoning effort:
+
+| | value |
+|:---|---:|
+| mean rubric points | **4.291 / 10** |
+| across-task sd | 2.795 |
+| pass@≥7 | **13 / 60 = 21.7%** (binomial se 5.3 pp) |
+| chemistry / biology / physics means | 5.044 / 4.801 / 3.028 |
+
+The paper reports Claude Opus 4.5 at 17.5% over the same sixty tasks at thirty trials each,
+under a **GPT-5** judge that returns 404 on the endpoint available here — and reports the same
+chemistry-then-biology-then-physics ordering. Landing inside one standard error of that figure
+and reproducing its ordering is **corroboration of the scoring path, not comparability of the
+instruments**; judge choice is worth more than the difference being discussed, so no number
+here may be placed beside the paper's table.
+
+**AutoR's own score and wall clock on this benchmark are UNMEASURED**, and they are blank for
+one reason: the operator builds its CLI command with a permission-bypass flag pair that the
+agent harness this work was done under refuses to launch. Everything else on the page was
+reachable without it. The exact command a human can run to fill the blank, the ten admission
+clauses of the paired trial, the judge's measured noise and the honest cost estimate are in
+[docs/frontierscience.md](docs/frontierscience.md).
+
 ## Documentation
 
 The [docs/](docs/) directory is the reference documentation. This README is the overview; everything
@@ -977,6 +1024,7 @@ below is the detail behind it.
 | [Studio Guide & API](docs/studio.md) | The browser workspace and its complete HTTP API. |
 | [ResearchClawBench](docs/researchclawbench.md) | Running with no human in the loop: unattended execution, the benchmark adapter and its output contract, and Gemini-backed web search. |
 | [ResearchClawBench Landscape](docs/researchclawbench-landscape.md) | How EvoScientist, ARIS Codex and MIRA actually score on the benchmark, which reported numbers reproduce, and the baseline any result must be quoted against. |
+| [FrontierScience-Research](docs/frontierscience.md) | The second benchmark: sixty written science questions graded against a rubric by a judge model. The two profiles, the prompt contract, the judge's measured noise, the paired trial, and the two numbers that are not measured. |
 | [Architecture](docs/architecture.md) | Layers, the module map, the stage walk, prompt assembly by typed channel, recovery, extension points. |
 | [Development](docs/development.md) | Dev setup, tests, CI, conventions, and recipes for adding a stage, venue, or backend. |
 | [Troubleshooting](docs/troubleshooting.md) | Symptom-to-fix for the errors AutoR actually raises. |
