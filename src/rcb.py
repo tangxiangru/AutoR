@@ -126,27 +126,67 @@ class BenchmarkResult:
     pipeline_completed: bool
     export: ExportResult
     auto_skipped_stages: list[str] = field(default_factory=list)
+    #: The exception that ended the stage walk, as ``"TypeName: message"``, or ``""`` when
+    #: the walk finished on its own terms. This is the field that separates a run which
+    #: degraded from one which stopped, and they are not the same outcome however similar
+    #: the directory looks afterwards.
+    aborted_with: str = ""
+
+    @property
+    def aborted(self) -> bool:
+        return bool(self.aborted_with)
+
+    @property
+    def status(self) -> str:
+        """What `_meta.json` should say. Three outcomes, not two.
+
+        ``completed`` -- the walk finished and the report is substantive.
+        ``aborted``   -- an exception ended the walk. A report may still exist, because
+                         the adapter exports whatever the run produced before it died;
+                         that report is a salvage, not a result.
+        ``failed``    -- the walk finished but produced no substantive report.
+        """
+        if self.aborted:
+            return "aborted"
+        return "completed" if self._report_is_substantive() else "failed"
+
+    def _report_is_substantive(self) -> bool:
+        path = self.export.report_path
+        if not path.exists():
+            return False
+        return len(read_text(path).strip()) >= MIN_REPORT_CHARS
 
     @property
     def exit_code(self) -> int:
-        """0 when a real report reached the harness.
+        """0 when a real report reached the harness *and* the run got there on its own.
 
-        The pipeline completing is not the bar: ResearchClawBench scores the report, so a
-        run that auto-skipped a stage but still produced a substantive report is a success,
-        and a "completed" run with an empty report is not.
+        An auto-skipped stage is not disqualifying: ResearchClawBench scores the report,
+        and a run that lost a stage to its recovery path and still produced a substantive
+        report is a degraded success. That was this property's whole argument, and it
+        holds -- for a walk that finished.
 
-        That second half was the docstring's claim and not the code's: this tested
-        ``.exists()``, and a 197-byte "No completed stage output was produced" stub exists.
-        Eight of forty benchmark runs therefore reported ``exit_code: 0, status:
-        completed`` while shipping nothing, and the batch log, the run metadata and the
-        harness all agreed the runs had succeeded. Nothing surfaced it until the scoring
-        pass, thirteen hours later. Hold the file to ``MIN_REPORT_CHARS``, the same floor
-        every source inside :func:`export_run` is already held to.
+        It does not hold for a walk that was ended by an exception, and the difference was
+        invisible here. On the `full40_pins` arm, Life_002 died at Stage 03 of 7 on a
+        `UnicodeDecodeError` raised while assembling a prompt. Four stages were never
+        attempted. The adapter caught it at the top, synthesised a report from the partial
+        state, and this property returned 0 because a 40 KB file existed -- so
+        `_meta.json` said `completed`, the batch runner logged `DONE ... completed`, the
+        scorer scored it 22.6, and that number entered a 40-task arm mean indistinguishable
+        from the runs that finished. It took reading `_agent_output.jsonl` by hand to find
+        `"pipeline_completed": false` next to `"report_source": "synthesized"`.
+
+        So: a substantive report is still necessary and is no longer sufficient.
+
+        The report floor has its own history. This once tested ``.exists()``, and a
+        197-byte "No completed stage output was produced" stub exists. Eight of forty
+        benchmark runs therefore reported ``exit_code: 0, status: completed`` while
+        shipping nothing, and the batch log, the run metadata and the harness all agreed
+        the runs had succeeded; nothing surfaced it until the scoring pass thirteen hours
+        later. Hold the file to ``MIN_REPORT_CHARS``, the same floor every source inside
+        :func:`export_run` is already held to. The abort case above is the same defect one
+        level up, found the same way and costing the same thirteen hours.
         """
-        path = self.export.report_path
-        if not path.exists():
-            return 1
-        return 0 if len(read_text(path).strip()) >= MIN_REPORT_CHARS else 1
+        return 0 if self.status == "completed" else 1
 
 
 # ---------------------------------------------------------------------------

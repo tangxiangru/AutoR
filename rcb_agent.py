@@ -677,6 +677,7 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
     manager.skill_task_id = _task_id or None
 
     pipeline_completed = False
+    aborted_with = ""
     try:
         pipeline_completed = manager.run(
             goal,
@@ -686,7 +687,11 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
             resources=collect_reference_resources(workspace) or None,
             final_stage=resolve_stage(args.final_stage),
         )
-    except Exception:  # noqa: BLE001 - a crashed pipeline must still export what it produced
+    except Exception as exc:  # noqa: BLE001 - a crashed pipeline must still export what it produced
+        # Exporting the salvage is right. Reporting the salvage as a finished run is not,
+        # and that is what happened until this line existed: the exception was recorded in
+        # `_agent_output.jsonl` and nowhere a downstream reader looks.
+        aborted_with = f"{type(exc).__name__}: {exc}"[:500]
         emit_event({"type": "error", "where": "pipeline", "traceback": traceback.format_exc()})
 
     paths = build_run_paths_for_workspace(workspace)
@@ -710,23 +715,33 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
         auto_skipped_stages=manager.auto_skipped_stages,
         synthesize=synthesizer,
     )
-    write_run_meta(
-        workspace,
-        task_id=infer_task_id(workspace),
-        run_id=paths.run_root.name,
-        # The harness scores the report, so a report is what "completed" means here.
-        status="completed" if export.report_path.exists() else "failed",
-        duration_seconds=round(time.monotonic() - started_at),
-        model=model,
-        extra={"report_source": export.report_source, "pipeline_completed": pipeline_completed},
-    )
-    return BenchmarkResult(
+    result = BenchmarkResult(
         workspace=workspace,
         run_root=paths.run_root,
         pipeline_completed=pipeline_completed,
         export=export,
         auto_skipped_stages=list(manager.auto_skipped_stages),
+        aborted_with=aborted_with,
     )
+    # Written once, after the result exists, because the result is the only thing that
+    # knows whether the walk finished -- and `status` is the field every downstream
+    # reader gates on. `run_arm.py` skips a task whose meta says `completed`, and
+    # `score_arm.py` scores one; both were being handed `completed` for a run that had
+    # stopped at Stage 03 of 7.
+    write_run_meta(
+        workspace,
+        task_id=infer_task_id(workspace),
+        run_id=paths.run_root.name,
+        status=result.status,
+        duration_seconds=round(time.monotonic() - started_at),
+        model=model,
+        extra={
+            "report_source": export.report_source,
+            "pipeline_completed": pipeline_completed,
+            "aborted_with": aborted_with,
+        },
+    )
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -741,7 +756,7 @@ def main(argv: list[str] | None = None) -> int:
     emit_event(
         {
             "type": "result",
-            "status": "completed" if result.exit_code == 0 else "failed",
+            "status": result.status,
             "pipeline_completed": result.pipeline_completed,
             "auto_skipped_stages": result.auto_skipped_stages,
             "run_root": str(result.run_root),
