@@ -490,6 +490,7 @@ def rollback_to_stage(paths: RunPaths, rollback_stage: StageSpec, reason: str | 
     from .coeffects import drift_across_run, format_drift
     from .effects import recover_to_stage
     from .utils import append_log_entry
+    from .withdrawal_ledger import WithdrawalRecord, append_withdrawal
 
     manifest = ensure_run_manifest(paths)
     invalidated_reason = reason or f"Rolled back to {rollback_stage.stage_title}"
@@ -588,6 +589,30 @@ def rollback_to_stage(paths: RunPaths, rollback_stage: StageSpec, reason: str | 
     )
     save_run_manifest(paths.run_manifest, updated)
     rebuild_memory_from_manifest(paths, updated)
+
+    # The state has gone back; this is the half that does not. Written after the manifest
+    # so the row describes a withdrawal that completed, and appended to a file outside
+    # `workspace/` so no withdrawal — including a later one — can reach it. A run that
+    # recovered the workspace and also erased the reason would make a rollback
+    # indistinguishable from never having tried, and a run that cannot tell those apart
+    # will try the same thing again.
+    append_withdrawal(
+        paths,
+        WithdrawalRecord(
+            at=_now(),
+            target_stage=rollback_stage.slug,
+            reason=invalidated_reason,
+            deleted=recovery.deleted,
+            rewound=recovery.rewound,
+            invalidated=tuple(
+                entry.slug
+                for entry in updated_stages
+                if entry.stale or entry.slug == rollback_stage.slug
+            ),
+            drifted=tuple(drift.render() for drift in drifts),
+            emissions_discarded=recovery.emissions_discarded,
+        ),
+    )
     return updated
 
 
