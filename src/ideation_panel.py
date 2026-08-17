@@ -30,7 +30,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, Sequence
 
 from .approval_agent import AutomatedReviewer
 from .terminal_ui import TerminalUI
@@ -412,6 +412,7 @@ class IdeationPanel:
         stage_timeout: int = 14400,
         ideas_per_proposer: int = 2,
         score_pool: bool = True,
+        disallowed_tools: Sequence[str] = (),
     ) -> None:
         if not lenses:
             raise ValueError("An ideation panel needs at least one lens.")
@@ -422,6 +423,11 @@ class IdeationPanel:
         self.ui = ui or TerminalUI()
         self.ideas_per_proposer = max(1, ideas_per_proposer)
         self.score_pool = score_pool
+        # Every proposer is a model seat of its own, so a run whose protocol denies a tool
+        # has to deny it here too. Five seats live behind this one argument -- the largest
+        # single population of backends in the tree -- and a default of `()` is what every
+        # existing caller gets.
+        self.disallowed_tools = tuple(disallowed_tools)
         self._members = {
             lens.key: AutomatedReviewer(
                 lens.backend or backend_name,
@@ -429,6 +435,7 @@ class IdeationPanel:
                 fake_mode=fake_mode,
                 ui=self.ui,
                 stage_timeout=stage_timeout,
+                disallowed_tools=disallowed_tools,
             )
             for lens in lenses
         }

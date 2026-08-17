@@ -837,10 +837,13 @@ FS_MIN_ANSWER_CHARS = 200
 #: Truncating would hand the judge a sentence that stops mid-clause and score it,
 #: which is the failure this benchmark's own probe already produced once from the
 #: other end (a judge response cut at its token budget returned HTTP 200, an
-#: ``incomplete`` status and 636 characters of a graded verdict). Real AutoR
-#: reports on the sibling benchmark run to a median of 37 kB and a maximum of
-#: 75 kB, so this is twice the largest thing the pipeline has ever produced: an
-#: answer past it is a runaway, not a thorough answer.
+#: ``incomplete`` status and 636 characters of a graded verdict). Measured over
+#: the forty real ResearchClawBench runs, a report is 24,799 B at the smallest,
+#: 37,067 B at the median and 75,263 B at the largest, so this is 1.99 times the
+#: largest thing the pipeline has ever produced: an answer past it is a runaway,
+#: not a thorough answer. ``tests/test_fs_adapter.py`` holds it inside that band
+#: rather than against itself -- every ceiling test writes
+#: ``FS_MAX_ANSWER_CHARS + 1``, which follows the constant wherever it goes.
 FS_MAX_ANSWER_CHARS = 150_000
 
 #: The answer file came from the model itself — the direct arm's reply, or an
@@ -1000,16 +1003,38 @@ def build_fs_goal(
 #: The design this was written from said "contains any of
 #: ``REQUIRED_STAGE_HEADINGS``", and a bare substring test is the wrong instrument
 #: for two of the seven: "Objective" and "Key Results" are ordinary English, and a
-#: correct answer that opens "The objective is to show that..." would be refused
-#: and never scored -- a false refusal costs the whole task, where a missed
-#: detection costs one low score in a population of sixty. Anchored as a markdown
+#: correct answer that opens "Objective: determine the period of the pendulum."
+#: would be refused and never scored -- a false refusal costs the whole task, where
+#: a missed detection costs one low score in a population of sixty. Anchored as a
 #: heading, the pattern catches what it is for, which is a stage summary or a
-#: stage-shaped plan reaching ``answer.md``, and
-#: ``tests/test_fs_adapter.py`` carries the control that proves the prose use
-#: survives.
+#: stage-shaped plan reaching ``answer.md``, and ``tests/test_fs_adapter.py``
+#: carries both halves of the discrimination: the capitalised prose use survives,
+#: and the same words as a heading are refused. (An earlier control used lowercase
+#: prose, which a bare substring matcher also lets through, so it witnessed
+#: nothing and the deviation from the design was untested.)
+#:
+#: Two shapes beyond ``#``. **Case-insensitive**, because "## objective" is a
+#: heading whoever typed it; and a **whole-line bold** alternative, because
+#: ``**Key Results**`` on its own line is how a model that was told not to use
+#: headings writes one. The bold branch is anchored at both ends -- the line may
+#: hold nothing but the bolded heading and an optional colon -- so bolding the
+#: phrase inside a sentence is not a refusal.
+#:
+#: **Setext underlining is knowingly out of scope.** ``Key Results`` followed by a
+#: line of dashes is a heading in markdown and this pattern does not see it. Two
+#: reasons and neither is oversight: the shape requires a look-ahead to the next
+#: line, which turns a pattern into a parser, and it is the one heading shape no
+#: stage summary in this tree emits -- ``src.utils`` writes ``##`` -- so the case
+#: that would reach ``answer.md`` from a stage is already covered. A run that
+#: produced one scores badly rather than being refused, which is the cheap
+#: direction of the error.
+_FS_STAGE_HEADING_ALTERNATION = "|".join(re.escape(h) for h in REQUIRED_STAGE_HEADINGS)
 FS_STAGE_HEADING_PATTERN = re.compile(
-    r"^\s{0,3}#{1,6}\s*(?:\*\*)?(" + "|".join(re.escape(h) for h in REQUIRED_STAGE_HEADINGS) + r")",
-    re.MULTILINE,
+    r"^\s{0,3}(?:"
+    r"#{1,6}\s*(?:\*\*)?(?P<hash>" + _FS_STAGE_HEADING_ALTERNATION + r")"
+    r"|\*\*(?P<bold>" + _FS_STAGE_HEADING_ALTERNATION + r")\*\*:?\s*$"
+    r")",
+    re.MULTILINE | re.IGNORECASE,
 )
 
 
@@ -1030,7 +1055,12 @@ def answer_content_refusals(text: str) -> list[str]:
     reasons: list[str] = []
     if contains_placeholder_text(text):
         reasons.append(FS_REFUSAL_ANSWER_IS_A_PLAN + ":placeholder")
-    headings = sorted({match.group(1) for match in FS_STAGE_HEADING_PATTERN.finditer(text)})
+    headings = sorted(
+        {
+            match.group("hash") or match.group("bold")
+            for match in FS_STAGE_HEADING_PATTERN.finditer(text)
+        }
+    )
     if headings:
         reasons.append(FS_REFUSAL_ANSWER_IS_A_PLAN + ":" + ",".join(headings))
     return reasons
@@ -1289,10 +1319,15 @@ class _OperatorCall:
     **A fake operator does not fake this call.** ``_prepare_invocation`` builds the
     real CLI command whatever ``fake_mode`` says -- only ``run_stage`` branches --
     so a producer that reached this seam under ``--fake-operator`` would spawn the
-    real backend. Every subclass therefore answers :meth:`supported` with
-    ``False`` under a fake operator and the caller takes the next path. That is
-    also why ``--fake-operator`` smoke runs exercise the ``stage`` export path
-    rather than the synthesis one.
+    real backend. Two guards keep that from happening, and they are not
+    interchangeable: each producer's ``__call__`` returns :meth:`fake_answer` from
+    an explicit ``fake`` branch placed *before* anything else, and
+    :meth:`supported` answers ``False`` under a fake operator as a backstop for a
+    third producer written later. Because the explicit branch comes first, the
+    backstop is never reached today and a ``--fake-operator`` smoke run publishes
+    ``answer_source: "synthesized"`` on the pipeline arm -- not ``"stage"``, which
+    is what an earlier draft of this class produced and what this paragraph used
+    to claim.
     """
 
     def __init__(self, operator: Any) -> None:
@@ -1548,6 +1583,135 @@ class AnswerSynthesizer(_OperatorCall):
 # ---------------------------------------------------------------------------
 
 
+#: Tool names that reach the network, matched case-insensitively as substrings.
+#:
+#: Four spellings and not two, measured rather than guessed. Over the forty real
+#: ResearchClawBench transcripts under ``/rmeng_data/robtang/autor-rcb-rerun/``, thirty
+#: runs made at least one browsing call, and the names that appear are
+#: ``mcp__autor-search__web_search`` (29 runs) and ``WebFetch`` (22 runs). The built-in
+#: ``WebSearch`` -- the name the ``--disallowed-tools`` flag speaks, and the one this
+#: adapter denies -- appears in none of them, because Claude Code on Vertex has it
+#: disabled and this repository substitutes an MCP server. A witness that matched only the
+#: flag's spelling would have reported zero browsing calls for three quarters of a corpus
+#: that browsed.
+FS_BROWSING_TOOL_TOKENS = ("websearch", "webfetch", "web_search", "web_fetch")
+
+#: The fields :func:`read_transcript_witness` publishes, and what ``None`` means in each.
+#:
+#: Every key is always present in ``_meta.json``. ``None`` is "not observed", never zero
+#: and never false: a run with no transcript -- ``--fake-operator``, or a crash before the
+#: first call -- must not be able to satisfy a ``browsing_tool_calls == 0`` admission
+#: clause by having no evidence. A clause reading a null refuses the pair, which is the
+#: safe direction; a clause reading a zero admits it.
+FS_TRANSCRIPT_FIELDS = (
+    "stop_reason",
+    "truncated",
+    "browsing_tool_calls",
+    "browsing_tool_names",
+    "backend_calls",
+    "output_tokens_total",
+)
+
+
+def _is_browsing_tool(name: str) -> bool:
+    lowered = name.lower()
+    return any(token in lowered for token in FS_BROWSING_TOOL_TOKENS)
+
+
+def read_transcript_witness(paths: RunPaths | None) -> dict[str, Any]:
+    """What the raw stream-json log says the backend actually did.
+
+    Six fields, all of them ``None`` when there is no transcript to read. The run tree is
+    created for this: ``_fresh_run_tree`` in the front end exists so that even the direct
+    arm's single call streams into ``logs_raw.jsonl``, because on a benchmark whose
+    published protocol is "without browsing" the transcript is the only witness for
+    whether the agent reached for a browsing tool. Denying the tools says what the agent
+    was *allowed* to do; this says what it did.
+
+    One file covers every seat. The reviewer and each ideation proposer stream through the
+    same :class:`src.utils.RunPaths`, so a count taken here is a count over all seven
+    models the pipeline arm seats, not over the executor alone.
+
+    The shapes below were read off a real corpus rather than a schema: a 7,141-line
+    transcript from the sibling benchmark carries 73 ``type: "result"`` lines, each with
+    ``stop_reason``, ``usage.output_tokens`` and ``usage.server_tool_use`` counters, and
+    4,235 ``type: "assistant"`` lines whose ``message.content`` holds the ``tool_use``
+    blocks. ``stop_reason`` is *absent* from almost every assistant line, which is why it
+    is taken from the result lines.
+
+    ``truncated`` is true when **any** call in the run stopped at its token ceiling, not
+    only the last one: a stage that was cut off and then retried leaves a complete final
+    answer standing on an incomplete one.
+    """
+    absent: dict[str, Any] = {field: None for field in FS_TRANSCRIPT_FIELDS}
+    if paths is None or not paths.logs_raw.exists():
+        return absent
+
+    backend_calls = 0
+    output_tokens = 0
+    browsing_calls = 0
+    browsing_names: set[str] = set()
+    stop_reason: str | None = None
+    truncated = False
+    with paths.logs_raw.open("r", encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                # A non-JSON line is logged by the operator itself, wrapped in `_meta`.
+                # Skipping it is not a silent drop: the count it would contribute to is
+                # `backend_calls`, and a line that is not JSON is not a completed call.
+                continue
+            if not isinstance(payload, dict):
+                continue
+            message = payload.get("message")
+            if isinstance(message, dict):
+                for block in message.get("content") or []:
+                    if not isinstance(block, dict) or block.get("type") != "tool_use":
+                        continue
+                    name = str(block.get("name") or "")
+                    if _is_browsing_tool(name):
+                        browsing_calls += 1
+                        browsing_names.add(name)
+            if payload.get("type") != "result":
+                continue
+            backend_calls += 1
+            reason = payload.get("stop_reason")
+            if isinstance(reason, str) and reason:
+                stop_reason = reason
+                if reason == "max_tokens":
+                    truncated = True
+            usage = payload.get("usage")
+            if isinstance(usage, dict):
+                tokens = usage.get("output_tokens")
+                if isinstance(tokens, int):
+                    output_tokens += tokens
+                server = usage.get("server_tool_use")
+                if isinstance(server, dict):
+                    # Server-side search never appears as a `tool_use` block, so a count
+                    # taken only from the blocks would read zero on a run that searched.
+                    for key, count in server.items():
+                        if isinstance(count, int) and count and _is_browsing_tool(str(key)):
+                            browsing_calls += count
+                            browsing_names.add(str(key))
+    if backend_calls == 0 and browsing_calls == 0 and not browsing_names:
+        # A transcript that holds no completed call is not a witness to anything. Reading
+        # it as "zero browsing calls" would let a run that never started satisfy the
+        # protocol clause by producing no evidence.
+        return absent
+    return {
+        "stop_reason": stop_reason,
+        "truncated": truncated,
+        "browsing_tool_calls": browsing_calls,
+        "browsing_tool_names": sorted(browsing_names),
+        "backend_calls": backend_calls,
+        "output_tokens_total": output_tokens,
+    }
+
+
 def stages_approved_in(paths: RunPaths) -> list[str]:
     """Stage slugs a reviewer actually approved, from the run manifest.
 
@@ -1603,12 +1767,17 @@ def _no_content_refusal(meta: Mapping[str, Any]) -> bool:
 #: :func:`fs_exit_failures` walks this and nothing else.
 #:
 #: The list exists because of a measured defect on the sibling benchmark, and it is the
-#: most important thing in this file. Forty of forty real ResearchClawBench runs wrote
-#: ``status: "completed"``; 77.5% of them had auto-skipped at least one stage and 17.5%
-#: had auto-skipped *the stage being scored*, and ``auto_skipped_stages`` appeared only in
-#: the stdout event stream and never in ``_meta.json``. Every downstream that read the
-#: metadata -- the scorer, the leaderboard importer, the trial driver -- recorded those as
-#: successes. So the fields below are in the metadata, the exit code is computed from the
+#: most important thing in this file. Measured over the forty real ResearchClawBench runs
+#: under ``/rmeng_data/robtang/autor-rcb-rerun/workspaces/``: thirty-nine of forty wrote
+#: ``status: "completed"`` and the fortieth wrote no result line at all, crashing with
+#: ``status: "running"`` and no ``pipeline_completed`` key. 77.5% of the forty had
+#: auto-skipped at least one stage and 20% had auto-skipped *the stage being scored*, and
+#: ``auto_skipped_stages`` appears in none of the forty metadata files -- it existed only
+#: in the stdout event stream. Every downstream that read the metadata -- the scorer, the
+#: leaderboard importer, the trial driver -- recorded the thirty-nine as successes and had
+#: nothing to say about the fortieth, which is the same defect from the other side: a
+#: false claim and a missing claim read alike to a reader that checks a field for
+#: truthiness. So the fields below are in the metadata, the exit code is computed from the
 #: metadata, and the two cannot disagree.
 FS_EXIT_CLAUSES: tuple[tuple[str, str, "Callable[[Mapping[str, Any]], bool]"], ...] = (
     ("answer_present", "an answer file exists at the workspace path", _answer_present),
@@ -1669,6 +1838,9 @@ def build_fs_meta(
     duration_seconds: int,
     attempt_index: int = 0,
     fake_operator: bool = False,
+    disallowed_tools_requested: Sequence[str] | None = None,
+    disallowed_tools_by_seat: Mapping[str, Sequence[str]] | None = None,
+    witness: Mapping[str, Any] | None = None,
     extra: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The metadata record, assembled before it is written or judged.
@@ -1679,6 +1851,19 @@ def build_fs_meta(
     field a trial's admission clauses read: what was answered, by whom, under
     which instruction, with which tools denied, and whether the pipeline actually
     finished.
+
+    **Three fields about tools where there was one.** ``disallowed_tools`` is what every
+    model seat in the run was actually carrying -- the intersection, so that a run-level
+    sentence cannot be falsified by one seat -- ``disallowed_tools_requested`` is what the
+    flags asked for, and ``disallowed_tools_by_seat`` names each seat. They differ
+    whenever a backend has no knob for the request, which today is every codex seat, and a
+    record that carried only the request would say "WebSearch and WebFetch were denied" of
+    a run that denied nothing.
+
+    **The six transcript fields are always present, and null is not zero.** They come from
+    :func:`read_transcript_witness`, they are ``None`` when there is no transcript, and an
+    admission clause reading ``browsing_tool_calls == 0`` therefore refuses a run that
+    produced no evidence rather than admitting it.
     """
     payload: dict[str, Any] = {
         "schema": FS_META_SCHEMA,
@@ -1699,6 +1884,12 @@ def build_fs_meta(
         "dataset_path": str(dataset_path) if dataset_path is not None else "",
         "dataset_sha256": dataset_sha256,
         "disallowed_tools": list(disallowed_tools),
+        "disallowed_tools_requested": list(
+            disallowed_tools if disallowed_tools_requested is None else disallowed_tools_requested
+        ),
+        "disallowed_tools_by_seat": {
+            seat: list(tools) for seat, tools in (disallowed_tools_by_seat or {}).items()
+        },
         "pipeline_completed": bool(pipeline_completed),
         "auto_skipped_stages": list(auto_skipped_stages),
         "stages_approved": list(stages_approved),
@@ -1708,6 +1899,8 @@ def build_fs_meta(
         "answer_sha256": answer.sha256,
         "refusals": list(answer.refusals),
     }
+    observed = dict(witness or {})
+    payload.update({field: observed.get(field) for field in FS_TRANSCRIPT_FIELDS})
     if extra:
         payload.update(dict(extra))
     payload["exit_clause_failures"] = fs_exit_failures(payload)

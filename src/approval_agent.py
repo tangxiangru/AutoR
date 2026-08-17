@@ -5,7 +5,7 @@ import re
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 from .deliverables import COVERAGE_FILENAME
 from .operator import ClaudeOperator
@@ -252,6 +252,7 @@ class AutomatedReviewer:
         stage_timeout: int = 14400,
         unattended: bool = False,
         codex_command: str = "codex",
+        disallowed_tools: Sequence[str] = (),
     ) -> None:
         # Unattended runs cannot ask a human what the reviewer meant, and aborting a
         # multi-hour run because a verdict was unreadable throws away work the reviewer
@@ -262,11 +263,27 @@ class AutomatedReviewer:
             # `codex_command` for the same reason the execution operator takes one: the
             # binary is where a different backend is selected, and a reviewer left on the
             # default would silently be a different model from the stages it is judging.
+            # `disallowed_tools` is *not* forwarded, because `CodexOperator` has no such
+            # parameter; `self.disallowed_tools` below therefore reads back empty for a
+            # codex reviewer, which is what was applied rather than what was asked for.
             self._operator = CodexOperator(model=model, fake_mode=fake_mode, ui=ui,
                                            stage_timeout=stage_timeout, command=codex_command)
         else:
             normalized_backend = "claude"
-            self._operator = ClaudeOperator(model=model, fake_mode=fake_mode, ui=ui, stage_timeout=stage_timeout)
+            self._operator = ClaudeOperator(
+                model=model,
+                fake_mode=fake_mode,
+                ui=ui,
+                stage_timeout=stage_timeout,
+                disallowed_tools=disallowed_tools,
+            )
+        # Read back off the operator rather than stored from the argument. A reviewer is
+        # a model seat, a protocol that denies a tool has to reach every seat or it is not
+        # the protocol, and the only honest record of a denial is the one the thing that
+        # would make the call is actually carrying. Empty by default, which is every
+        # existing caller: withholding a tool a stage contract assumes is available fails
+        # the stage rather than the tool.
+        self.disallowed_tools = tuple(getattr(self._operator, "disallowed_tools", ()))
         self.backend_name = normalized_backend
         self.model = model
         self.fake_mode = fake_mode

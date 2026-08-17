@@ -1,12 +1,16 @@
 """A run that reports success while producing nothing is the defect this file guards.
 
-Forty of forty real ResearchClawBench runs on this machine wrote ``status: "completed"``
-into ``_meta.json``. Thirty-one of them had auto-skipped at least one stage and seven had
-auto-skipped *the very stage being scored*, and the word ``auto_skipped_stages`` appeared
-nowhere in the metadata — it existed only in the stdout event stream, which no downstream
-reads. The scorer, the leaderboard importer and the trial driver all recorded those runs
-as successes, and nothing surfaced it until a human read the transcripts thirteen hours
-later.
+Measured over the forty real ResearchClawBench runs under
+``/rmeng_data/robtang/autor-rcb-rerun/workspaces/``: thirty-nine of forty wrote
+``status: "completed"`` into ``_meta.json``, and the fortieth wrote no result line at all
+— it crashed, leaving ``status: "running"`` and no ``pipeline_completed`` key. Thirty-one
+of the forty had auto-skipped at least one stage and eight had auto-skipped *the very
+stage being scored*, and the word ``auto_skipped_stages`` appears in none of the forty
+metadata files — it existed only in the stdout event stream, which no downstream reads.
+The scorer, the leaderboard importer and the trial driver recorded the thirty-nine as
+successes and had nothing at all to say about the fortieth, and nothing surfaced either
+shape until a human read the transcripts thirteen hours later. The two are one defect: a
+downstream that decides on a field cannot tell a false claim from a missing one.
 
 So the FrontierScience adapter computes its exit code from the same dictionary it writes
 to disk, and refuses six separate ways. :class:`ExitCodeTests` flips exactly one conjunct
@@ -148,6 +152,28 @@ class RecordingOperator:
         return (0, self.reply, "", None, {})
 
 
+def all_goals() -> list[tuple[str, str]]:
+    """Every combination of guidance and workspace, labelled.
+
+    Module level rather than a method, because two classes scan this same population: one
+    asks where the fence is and the other asks what the rendered text says about marking,
+    and a second copy of the six combinations is the copy that stops at five.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        return [
+            (
+                f"{guidance}/{'workspace' if ws else 'no workspace'}",
+                build_fs_goal(
+                    A_PROBLEM,
+                    workspace=Path(tmp) if ws else None,
+                    answer_guidance=guidance,
+                ),
+            )
+            for guidance in FS_ANSWER_GUIDANCE_CHOICES
+            for ws in (True, False)
+        ]
+
+
 def a_run_tree(root: Path):
     """A run tree with the layout the operator seam expects."""
     paths = build_run_paths(root / ".autor" / "20260817_000000")
@@ -190,24 +216,8 @@ def a_meta(**overrides) -> dict:
 class TheFencedTaskComesFirstTests(unittest.TestCase):
     """Five readers in this tree take a prefix of the goal and one reads the fence."""
 
-    def all_goals(self) -> list[tuple[str, str]]:
-        """Every combination of guidance and workspace, labelled."""
-        with tempfile.TemporaryDirectory() as tmp:
-            return [
-                (
-                    f"{guidance}/{'workspace' if ws else 'no workspace'}",
-                    build_fs_goal(
-                        A_PROBLEM,
-                        workspace=Path(tmp) if ws else None,
-                        answer_guidance=guidance,
-                    ),
-                )
-                for guidance in FS_ANSWER_GUIDANCE_CHOICES
-                for ws in (True, False)
-            ]
-
     def test_the_task_fence_opens_in_the_first_line_or_two_of_every_goal(self) -> None:
-        for label, goal in self.all_goals():
+        for label, goal in all_goals():
             with self.subTest(combination=label):
                 self.assertIn(TASK_BEGIN_MARKER, goal)
                 self.assertIn(TASK_END_MARKER, goal)
@@ -220,7 +230,7 @@ class TheFencedTaskComesFirstTests(unittest.TestCase):
                 )
 
     def test_every_goal_yields_the_problem_and_only_the_problem(self) -> None:
-        for label, goal in self.all_goals():
+        for label, goal in all_goals():
             with self.subTest(combination=label):
                 self.assertEqual(task_statement(goal), A_PROBLEM)
 
@@ -286,6 +296,47 @@ class TheAgentIsNeverToldHowItIsMarkedTests(unittest.TestCase):
         self.assertIn("worth more", hits)
         self.assertIn("earns", hits)
         self.assertIn("lost mark", hits)
+
+    def test_no_rendered_goal_describes_the_marking_unless_it_was_asked_to(self) -> None:
+        """The scan runs on the artefact, not on the ingredients.
+
+        Two module constants were the whole population, so anything joined on after the
+        blocks were assembled escaped: appending "Each correct specific earns points." to
+        :func:`build_fs_goal`'s return value left every test green. The population is now
+        the six rendered goals, and ``coverage`` is the control — it is the one
+        combination that must trip, so a scanner matching nothing would fail here rather
+        than pass everywhere.
+
+        The fenced problem is the dataset's words rather than this harness's, so
+        :data:`A_PROBLEM` is written free of the list: a hit is always the harness's.
+        """
+        for label, goal in all_goals():
+            with self.subTest(combination=label):
+                hits = self.scan(goal, self.SCORING_WORDS)
+                if label.startswith("coverage"):
+                    self.assertIn("worth more", hits)
+                    self.assertIn("earns", hits)
+                else:
+                    self.assertEqual(hits, [])
+
+    def test_the_synthesis_prompt_never_describes_the_marking_either(self) -> None:
+        """A full prompt, sent only in the treatment arm, and it was unscanned.
+
+        :meth:`AnswerSynthesizer.build_prompt` is not part of
+        :data:`FS_TASK_INSTRUCTION_SHA256` and reaches only one of the two arms, so
+        scoring-function language added here would be an undeclared one-sided prompt
+        intervention with no witness anywhere in the tree — the exact defect this class
+        exists to prevent, one file away from where it was being looked for.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            prompt = AnswerSynthesizer(RecordingOperator()).build_prompt(
+                paths=a_run_tree(workspace),
+                workspace=workspace,
+                problem=A_PROBLEM,
+                stages_approved=["02_hypothesis_generation"],
+            )
+        self.assertEqual(self.scan(prompt, self.SCORING_WORDS), [])
 
     def test_the_coverage_block_is_off_unless_it_is_asked_for(self) -> None:
         self.assertNotIn(FS_COVERAGE_GUIDANCE, build_fs_goal(A_PROBLEM))
@@ -357,15 +408,57 @@ class AnAnswerThatIsAPlanIsNotAnAnswerTests(unittest.TestCase):
             )
         )
 
-    def test_an_answer_that_merely_uses_the_word_objective_is_not_refused(self) -> None:
-        """The control, and the reason the match is anchored on a heading.
+    def test_capitalised_prose_using_those_words_is_not_refused(self) -> None:
+        """The control for the deviation, and it has to be a string that discriminates.
 
-        A bare substring test refuses "The objective is to show that..." — ordinary
-        English in a physics answer — and a false refusal costs the whole task, where a
-        missed detection costs one low score in a population of sixty.
+        The design said "contains any of ``REQUIRED_STAGE_HEADINGS``" as a bare substring;
+        the shipped pattern is anchored on a heading instead, and the justification is that
+        a bare substring refuses ordinary English. A control written in *lowercase* prose
+        does not witness that: ``FS_STAGE_HEADING_PATTERN`` used to be case-sensitive, so
+        the bare-substring version returned no match on it either and the two instruments
+        agreed. These strings are the ones they disagree on — a capitalised sentence
+        opening and a bolded phrase mid-sentence — so replacing the pattern with the
+        design's version fails here.
         """
-        prose = AN_ANSWER + "\nThe objective is to show that the key results scale as L^(1/2).\n"
-        self.assertEqual(answer_content_refusals(prose), [])
+        for prose in (
+            "Objective: determine the period of the pendulum, then its damping.",
+            "The Key Results below are quoted for L = 1.00 m.",
+            "The **key results** scale as L^(1/2), and Your Options follow from them.",
+        ):
+            with self.subTest(prose=prose):
+                self.assertEqual(answer_content_refusals(AN_ANSWER + "\n" + prose + "\n"), [])
+
+    def test_the_same_words_as_a_heading_are_refused(self) -> None:
+        """The positive twin. A control that only ever passes proves the scanner is off."""
+        for heading in ("## Objective\n\nfoo\n", "### **What I Did**\n\nfoo\n"):
+            with self.subTest(heading=heading):
+                self.assertTrue(
+                    any(
+                        reason.startswith(FS_REFUSAL_ANSWER_IS_A_PLAN)
+                        for reason in answer_content_refusals(AN_ANSWER + "\n" + heading)
+                    )
+                )
+
+    def test_the_two_shapes_a_model_writes_instead_of_a_hash_heading_are_caught(self) -> None:
+        """Measured coverage holes in the first version of the pattern, now decided.
+
+        ``**Key Results**`` on a line of its own is a heading whatever it is made of, and
+        ``## objective`` is one whoever typed it. Both were missed while ``## Objective``
+        was refused, which is a gate that depends on the model's capitalisation.
+        """
+        self.assertTrue(answer_content_refusals("**Key Results**\n\nT = 2.01 s\n"))
+        self.assertTrue(answer_content_refusals("## objective\n\nfoo\n"))
+
+    def test_setext_underlining_is_the_shape_this_knowingly_does_not_catch(self) -> None:
+        """Recorded rather than left to be discovered as a surprise.
+
+        A heading underlined with dashes needs a look-ahead to the next line, which turns
+        the pattern into a parser; and no stage summary in this tree emits one, so the
+        path that reaches ``answer.md`` from a stage is covered without it. The cost of
+        the miss is one low score, not a refused task. If this test ever fails, the
+        pattern grew a capability and this docstring is out of date rather than wrong.
+        """
+        self.assertEqual(answer_content_refusals("Key Results\n-----------\n\nfoo\n"), [])
 
     def test_a_clean_answer_is_not_refused(self) -> None:
         self.assertEqual(answer_content_refusals(AN_ANSWER), [])
@@ -583,11 +676,20 @@ class ExitCodeTests(unittest.TestCase):
         self.assertEqual(fs_exit_failures(meta), ["answer_not_fallback"])
 
     def test_a_pipeline_that_did_not_complete_exits_non_zero(self) -> None:
-        """The clause the sibling benchmark did not have. It is the one that fires here.
+        """The clause the sibling benchmark has too. What it lacked was the other field.
 
-        When Stage 02 exhausts its retries under ``--max-auto-skips 0`` the manager routes
-        to the deliverable, finds it is already at the final stage, and aborts —
-        ``auto_skipped_stages`` stays *empty* the whole way. Only this clause sees it.
+        ResearchClawBench declares an admission clause of this name and computes the field
+        for it, so "a clause RCB did not have" would be false. What its ``_meta.json``
+        never carried is ``auto_skipped_stages``: measured over the forty real runs, all
+        thirty-nine that finished carry ``pipeline_completed`` and none of the forty
+        carries ``auto_skipped_stages``, so the skipped-stage case escaped through the
+        metadata. Here the two are computed from one dictionary in one place, so they
+        cannot disagree.
+
+        This is the case where only ``pipeline_completed`` can see the failure: when
+        Stage 02 exhausts its retries under ``--max-auto-skips 0`` the manager routes to
+        the deliverable, finds it is already at the final stage, and aborts —
+        ``auto_skipped_stages`` stays *empty* the whole way.
         """
         meta = self.passing(pipeline_completed=False)
         self.assertEqual(fs_exit_failures(meta), ["pipeline_completed"])
@@ -838,6 +940,172 @@ class BrowsingIsDeniedOnBothArmsTests(unittest.TestCase):
         self.assertFalse(operator.web_search_mcp)
 
 
+class EverySeatIsDeniedTheSameToolsTests(unittest.TestCase):
+    """The protocol is a claim about the run, and the ``ideate`` arm runs seven models.
+
+    Denying the browsing tools to the execution operator alone left the reviewer and all
+    five ideation proposers able to search, while ``_meta.json`` recorded one run-level
+    ``disallowed_tools: ["WebSearch", "WebFetch"]`` — a true sentence about one seat
+    published as a sentence about the run. On a benchmark whose published protocol is
+    "without browsing", a treatment-arm win would then have been indistinguishable from a
+    win at browsing, and the artifact would have said browsing was denied.
+    """
+
+    DENIED = ("WebSearch", "WebFetch")
+
+    def an_ideate_arm(self, *argv: str):
+        """The executor and the manager the ``ideate`` arm would run with."""
+        import contextlib
+        import io
+
+        from src.terminal_ui import TerminalUI
+
+        args = fs_agent.parse_args(["--fake-operator", "--profile", "ideate", *argv])
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        workspace = Path(tmp.name)
+        ui = TerminalUI(interactive=False)
+        operator = fs_agent.create_operator(
+            "claude",
+            model="sonnet",
+            codex_sandbox="workspace-write",
+            fake_mode=True,
+            ui=ui,
+            stage_timeout=60,
+            disallowed_tools=self.DENIED,
+        )
+        with contextlib.redirect_stdout(io.StringIO()):
+            manager = fs_agent.build_manager(
+                args,
+                workspace=workspace,
+                runs_dir=workspace / ".autor",
+                operator=operator,
+                ui=ui,
+                review_backend="claude",
+                review_model="sonnet",
+                disallowed_tools=self.DENIED,
+            )
+        return operator, manager
+
+    def every_backend(self, operator, manager) -> dict[str, object]:
+        """The objects that would spawn a CLI, one per seat.
+
+        Walked down to the operator rather than stopped at the reviewer wrapper: the
+        wrapper is not what builds the command line, and an assertion on it would hold
+        while the thing making the call carried nothing.
+        """
+        backends: dict[str, object] = {"executor": operator}
+        backends["reviewer"] = manager.reviewer._operator  # noqa: SLF001
+        for key, member in manager.ideation_panel._members.items():  # noqa: SLF001
+            backends[f"proposer:{key}"] = member._operator  # noqa: SLF001
+        return backends
+
+    def test_every_operator_the_ideate_arm_seats_is_denied_the_browsing_tools(self) -> None:
+        operator, manager = self.an_ideate_arm()
+        for seat, backend in self.every_backend(operator, manager).items():
+            with self.subTest(seat=seat):
+                self.assertEqual(tuple(backend.disallowed_tools), self.DENIED)
+
+    def test_the_walk_finds_seven_distinct_backends_and_not_one_of_them_seven_times(self) -> None:
+        """The control. A walk that returned the executor under seven names would pass."""
+        operator, manager = self.an_ideate_arm()
+        backends = self.every_backend(operator, manager)
+        self.assertEqual(len(backends), 7)
+        self.assertEqual(len({id(backend) for backend in backends.values()}), 7)
+        self.assertEqual(
+            sorted(backends)[:2], ["executor", "proposer:adjacent"], "the seats are named"
+        )
+
+    def test_no_seat_is_offered_a_search_tool_over_mcp_either(self) -> None:
+        """Denying the built-in while handing out an MCP one would be neither protocol."""
+        operator, manager = self.an_ideate_arm()
+        for seat, backend in self.every_backend(operator, manager).items():
+            with self.subTest(seat=seat):
+                self.assertFalse(backend.web_search_mcp)
+
+    def test_the_metadata_names_each_seat_and_what_that_seat_carries(self) -> None:
+        operator, manager = self.an_ideate_arm()
+        seats = fs_agent.operator_seats(operator, manager)
+        self.assertEqual(sorted(seats), sorted(self.every_backend(operator, manager)))
+        for seat, tools in seats.items():
+            with self.subTest(seat=seat):
+                self.assertEqual(tools, self.DENIED)
+
+    def test_a_panel_that_is_off_leaves_two_seats_and_says_so(self) -> None:
+        """The other half of the count: the census follows the run's own assembly."""
+        operator, manager = self.an_ideate_arm("--no-ideation-panel")
+        self.assertEqual(sorted(fs_agent.operator_seats(operator, manager)), ["executor", "reviewer"])
+
+    def test_the_direct_arm_seats_exactly_one_backend(self) -> None:
+        from src.terminal_ui import TerminalUI
+
+        operator = fs_agent.create_operator(
+            "claude",
+            model="sonnet",
+            codex_sandbox="workspace-write",
+            fake_mode=True,
+            ui=TerminalUI(interactive=False),
+            stage_timeout=60,
+            disallowed_tools=self.DENIED,
+        )
+        self.assertEqual(fs_agent.operator_seats(operator), {"executor": self.DENIED})
+
+    def test_the_run_level_list_is_what_every_seat_carries_not_what_one_does(self) -> None:
+        """Intersection, not union: one denied seat must not speak for six undenied ones."""
+        self.assertEqual(
+            fs_agent.tools_denied_on_every_seat(
+                {"executor": self.DENIED, "reviewer": self.DENIED}
+            ),
+            self.DENIED,
+        )
+        self.assertEqual(
+            fs_agent.tools_denied_on_every_seat({"executor": self.DENIED, "reviewer": ()}),
+            (),
+        )
+        self.assertEqual(
+            fs_agent.tools_denied_on_every_seat(
+                {"executor": self.DENIED, "reviewer": ("WebSearch",)}
+            ),
+            ("WebSearch",),
+        )
+
+    def test_a_codex_seat_records_the_denial_it_could_apply_and_not_the_one_requested(self) -> None:
+        """``--operator codex`` used to record a denial it structurally cannot apply.
+
+        ``CodexOperator`` has no ``disallowed_tools`` parameter, so the list was dropped on
+        the way in and written into ``_meta.json`` on the way out. Recorded from the
+        object now, so a codex run says it denied nothing — which is what happened.
+        """
+        from src.terminal_ui import TerminalUI
+
+        operator = fs_agent.create_operator(
+            "codex",
+            model="default",
+            codex_sandbox="workspace-write",
+            fake_mode=True,
+            ui=TerminalUI(interactive=False),
+            stage_timeout=60,
+            disallowed_tools=self.DENIED,
+        )
+        self.assertEqual(fs_agent.operator_seats(operator), {"executor": ()})
+        self.assertEqual(fs_agent.tools_denied_on_every_seat({"executor": ()}), ())
+
+    def test_the_codex_exemption_is_still_needed(self) -> None:
+        """The day the backend grows the knob, this fails and the exemption goes away."""
+        import inspect
+
+        from src.operator_codex import CodexOperator
+
+        self.assertNotIn(
+            "disallowed_tools", inspect.signature(CodexOperator.__init__).parameters
+        )
+        self.assertIn(
+            "disallowed_tools",
+            inspect.signature(fs_agent.ClaudeOperator.__init__).parameters,
+            "the control: the parameter exists on the backend that does have it",
+        )
+
+
 class WorkspaceNamingTests(unittest.TestCase):
     def test_two_workspaces_named_in_the_same_second_do_not_collide(self) -> None:
         """A second was not enough: two arms in one directory made the paired delta zero."""
@@ -901,6 +1169,438 @@ class TheFrontEndDeclaresTwoArmsAndNoMoreTests(unittest.TestCase):
 
         source = (REPO / "fs_agent.py").read_text(encoding="utf-8")
         self.assertGreater(len(re.findall(r'add_argument\(\s*"(--[a-z0-9-]+)"', source)), 20)
+
+
+class WhatTheRunAppliedIsWhatTheRecordSaysTests(unittest.TestCase):
+    """``run()`` itself, with the dataset stubbed so this runs on a machine without it.
+
+    Everything here was untested, and every one of it is a field two arms are compared on.
+    ``disallowed_tools``, ``task_instruction_sha256`` and ``answer_guidance`` are three of
+    the eight the trial's environment digest is built from, and the wiring from
+    ``--web-search off`` to the operator's denied list *is* the protocol. Deleting any of
+    them inside ``run()`` left the suite green: the helpers each had a unit test and the
+    caller had none, so ``build_fs_meta(disallowed_tools=())`` and
+    ``create_operator(..., disallowed_tools=())`` were both free moves.
+
+    The dataset is stubbed rather than skipped. A guarantee about the front end that only
+    holds when a 372 kB file nobody may commit happens to be on the machine is a guarantee
+    that does not hold on CI, which is where a regression would otherwise be caught.
+    """
+
+    def a_row(self):
+        from src.frontierscience import FsRow
+
+        payload = json.loads(SYNTHETIC.read_text(encoding="utf-8").splitlines()[0])
+        return FsRow.from_payload(0, payload)
+
+    def run_agent(self, *argv: str, workspace: Path | None = None) -> tuple[int, dict]:
+        import contextlib
+        import io
+        from unittest.mock import patch
+
+        if workspace is None:
+            tmp = tempfile.TemporaryDirectory()
+            self.addCleanup(tmp.cleanup)
+            workspace = Path(tmp.name) / "fs000_arm"
+        rows = [self.a_row()]
+        with patch.object(fs_agent, "load_dataset", lambda *a, **k: rows):
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = fs_agent.main(
+                    [
+                        "--fake-operator",
+                        "--task", "fs:000",
+                        "--dataset", str(SYNTHETIC),
+                        "--workspace", str(workspace),
+                        *argv,
+                    ]
+                )
+        meta_path = workspace / "_meta.json"
+        meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
+        return code, meta
+
+    def test_the_written_record_carries_the_tools_the_run_denied(self) -> None:
+        _code, meta = self.run_agent("--profile", "direct")
+        self.assertEqual(meta["disallowed_tools"], ["WebSearch", "WebFetch"])
+        self.assertEqual(meta["disallowed_tools_requested"], ["WebSearch", "WebFetch"])
+        self.assertEqual(meta["disallowed_tools_by_seat"], {"executor": ["WebSearch", "WebFetch"]})
+
+    def test_the_pipeline_arm_records_all_seven_seats(self) -> None:
+        _code, meta = self.run_agent("--profile", "ideate")
+        seats = meta["disallowed_tools_by_seat"]
+        self.assertEqual(len(seats), 7)
+        for seat, tools in seats.items():
+            with self.subTest(seat=seat):
+                self.assertEqual(tools, ["WebSearch", "WebFetch"])
+
+    def test_the_denied_list_arrives_from_the_web_search_flag(self) -> None:
+        """Captured at the seam, because the flag is one rename away from the operator."""
+        import contextlib
+        import io
+        from unittest.mock import patch
+
+        captured: list[dict] = []
+        real = fs_agent.create_operator
+
+        def capture(backend, **kwargs):
+            captured.append(dict(kwargs))
+            return real(backend, **kwargs)
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        rows = [self.a_row()]
+        with patch.object(fs_agent, "load_dataset", lambda *a, **k: rows), \
+                patch.object(fs_agent, "create_operator", capture):
+            with contextlib.redirect_stdout(io.StringIO()):
+                fs_agent.main(
+                    [
+                        "--fake-operator", "--task", "fs:000", "--dataset", str(SYNTHETIC),
+                        "--workspace", str(Path(tmp.name) / "fs000_arm"), "--profile", "direct",
+                    ]
+                )
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(captured[0]["disallowed_tools"], ("WebSearch", "WebFetch"))
+
+    def test_an_explicit_denied_list_overrides_what_the_search_mode_implies(self) -> None:
+        _code, meta = self.run_agent("--profile", "direct", "--disallowed-tools", "Bash", "WebFetch")
+        self.assertEqual(meta["disallowed_tools_requested"], ["Bash", "WebFetch"])
+        self.assertEqual(meta["disallowed_tools"], ["Bash", "WebFetch"])
+
+    def test_the_record_carries_the_digest_of_the_instruction_that_was_sent(self) -> None:
+        _code, meta = self.run_agent("--profile", "direct")
+        self.assertEqual(meta["task_instruction_sha256"], FS_TASK_INSTRUCTION_SHA256)
+
+    def test_the_recorded_guidance_is_the_one_the_flag_asked_for(self) -> None:
+        """Two arms told different things is not a pair, and the record is how anyone knows."""
+        for guidance in FS_ANSWER_GUIDANCE_CHOICES:
+            with self.subTest(guidance=guidance):
+                _code, meta = self.run_agent("--profile", "direct", "--answer-guidance", guidance)
+                self.assertEqual(meta["answer_guidance"], guidance)
+
+    def test_the_direct_arm_is_never_handed_the_workspace_contract(self) -> None:
+        """The goal the run tree recorded is the goal the model was given.
+
+        The direct arm's reply *is* the answer, so a contract telling it to write
+        ``answer.md`` would make the control arm do a second thing the treatment does —
+        and the two arms would differ by more than the pipeline.
+        """
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        workspace = Path(tmp.name) / "fs000_arm"
+        self.run_agent("--profile", "direct", workspace=workspace)
+        goals = sorted(workspace.glob(".autor/*/user_input.txt"))
+        self.assertEqual(len(goals), 1)
+        recorded = goals[0].read_text(encoding="utf-8")
+        self.assertIn(TASK_BEGIN_MARKER, recorded)
+        self.assertNotIn("Where the answer goes", recorded)
+        self.assertNotIn("answer.md", recorded)
+
+    def test_a_fake_answer_says_so_in_the_scored_file(self) -> None:
+        """The marker's own docstring claims two witnesses; this is the second one."""
+        from src.frontierscience import FS_FAKE_ANSWER_MARKER
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        workspace = Path(tmp.name) / "fs000_arm"
+        _code, meta = self.run_agent("--profile", "direct", workspace=workspace)
+        self.assertTrue(meta["fake_operator"])
+        body = answer_path_for(workspace).read_text(encoding="utf-8")
+        self.assertTrue(body.startswith(FS_FAKE_ANSWER_MARKER))
+
+    def test_the_direct_arm_completes_only_if_the_call_came_back_with_text(self) -> None:
+        """Its one completion clause. Hardcoding it true made every direct run a success."""
+        from unittest.mock import patch
+
+        from src.frontierscience import DirectAnswerWriter
+
+        with patch.object(DirectAnswerWriter, "__call__", lambda self, **kwargs: None):
+            code, meta = self.run_agent("--profile", "direct")
+        self.assertEqual(code, 1)
+        self.assertFalse(meta["pipeline_completed"])
+        self.assertIn("pipeline_completed", meta["exit_clause_failures"])
+
+    def test_a_recovered_workspace_always_exits_non_zero(self) -> None:
+        """``--export-only`` cannot observe the walk, so it may not claim it completed."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        workspace = Path(tmp.name) / "fs000_arm"
+        first_code, first_meta = self.run_agent("--profile", "direct", workspace=workspace)
+        self.assertEqual(first_code, 0)
+        self.assertTrue(first_meta["pipeline_completed"])
+
+        code, meta = self.run_agent("--profile", "direct", "--export-only", workspace=workspace)
+        self.assertEqual(code, 1)
+        self.assertFalse(meta["pipeline_completed"])
+        self.assertTrue(meta["export_only"])
+
+    def test_the_six_transcript_fields_are_present_and_null_rather_than_zero(self) -> None:
+        """A fake run has no transcript, and "no evidence" must not read as "no browsing".
+
+        A clause reading ``browsing_tool_calls == 0`` admits a zero and refuses a null, so
+        the null is the safe value for a run that never called a backend.
+        """
+        from src.frontierscience import FS_TRANSCRIPT_FIELDS
+
+        _code, meta = self.run_agent("--profile", "direct")
+        for field in FS_TRANSCRIPT_FIELDS:
+            with self.subTest(field=field):
+                self.assertIn(field, meta)
+                self.assertIsNone(meta[field])
+
+    def test_a_transcript_in_the_run_tree_reaches_the_written_record(self) -> None:
+        """The witness has to be read by the front end, not merely be readable.
+
+        Exercised through ``--export-only`` because that is the one path where a run tree
+        already holds a transcript that this process did not write: the fake operator
+        streams nothing, so a fake run's own fields are null by construction and a test
+        that only looked at those would pass with the reader unplugged.
+        """
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        workspace = Path(tmp.name) / "fs000_arm"
+        self.run_agent("--profile", "direct", workspace=workspace)
+        run_root = sorted((workspace / ".autor").iterdir())[-1]
+        write_transcript(build_run_paths(run_root), A_TRANSCRIPT)
+
+        _code, meta = self.run_agent("--profile", "direct", "--export-only", workspace=workspace)
+        self.assertEqual(meta["browsing_tool_calls"], 4)
+        self.assertIn("WebFetch", meta["browsing_tool_names"])
+        self.assertEqual(meta["backend_calls"], 1)
+        self.assertEqual(meta["output_tokens_total"], 1234)
+        self.assertEqual(meta["stop_reason"], "end_turn")
+        self.assertIs(meta["truncated"], False)
+
+    def test_a_codex_run_records_that_it_denied_nothing(self) -> None:
+        """What was applied, not what was asked for.
+
+        ``CodexOperator`` has no ``disallowed_tools`` parameter, so ``--operator codex``
+        used to write ``["WebSearch", "WebFetch"]`` into the metadata of a run in which
+        nothing was denied to anything. The request is still recorded, under its own name,
+        so the gap is visible rather than resolved in one direction or the other.
+        """
+        _code, meta = self.run_agent("--profile", "direct", "--operator", "codex")
+        self.assertEqual(meta["operator"], "codex")
+        self.assertEqual(meta["disallowed_tools_requested"], ["WebSearch", "WebFetch"])
+        self.assertEqual(meta["disallowed_tools"], [])
+        self.assertEqual(meta["disallowed_tools_by_seat"], {"executor": []})
+
+    def test_print_goal_writes_the_contract_and_leaves_nothing_behind(self) -> None:
+        """Out of the dataset-gated class: with the split hidden this was unguarded.
+
+        A directory ``--print-goal`` created is a directory a trial driver's sweep finds
+        later and counts as a run that was started.
+        """
+        import contextlib
+        import io
+        from unittest.mock import patch
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        workspace = Path(tmp.name) / "fs000_arm"
+        buffer = io.StringIO()
+        rows = [self.a_row()]
+        with patch.object(fs_agent, "load_dataset", lambda *a, **k: rows):
+            with contextlib.redirect_stdout(buffer):
+                code = fs_agent.main(
+                    [
+                        "--task", "fs:000", "--dataset", str(SYNTHETIC),
+                        "--workspace", str(workspace), "--profile", "ideate", "--print-goal",
+                    ]
+                )
+        self.assertEqual(code, 0)
+        self.assertIn(TASK_BEGIN_MARKER, buffer.getvalue())
+        self.assertIn("Where the answer goes", buffer.getvalue())
+        self.assertFalse(workspace.exists(), "printing the contract must leave nothing behind")
+
+
+#: Four lines shaped like the ones a real ``logs_raw.jsonl`` holds. Written here rather
+#: than copied from a run: the shapes were read off a real 7,141-line transcript from the
+#: sibling benchmark (4,235 ``assistant`` lines, 73 ``result`` lines each carrying
+#: ``stop_reason``, ``usage.output_tokens`` and ``usage.server_tool_use``), and a real
+#: transcript quotes a real task, which does not belong in this repository.
+A_TRANSCRIPT = [
+    {
+        "type": "assistant",
+        "message": {
+            "content": [
+                {"type": "text", "text": "Working."},
+                {"type": "tool_use", "name": "Bash", "input": {}},
+                {"type": "tool_use", "name": "mcp__autor-search__web_search", "input": {}},
+            ]
+        },
+    },
+    {"_meta": {"stage": "02_hypothesis_generation", "attempt": 1, "mode": "real_start"}},
+    {
+        "type": "assistant",
+        "message": {"content": [{"type": "tool_use", "name": "WebFetch", "input": {}}]},
+    },
+    {
+        "type": "result",
+        "subtype": "success",
+        "stop_reason": "end_turn",
+        "usage": {
+            "output_tokens": 1234,
+            "server_tool_use": {"web_search_requests": 2, "web_fetch_requests": 0},
+        },
+    },
+]
+
+
+def write_transcript(paths, events) -> None:
+    paths.logs_raw.parent.mkdir(parents=True, exist_ok=True)
+    paths.logs_raw.write_text(
+        "".join(json.dumps(event) + "\n" for event in events) + "not json at all\n",
+        encoding="utf-8",
+    )
+
+
+class TheTranscriptIsTheWitnessForBrowsingTests(unittest.TestCase):
+    """Denying a tool says what the agent was allowed to do; this says what it did.
+
+    The run tree exists for this. ``_fresh_run_tree`` gives even the single-call arm a
+    place to stream to, and its docstring says the transcript is the only witness for
+    whether the agent reached for a browsing tool — and then nothing counted. Two of the
+    design's ten admission clauses (``answer_not_truncated`` and ``no_browsing``) had no
+    field to bind to.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.paths = a_run_tree(Path(self._tmp.name))
+
+    def test_a_run_with_no_transcript_reports_nothing_rather_than_zero(self) -> None:
+        """The distinction the clause depends on: no evidence is not evidence of none."""
+        from src.frontierscience import FS_TRANSCRIPT_FIELDS, read_transcript_witness
+
+        for witness in (read_transcript_witness(None), read_transcript_witness(self.paths)):
+            for field in FS_TRANSCRIPT_FIELDS:
+                with self.subTest(field=field):
+                    self.assertIsNone(witness[field])
+
+    def test_every_browsing_call_in_the_transcript_is_counted_and_named(self) -> None:
+        """Three calls under two spellings, plus two the server made and never logged."""
+        from src.frontierscience import read_transcript_witness
+
+        write_transcript(self.paths, A_TRANSCRIPT)
+        witness = read_transcript_witness(self.paths)
+        self.assertEqual(witness["browsing_tool_calls"], 4)
+        self.assertEqual(
+            witness["browsing_tool_names"],
+            ["WebFetch", "mcp__autor-search__web_search", "web_search_requests"],
+        )
+        self.assertEqual(witness["backend_calls"], 1)
+        self.assertEqual(witness["output_tokens_total"], 1234)
+        self.assertEqual(witness["stop_reason"], "end_turn")
+        self.assertFalse(witness["truncated"])
+
+    def test_a_run_that_did_not_browse_reports_zero_and_not_none(self) -> None:
+        """The control. A witness that reported nothing for everything would pass above."""
+        from src.frontierscience import read_transcript_witness
+
+        write_transcript(
+            self.paths,
+            [
+                {
+                    "type": "assistant",
+                    "message": {"content": [{"type": "tool_use", "name": "Bash", "input": {}}]},
+                },
+                {"type": "result", "stop_reason": "end_turn", "usage": {"output_tokens": 7}},
+            ],
+        )
+        witness = read_transcript_witness(self.paths)
+        self.assertEqual(witness["browsing_tool_calls"], 0)
+        self.assertEqual(witness["browsing_tool_names"], [])
+        self.assertEqual(witness["backend_calls"], 1)
+
+    def test_the_mcp_spelling_is_the_one_the_real_corpus_uses(self) -> None:
+        """Matching only the flag's spelling would have missed three quarters of a corpus.
+
+        Over the forty real ResearchClawBench transcripts, thirty runs made at least one
+        browsing call; the names are ``mcp__autor-search__web_search`` (29 runs) and
+        ``WebFetch`` (22). The built-in ``WebSearch`` — the name this adapter denies —
+        appears in none of them, because it is disabled on this deployment and an MCP
+        server stands in for it.
+        """
+        from src.frontierscience import _is_browsing_tool
+
+        for name in ("WebSearch", "WebFetch", "mcp__autor-search__web_search", "web_fetch_requests"):
+            with self.subTest(name=name):
+                self.assertTrue(_is_browsing_tool(name))
+        for name in ("Bash", "Read", "TodoWrite", "mcp__autor-workspace__write"):
+            with self.subTest(name=name):
+                self.assertFalse(_is_browsing_tool(name))
+
+    def test_a_call_cut_off_at_its_token_ceiling_is_recorded_as_truncated(self) -> None:
+        """One truncated call in a run of many is still a truncated run.
+
+        The last call standing on an incomplete earlier one reads as complete if only the
+        final ``stop_reason`` is kept, which is how a judge ends up grading half an answer.
+        """
+        from src.frontierscience import read_transcript_witness
+
+        write_transcript(
+            self.paths,
+            [
+                {"type": "result", "stop_reason": "max_tokens", "usage": {"output_tokens": 9}},
+                {"type": "result", "stop_reason": "end_turn", "usage": {"output_tokens": 3}},
+            ],
+        )
+        witness = read_transcript_witness(self.paths)
+        self.assertTrue(witness["truncated"])
+        self.assertEqual(witness["stop_reason"], "end_turn")
+        self.assertEqual(witness["backend_calls"], 2)
+        self.assertEqual(witness["output_tokens_total"], 12)
+
+    def test_a_transcript_holding_no_completed_call_witnesses_nothing(self) -> None:
+        """A stream that died before its first result is not a run that did not browse."""
+        from src.frontierscience import read_transcript_witness
+
+        write_transcript(self.paths, [{"type": "system", "subtype": "init"}])
+        self.assertIsNone(read_transcript_witness(self.paths)["browsing_tool_calls"])
+
+
+class TheAdaptersOwnConstantsAreBoundedTests(unittest.TestCase):
+    """A ceiling nobody pinned is a ceiling one edit away from not being one."""
+
+    #: Largest report any of the forty real ResearchClawBench runs produced, in bytes.
+    #: Measured over ``/rmeng_data/robtang/autor-rcb-rerun/workspaces/*/report/*.md``:
+    #: min 24,799, median 37,067, max 75,263 (n = 40).
+    LARGEST_REAL_REPORT = 75_263
+
+    def test_the_ceiling_stays_within_the_band_its_own_comment_argues_for(self) -> None:
+        """The floor was pinned absolutely and the ceiling was pinned to itself.
+
+        Every ceiling test wrote ``FS_MAX_ANSWER_CHARS + 1``, so raising the constant a
+        thousandfold moved the tests with it and refused nothing. The claim on the
+        constant is "about twice the largest thing the pipeline has ever produced", which
+        is a band: below the largest real artifact it refuses honest work, and far above
+        it stops being a runaway detector at all. 150,000 is 1.99 times 75,263.
+        """
+        self.assertGreaterEqual(
+            FS_MAX_ANSWER_CHARS,
+            round(1.9 * self.LARGEST_REAL_REPORT),
+            "a ceiling near the largest real artifact refuses a thorough answer",
+        )
+        self.assertLessEqual(
+            FS_MAX_ANSWER_CHARS,
+            4 * self.LARGEST_REAL_REPORT,
+            "a ceiling far above anything the pipeline can produce refuses nothing",
+        )
+
+    def test_the_floor_stays_below_a_short_but_complete_derivation(self) -> None:
+        self.assertLess(FS_MIN_ANSWER_CHARS, 800)
+        self.assertGreater(FS_MIN_ANSWER_CHARS, 0)
+
+    def test_this_adapters_own_stage_is_not_one_of_the_eight(self) -> None:
+        """Its slug labels prompts and logs. Wearing Stage 02's identity would file this
+        adapter's synthesis call under the stage the run is being judged on."""
+        from src.frontierscience import FS_ANSWER_STAGE
+        from src.utils import STAGES
+
+        self.assertEqual(FS_ANSWER_STAGE.number, 9)
+        self.assertEqual(FS_ANSWER_STAGE.slug, "09_fs_answer")
+        self.assertNotIn(FS_ANSWER_STAGE.slug, {stage.slug for stage in STAGES})
+        self.assertNotIn(FS_ANSWER_STAGE.number, {stage.number for stage in STAGES})
 
 
 def dataset_present() -> bool:

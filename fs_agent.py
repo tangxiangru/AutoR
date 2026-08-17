@@ -31,18 +31,44 @@ without a search tool is not. Stopping at Stage 02 has a second effect worth nam
 writing stage's figure floor is never consulted, so nothing in :mod:`src.utils` has to
 move for this benchmark to run at all.
 
-**What the exit code means, and why it is not "the pipeline said completed".** On the
-sibling benchmark, forty of forty real runs wrote ``status: "completed"``. Seventy-seven
-and a half per cent of them had auto-skipped at least one stage; seventeen and a half per
-cent had auto-skipped *the stage being scored*; and ``auto_skipped_stages`` appeared only
-in the stdout event stream and never in ``_meta.json``. Every downstream that read the
-metadata therefore recorded those runs as successes, and nothing surfaced it until a human
-read the transcripts thirteen hours later. So this adapter writes the fields that decide
-the verdict into ``_meta.json``, computes the exit code from that same dictionary through
-:func:`src.frontierscience.fs_exit_code`, and refuses six separate ways rather than one:
-the answer file has to exist, be inside the length band, have come from a model rather than
-from the deterministic assembly, follow a procedure that ran to completion, follow a walk
-that auto-skipped nothing, and be an answer rather than a plan for one.
+**What the exit code means, and why it is not "the pipeline said completed".** Measured
+over the forty real ResearchClawBench runs under
+``/rmeng_data/robtang/autor-rcb-rerun/workspaces/``: thirty-nine of forty wrote
+``status: "completed"`` into ``_meta.json``, and the fortieth wrote no result line at all
+-- it crashed, leaving seven keys, ``status: "running"`` and no ``pipeline_completed``.
+Thirty-one of the forty (77.5%) had auto-skipped at least one stage and eight (20%) had
+auto-skipped *the stage being scored*, and ``auto_skipped_stages`` appears in none of the
+forty metadata files: it existed only in the stdout event stream. Both shapes are the same
+defect from two directions -- neither the thirty-nine nor the one was distinguishable from
+success by anything that read the metadata, because the false claim and the missing claim
+read alike to a downstream that checks a field for truthiness. So this adapter writes the
+fields that decide the verdict into ``_meta.json``, computes the exit code from that same
+dictionary through :func:`src.frontierscience.fs_exit_code`, and refuses six separate ways
+rather than one: the answer file has to exist, be inside the length band, have come from a
+model rather than from the deterministic assembly, follow a procedure that ran to
+completion, follow a walk that auto-skipped nothing, and be an answer rather than a plan
+for one.
+
+**The no-browsing protocol reaches every seat, and the record says which.** The published
+protocol forbids browsing, and the ``ideate`` arm seats seven models: the executor, the
+reviewer, and five ideation proposers. The denied-tool list is threaded to all seven
+through :func:`build_manager`, and ``_meta.json`` records ``disallowed_tools_by_seat``
+beside the run-level ``disallowed_tools`` -- which is the intersection over the seats, so
+the run-level sentence cannot be true of one seat and false of six.
+``disallowed_tools_requested`` is kept separately because a backend without the knob
+(every codex seat: ``CodexOperator`` has no ``disallowed_tools`` parameter) applies
+nothing, and a record that carried only the request would claim a denial that never
+happened.
+
+**What the transcript witnesses, and what a null in it means.**
+:func:`src.frontierscience.read_transcript_witness` reads ``logs_raw.jsonl`` -- every
+seat streams into one file -- and writes ``stop_reason``, ``truncated``,
+``browsing_tool_calls``, ``browsing_tool_names``, ``backend_calls`` and
+``output_tokens_total`` into the metadata. All six are always present and all six are
+``None`` when there is no transcript, which is what a ``--fake-operator`` run and a run
+that crashed before its first call both produce. ``None`` is not zero on purpose: a trial
+clause reading ``browsing_tool_calls == 0`` must refuse a run that produced no evidence
+rather than admit it for having none.
 
 Nothing here reads stdin, and every prompt that would block raises instead of hanging.
 """
@@ -55,7 +81,7 @@ import sys
 import time
 import traceback
 from pathlib import Path
-from typing import Sequence
+from typing import Mapping, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parent
 if str(REPO_ROOT) not in sys.path:
@@ -83,6 +109,7 @@ from src.frontierscience import (  # noqa: E402
     fs_workspace_name,
     infer_fs_task_key,
     load_dataset,
+    read_transcript_witness,
     resolve_answer_guidance,
     resolve_dataset_path,
     resolve_task_keys,
@@ -309,7 +336,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Search provider for the operators. Defaults to off here, unlike everywhere "
              "else in this repository: the published protocol for this benchmark forbids "
              "browsing, and 'off' both offers no search tool and denies WebSearch and "
-             "WebFetch to the CLI.",
+             "WebFetch to every Claude seat the run builds -- the executor, the reviewer "
+             "and each ideation proposer. The codex backend has no denied-tool parameter, "
+             "so a codex run records that it denied nothing rather than claiming it did.",
     )
     parser.add_argument(
         "--disallowed-tools",
@@ -317,7 +346,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar="TOOL",
         help="Tool names to deny the agent, overriding what --web-search implies. Both "
              "arms must be given the same list for a paired comparison to mean anything, "
-             "so it is recorded in the run's metadata rather than left implicit.",
+             "so the metadata records the list that was asked for, the list every seat "
+             "actually carries, and the per-seat breakdown -- three fields, because a "
+             "backend without the knob makes the first two differ.",
     )
     parser.add_argument(
         "--cross-review",
@@ -399,6 +430,11 @@ def create_operator(
     tool list and because a run that wanted to measure the protocol's cost could set it --
     but the default is ``off`` and the search-tool wiring is deliberately absent rather
     than merely unset.
+
+    ``disallowed_tools`` reaches the Claude backend and not the codex one, because
+    ``CodexOperator`` has no such parameter. That asymmetry is recorded rather than
+    papered over: :func:`operator_seats` reads the list back off whatever was built, so a
+    codex run's metadata says it denied nothing.
     """
     if backend == "codex":
         return CodexOperator(
@@ -472,6 +508,7 @@ def build_manager(
     review_backend: str,
     review_model: str,
     web_search_context: str | None = None,
+    disallowed_tools: Sequence[str] = (),
 ) -> ResearchManager:
     """Assemble the ``ideate`` arm: one stage, its reviewer, and nothing else.
 
@@ -487,6 +524,15 @@ def build_manager(
     manager and not a constructor keyword. That is a real distinction rather than a
     stylistic one -- passing it as a keyword raises ``TypeError`` -- and it is the shape
     ``rcb_agent.py`` already uses.
+
+    **``disallowed_tools`` reaches every seat this function builds, not just the one it
+    is handed.** The published protocol for this benchmark is "no browsing", and this arm
+    seats seven models: the executor, the reviewer, and five proposers. Denying the
+    browsing tools to the executor alone leaves six that can search, in the arm whose
+    whole claim is that it differs from the control by the pipeline and not by what the
+    models could reach -- so a treatment-arm win would be indistinguishable from a win at
+    browsing while the artifact recorded that browsing was denied. The two constructors
+    below take the list with a default of ``()``, which is every other caller in the tree.
     """
     reviewer = AutomatedReviewer(
         review_backend,
@@ -498,6 +544,7 @@ def build_manager(
         # There is no human on this run, and aborting at the approval gate forfeits the
         # question outright.
         unattended=True,
+        disallowed_tools=disallowed_tools,
     )
     manager = ResearchManager(
         project_root=REPO_ROOT,
@@ -535,8 +582,59 @@ def build_manager(
             ui=ui,
             stage_timeout=args.stage_timeout,
             ideas_per_proposer=args.ideas_per_proposer,
+            disallowed_tools=disallowed_tools,
         )
     return manager
+
+
+#: How a seat is named in ``disallowed_tools_by_seat``. One prefix rather than a bare lens
+#: key so that a reader of the metadata can tell the five proposers from the two seats that
+#: are not proposers without holding the lens vocabulary in their head.
+FS_PROPOSER_SEAT_PREFIX = "proposer:"
+
+
+def operator_seats(operator, manager: ResearchManager | None = None) -> dict[str, tuple[str, ...]]:
+    """Every model seat a run built, and the denied-tool list each one is carrying.
+
+    Read off the objects rather than assembled from the flags, because the flag says what
+    was asked for and the object says what was applied, and those are two different
+    sentences whenever a backend has no knob for it -- ``CodexOperator`` has no
+    ``disallowed_tools`` parameter, so a codex seat reports ``()`` here however the run
+    was invoked. Recording the request instead would put "WebSearch and WebFetch were
+    denied" in the artifact of a run that denied nothing.
+
+    Seven seats on the ``ideate`` arm and one on ``direct``. The count is the point: the
+    first version of this adapter denied the browsing tools to the executor and recorded a
+    single run-level list, which was a true statement about one seat published as a
+    statement about the run.
+    """
+    seats: dict[str, tuple[str, ...]] = {
+        "executor": tuple(getattr(operator, "disallowed_tools", ()))
+    }
+    if manager is None:
+        return seats
+    reviewer = getattr(manager, "reviewer", None)
+    if reviewer is not None:
+        seats["reviewer"] = tuple(getattr(reviewer, "disallowed_tools", ()))
+    panel = getattr(manager, "ideation_panel", None)
+    if panel is not None:
+        for key, member in sorted(getattr(panel, "_members", {}).items()):  # noqa: SLF001
+            seats[f"{FS_PROPOSER_SEAT_PREFIX}{key}"] = tuple(getattr(member, "disallowed_tools", ()))
+    return seats
+
+
+def tools_denied_on_every_seat(seats: Mapping[str, Sequence[str]]) -> tuple[str, ...]:
+    """The tools no model in this run could reach: the intersection, in first-seen order.
+
+    A run-level sentence about a run with seven seats has to be true of all seven. The
+    intersection is the only summary with that property -- a union would let one denied
+    seat speak for six undenied ones, which is the shape the artifact had before
+    :func:`operator_seats` existed.
+    """
+    if not seats:
+        return ()
+    ordered = list(dict.fromkeys(tool for tools in seats.values() for tool in tools))
+    return tuple(tool for tool in ordered if all(tool in tools for tools in seats.values()))
 
 
 def run(args: argparse.Namespace) -> FsRunResult:
@@ -628,8 +726,14 @@ def run(args: argparse.Namespace) -> FsRunResult:
     stages_approved: list[str] = []
     direct_answer: str | None = None
     paths = None
+    manager = None
 
     if args.export_only:
+        # `pipeline_completed` keeps the False it was initialised with, and that is the
+        # record rather than an oversight: a re-export cannot observe the walk that
+        # produced the run tree, so it must not claim anything about it. The exit code is
+        # therefore non-zero, which is correct -- a recovered workspace is evidence to
+        # look at, not a scored result. Nothing in this branch may set it true.
         run_root = _latest_run_root(runs_dir)
         if run_root is None:
             raise FileNotFoundError(f"No AutoR run found under {runs_dir}; nothing to export.")
@@ -645,6 +749,7 @@ def run(args: argparse.Namespace) -> FsRunResult:
             review_backend=review_backend,
             review_model=review_model,
             web_search_context=web_search_context,
+            disallowed_tools=disallowed_tools,
         )
         try:
             pipeline_completed = manager.run(
@@ -679,13 +784,10 @@ def run(args: argparse.Namespace) -> FsRunResult:
         synthesize=AnswerSynthesizer(operator) if ideate else None,
         problem=row.problem,
     )
-    if args.export_only:
-        # A re-export cannot observe the walk that produced the run tree, so it must not
-        # claim anything about it. Saying `pipeline_completed: false` is the honest record
-        # and it makes the exit code non-zero, which is correct: a recovered workspace is
-        # evidence to look at, not a scored result.
-        pipeline_completed = False
-
+    # Read off the objects that were built, after they have been used. What the flags
+    # asked for is `disallowed_tools`; what the seven seats are carrying is this, and the
+    # two disagree on any backend without the knob.
+    seats = operator_seats(operator, manager)
     meta = build_fs_meta(
         workspace=workspace,
         task=row.key,
@@ -698,7 +800,10 @@ def run(args: argparse.Namespace) -> FsRunResult:
         pipeline_completed=pipeline_completed,
         auto_skipped_stages=auto_skipped_stages,
         stages_approved=stages_approved,
-        disallowed_tools=disallowed_tools,
+        disallowed_tools=tools_denied_on_every_seat(seats),
+        disallowed_tools_requested=disallowed_tools,
+        disallowed_tools_by_seat=seats,
+        witness=read_transcript_witness(paths),
         dataset_path=dataset_path,
         dataset_sha256=dataset_sha256,
         run_id=paths.run_root.name if paths is not None else "",
