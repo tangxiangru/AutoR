@@ -117,7 +117,12 @@ if TYPE_CHECKING:  # pragma: no cover - import cycle at runtime, type-only here
 #: shipped without: ``v`` was matching the tail of CV, HIV, dev and MeV, so writing
 #: "CV 0.821" hid an invented number from ``numeric_fidelity`` for a gain of +0.0476 --
 #: the same size as the gradient v6 added the filter to remove.
-RUBRIC_VERSION = "7"
+#:
+#: ``8`` adds ``source_figure_coverage``, the first criterion that can see a result the
+#: source published and this run did not draw. It is inert on every archived run by
+#: construction -- absent inventory scores 1.0 -- so it changes no existing score, and the
+#: version still moves because the criterion set and the total weight do.
+RUBRIC_VERSION = "8"
 
 #: The keys the rubric refuses to read out of an adjudication artifact.
 #:
@@ -202,6 +207,9 @@ CRITERIA: tuple[Criterion, ...] = (
     # the exemption that scored only the "spoken to" half below Stage 05 is what let a
     # draft of restated demands reach 1.000 there, and Stage 01 does write `literature/`.
     Criterion("deliverable_coverage", "Answers the task's demands", weight=3.0),
+    # min_stage=6: figures are drawn at 06 and published at 07, so before that there is
+    # nothing to have failed to draw.
+    Criterion("source_figure_coverage", "Draws what the source published", weight=2.0, min_stage=6),
 )
 
 CRITERIA_BY_KEY: dict[str, Criterion] = {item.key: item for item in CRITERIA}
@@ -1343,6 +1351,91 @@ def _run_started_at(paths: RunPaths) -> float | None:
         return None
 
 
+#: What Stage 01 writes down about the figures the source study published, if it wrote
+#: anything. One row per panel; the fields this criterion reads are `figure`/`panel` (or
+#: any id) and, optionally, `drawn_as` naming the file the run intends to publish for it.
+SOURCE_FIGURES_FILENAME = "source_figures.json"
+
+
+def _score_source_figure_coverage(paths: RunPaths) -> CriterionScore:
+    """Did the run draw the results the source published?
+
+    The gap this closes, stated as the run that found it. Physics_000 reproduced a packing
+    theory to 110 of 111 published closed-form values and scored 18.7 against a bare
+    agent's 53.4. Its three graded criteria were all image criteria, at 20, 28 and 5. Its
+    own Stage 07 champion scored **0.9969**, with `deliverable_coverage` at 1.000 and the
+    observation "4/4 of the task's demands are spoken to, 4/4 by something on disk" --
+    which was true. The run answered every demand, in prose, with numbers that traced. The
+    source's figures were never drawn, and no criterion here could see the difference
+    between a result reported as a number and a result *shown as the object the demand
+    names*.
+
+    This reads `notes/source_figures.json`, the inventory
+    `draw-the-source-figure-panel-for-panel` asks Stage 01 to write, and scores the
+    fraction of its rows that reached a published, referenced figure.
+
+    **It is inert until a run writes that inventory, and that is deliberate.** Absent, it
+    scores 1.0 and says so in ``observed``, exactly as ``deliverable_coverage`` does for a
+    task that states no demand. Replayed over the 40 archived runs it therefore scores
+    1.000 on all of them and moves nothing, because none of them predates the skill that
+    asks for the file. The three criteria added to this module before it were each landed
+    with a gradient and each turned out to have a route that bought score without doing
+    work; this one cannot fire on a run that did not opt in, which bounds what it can get
+    wrong to the runs that are trying.
+
+    The self-report risk is real and bounded: the operator writes the inventory, so an
+    empty one scores 1.0. That is the status quo, not a new hole -- the criterion is a
+    gradient for runs that write down what the source published, never a penalty on runs
+    that do not.
+    """
+    weight = CRITERIA_BY_KEY["source_figure_coverage"].weight
+    key = "source_figure_coverage"
+    title = CRITERIA_BY_KEY[key].title
+
+    payload = _load_json(paths.notes_dir / SOURCE_FIGURES_FILENAME)
+    rows = payload.get("figures") if isinstance(payload, Mapping) else payload
+    if not isinstance(rows, list) or not rows:
+        return CriterionScore(
+            key, title, weight, 1.0,
+            f"no {SOURCE_FIGURES_FILENAME}: nothing recorded about the source's figures",
+            "",
+        )
+
+    report = read_text(paths.report_file).lower() if paths.report_file.exists() else ""
+    published = {path.name.lower() for path in _existing_files(paths.report_images_dir)}
+
+    drawn: list[str] = []
+    missing: list[str] = []
+    for index, row in enumerate(rows, start=1):
+        if not isinstance(row, Mapping):
+            missing.append(f"row {index}")
+            continue
+        label = str(row.get("figure") or row.get("panel") or row.get("id") or f"row {index}")
+        target = _normalize_name(str(row.get("drawn_as") or ""))
+        if target and target in published and target in report:
+            drawn.append(label)
+        else:
+            missing.append(label)
+
+    score = _clamp(len(drawn) / len(rows))
+    observed = f"{len(drawn)}/{len(rows)} of the source's panels have a published figure"
+    if score >= 1.0:
+        shortfall = ""
+    else:
+        shortfall = (
+            f"The source published {len(rows)} panels and {len(missing)} of them have no "
+            f"figure of yours: {', '.join(missing[:4])}. Name the file in each row's "
+            "`drawn_as`, publish it under report/images/, and reference it from the "
+            "report. A result reported as a number is not the same result shown."
+        )
+    return CriterionScore(key, title, weight, score, observed, shortfall)
+
+
+def _normalize_name(value: str) -> str:
+    """The bare filename, lowercased, from whatever form a row wrote it in."""
+    return PurePosixPath(value.strip()).name.lower()
+
+
 def _score_traceability(markdown: str) -> CriterionScore:
     """The four decision-ledger buckets, filled and saying different things.
 
@@ -1714,6 +1807,8 @@ def score_stage(
             scores.append(_score_reproducibility(paths, stage, markdown))
         elif criterion.key == "deliverable_coverage":
             scores.append(_score_deliverable_coverage(markdown, paths, artifact_roots))
+        elif criterion.key == "source_figure_coverage":
+            scores.append(_score_source_figure_coverage(paths))
 
     scores = _cap_quantification_by_fidelity(scores)
 

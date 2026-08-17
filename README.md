@@ -128,7 +128,7 @@ naming them.
 | Typed information channels | `CHANNELS`, [src/information_flow.py](src/information_flow.py) | 19 |
 | `validate_*` functions the stage gate calls | `validate_stage_artifacts`, [src/utils.py](src/utils.py) | 17 |
 | Required stage-summary headings | `REQUIRED_STAGE_HEADINGS` | 7 |
-| Rubric criteria (weighted, backend-free) | `CRITERIA`, [src/rubric.py](src/rubric.py) | 9 |
+| Rubric criteria (weighted, backend-free) | `CRITERIA`, [src/rubric.py](src/rubric.py) | 10 |
 | Flags on `main.py` / `rcb_agent.py` | `parse_args` | 61 / 37 |
 | Python modules / lines / tests | the tree | 179 / 82 k / 2561 |
 
@@ -356,7 +356,7 @@ included.
 Every valid stage draft is measured against a rigour rubric read off disk — do the paths it names
 resolve, do the numbers it reports appear in a results file, did it produce artifacts during *this*
 execution, is the decision ledger four different things rather than one sentence four times. Nine
-weighted criteria, `RUBRIC_VERSION = "7"`:
+weighted criteria, `RUBRIC_VERSION = "8"`:
 
 | Criterion | Weight | From | What it measures |
 | --- | ---: | :---: | --- |
@@ -364,6 +364,7 @@ weighted criteria, `RUBRIC_VERSION = "7"`:
 | `numeric_fidelity` | 3.0 | 05 | Reported numbers trace to a results file |
 | `reproducibility` | 3.0 | 01 | The machine-readable validity chain is present and parses |
 | `deliverable_coverage` | 3.0 | 01 | The draft speaks to each thing the *task statement* asked for, with a number an artifact holds |
+| `source_figure_coverage` | 2.0 | 06 | Each panel the source published has a figure of this run's, published and referenced |
 | `contract` | 2.0 | 01 | Contract compliance in substance, not just in headings |
 | `artifact_breadth` | 2.0 | 01 | Artifacts produced *this* stage, in the directories this stage's prompt named |
 | `quantification` | 2.0 | 04 | Findings carrying numbers rather than adjectives |

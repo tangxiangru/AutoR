@@ -111,7 +111,7 @@ def comparability_basis(
 
     A stage's score is a weighted mean over the criteria that apply to it, and the
     late stages face more of them: Stage 02 is scored on seven criteria worth 16,
-    Stage 06 on nine worth 21, including `numeric_fidelity`, which is the hardest.
+    Stage 06 on ten worth 23, including `numeric_fidelity`, which is the hardest.
     So the *set of stages a run reached* is a free parameter of the objective. On a
     scripted `--fake-operator` run the difference is not subtle — mean fitness over
     stages 01-02 is 0.973 against 0.817 over all eight, a gap nearly eight times the
