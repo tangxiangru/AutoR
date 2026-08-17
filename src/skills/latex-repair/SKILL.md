@@ -1,6 +1,7 @@
 ---
 name: latex-repair
 description: Use when a LaTeX build fails or produces a broken PDF in Stage 07 (Writing) — undefined control sequences, missing style packages, unresolved citations or references, float placement blowing the page budget, or a build_log.txt full of errors you need to triage.
+stages: 07_writing
 ---
 
 # LaTeX repair

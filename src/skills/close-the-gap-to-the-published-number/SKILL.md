@@ -1,6 +1,7 @@
 ---
 name: close-the-gap-to-the-published-number
 description: Use at Stage 05 and Stage 06 the moment a reproduction lands materially off a number the source study published — a different order of magnitude, an inverted trend, a collapsed estimate. Covers why the gap is a defect in your pipeline until you have shown otherwise, how much of the remaining budget to spend closing it, and what to write when it will not close.
+stages: 05_experimentation, 06_analysis
 ---
 
 # A disagreement with the published number is a bug report addressed to you

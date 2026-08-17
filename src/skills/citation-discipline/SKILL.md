@@ -1,6 +1,7 @@
 ---
 name: citation-discipline
 description: Use when adding, verifying or cleaning citations and BibTeX entries in Stage 07 (Writing), when a reference cannot be resolved cleanly from DBLP or CrossRef, when checking that a cited paper actually supports the claim attributed to it, or when filling citation_verification.json.
+stages: 01_literature_survey, 07_writing
 ---
 
 # Citation discipline

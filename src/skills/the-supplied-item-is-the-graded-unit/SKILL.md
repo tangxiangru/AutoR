@@ -1,6 +1,7 @@
 ---
 name: the-supplied-item-is-the-graded-unit
 description: Use at study design whenever the task ships a specific named object in data/ — one paper, one structure, one instance — and again before writing. Covers reporting that item's own numbers under its own name, choosing the worked example by the task's pointer rather than by your result, and how to widen scope without dropping it.
+stages: 03_study_design, 06_analysis, 07_writing
 ---
 
 # The item the task ships is the unit the reader is checking

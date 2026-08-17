@@ -1,6 +1,7 @@
 ---
 name: earth-report-the-lattice-and-show-the-field
 description: Use at analysis and figure planning when a geospatial or gridded result is about to be reported only as regional aggregates. Covers reporting the stratified lattice, showing the field the strata came from, and which map a study of this kind is expected to publish.
+stages: 03_study_design, 06_analysis
 ---
 
 # Earth: report the stratified lattice, and show the field it came from

@@ -1,6 +1,7 @@
 ---
 name: reproduce-then-extend
 description: Use when the task is to reproduce, replicate or re-implement a published study, at design time and when reporting results. Covers what a reproduction must report, how to compare against the source study's numbers, and why the reproduction comes before any improvement.
+stages: 01_literature_survey, 03_study_design, 07_writing
 ---
 
 # A reproduction is judged against the study it reproduces

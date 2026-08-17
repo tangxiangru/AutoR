@@ -1,6 +1,7 @@
 ---
 name: earth-comparator-set-lives-outside-the-supplied-archive
 description: Use at study design when the supplied archive is about to become both the input and the thing you compare against. Covers where the comparison set has to come from, what a self-comparison cannot establish, and how to build a comparator from outside the shipped data.
+stages: 03_study_design, 05_experimentation, 06_analysis
 ---
 
 # Earth: the supplied archive is an input, never the comparison set

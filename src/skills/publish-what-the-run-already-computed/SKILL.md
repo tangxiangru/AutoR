@@ -1,6 +1,7 @@
 ---
 name: publish-what-the-run-already-computed
 description: Use at Stage 06 and again before the report is finalised, when deciding which of the run's results enter the deliverable. Sweeps the run's own outputs for quantities it computed and never published, and covers the three shapes that sweep finds — the diagnostic never persisted, the column requested and dropped, the feasibility measurement discarded — and what to promote out of an appendix.
+stages: 04_implementation, 06_analysis, 07_writing
 ---
 
 # The most expensive result is the one you computed and did not show
