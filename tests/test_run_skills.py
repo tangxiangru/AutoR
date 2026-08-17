@@ -637,3 +637,33 @@ class PinTableTest(unittest.TestCase):
         self.assertIn("Physics_000", note)
         self.assertIn("a, b", note)
         self.assertEqual(pinned_skills_note("Physics_000", frozenset()), "")
+
+
+class ThePinRecordSurvivesTest(unittest.TestCase):
+    """`skill_pins` has to still be in the config after the run finishes starting.
+
+    `Manager._install_skills` writes it and `ensure_run_config` used to run on the very
+    next line of `create_run`, rebuilding the config field by field and dropping
+    everything it does not name. So a pinned run logged that it was pinned and then
+    published a config saying it was not — and the config is the half a later reader
+    parses. Both halves or neither.
+    """
+
+    def test_ensure_run_config_keeps_a_key_it_does_not_manage(self) -> None:
+        from src.utils import ensure_run_config, load_run_config, save_run_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = build_run_paths(Path(tmp) / "run_0001")
+            ensure_run_layout(paths)
+            ensure_run_config(paths, model="opus")
+            config = load_run_config(paths)
+            config["skill_pins"] = ["a-skill"]
+            config["skill_pin_task_id"] = "Physics_000"
+            save_run_config(paths, config)
+
+            ensure_run_config(paths, model="opus", venue="neurips_2025")
+
+            after = load_run_config(paths)
+            self.assertEqual(after.get("skill_pins"), ["a-skill"])
+            self.assertEqual(after.get("skill_pin_task_id"), "Physics_000")
+            self.assertEqual(after.get("venue"), "neurips_2025", "a managed field still wins")
