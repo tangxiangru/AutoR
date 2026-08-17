@@ -749,9 +749,14 @@ class TheTaskGrammarIsTheSharedOneTest(_Harness):
         from src.frontierscience import DatasetRefused
         from tests.test_fs_dataset import synthetic_rows
 
+        from src.frontierscience import FS_TASK_SELECTION_HELP
+
         with self.assertRaises(DatasetRefused) as caught:
             self.tool.resolve_row(synthetic_rows(), "fs:999")
-        self.assertIn("random.Random(S).sample", str(caught.exception))
+        # The shared sentence itself, so this and the adapter cannot drift into two
+        # grammars, and so it stays a grammar rather than a promise about flags.
+        self.assertIn(FS_TASK_SELECTION_HELP, str(caught.exception))
+        self.assertIn("inclusive index ranges", str(caught.exception))
 
 
 class NoBenchmarkScoreReachesTheArchiveTest(unittest.TestCase):

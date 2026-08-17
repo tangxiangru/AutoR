@@ -149,16 +149,38 @@ FS_DEFAULT_DATASET_PATH = Path.home() / ".cache" / "frontierscience" / "research
 #: someone has already published.
 FS_TASK_KEY_PREFIX = "fs:"
 
-#: One sentence for both readers of the ``--tasks`` grammar: the argparse help and the
-#: refusal raised when a spec does not parse. Written once because a help string and an
-#: error message that describe the same grammar in two places are two encodings of one
-#: rule, and the one nobody reads is the one that goes stale.
+#: The grammar of a task spec, in one sentence, attached to every refusal
+#: :func:`resolve_task_keys` raises when a spec does not parse -- in this module and in
+#: ``tools/score_fs_run.py``, which is the point of it being a constant: two refusals
+#: describing one grammar in two places are two encodings of one rule, and the copy nobody
+#: exercises is the copy that drifts.
+#:
+#: It describes the *spec string* and nothing else. It used to promise a ``--subject`` and
+#: a ``--sample N --sample-seed S`` as well, and no front end has ever declared either:
+#: ``fs_agent.py`` and ``tools/score_fs_run.py`` each take one ``--task`` and refuse
+#: anything resolving to more or fewer than one row, and the trial driver never opens the
+#: dataset at all -- its population is the explicit ``tasks`` list in the plan. Prose is a
+#: specification here, so a help string describing flags nobody offers is a defect and not
+#: a nicety; the subject filter and the seeded draw are keyword arguments of
+#: :func:`resolve_task_keys`, documented on it, and :data:`FS_TASK_SUBSET_ARGUMENTS` is
+#: what says so where a caller would look.
 FS_TASK_SELECTION_HELP = (
-    "Task subset. Either `all`, or a comma-separated list whose parts are row indices "
-    "(`0,3,7`), task keys (`fs:000`) or inclusive index ranges (`10-19,40-49`). "
-    "Combined with --subject by intersection. --sample N --sample-seed S then draws a "
-    "subset as `random.Random(S).sample(sorted(keys), N)`, reported in sorted order, so "
-    "the selection can be reproduced by hand. Defaults to all sixty rows."
+    "Task spec. Either `all`, or a comma-separated list whose parts are row indices "
+    "(`0,3,7`), task keys (`fs:000`) or inclusive index ranges (`10-19,40-49`). Resolves "
+    "against the sixty rows of the split; an index outside it is refused rather than "
+    "skipped."
+)
+
+#: The two subset arguments :func:`resolve_task_keys` takes beyond the spec string, and
+#: the algorithm the seeded draw uses, written out so a selection can be redone by hand.
+#: **No command line offers these**; they are keyword arguments, and this constant is the
+#: sentence that says so rather than a help string implying a flag.
+FS_TASK_SUBSET_ARGUMENTS = (
+    "`subject=` intersects the spec with one of the split's three subjects. "
+    "`sample=N, sample_seed=S` then draws a subset as "
+    "`random.Random(S).sample(sorted(keys), N)`, returned in sorted order, so the "
+    "selection can be reproduced by hand. Neither is a command-line flag on any front "
+    "end in this tree."
 )
 
 #: Head of a rubric item, anchored at column 0. Every one of the 635 ``Points:``
@@ -576,20 +598,28 @@ def resolve_task_keys(
     sample: int | None = None,
     sample_seed: int | None = None,
 ) -> list[str]:
-    """Turn the three subset flags into one explicit, sorted list of task keys.
+    """Turn a task spec, a subject and a seeded draw into one explicit, sorted key list.
+
+    **Three arguments and one spec string.** ``tasks`` is what the front ends' ``--task``
+    carries and :data:`FS_TASK_SELECTION_HELP` describes; ``subject``, ``sample`` and
+    ``sample_seed`` are keyword arguments with no command line behind them, described in
+    :data:`FS_TASK_SUBSET_ARGUMENTS`. That is stated here rather than in a help string
+    because a help string naming a flag nobody declares is a specification of a CLI that
+    does not exist, and this one promised a ``--subject`` and a ``--sample`` for as long
+    as it existed.
 
     The list this returns is what goes into the plan and into the result file verbatim.
-    Nothing downstream re-derives it: a subset recomputed from ``--sample 10
-    --sample-seed 7`` a week later against a dataset that has moved is a different
-    population wearing the same flags, and the report would have no way to say so.
+    Nothing downstream re-derives it: a subset recomputed from ``sample=10,
+    sample_seed=7`` a week later against a dataset that has moved is a different
+    population wearing the same arguments, and the report would have no way to say so.
 
     Three refusals rather than three conveniences. An index outside the dataset is an
     error, not a row to skip, because a spec of ``0-99`` against sixty rows means the
-    author believed something false. ``--sample`` without ``--sample-seed`` is refused
+    author believed something false. ``sample`` without ``sample_seed`` is refused
     because an unseeded draw cannot be reproduced and a benchmark subset that cannot be
-    reproduced is not a subset anyone can argue with. ``--sample`` larger than the
+    reproduced is not a subset anyone can argue with. ``sample`` larger than the
     selection is refused rather than truncated, for the same reason: silently returning
-    forty rows for ``--sample 100`` publishes a number about a population the flags do
+    forty rows for ``sample=100`` publishes a number about a population the arguments do
     not describe.
     """
     by_key = rows_by_key(rows)
@@ -626,16 +656,17 @@ def resolve_task_keys(
 
     if sample_seed is None:
         raise DatasetRefused(
-            "--sample needs --sample-seed: an unseeded draw cannot be reproduced, and a "
-            "benchmark subset nobody can redraw cannot be argued with"
+            "sample= needs sample_seed=: an unseeded draw cannot be reproduced, and a "
+            f"benchmark subset nobody can redraw cannot be argued with. "
+            f"{FS_TASK_SUBSET_ARGUMENTS}"
         )
     if sample < 1:
-        raise DatasetRefused(f"--sample {sample} asks for no tasks")
+        raise DatasetRefused(f"sample={sample} asks for no tasks")
     if sample > len(keys):
         raise DatasetRefused(
-            f"--sample {sample} exceeds the {len(keys)} task(s) the other flags select; "
-            "refusing rather than truncating, which would publish a number about a "
-            "population the flags do not describe"
+            f"sample={sample} exceeds the {len(keys)} task(s) the other arguments "
+            "select; refusing rather than truncating, which would publish a number about "
+            "a population the arguments do not describe"
         )
     return sorted(random.Random(sample_seed).sample(keys, sample))
 
@@ -1415,8 +1446,9 @@ class DirectAnswerWriter(_OperatorCall):
 
     #: Attempts at the one call. Two, not one and not the pipeline's eight: an
     #: empty reply here is almost always transport, and a retry costs one answer
-    #: latency (measured at a mean of 134.5 s on this benchmark for a direct
-    #: model call) where the alternative is a refused pair.
+    #: latency -- measured over the whole sixty-row split at a mean of 120.1 s, a
+    #: median of 115.9 s and a maximum of 290.1 s -- where the alternative is a
+    #: refused pair.
     MAX_ATTEMPTS = 2
 
     def __init__(self, operator: Any, max_attempts: int = MAX_ATTEMPTS) -> None:

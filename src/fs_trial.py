@@ -1068,10 +1068,26 @@ def collect_fs_pairs(
         outcome=FS_TOTAL,
     )
 
-    named: dict[str, list[str]] = {}
+    # Two dictionaries, not one, because only one of them is a confound and the leak
+    # check below is about confounds alone.
+    #
+    # ``confounds`` holds what :func:`compare_fs_arms` found between two arms that *both*
+    # reached the pair. One of those surviving into ``result.pairs`` means the digest
+    # baked into the stage key and the cross-arm diff disagree, and something the diff can
+    # name is inside the published difference. That is the assertion's whole subject.
+    #
+    # ``refusal_reasons`` is prose about arms that never reached a pair at all, keyed on
+    # the raw task key the refusal carries. Merging the two used to raise on the ordinary
+    # trial: the duplicate fold renames the surviving evidence to the *group* key, and the
+    # group key is one of the members' own task keys, so refusing one arm of row 6 while
+    # rows 6 and 11 fold into `fs:006` put a refusal reason and a live pair on one key.
+    # The trial then ended with an AssertionError and no report -- and the message blamed
+    # the environment digest, which had not moved.
+    confounds: dict[str, list[str]] = {}
+    refusal_reasons: dict[str, list[str]] = {}
     for refusal in refusals:
         side = "control" if refusal.arm == control.label else "treatment"
-        named.setdefault(refusal.task_key, []).append(
+        refusal_reasons.setdefault(refusal.task_key, []).append(
             f"the {side} arm `{refusal.arm}` was refused ({', '.join(refusal.clauses)})"
         )
     tasks = {task for task, _ in admitted} | {item.task_key for item in refusals}
@@ -1079,22 +1095,31 @@ def collect_fs_pairs(
         left = admitted.get((task, control.label))
         right = admitted.get((task, treatment.label))
         if left is not None and right is not None:
-            named.setdefault(task, []).extend(compare_fs_arms(left, right))
+            reasons = compare_fs_arms(left, right)
+            if reasons:
+                confounds[task] = reasons
 
     kept = {pair.trial_id for pair in result.pairs}
-    leaked = sorted(task for task, reasons in named.items() if reasons and task in kept)
+    leaked = sorted(task for task, reasons in confounds.items() if reasons and task in kept)
     if leaked:
         raise AssertionError(
-            "a pair with a named reason to be excluded survived pairing: "
-            + ", ".join(leaked)
-            + ". The environment digest and the cross-arm diff have gone out of step, "
-            "which means a confound can now reach the published difference."
+            "a confounded pair survived pairing: "
+            + "; ".join(f"`{task}` ({'; '.join(confounds[task])})" for task in leaked)
+            + ". The environment digest in the stage key and the cross-arm diff have gone "
+            "out of step -- the diff can name a difference the digest did not exclude -- "
+            "so a confound can now reach the published difference."
         )
 
     excluded = dict(result.excluded)
-    for task, reasons in named.items():
-        if reasons:
-            excluded[task] = "; ".join(reasons)
+    for task in sorted(set(confounds) | set(refusal_reasons)):
+        if task in kept:
+            # A refused arm whose task key is also the name of a surviving fold group.
+            # The refusal is real and is printed in the ledger under its own key; writing
+            # it here as well would tell a reader that one task both produced a pair and
+            # was excluded from the mean. (`confounds` never reaches this branch: a task
+            # in both `confounds` and `kept` raised above.)
+            continue
+        excluded[task] = "; ".join(refusal_reasons.get(task, []) + confounds.get(task, []))
     for task in tasks:
         if task not in kept and task not in excluded:
             excluded[task] = "no run of either arm was admitted"
@@ -1636,9 +1661,14 @@ def _refused_to_print(trial: FsTrial, plan: "FsTrialPlan") -> list[str]:
         "- **No score taken while the trial was in flight.** Every total above comes from "
         "one continuous final pass with one judge, so a judge that drifted across the "
         "trial cannot ride into the difference unmeasured.",
-        f"- **No pair carrying a named exclusion reason.** `collect_fs_pairs` raises "
-        f"rather than publishing one, so the {len(trial.result.excluded)} excluded "
-        "task(s) above are excluded from the mean and not merely annotated under it.",
+        f"- **No pair whose two arms `compare_fs_arms` can tell apart.** `collect_fs_pairs` "
+        f"raises rather than publishing one, so the {len(trial.result.excluded)} excluded "
+        "task(s) above are excluded from the mean and not merely annotated under it. The "
+        "raise is over cross-arm confounds only, and deliberately so: after the duplicate "
+        "fold a surviving pair carries the *group's* key, which is also one member's own "
+        "key, so a refusal of that member is not a confound reaching the difference and "
+        "must not be read as one. Those refusals are in the ledger above under their own "
+        "keys.",
     ]
 
 
@@ -1699,6 +1729,12 @@ class FsTrialPlan:
     #: repository when it is set at all: the judge quotes rubric items verbatim while it
     #: reasons, and the dataset card asks that this text not enter a crawlable corpus.
     judge_raw_dir: str = ""
+    #: One, and :func:`_refuse_a_plan_that_cannot_produce_a_pair` refuses anything else.
+    #: The field is kept rather than deleted because it is what a pooled-attempt design
+    #: would set, it is in the environment digest so that a half-applied pooling separates
+    #: the arms, and the report prints the declaration against the observation as a second
+    #: witness. A knob that can only be set wrong is worse than no knob, so the freeze is
+    #: what turns this one from a lie into a placeholder.
     answer_attempts: int = 1
     judge_replicates: int = 1
     pass_threshold: float = FS_PASS_THRESHOLD
@@ -1833,6 +1869,19 @@ def _refuse_a_plan_that_cannot_produce_a_pair(plan: FsTrialPlan) -> None:
         raise ValueError(f"unknown arm_order_mode {plan.arm_order_mode!r}")
     if plan.answer_attempts < 1 or plan.judge_replicates < 1:
         raise ValueError("answer_attempts and judge_replicates are counts of things that happen")
+    if plan.answer_attempts != 1:
+        raise ValueError(
+            f"this plan asks for {plan.answer_attempts} answer attempts per (task, arm) and "
+            "this driver can only produce one. `next_actions` launches a second attempt "
+            "after an abandon, a stall or a crash and never after a run that finished, and "
+            "`evidence_for` records one evidence per run and pools nothing -- so a plan "
+            "declaring more is accepted, launched, spent, and then disagrees with its own "
+            "runs in a report line. That is the twelve-runs shape this freeze exists to "
+            "stop, and refusing here costs a string comparison. Pooling attempts means "
+            "averaging them into one total *and* leaving `answer_attempts` in the "
+            "environment digest, so that a half-applied pooling separates the two arms "
+            "rather than averaging them; until that is built, one is the only honest value."
+        )
     if plan.concurrency < 1 or plan.judge_concurrency < 1:
         raise ValueError("a concurrency below one is a trial that never starts a run")
     if not 0.0 < plan.max_refusal_rate_for_publication <= 1.0:

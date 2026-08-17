@@ -242,6 +242,9 @@ def make_workspace(plan: FsTrialPlan, task: str, arm: str) -> Path:
     """
     base = Path(plan.state_dir) / "workspaces"
     base.mkdir(parents=True, exist_ok=True)
+    # `candidate` survives the loop and is named in the refusal below. No initialiser
+    # above it, because a bound of zero is not a state worth writing an unreachable branch
+    # for: the retry count is asserted at `WORKSPACE_NAME_TRIES` by the collision test.
     for _try in range(WORKSPACE_NAME_TRIES):
         candidate = base / fs_workspace_name(task, arm)
         try:
@@ -250,9 +253,13 @@ def make_workspace(plan: FsTrialPlan, task: str, arm: str) -> Path:
             continue
         return candidate
     raise SystemExit(
-        f"could not find an unused workspace name for {task}/{arm} under {base} in "
-        f"{WORKSPACE_NAME_TRIES} tries. The name carries microseconds, so this means "
-        "something else is creating directories there."
+        f"could not find an unused workspace name for {task}/{arm} in "
+        f"{WORKSPACE_NAME_TRIES} tries; the last one taken was {candidate}. The name "
+        "carries microseconds and the arm label, so this means something else is creating "
+        "directories under "
+        f"{base}. Refusing rather than reusing: the sibling driver's `exist_ok=True` put "
+        "two arms of one task in one directory, where they overwrote each other's "
+        "deliverable and made the paired difference identically zero."
     )
 
 
@@ -661,9 +668,14 @@ def evidence_for(plan: FsTrialPlan, state: Mapping[str, Any]) -> FsArmEvidence |
         answer_guidance=str(state.get("meta_answer_guidance") or ""),
         task_instruction_sha256=str(state.get("meta_task_instruction_sha256") or ""),
         disallowed_tools=tuple(sorted(str(item) for item in tools)) if isinstance(tools, list) else (),
-        # One, always, and observed rather than declared: this driver produces one
-        # evidence per run and pools nothing. It is in the digest so that an arm pooled
-        # over three attempts could never be averaged against an arm that ran once.
+        # One, always, and a constant rather than an observation -- there is nothing on
+        # disk to read it off, because this driver produces one evidence per run and pools
+        # nothing. Writing `plan.answer_attempts` here instead would make the field agree
+        # with the plan by construction while still being a constant, which is the worse
+        # of the two. `_refuse_a_plan_that_cannot_produce_a_pair` refuses a plan that asks
+        # for any other value, so the constant and the declaration cannot disagree; it is
+        # in the digest so that an arm pooled over three attempts, the day pooling is
+        # built, could never be averaged against an arm that ran once.
         answer_attempts=1,
         judge_replicates=len(points),
     )
@@ -963,9 +975,45 @@ def cmd_plan(plan: FsTrialPlan) -> int:
     return 0
 
 
+def missing_worktrees(plan: FsTrialPlan) -> list[str]:
+    """Every ``autor`` arm whose ``worktree`` is not a directory on this box.
+
+    A launch-time question and not a freeze-time one, deliberately. A plan is a value: it
+    is loaded by ``report`` as well as by ``run``, and by whoever reads a finished trial
+    on a second machine, so a filesystem probe inside
+    :meth:`src.fs_trial.FsTrialPlan.from_dict` would make rebuilding an old report depend
+    on a checkout somebody has since deleted. ``run`` is the one verb that needs the
+    directory to be there.
+
+    It has to be there even under ``operator: "fake"``. The child's cwd is the arm's
+    worktree, and ``revision_at_launch`` / ``revision_at_finish`` / ``worktree_dirty`` are
+    real ``git`` readings off it that ``producer_matches_arm`` compares against the arm's
+    label -- the dry run fabricates the operator and the judge, and nothing else. Without
+    this the shipped plan died at ``Popen`` with a bare ``FileNotFoundError`` naming no
+    arm, after the lock was taken and the state directory created.
+    """
+    return [
+        f"{spec.label}: {spec.worktree or '<unset>'}"
+        for spec in (plan.control, plan.treatment)
+        if spec.kind == "autor" and not Path(spec.worktree).is_dir()
+    ]
+
+
 def cmd_run(plan: FsTrialPlan) -> int:
     if not (Path(plan.state_dir) / "plan.json").exists():
         raise SystemExit("freeze the plan first: `fs_trial.py plan --plan <path>`")
+    absent = missing_worktrees(plan)
+    if absent:
+        raise SystemExit(
+            "these `autor` arms name a worktree that is not a directory here:\n  "
+            + "\n  ".join(absent)
+            + "\nEvery run of such an arm is launched with that directory as its working "
+            "directory and has its revision read out of it, so this is not a dry-run "
+            "exemption: `operator: \"fake\"` fabricates the operator and the judge and "
+            "nothing else, and `producer_matches_arm` compares a real `git rev-parse` "
+            "against the arm's label. Point the arm at a real checkout at its sha, or run "
+            "a plan whose arms are both `direct`."
+        )
     known = {
         int(state["child_pid"])
         for state in all_states(plan)

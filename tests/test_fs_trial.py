@@ -19,7 +19,9 @@ import json
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from unittest import mock
 
+from src import fs_trial
 from src.frontierscience import (
     FS_FALLBACK_MARKER,
     FS_IDEATE_STAGE,
@@ -33,6 +35,8 @@ from src.fs_trial import (
     FS_ADMISSION_CLAUSES,
     FS_FAKE_FAULTS,
     FS_MAX_REFUSAL_RATE,
+    FS_MDE_MULTIPLIER,
+    FS_NON_COMPARABILITY_BANNER,
     FS_STAGES_APPROVED_BY_KIND,
     FsAction,
     FsArmEvidence,
@@ -480,6 +484,62 @@ class TheByteIdenticalRowsBecomeOnePairTests(unittest.TestCase):
         self.assertEqual(len(notes), 2)
         self.assertIn("different environments", notes[0])
 
+    def test_refusing_one_member_of_a_fold_does_not_raise_over_the_survivor(self) -> None:
+        """The crash that destroyed the deliverable: a refusal keyed on the fold's group.
+
+        Rows 6 and 11 fold into the group `fs:006`, which is also row 6's own task key. Row
+        6's treatment arm is refused and row 11 is clean on both arms, so the fold's only
+        shared member is `fs:011` and the surviving evidence is *renamed* to `fs:006` --
+        the same key the refusal reason is filed under. The leak check used to read that
+        collision as "a pair with a named reason to be excluded survived pairing" and
+        raise, blaming the environment digest, which had not moved. `cmd_run` builds the
+        report after the lock is released, so a finished multi-day trial ended in a
+        traceback and wrote no `report.md` at all.
+
+        The mirror case (row 11 refused, row 6 clean) never raised, because the group key
+        is the lowest member's, which is why the five cases above miss it.
+        """
+        items = [
+            evidence(CONTROL, task="fs:006", duplicate_of=None, points=(2.0,)),
+            evidence(
+                TREATMENT, task="fs:006", duplicate_of=None, points=(4.0,),
+                browsing_tool_calls=1,
+            ),
+        ] + self._both("fs:011", 6, 3.0, 5.0)
+        trial = trial_of(*items, planned=2)
+        self.assertEqual(trial.result.n, 1)
+        self.assertEqual(trial.folded, (("fs:006", ("fs:011",)),))
+        # The surviving pair is row 11's difference alone, and the refusal is in the
+        # ledger under its own key rather than presented as an exclusion of the pair.
+        self.assertAlmostEqual(trial.result.mean_difference, 2.0)
+        self.assertEqual(
+            [(item.task_key, item.clauses) for item in trial.refusals],
+            [("fs:006", ("no_browsing",))],
+        )
+        rendered = format_fs_trial_report(
+            trial, plan=plan(tasks=["fs:006", "fs:011"]), judge_model="gpt-5.1"
+        )
+        self.assertIn(f"`fs:006` / `{TREATMENT.label}`: no_browsing", rendered)
+        self.assertNotIn("was refused (no_browsing)", rendered)
+
+    def test_the_leak_check_still_raises_on_a_confound_it_can_name(self) -> None:
+        """The control for the repair above: narrowing the check must not disarm it.
+
+        `compare_fs_arms` is made to name a difference the stage key's digest did not
+        exclude -- exactly the "the diff and the digest have gone out of step" state the
+        assertion exists for -- and the raise has to survive.
+        """
+        left, right = evidence(CONTROL), evidence(TREATMENT)
+        with mock.patch.object(
+            fs_trial, "compare_fs_arms", lambda control, treatment: ["a field moved"]
+        ):
+            with self.assertRaises(AssertionError) as caught:
+                trial_of(left, right)
+        message = str(caught.exception)
+        self.assertIn("a confounded pair survived pairing", message)
+        self.assertIn("a field moved", message)
+        self.assertIn("fs:000", message)
+
     def test_a_task_with_no_duplicate_passes_through_untouched(self) -> None:
         """The control: a fold that changed a non-duplicate would be invisible above."""
         items = self._both("fs:000", None, 2.0, 4.0)
@@ -534,6 +594,32 @@ class TheReportRefusesToPublishABiasedDifferenceTests(unittest.TestCase):
         self.assertNotIn("The difference is not published", rendered)
         self.assertIn("mean difference:", rendered)
 
+    def test_exactly_the_ceiling_publishes_and_a_hair_over_it_does_not(self) -> None:
+        """The design's wording is "任一臂拒绝率 > 0.20", so `>` is right -- and untested.
+
+        The two cases above sit at 37.5% and 10%, neither of them near the line, so `>`
+        could become `>=` with the suite green and a trial that refused exactly a fifth of
+        one arm would be withheld or published depending on nothing.
+        """
+        at_the_line, _ = self._lopsided(refused=1, admitted=4)
+        self.assertAlmostEqual(at_the_line.refusal_rate(TREATMENT.label), 0.20)
+        self.assertEqual(at_the_line.refusal_rate_exceeds(FS_MAX_REFUSAL_RATE), [])
+        rendered = format_fs_trial_report(
+            at_the_line,
+            plan=plan(tasks=[f"fs:{i:03d}" for i in range(5)]),
+            judge_model="gpt-5.1",
+        )
+        self.assertNotIn("The difference is not published", rendered)
+        self.assertIn("mean difference:", rendered)
+
+        over, _ = self._lopsided(refused=1, admitted=3)
+        self.assertAlmostEqual(over.refusal_rate(TREATMENT.label), 0.25)
+        self.assertEqual(over.refusal_rate_exceeds(FS_MAX_REFUSAL_RATE), [TREATMENT.label])
+        withheld = format_fs_trial_report(
+            over, plan=plan(tasks=[f"fs:{i:03d}" for i in range(4)]), judge_model="gpt-5.1"
+        )
+        self.assertIn("The difference is not published", withheld)
+
     def test_both_arms_rates_are_printed_side_by_side_even_at_zero(self) -> None:
         trial = trial_of(evidence(CONTROL), evidence(TREATMENT))
         rendered = format_fs_trial_report(trial, plan=plan(tasks=["fs:000"]), judge_model="gpt-5.1")
@@ -577,13 +663,78 @@ class TheReportSaysWhatItWillNotPrintTests(unittest.TestCase):
         self.assertNotIn("| Criterion |", self.rendered)
         self.assertNotIn("Concentration:", self.rendered)
 
+    def test_the_refusal_to_publish_a_confounded_pair_says_what_it_covers(self) -> None:
+        """The claim is narrowed to what the raise actually holds.
+
+        It used to read "no pair carrying a named exclusion reason", which was too broad
+        in exactly the direction that crashed the driver: after the duplicate fold a
+        surviving pair carries the group's key, one member's refusal is filed under that
+        same key, and treating the collision as a confound raised over an ordinary trial.
+        """
+        self.assertIn(
+            "No pair whose two arms `compare_fs_arms` can tell apart", self.rendered
+        )
+        self.assertIn("over cross-arm confounds only", self.rendered)
+
     def test_it_says_why_the_criterion_table_is_absent(self) -> None:
         self.assertIn("No per-rubric-item table and no concentration figure", self.rendered)
         self.assertIn("second, unvalidated instrument", self.rendered)
 
     def test_the_non_comparability_banner_is_always_printed(self) -> None:
-        self.assertIn("not comparable to the paper's table", self.rendered)
-        self.assertIn("gpt-5.1", self.rendered)
+        """The banner itself, verbatim, and not a phrase that appears elsewhere too.
+
+        This used to assert `"not comparable to the paper's table"` and `"gpt-5.1"`, and
+        both survive deleting the banner: `_what_this_measures` closes with "it is not
+        comparable to the paper's table, for the reason printed at the top of this page"
+        -- a sentence that then points at nothing -- and the judge name is on every
+        published line. The whole block could be cut with the suite green, on the one
+        disclosure the module says is "printed on every report, above every number, and
+        never behind a condition".
+        """
+        self.assertIn(FS_NON_COMPARABILITY_BANNER, self.rendered)
+
+    def test_the_banner_sits_above_every_number(self) -> None:
+        """The other half of the claim: *above* every number, not merely present."""
+        banner = self.rendered.index(FS_NON_COMPARABILITY_BANNER)
+        for marker in (
+            "mean rubric points,",
+            "paired mean difference:",
+            "pass@>=",
+            "## The difference",
+        ):
+            with self.subTest(marker=marker):
+                self.assertLess(banner, self.rendered.index(marker))
+
+    def test_the_two_assertions_above_would_notice_the_banner_going_missing(self) -> None:
+        """The control. A report with the block removed must fail both of them."""
+        without = self.rendered.replace(FS_NON_COMPARABILITY_BANNER, "")
+        self.assertNotIn(FS_NON_COMPARABILITY_BANNER, without)
+        # And the phrase the old assertion matched is still there, which is exactly why
+        # the old assertion held nothing.
+        self.assertIn("not comparable to the paper's table", without)
+
+    def test_the_banner_is_printed_even_when_the_difference_is_withheld(self) -> None:
+        """"Never behind a condition" includes the early return above the difference."""
+        items = []
+        for index in range(4):
+            task = f"fs:{index:03d}"
+            items += [
+                evidence(CONTROL, task=task),
+                evidence(TREATMENT, task=task, meta_status="failed"),
+            ]
+        withheld = format_fs_trial_report(
+            trial_of(*items, planned=4),
+            plan=plan(tasks=[f"fs:{i:03d}" for i in range(4)]),
+            judge_model="gpt-5.1",
+        )
+        self.assertIn("The difference is not published", withheld)
+        self.assertIn(FS_NON_COMPARABILITY_BANNER, withheld)
+
+    def test_the_banner_is_printed_over_a_trial_with_no_pair_at_all(self) -> None:
+        empty = format_fs_trial_report(
+            trial_of(planned=1), plan=plan(tasks=["fs:000"]), judge_model=""
+        )
+        self.assertIn(FS_NON_COMPARABILITY_BANNER, empty)
 
     def test_a_single_draw_reports_an_unmeasured_spread_and_never_zero(self) -> None:
         self.assertIn("judge sampling noise: **unmeasured (1 draw)**", self.rendered)
@@ -615,6 +766,98 @@ class TheReportSaysWhatItWillNotPrintTests(unittest.TestCase):
         self.assertIn("It is not a measurement of AutoR's capability", self.rendered)
 
 
+class TheInterimBannerIsTheDefenceAgainstStoppingEarlyTests(unittest.TestCase):
+    """Item 3 of the report order, and the only thing standing between a resumable
+    apparatus and a machine for stopping when the sign looks good.
+
+    It had no positive assertion anywhere: `FsTrial.interim` could be replaced by
+    ``return False`` with the suite green, because the only INTERIM assertion in either
+    module was the *negative* one over a completed fold. That negative case is kept below
+    as this class's control.
+    """
+
+    def _pairs(self, count: int, *, start: int = 0, planned: int, **kwargs):
+        items = []
+        for index in range(start, start + count):
+            task = f"fs:{index:03d}"
+            items += [
+                evidence(CONTROL, task=task, points=(2.0,)),
+                evidence(TREATMENT, task=task, points=(5.0,)),
+            ]
+        return trial_of(*items, planned=planned, **kwargs)
+
+    def test_a_trial_short_of_its_planned_n_says_so_above_the_p_value(self) -> None:
+        trial = self._pairs(3, planned=6)
+        self.assertTrue(trial.interim)
+        self.assertEqual((trial.result.n, trial.expected_pairs, trial.folded_away), (3, 6, 0))
+        rendered = format_fs_trial_report(
+            trial, plan=plan(tasks=[f"fs:{i:03d}" for i in range(6)]), judge_model="gpt-5.1"
+        )
+        self.assertIn(
+            "> **INTERIM -- 3 of 6 pairs (6 planned task(s), 0 folded away as "
+            "duplicate rows).**",
+            rendered,
+        )
+        self.assertIn("The p-value below is not this trial's result", rendered)
+        self.assertLess(rendered.index("INTERIM"), rendered.index("two-sided p"))
+
+    def test_a_complete_trial_raises_no_banner(self) -> None:
+        """The control: without it the assertion above would hold for every report."""
+        trial = self._pairs(6, planned=6)
+        self.assertFalse(trial.interim)
+        rendered = format_fs_trial_report(
+            trial, plan=plan(tasks=[f"fs:{i:03d}" for i in range(6)]), judge_model="gpt-5.1"
+        )
+        self.assertNotIn("INTERIM", rendered)
+
+    def test_the_banner_counts_against_planned_minus_folded_and_not_planned(self) -> None:
+        """A fold is a design decision and attrition is a failure; the banner separates
+        them. Four planned tasks, rows 6 and 11 folding into one pair, row 25 pairing and
+        row 30 refused: two pairs out of the three this plan could ever produce."""
+        items = [
+            evidence(CONTROL, task="fs:006", points=(2.0,)),
+            evidence(TREATMENT, task="fs:006", points=(4.0,)),
+            evidence(CONTROL, task="fs:011", duplicate_of=6, points=(3.0,)),
+            evidence(TREATMENT, task="fs:011", duplicate_of=6, points=(5.0,)),
+            evidence(CONTROL, task="fs:025", points=(2.0,)),
+            evidence(TREATMENT, task="fs:025", points=(6.0,)),
+            evidence(CONTROL, task="fs:030", points=(2.0,)),
+            evidence(TREATMENT, task="fs:030", points=(6.0,), meta_status="failed"),
+        ]
+        trial = trial_of(*items, planned=4)
+        self.assertEqual((trial.result.n, trial.folded_away, trial.expected_pairs), (2, 1, 3))
+        rendered = format_fs_trial_report(
+            trial,
+            plan=plan(tasks=["fs:006", "fs:011", "fs:025", "fs:030"]),
+            judge_model="gpt-5.1",
+        )
+        self.assertIn(
+            "> **INTERIM -- 2 of 3 pairs (4 planned task(s), 1 folded away as "
+            "duplicate rows).**",
+            rendered,
+        )
+
+    def test_a_fold_alone_is_not_attrition(self) -> None:
+        """The other control, and the arithmetic `folded_away` exists for: every run
+        succeeded and one duplicate group collapsed as designed, so there is no banner."""
+        items = [
+            evidence(CONTROL, task="fs:006", points=(2.0,)),
+            evidence(TREATMENT, task="fs:006", points=(4.0,)),
+            evidence(CONTROL, task="fs:011", duplicate_of=6, points=(3.0,)),
+            evidence(TREATMENT, task="fs:011", duplicate_of=6, points=(5.0,)),
+        ]
+        trial = trial_of(*items, planned=2)
+        self.assertEqual((trial.result.n, trial.folded_away, trial.expected_pairs), (1, 1, 1))
+        self.assertFalse(trial.interim)
+
+    def test_the_banner_also_fires_when_more_pairs_arrive_than_were_planned(self) -> None:
+        """`!=` and not `<`. A trial reporting more pairs than the frozen plan asked for
+        is a plan that was edited or a state directory holding another trial's runs, and
+        publishing that silently is worse than publishing a short one."""
+        trial = self._pairs(3, planned=2)
+        self.assertTrue(trial.interim)
+
+
 class TheStatisticsBesideTheMeanTests(unittest.TestCase):
     def test_wilson_is_not_degenerate_where_wald_is(self) -> None:
         low, high = wilson_interval(0, 20)
@@ -639,6 +882,48 @@ class TheStatisticsBesideTheMeanTests(unittest.TestCase):
         large = minimum_detectable_effect(1.0, 64)
         self.assertGreater(small, large)
         self.assertAlmostEqual(small / large, 4.0)
+
+    def test_the_multiplier_is_the_two_z_scores_and_not_a_fudge_factor(self) -> None:
+        """The ratio above is multiplier-invariant, so it held the *magnitude* of nothing.
+
+        `FS_MDE_MULTIPLIER` could be 1.0 with the suite green, which would publish "the
+        minimum effect N pairs could detect at 80% power" as a number two-and-a-half times
+        too small and quietly disarm the warning that hangs off it. The two halves answer
+        different questions -- 1.96 is the false-positive rate and 0.8416 is the power --
+        so both are asserted, and then the closed form is asserted against a worked case.
+        """
+        self.assertAlmostEqual(FS_MDE_MULTIPLIER, 2.801585, places=6)
+        self.assertAlmostEqual(FS_MDE_MULTIPLIER - 0.841621, 1.959964, places=6)
+        self.assertAlmostEqual(minimum_detectable_effect(1.0, 4), FS_MDE_MULTIPLIER / 2)
+        self.assertAlmostEqual(minimum_detectable_effect(2.0, 16), 2.0 * 2.801585 / 4)
+
+    def test_a_trial_powered_for_its_own_effect_does_not_say_it_was_not(self) -> None:
+        """The boundary control for the warning below, which the +8/-8/+8 fixture misses.
+
+        That fixture's sd is so large that both a 2.80 multiplier and a 1.0 one trip the
+        warning, so the sentence "this trial could not have detected the effect it was
+        designed around" was printed by a condition nothing pinned. Here the sd is small
+        enough that the MDE lands *under* the declared minimum effect, and the warning
+        must be absent.
+        """
+        items = []
+        for index, (left, right) in enumerate([(2.0, 2.1), (2.0, 2.2), (2.0, 2.1), (2.0, 2.2)]):
+            task = f"fs:{index:03d}"
+            items += [
+                evidence(CONTROL, task=task, points=(left,)),
+                evidence(TREATMENT, task=task, points=(right,)),
+            ]
+        trial = trial_of(*items, planned=4)
+        sd = paired_difference_sd(trial.result.differences)
+        mde = minimum_detectable_effect(sd, trial.result.n)
+        self.assertLess(mde, 0.5)
+        rendered = format_fs_trial_report(
+            trial,
+            plan=plan(tasks=[f"fs:{i:03d}" for i in range(4)]),
+            judge_model="gpt-5.1",
+        )
+        self.assertIn("the minimum effect 4 pairs could detect at 80% power", rendered)
+        self.assertNotIn("could not have detected the effect it was designed around", rendered)
 
     def test_a_trial_that_could_not_have_seen_its_own_effect_says_so(self) -> None:
         items = []
@@ -746,6 +1031,45 @@ class ThePlanIsFrozenAndRefusesWhatWouldSpendATrialTests(unittest.TestCase):
         payload["digest"] = "whatever"
         self.assertEqual(FsTrialPlan.from_dict(payload).digest, plan().digest)
 
+    def test_more_than_one_answer_attempt_is_refused_at_freeze(self) -> None:
+        """A knob that can only be set wrong, refused before the plan is spent.
+
+        `next_actions` launches a second attempt only after an abandon, a stall or a
+        crash, and `evidence_for` writes `answer_attempts=1` as a constant, so a plan
+        declaring three was accepted, launched, spent, and then disclosed the
+        disagreement in a report line over a finished trial.
+        """
+        with self.assertRaises(ValueError) as caught:
+            plan(answer_attempts=3)
+        self.assertIn("this driver can only produce one", str(caught.exception))
+        self.assertIn("pools nothing", str(caught.exception))
+
+    def test_zero_attempts_is_refused_by_the_count_clause_and_not_by_this_one(self) -> None:
+        """The two refusals are about different things and must not collapse into one."""
+        with self.assertRaises(ValueError) as caught:
+            plan(answer_attempts=0)
+        self.assertIn("counts of things that happen", str(caught.exception))
+
+    def test_one_attempt_is_accepted(self) -> None:
+        """The control: the refusal above must not refuse the only value that works."""
+        self.assertEqual(plan(answer_attempts=1).answer_attempts, 1)
+
+    def test_the_report_still_carries_the_disagreement_as_a_second_witness(self) -> None:
+        """The freeze is the gate; the report line is the witness that the gate held.
+
+        A plan that reached the renderer with a value the freeze would have refused --
+        by being constructed rather than parsed, which is what a future edit to
+        `from_dict` could do -- still says so above the numbers.
+        """
+        rendered = format_fs_trial_report(
+            trial_of(evidence(CONTROL), evidence(TREATMENT)),
+            plan=replace(plan(tasks=["fs:000"]), answer_attempts=3),
+            judge_model="gpt-5.1",
+        )
+        self.assertIn(
+            "**the plan declared 3 answer attempt(s) and the runs recorded [1].**", rendered
+        )
+
     def test_a_repeated_task_is_refused(self) -> None:
         with self.assertRaises(ValueError) as caught:
             plan(tasks=["fs:000", "fs:000"])
@@ -785,9 +1109,9 @@ class ThePlanMayNotImplyAScheduleNobodyMeasuredTests(unittest.TestCase):
     def test_a_trial_of_two_direct_arms_is_not_asked_for_the_word(self) -> None:
         """The exemption is narrow and the control shows where it stops.
 
-        A direct arm's latency *is* measured -- 134.5 s mean over 21 tasks -- so a plan
-        with no pipeline arm has nothing UNMEASURED to declare, and demanding the word
-        anyway would train whoever writes the next plan to paste it in.
+        A direct arm's latency *is* measured -- 120.1 s mean over the whole sixty-row
+        split -- so a plan with no pipeline arm has nothing UNMEASURED to declare, and
+        demanding the word anyway would train whoever writes the next plan to paste it in.
         """
         two_direct = plan(
             treatment={
@@ -798,7 +1122,7 @@ class ThePlanMayNotImplyAScheduleNobodyMeasuredTests(unittest.TestCase):
                 "label": "direct-sonnet-b", "kind": "direct", "model": "sonnet",
                 "answer_guidance": "minimal",
             },
-            cost_note="Two direct arms: 134.5 s mean answer latency, 2.6 h of judge.",
+            cost_note="Two direct arms: 120.1 s mean answer latency, 2.4 h of judge.",
         )
         self.assertEqual(two_direct.treatment.kind, "direct")
 
@@ -1037,6 +1361,60 @@ class TheDryRunKnobsAreDryRunOnlyTests(unittest.TestCase):
         for fault, clause in FS_FAKE_FAULTS.items():
             with self.subTest(fault=fault):
                 self.assertIn(clause, names)
+
+
+class OneAnswerLatencyWrittenInThreePlacesTests(unittest.TestCase):
+    """One measurement, three prose encodings, and no shared reader between them.
+
+    The direct arm's mean answer latency is quoted in `DEFAULT_FS_ANSWER_TIMEOUT`'s
+    comment, in `DirectAnswerWriter.MAX_ATTEMPTS`' docstring and in the shipped plan's
+    `cost_note`. All three carried 134.5 s -- the mean over an earlier balanced
+    twenty-one-task draw -- after the whole-split measurement had superseded it: 120.1 s
+    mean, 115.9 s median, 290.1 s max, 60 of 60 judged with zero judge failures.
+
+    Nothing can turn three sentences into one constant. What a test can do is fail the
+    day they disagree again, and refuse the superseded figure anywhere it is not
+    explicitly marked as superseded.
+    """
+
+    #: Everything a figure like this could be written into. Globbed rather than listed so
+    #: that a fourth copy in a new file is caught rather than exempted by omission.
+    POPULATION = ("*.py", "src/*.py", "src/*/*.py", "tools/*.py", "tests/*.py", "configs/*.json")
+
+    SUPERSEDED = "134.5"
+    MEASURED = "120.1"
+
+    def _bodies(self):
+        for pattern in self.POPULATION:
+            for path in sorted(REPO.glob(pattern)):
+                yield path, path.read_text(encoding="utf-8")
+
+    def test_the_three_copies_all_quote_the_whole_split_mean(self) -> None:
+        for name in ("fs_agent.py", "src/frontierscience.py", "configs/fs_trial_001.json"):
+            with self.subTest(file=name):
+                self.assertIn(self.MEASURED, (REPO / name).read_text(encoding="utf-8"))
+
+    def test_the_superseded_figure_is_never_quoted_as_the_measurement(self) -> None:
+        for path, body in self._bodies():
+            if self.SUPERSEDED not in body:
+                continue
+            with self.subTest(file=path.name):
+                self.assertIn(self.MEASURED, body)
+                self.assertIn("superseded", body)
+
+    def test_the_scan_would_notice_a_bare_copy_of_the_superseded_figure(self) -> None:
+        """The control: a scan that only ever looks at compliant files asserts nothing."""
+        fabricated = "answer latency is 134.5 s\n"
+        self.assertIn(self.SUPERSEDED, fabricated)
+        self.assertNotIn(self.MEASURED, fabricated)
+        self.assertNotIn("superseded", fabricated)
+
+    def test_the_population_is_not_empty_and_reaches_the_three_files(self) -> None:
+        """The other control: a glob that matched nothing would pass everything."""
+        seen = {path.relative_to(REPO).as_posix() for path, _body in self._bodies()}
+        self.assertGreater(len(seen), 50)
+        for name in ("fs_agent.py", "src/frontierscience.py", "configs/fs_trial_001.json"):
+            self.assertIn(name, seen)
 
 
 class TheFallbackMarkerIsTheAdapterSTests(unittest.TestCase):

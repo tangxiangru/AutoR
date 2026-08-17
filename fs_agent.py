@@ -152,11 +152,14 @@ from src.web_search import (  # noqa: E402
 #: anybody can interpret.
 DEFAULT_FS_STAGE_TIMEOUT = 3600
 
-#: Seconds allowed for the ``direct`` arm's single call. Measured mean answer latency for
-#: a direct model call on this benchmark is 134.5 seconds, and the longest observed answer
-#: spent 34,313 output tokens, so this is an order of magnitude of headroom. It is not the
-#: stage timeout: there is no stage, and reusing one number for two things is how a knob
-#: ends up tuned for the wrong one.
+#: Seconds allowed for the ``direct`` arm's single call. Measured over the **whole
+#: sixty-row split**, a direct model call on this benchmark takes a mean of 120.1 s, a
+#: median of 115.9 s and at most 290.1 s (60 of 60 judged, zero judge failures), and the
+#: longest observed answer spent 34,313 output tokens -- so this is six times the slowest
+#: call anybody has recorded here. The earlier figure of 134.5 s was the mean over a
+#: balanced twenty-one-task draw and is superseded. It is not the stage timeout: there is
+#: no stage, and reusing one number for two things is how a knob ends up tuned for the
+#: wrong one.
 DEFAULT_FS_ANSWER_TIMEOUT = 1800
 
 #: Attempts per stage before the stage is auto-skipped. Two, where the interactive default

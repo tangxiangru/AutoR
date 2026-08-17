@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 import sys
 import tempfile
 import unittest
@@ -52,6 +53,7 @@ from src.frontierscience import (
     FS_DEFAULT_DATASET_PATH,
     FS_RUBRIC_HEAD_PATTERN,
     FS_TASK_SELECTION_HELP,
+    FS_TASK_SUBSET_ARGUMENTS,
     FsRow,
     RubricItem,
     RubricParseError,
@@ -350,13 +352,41 @@ class TheTaskSubsetIsExplicitTest(unittest.TestCase):
         self.assertEqual(keys, by_hand)
         self.assertEqual(keys, resolve_task_keys(self.rows, sample=8, sample_seed=20260817))
 
-    def test_the_help_text_names_the_algorithm_so_it_can_be_redone_by_hand(self) -> None:
-        self.assertIn("random.Random(S).sample(sorted(keys), N)", FS_TASK_SELECTION_HELP)
+    def test_the_subset_arguments_name_the_algorithm_so_it_can_be_redone_by_hand(self) -> None:
+        """The seeded draw's algorithm is written down; it just is not written down in a
+        flag's help, because there is no flag."""
+        self.assertIn("random.Random(S).sample(sorted(keys), N)", FS_TASK_SUBSET_ARGUMENTS)
+
+    def test_the_help_text_promises_no_flag_no_front_end_declares(self) -> None:
+        """Prose is a specification here.
+
+        `FS_TASK_SELECTION_HELP` reaches a reader as the `--task` help on two front ends
+        and as the tail of every spec refusal. It promised a `--tasks`, a `--subject` and
+        a `--sample N --sample-seed S`, and nothing has ever declared any of them:
+        `fs_agent.py` and `tools/score_fs_run.py` each take one `--task`, and the trial
+        driver's population is the explicit `tasks` list in its plan.
+        """
+        declared = set()
+        for name in ("fs_agent.py", "tools/score_fs_run.py", "tools/fs_trial.py"):
+            body = (REPO / name).read_text(encoding="utf-8")
+            declared |= set(re.findall(r'add_argument\(\s*"(--[a-z0-9-]+)"', body))
+        self.assertIn("--task", declared, "the scan found no flags to check against")
+        promised = set(re.findall(r"(--[a-z][a-z0-9-]*)", FS_TASK_SELECTION_HELP))
+        self.assertEqual(sorted(promised - declared), [])
+
+    def test_the_scan_would_notice_a_promise_nobody_keeps(self) -> None:
+        """The control: guards the regex rather than the tree."""
+        self.assertEqual(
+            re.findall(r"(--[a-z][a-z0-9-]*)", "use --subject and --sample-seed"),
+            ["--subject", "--sample-seed"],
+        )
 
     def test_a_sample_without_a_seed_is_refused(self) -> None:
         with self.assertRaises(DatasetRefused) as caught:
             resolve_task_keys(self.rows, sample=4)
         self.assertIn("reproduced", str(caught.exception))
+        # And it says what to pass, which is an argument and not a flag.
+        self.assertIn("Neither is a command-line flag", str(caught.exception))
 
     def test_a_sample_larger_than_the_selection_is_refused_not_truncated(self) -> None:
         with self.assertRaises(DatasetRefused) as caught:
@@ -371,7 +401,8 @@ class TheTaskSubsetIsExplicitTest(unittest.TestCase):
     def test_an_unreadable_spec_is_refused_with_the_grammar_attached(self) -> None:
         with self.assertRaises(DatasetRefused) as caught:
             resolve_task_keys(self.rows, tasks="physics")
-        self.assertIn("random.Random(S).sample", str(caught.exception))
+        self.assertIn("inclusive index ranges", str(caught.exception))
+        self.assertIn(FS_TASK_SELECTION_HELP, str(caught.exception))
 
     def test_an_unknown_subject_is_refused(self) -> None:
         with self.assertRaises(DatasetRefused) as caught:

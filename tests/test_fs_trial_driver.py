@@ -219,6 +219,51 @@ class AWholeTrialTests(DryRunCase):
         self.assertNotEqual(first, second)
         self.assertTrue(first.is_dir() and second.is_dir())
 
+    def test_a_second_workspace_of_the_same_name_is_loud_and_not_shared(self) -> None:
+        """`exist_ok=False`, which the test above never reaches.
+
+        `fs_workspace_name` carries microseconds *and* the arm label, so two arms of one
+        task always get two names and the flag is never exercised -- flipping it to
+        `exist_ok=True` left the suite green, on the sibling driver's worst scar: two arms
+        in one directory, overwriting each other's deliverable, a paired difference of
+        exactly zero manufactured by a filename. Pinning the name to a constant is the
+        only way to reach the collision, and it pins the retry bound at the same time.
+        """
+        path = self._plan()
+        plan = self.tool.load_plan(path)
+        calls = []
+
+        def one_name(task, arm):
+            calls.append((task, arm))
+            return "fs000_direct-opus_collide"
+
+        with mock.patch.object(self.tool, "fs_workspace_name", one_name):
+            first = self.tool.make_workspace(plan, "fs:000", self.control_arm)
+            with self.assertRaises(SystemExit) as caught:
+                self.tool.make_workspace(plan, "fs:000", self.control_arm)
+        self.assertIn(str(first), str(caught.exception))
+        self.assertIn(str(first.parent), str(caught.exception))
+        self.assertIn("fs:000", str(caught.exception))
+        self.assertIn(str(self.tool.WORKSPACE_NAME_TRIES), str(caught.exception))
+        # Tried the bound and no more: one call for the first workspace, then five.
+        self.assertEqual(len(calls), 1 + self.tool.WORKSPACE_NAME_TRIES)
+
+    def test_a_free_name_is_taken_on_the_first_try(self) -> None:
+        """The control for the retry bound: an unused name must not cost five attempts."""
+        path = self._plan()
+        plan = self.tool.load_plan(path)
+        calls = []
+        real = self.tool.fs_workspace_name
+
+        def counted(task, arm):
+            calls.append((task, arm))
+            return real(task, arm)
+
+        with mock.patch.object(self.tool, "fs_workspace_name", counted):
+            made = self.tool.make_workspace(plan, "fs:000", self.control_arm)
+        self.assertTrue(made.is_dir())
+        self.assertEqual(len(calls), 1)
+
     def test_editing_a_frozen_plan_is_refused(self) -> None:
         path = self._plan()
         self.drive("plan", "--plan", str(path))
@@ -234,6 +279,69 @@ class AWholeTrialTests(DryRunCase):
         with self.assertRaises(SystemExit) as caught:
             self.drive("run", "--plan", str(path))
         self.assertIn("freeze the plan first", str(caught.exception))
+
+    def test_an_autor_arm_whose_worktree_is_absent_is_refused_by_name(self) -> None:
+        """The shipped plan's failure mode, turned from a traceback into a sentence.
+
+        `configs/fs_trial_001.json` points its treatment arm at
+        `/home/robtang_google_com/AutoR-fs-treatment`, which does not exist. `run` used to
+        take the lock, create the state directory, write a `launched` state and then die
+        at `Popen` with a bare `FileNotFoundError` naming no arm and no path -- under
+        `operator: "fake"` as much as under a real one, because the child's cwd is the
+        arm's worktree and the revision the gate checks is read out of it with `git`.
+        """
+        path = self._plan(tasks=("fs:000",))
+        self.drive("plan", "--plan", str(path))
+        for item in sorted(self.worktree.rglob("*"), reverse=True):
+            item.unlink() if item.is_file() or item.is_symlink() else item.rmdir()
+        self.worktree.rmdir()
+        with self.assertRaises(SystemExit) as caught:
+            self.drive("run", "--plan", str(path))
+        message = str(caught.exception)
+        self.assertIn(str(self.worktree), message)
+        self.assertIn(self.treatment_arm, message)
+        self.assertIn("not a directory here", message)
+        # And it refused before spending anything: no lock, no run states, no workspaces.
+        self.assertFalse((self.root / "state" / "driver.lock").exists())
+        self.assertFalse((self.root / "state" / "runs").exists())
+
+    def test_a_present_worktree_is_not_refused(self) -> None:
+        """The control. Without it the refusal above would hold for every dry run."""
+        path = self._plan(tasks=("fs:000",))
+        self.assertEqual(self.tool.missing_worktrees(self.tool.load_plan(path)), [])
+        self.drive("plan", "--plan", str(path))
+        self.assertEqual(self.drive("run", "--plan", str(path)), 0)
+
+    def test_a_direct_only_plan_needs_no_checkout_at_all(self) -> None:
+        """The other control, and the shape of a dry run that really is dry: an arm with
+        no worktree is not asked for one."""
+        path = self._plan(
+            tasks=("fs:000",),
+            treatment={
+                "label": "direct-sonnet", "kind": "direct", "model": "sonnet",
+                "answer_guidance": "minimal",
+            },
+            control={
+                "label": "direct-sonnet-b", "kind": "direct", "model": "sonnet",
+                "answer_guidance": "minimal",
+            },
+            cost_note="Two direct arms; the judge is the only cost.",
+        )
+        self.assertEqual(self.tool.missing_worktrees(self.tool.load_plan(path)), [])
+        self.drive("plan", "--plan", str(path))
+        self.assertEqual(self.drive("run", "--plan", str(path)), 0)
+
+    def test_report_still_works_when_the_checkout_is_gone(self) -> None:
+        """Why the check is at `run` and not at freeze: a plan is a value, and rebuilding
+        an old report must not depend on a worktree somebody has since deleted."""
+        path = self._plan(tasks=("fs:000",))
+        self.drive("plan", "--plan", str(path))
+        self.drive("run", "--plan", str(path))
+        for item in sorted(self.worktree.rglob("*"), reverse=True):
+            item.unlink() if item.is_file() or item.is_symlink() else item.rmdir()
+        self.worktree.rmdir()
+        self.assertEqual(self.drive("report", "--plan", str(path)), 0)
+        self.assertIn("pairs: **1**", (self.root / "state" / "report.md").read_text(encoding="utf-8"))
 
     def test_a_foreign_autor_process_stops_the_driver_starting(self) -> None:
         path = self._plan()
@@ -386,6 +494,174 @@ class CrashSurvivalTests(DryRunCase):
         self.assertEqual([action.kind for action in first], ["done"])
 
 
+class TheDriverRefusalLedgerIsProducedAndNotOnlyRenderedTests(DryRunCase):
+    """`driver_refusals` end to end, against state files the real driver wrote.
+
+    The per-arm death count is the line the report tells a reader to judge the whole
+    trial on, and it was produced by a function nothing exercised: the only assertion
+    about it hand-constructed an `FsRefusal` and passed it *into* `collect_fs_pairs`, so
+    it tested the rendering. Forcing the producer to return ``{}`` left the suite green.
+
+    A dry run never reaches any of the four causes -- the fake operator does not crash,
+    stall, fall back or lose a score file -- so each is staged by editing the state
+    directory of a *finished* trial and rebuilding the report, which `build_report` is
+    documented and separately tested to be a pure function of.
+    """
+
+    CAUSES = ("fallback", "stalled", "abandoned", "unscored")
+
+    def _finished_trial(self):
+        path = self._plan(tasks=("fs:000", "fs:001", "fs:002", "fs:003"))
+        self.drive("plan", "--plan", str(path))
+        self.drive("run", "--plan", str(path))
+        return path, self.tool.load_plan(path)
+
+    def _state(self, plan, task: str, **changes) -> None:
+        where = self.tool.state_path(plan, task, self.treatment_arm, 1)
+        payload = json.loads(where.read_text(encoding="utf-8"))
+        payload.update(changes)
+        where.write_text(json.dumps(payload), encoding="utf-8")
+
+    def _drop_scores(self, task: str) -> None:
+        slug = task.replace(":", "")
+        for path in (self.root / "state" / "scores").glob(f"{slug}.{self.treatment_arm}.*"):
+            path.unlink()
+
+    def test_every_driver_cause_reaches_the_ledger_and_the_per_arm_count(self) -> None:
+        path, plan = self._finished_trial()
+        # A run that answered with the fallback template: it finished, the judge was
+        # never spent on it, and it must not read as "no treatment arm".
+        self._state(plan, "fs:000", classification="fallback")
+        self._drop_scores("fs:000")
+        # A run the watchdog killed, refused after its attempt budget.
+        self._state(plan, "fs:001", phase="refused", classification="stalled")
+        self._drop_scores("fs:001")
+        # The driver died between writing the abandonment and planning the replacement.
+        self._state(plan, "fs:002", phase="abandoned")
+        self._drop_scores("fs:002")
+        # Admissible, the final pass has been over it, and no score file exists: every
+        # draw failed. A whole trial of these publishes `pairs: 0` with an empty ledger.
+        self._drop_scores("fs:003")
+
+        self.assertEqual(self.drive("report", "--plan", str(path)), 0)
+        report = (self.root / "state" / "report.md").read_text(encoding="utf-8")
+        for cause in self.CAUSES:
+            with self.subTest(cause=cause):
+                self.assertIn(f"| `driver:{cause}` | 1 |", report)
+                self.assertIn(f"`{self.treatment_arm}`: driver:{cause}", report)
+        self.assertIn(f"treatment `{self.treatment_arm}`: **4 refused**, 0 admitted", report)
+        self.assertIn(f"control `{self.control_arm}`: **0 refused**, 4 admitted", report)
+        # And the ledger's whole point: this is a trial's result, not a footnote.
+        self.assertIn("The difference is not published", report)
+
+    def test_an_untouched_trial_carries_no_driver_row(self) -> None:
+        """The control. Without it the four rows above could come from anywhere."""
+        path, _plan = self._finished_trial()
+        self.assertEqual(self.drive("report", "--plan", str(path)), 0)
+        report = (self.root / "state" / "report.md").read_text(encoding="utf-8")
+        self.assertEqual([line for line in report.splitlines() if "| `driver:" in line], [])
+        self.assertIn("- no run was refused.", report)
+
+    def test_a_run_in_flight_is_not_an_attrition(self) -> None:
+        """`phase == "launched"` is deliberately not a driver refusal: calling a run that
+        has not died a death would report every interim trial as attrition."""
+        path, plan = self._finished_trial()
+        self._state(plan, "fs:000", phase="launched")
+        self._drop_scores("fs:000")
+        self.assertEqual(self.drive("report", "--plan", str(path)), 0)
+        report = (self.root / "state" / "report.md").read_text(encoding="utf-8")
+        self.assertEqual([line for line in report.splitlines() if "| `driver:" in line], [])
+
+    def test_an_abandoned_attempt_a_later_one_recovered_costs_an_attempt_not_a_pair(self) -> None:
+        """The other direction, and the reason the producer de-duplicates by cell.
+
+        `CrashSurvivalTests` leaves exactly this on disk: attempt 1 abandoned, attempt 2
+        finished and scored. Counting the abandonment would double the per-arm death
+        count the reader is told to judge the trial on.
+        """
+        path = self._plan(tasks=("fs:000",))
+        self.drive("plan", "--plan", str(path))
+        plan = self.tool.load_plan(path)
+        stale = self.root / "state" / "workspaces" / "fs000_treatment_stale"
+        stale.mkdir(parents=True)
+        self.tool.write_json(
+            self.tool.state_path(plan, "fs:000", self.treatment_arm, 1),
+            {
+                "task_key": "fs:000", "arm": self.treatment_arm, "attempt": 1,
+                "phase": "launched", "child_pid": 999_999, "workspace": str(stale),
+            },
+        )
+        self.assertEqual(self.drive("run", "--plan", str(path)), 0)
+        report = (self.root / "state" / "report.md").read_text(encoding="utf-8")
+        self.assertIn("- no run was refused.", report)
+        self.assertNotIn("driver:abandoned", report)
+
+
+class TheEnvironmentIsObservedAndNotCopiedFromThePlanTests(DryRunCase):
+    """`FsRunEnvironment`'s central claim, at the two fields where it decides something.
+
+    "Every one is *observed* off the artifacts rather than copied from the plan: a field
+    filled from the plan agrees by construction and is therefore not the field the
+    contract names." Sourcing `judge_model` from `plan.judge_model` and `dataset_sha256`
+    from `plan.dataset_sha256` passed the whole suite -- and under either, the two
+    warnings that hang off them become structurally unreachable, because the observation
+    *is* the declaration. The pure tests of those warnings build the environment by hand
+    and never touch `evidence_for`, which is the wiring that fills it.
+    """
+
+    def _finished_trial(self):
+        path = self._plan(tasks=("fs:000",))
+        self.drive("plan", "--plan", str(path))
+        self.drive("run", "--plan", str(path))
+        return path
+
+    def test_a_judge_the_score_files_name_is_read_off_them_and_not_off_the_plan(self) -> None:
+        path = self._finished_trial()
+        for score in sorted((self.root / "state" / "scores").glob("*.json")):
+            payload = json.loads(score.read_text(encoding="utf-8"))
+            payload["judge"]["model"] = "gemini-2.5-flash"
+            score.write_text(json.dumps(payload), encoding="utf-8")
+        self.assertEqual(self.drive("report", "--plan", str(path)), 0)
+        report = (self.root / "state" / "report.md").read_text(encoding="utf-8")
+        self.assertIn("the judge that ran is not the judge the plan declared", report)
+        self.assertIn("`gpt-5.1`", report)
+        self.assertIn("gemini-2.5-flash", report)
+
+    def test_a_dataset_the_runs_answered_is_read_off_them_and_not_off_the_plan(self) -> None:
+        path = self._finished_trial()
+        for where in sorted((self.root / "state" / "runs").glob("*.json")):
+            payload = json.loads(where.read_text(encoding="utf-8"))
+            payload["meta_dataset_sha256"] = "deadbeef" * 8
+            where.write_text(json.dumps(payload), encoding="utf-8")
+        self.assertEqual(self.drive("report", "--plan", str(path)), 0)
+        report = (self.root / "state" / "report.md").read_text(encoding="utf-8")
+        self.assertIn("the runs did not all answer the dataset the plan names", report)
+        self.assertIn("deadbeefdeadbeef", report)
+
+    def test_an_unedited_trial_raises_neither_warning(self) -> None:
+        """The control for both: the warnings must be about the edit, not about the run."""
+        path = self._finished_trial()
+        report = (self.root / "state" / "report.md").read_text(encoding="utf-8")
+        self.assertNotIn("is not the judge the plan declared", report)
+        self.assertNotIn("did not all answer the dataset the plan names", report)
+        self.assertEqual(self.drive("report", "--plan", str(path)), 0)
+
+    def test_one_arm_disagreeing_is_enough_for_the_dataset_warning(self) -> None:
+        """It is a claim about the population of runs, not about their consensus: two
+        files answering to one name is the confound the environment digest cannot
+        describe, because both arms would carry it."""
+        path = self._plan(tasks=("fs:000",))
+        self.drive("plan", "--plan", str(path))
+        self.drive("run", "--plan", str(path))
+        where = sorted((self.root / "state" / "runs").glob("*.json"))[0]
+        payload = json.loads(where.read_text(encoding="utf-8"))
+        payload["meta_dataset_sha256"] = "deadbeef" * 8
+        where.write_text(json.dumps(payload), encoding="utf-8")
+        self.assertEqual(self.drive("report", "--plan", str(path)), 0)
+        report = (self.root / "state" / "report.md").read_text(encoding="utf-8")
+        self.assertIn("the runs did not all answer the dataset the plan names", report)
+
+
 class TheLockIsTheKernelSTests(DryRunCase):
     def test_the_driver_names_itself_when_it_takes_the_lock(self) -> None:
         """A driver that let the marker default reads its own live lock as stale.
@@ -473,6 +749,72 @@ class TheFakeJudgeIsTheRealScorerSPureHalfTests(DryRunCase):
         self.assertEqual(payload["draws"][0]["verdict_matches"], 1)
         self.assertIsNone(payload["total_spread"])
         self.assertIn("unmeasured (1 draw)", payload["spread_text"])
+
+
+class TheJudgeIsSpentOnlyOnCandidateMeasurementsTests(DryRunCase):
+    """`final_pass`'s `classification != "ok"` filter, which nothing held.
+
+    Dropping it -- grading every finished run -- left the suite green, and the
+    consequence is not only the bill. A `fallback` or `incomplete` run acquires score
+    files, becomes an `FsArmEvidence`, reaches the admission gate, and moves out of the
+    `driver:fallback` ledger row into an `answer_not_fallback` one: the ledger's two
+    populations swap silently, and the judge is paid 72.9 s a call for a non-run.
+    """
+
+    def _run_with_a_fallback(self, tasks=("fs:000", "fs:001")):
+        path = self._plan(tasks=tasks)
+        self.drive("plan", "--plan", str(path))
+        self.drive("run", "--plan", str(path))
+        plan = self.tool.load_plan(path)
+        # Stage the non-run *after* the trial, then reopen it: `build_report` is a pure
+        # function of the state directory and `final_pass` skips what it has already
+        # scored, so the score files have to go too.
+        where = self.tool.state_path(plan, "fs:000", self.treatment_arm, 1)
+        payload = json.loads(where.read_text(encoding="utf-8"))
+        payload["classification"] = "fallback"
+        payload["meta_answer_source"] = "fallback"
+        where.write_text(json.dumps(payload), encoding="utf-8")
+        for score in (self.root / "state" / "scores").glob(
+            f"fs000.{self.treatment_arm}.*"
+        ):
+            score.unlink()
+        (self.root / "state" / "final_pass.json").unlink()
+        return path, plan
+
+    def test_a_finished_but_fallback_run_is_never_handed_to_the_judge(self) -> None:
+        path, plan = self._run_with_a_fallback()
+        self.tool.final_pass(plan)
+        written = sorted(
+            p.name for p in (self.root / "state" / "scores").glob(f"fs000.{self.treatment_arm}.*")
+        )
+        self.assertEqual(written, [], "the judge was spent on a run that is not a measurement")
+        # The control arm of the same task was untouched and is still scored, so the
+        # assertion above is about the classification and not about the task.
+        self.assertTrue(
+            sorted((self.root / "state" / "scores").glob(f"fs000.{self.control_arm}.*"))
+        )
+
+    def test_the_non_run_stays_in_the_driver_row_and_never_reaches_a_clause(self) -> None:
+        path, plan = self._run_with_a_fallback()
+        self.tool.final_pass(plan)
+        self.assertEqual(self.drive("report", "--plan", str(path)), 0)
+        report = (self.root / "state" / "report.md").read_text(encoding="utf-8")
+        self.assertIn("| `driver:fallback` | 1 |", report)
+        self.assertIn(f"`fs:000` / `{self.treatment_arm}`: driver:fallback", report)
+        # The two populations the filter keeps apart: a non-run must not be counted as a
+        # run the gate looked at and refused.
+        self.assertIn("| `answer_not_fallback` | 0 |", report)
+
+    def test_an_ok_run_the_final_pass_has_not_seen_is_graded(self) -> None:
+        """The control: the filter must not be a synonym for "grade nothing"."""
+        path = self._plan(tasks=("fs:000",))
+        self.drive("plan", "--plan", str(path))
+        self.drive("run", "--plan", str(path))
+        plan = self.tool.load_plan(path)
+        for score in (self.root / "state" / "scores").glob("*.json"):
+            score.unlink()
+        self.tool.final_pass(plan)
+        self.assertEqual(len(sorted((self.root / "state" / "scores").glob("*.json"))), 2)
 
 
 class TheRealScorerIsToldWhatThePlanDeclaredTests(DryRunCase):
