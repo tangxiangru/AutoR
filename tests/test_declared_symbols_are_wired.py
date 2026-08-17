@@ -25,13 +25,13 @@ place the product actually starts from, including ``studio.py``, without which t
 ``src/backend/`` package would read as dead.
 
 ``tests/`` and ``tools/`` are deliberately *not* roots. A test is the thing that keeps a
-dead symbol green -- twenty of the thirty-one symbols listed below have one -- so counting
+dead symbol green -- nineteen of the thirty symbols listed below have one -- so counting
 a test as wiring would make the gate assert nothing. An instrument is not evidence:
 ``archive_sample_complexity`` was importing ``RunRecord`` and crashing on it at the same
 time. A symbol that only ``tools/`` reaches is still exempt, but by a line somebody wrote,
 and :attr:`Exempt.reached_from` makes that line checkable.
 
-That twenty is :func:`allowlisted_symbols_with_a_test`, printed by the census and pinned
+That nineteen is :func:`allowlisted_symbols_with_a_test`, printed by the census and pinned
 against this sentence by
 :meth:`AllowlistIsHonestTests.test_the_stated_count_of_tested_symbols_is_the_measured_one`,
 because the first version of the sentence said twenty-one and no instrument could
@@ -198,15 +198,6 @@ ALLOWLIST: dict[str, Exempt] = {
         "So wiring the renderer means first deciding that a stage should be told which "
         "skills exist -- the pack is pull-based by design, and telling every stage about it "
         "up front is the cost the skill mechanism was built to avoid."
-    ),
-    # -- a documented claim about a function nothing calls --------------------------------
-    "src/information_flow.py::dependency_edges": Exempt(
-        "This module's own docstring says 'The graph is inspectable. `dependency_edges()` "
-        "returns the producer -> consumer pairs, so the information topology can be "
-        "printed, tested, and diffed', and README.md repeats the claim. Both are true of "
-        "the function and false of the product: only `test_information_flow.py` calls it, "
-        "so the topology is tested and never printed. Wiring means giving the inspection an "
-        "output -- a CLI subcommand or a run artifact -- which is a new surface."
     ),
     "src/stage_graph.py::admissible_moves": Exempt(
         "This module's docstring says '`admissible_moves` withdraws a revisit whose "
