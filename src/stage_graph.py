@@ -832,7 +832,103 @@ def record_graph_effect(paths: RunPaths, state: GraphState) -> dict[str, Any]:
 #: not unavailable so much as moot. ``pruned`` is the caller's own ``--final-stage``:
 #: not a fact about the research at all, and the one kind that means the walk is
 #: finished rather than stuck.
-BLOCK_KINDS = ("guard", "visits", "steps", "concluded", "pruned")
+#:
+#: Three of these are budgets and they bound different things. ``steps`` and
+#: ``visits`` bound the *walk* — how long it may be, how often one node may be
+#: re-entered — and both are counted inside :class:`GraphState`. ``budget`` bounds
+#: something the walk does not own: the unattended auto-skip pool, held by
+#: :class:`~src.manager.ResearchManager`, which recovering from an exhausted stage
+#: and reaching a deliverable both draw on. See :data:`DELIVERY_RESERVE`.
+BLOCK_KINDS = ("guard", "visits", "steps", "concluded", "pruned", "budget")
+
+
+#: Units of the unattended auto-skip budget a backward edge may not spend.
+#:
+#: `--max-auto-skips` (default 3) is a pool of recoveries from stages that exhaust
+#: their attempts, and :meth:`~src.manager.ResearchManager._handle_unattended_stage_exhaustion`
+#: spends it two ways that compete. While units remain, an exhausted stage is
+#: skipped and the run continues. Once ``len(auto_skipped_stages) >= max_auto_skips``
+#: the same exhaustion calls ``_route_to_deliverable``, which returns False when the
+#: run is *already* at the stage that writes the deliverable — and the run aborts
+#: with whatever is on disk. A backward edge draws on that pool too: it re-runs a
+#: stage, and a re-run stage can exhaust and consume a unit.
+#:
+#: **Measured, not chosen, and the measurement is two halves.**
+#:
+#: *The blast radius*, from ``tools/replay_revisit_reserve.py``, which replays finished
+#: runs against :func:`revisit_would_strand_delivery` at every candidate reserve. Over
+#: the four runs of the first live paired trial — 23 routing decisions, one backward
+#: move taken, 28 backward moves offered:
+#:
+#: ===========  ==================  ==================  ==========================
+#: reserve      revisits withdrawn  offers withdrawn    cancellations it prevents
+#: ===========  ==================  ==================  ==========================
+#: 0            0 of 1              4 of 28             0 of 2
+#: 1            0 of 1              7 of 28             0 of 2
+#: 2            0 of 1              15 of 28            0 of 2
+#: 3            1 of 1              28 of 28            0 of 2
+#: ===========  ==================  ==================  ==========================
+#:
+#: That refutes the top of the range outright: reserve 3 takes every backward move the
+#: corpus ever offered, including the one that was taken — a return from writing to
+#: analysis whose recorded reason was that a bootstrap "can flip that sentence from
+#: 'clears the bar' to 'not resolved either way'" — and prevents neither cancellation.
+#: A reserve sized to cover every
+#: stage between the revisit target and the deliverable is larger than 3 and is
+#: refuted by the same row. It does not separate 0, 1 and 2: none of them reaches a
+#: revisit that was actually taken, because the corpus's one backward move was made
+#: with the pool untouched.
+#:
+#: *What the abort costs*, which is what separates them, and is a property of
+#: :meth:`~src.manager.ResearchManager._handle_unattended_stage_exhaustion` rather
+#: than of the corpus. Driving that method at the writing stage with the pool at 3 and
+#: varying what is left: 0 units aborts the run, 1 unit auto-skips and the run
+#: continues, 2 units likewise. So the quantity the observed ending needed is exactly
+#: one, and one is the smallest reserve that holds it back — reserve 0 refuses a
+#: revisit only once the pool is already empty, which is too late for the branch that
+#: decides. ``test_the_reserve_is_the_unit_the_abort_needs`` is that measurement as a
+#: test.
+#:
+#: Reserve 2 would hold back a second unit nothing in the corpus asked for, and the
+#: table prices that at 15 withdrawn offers against 7 — better than twice the cost for
+#: a unit no measured ending needed.
+#:
+#: What one unit does **not** do is undo the two cancellations. Neither cancelled run
+#: took a backward edge, so no reserve on backward edges was going to save them: both
+#: pools were spent by forward stages exhausting. This is prophylaxis against a shape
+#: the corpus contains — a Stage 06 decision offering four backward moves with the
+#: pool already at zero, one step from the deliverable, in a run that then aborted at
+#: the deliverable — and not a repair for the shape that killed those two.
+DELIVERY_RESERVE = 1
+
+
+def revisit_would_strand_delivery(skips_left: int, reserve: int = DELIVERY_RESERVE) -> bool:
+    """Would taking a backward edge now risk the budget reaching a deliverable needs?
+
+    ``skips_left`` is ``max_auto_skips - len(auto_skipped_stages)`` at the moment of
+    choosing. A revisit costs at most one unit before the run is back where it
+    started — the re-entered stage can exhaust once — which is what the corpus's one
+    backward edge cost: Stage 06 was revisited, exhausted, and took ``1/3``. So a
+    revisit needs a unit of its own *and* :data:`DELIVERY_RESERVE` behind it, and is
+    refused when the pool cannot hold both.
+
+    A separate function rather than an inline comparison because the instrument that
+    sized the reserve calls it. A replay that reimplemented the comparison would be
+    measuring a copy of the rule, and the copy is the one that stays right.
+
+    **The stronger rule this is not.** "No backward edge until a deliverable exists"
+    is the tempting version, and it is already spellable in this module: it is
+    ``report_exists`` on every entry of :data:`REVISIT_EDGES`. It was declined on two
+    grounds. It contradicts what :meth:`~src.router.StageRouter.build_prompt` tells
+    the agent the graph is for — the point of ``06 -> 03`` is to fix the design
+    *before* it is written up, and "write first, go back after" is the "writes up
+    around the flaw it should have gone back for" the prompt exists to prevent. And
+    ``tools/replay_revisit_reserve.py`` prices it on the same corpus as the reserves:
+    it withdraws 18 of 28 backward offers against this reserve's 7, withdraws none of
+    the one backward move actually taken, and prevents neither cancellation. It is
+    two and a half times the cost of the reserve for nothing the corpus can show.
+    """
+    return skips_left <= reserve
 
 
 def replay_cost(source: str, target: str) -> int:
@@ -1128,12 +1224,26 @@ class StageGraph:
     def out_edges(self, slug: str) -> list[Edge]:
         return list(self._by_source.get(slug, []))
 
-    def moves(self, paths: RunPaths, slug: str, state: GraphState, *, final_stage: StageSpec | None = None) -> list[Move]:
+    def moves(
+        self,
+        paths: RunPaths,
+        slug: str,
+        state: GraphState,
+        *,
+        final_stage: StageSpec | None = None,
+        skips_left: int | None = None,
+    ) -> list[Move]:
         """Every edge out of ``slug``, each labelled admissible or blocked.
 
         Blocked edges are returned rather than filtered out. The router needs them:
         the useful thing to tell an agent is not "you may go to 06" but "07 is
         closed because H2 has no verdict", which is a reason to go to 06.
+
+        ``skips_left`` is the caller's remaining unattended auto-skip budget, and
+        ``None`` means the caller has none to declare — a topology inspected outside
+        a run, or a walk with no auto-skip pool behind it. Only the manager passes a
+        number, and only a backward edge can be shut by it: see
+        :data:`DELIVERY_RESERVE`.
         """
         results: list[Move] = []
         for edge in self.out_edges(slug):
@@ -1205,6 +1315,23 @@ class StageGraph:
                     f"the run has taken {state.steps} steps, which is the limit for this graph",
                     "steps",
                 )
+            # Last in the chain, and that is the invariant rather than an ordering
+            # preference: appended here it can only ever turn an *admissible* move
+            # into a blocked one. It cannot re-label an edge a guard already shut, so
+            # it can never make a gated edge look like a budget matter that will clear
+            # on its own, and it can never open anything. That is the same one-way
+            # constraint the archive and the cross-model reviewer are held to.
+            elif (
+                edge.kind == "revisit"
+                and skips_left is not None
+                and revisit_would_strand_delivery(skips_left)
+            ):
+                blocked, kind = (
+                    f"going back re-runs a stage that can exhaust, and only {skips_left} "
+                    f"auto-skip(s) remain — the run has to keep {DELIVERY_RESERVE} in hand "
+                    "to reach a deliverable",
+                    "budget",
+                )
             results.append(Move(edge, guard, blocked, kind))
 
         return _preempted_by_a_conclusion(results)
@@ -1234,6 +1361,10 @@ class StageGraph:
         A budget block is different and is never overridden: a guard says something
         about the research, a budget says something about the run, and the run
         stopping is exactly what a budget is for.
+
+        The ``budget`` kind is not in the set below and does not need to be: it is
+        attached only to a ``revisit``, and the default is never a backward move, so
+        it can only ever remove a move this function had already declined to take.
         """
         moves = self.moves(paths, slug, state, **kwargs)
         by_rank = lambda move: (move.edge.priority, move.edge.target)  # noqa: E731
