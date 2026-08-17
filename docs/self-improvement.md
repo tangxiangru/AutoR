@@ -537,6 +537,14 @@ sign-flip test over *n* pairs cannot go below `2 / 2**n` — three pairs bottom 
 floor is printed beside the p-value, so *did not show an effect* stays
 distinguishable from *could not have shown one*.
 
+Above `MAX_EXACT_PAIRS = 18` the enumeration is replaced by a seeded sample of
+`SAMPLED_SIGN_ASSIGNMENTS = 200,000` sign assignments over the same differences, so
+the floor printed there is the sample's own resolution, 5e-6, and not 2 / 2ⁿ. That
+distinction is not decoration: the branch used to truncate the enumeration to the
+first eighteen differences while leaving the observed mean over all of them, which
+returned p = 0.0 at sixty pairs — a value no permutation test can produce — beside a
+floor of 1.7e-18.
+
 **It does not estimate from fake runs.** One `--fake-operator` arm disqualifies the
 pair, because a scripted operator's score measures the script.
 

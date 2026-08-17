@@ -413,6 +413,9 @@ No `main.py` flag reaches any of these; they are the shape of the deliverable.
 | `DEFAULT_MIN_GAIN` | `archive.py` | 0.02 | Mean fitness a challenger topology must beat the incumbent by. Roughly one rubric criterion moving a quarter of its range. |
 | `DEFAULT_MIN_OBSERVATIONS` | `archive.py` | 6 | Runs an edge needs before the archive will act on it. **Derived, not written down**: `minimum_arms_for(ALPHA, family=len(REVISIT_EDGES) + len(STAGES))`, so adding an edge re-corrects it instead of silently under-correcting. |
 | `MIN_PAIRS_FOR_SIGNIFICANCE` | `trials.py` | 6 | Below this, an exact two-sided sign-flip test cannot reach p < 0.05 at *any* effect size, because it bottoms out at 2 / 2ⁿ. A smaller trial is labelled `underpowered`. |
+| `MAX_EXACT_PAIRS` | `trials.py` | 18 | Pairs up to which `sign_flip_p` enumerates every sign assignment. 2¹⁸ takes 0.27 s; above it the null is sampled instead. `sign_flip_estimator` is the only line that compares against it, so which computation ran is one answer and the report reads that one. It used to decide how many differences the test looked at as well, which returned p = 0.0 at sixty pairs. |
+| `SAMPLED_SIGN_ASSIGNMENTS` | `trials.py` | 200,000 | Size of the sampled reference set above `MAX_EXACT_PAIRS`, and therefore the floor the report prints there (5e-6). Costs 0.08 s at sixty pairs. |
+| `SIGN_FLIP_SEED` | `trials.py` | 20260817 | Seed for that sample, printed in the report. A Monte-Carlo p that moves between two renderings of the same trial is a number a reader cannot check. |
 
 ### Prompt assembly
 

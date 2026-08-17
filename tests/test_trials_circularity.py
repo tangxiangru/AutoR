@@ -98,7 +98,11 @@ class ACircularTrialIsRefusedTests(unittest.TestCase):
         # difference would be arithmetic rather than evidence", which is the point
         # being made rather than the number being reported.
         self.assertNotIn("- mean difference: **", rendered)
-        self.assertNotIn("- exact two-sided p: **", rendered)
+        # "two-sided p: **" and not "- exact two-sided p: **": there are three p-lines
+        # now — exact, sampled, and the one for differences that cancel — and a refusal
+        # that names one of them would go green the day a refused trial grew to nineteen
+        # pairs. The substring is the part all three share.
+        self.assertNotIn("two-sided p: **", rendered)
         self.assertNotIn("Concentration:", rendered)
 
     def test_the_refusal_says_what_would_make_it_trialable(self) -> None:
