@@ -101,8 +101,10 @@ So ``N=2`` is refused, and no larger value does useful work on this data either:
 fires on 1 of the 22 visits and cuts **0** iterations, ``N=4`` and ``N=5`` fire on nothing
 at all. Three is shipped as the safe value -- the smallest at which the measured cost is
 zero on both columns -- and the finding recorded beside it is about the population:
-**every repeat in these three runs is a validator error** (four repeat events, all
-``validators_refused``, no other kind ever repeating), and a repeated validator error is
+**every repeat in these three runs is a validator error** (three maximal runs of an
+unchanged digest, of lengths 2, 3 and 2, which is four adjacent duplicate pairs -- both
+counts are given because "a repeat event" reads as either and the bare number was
+ambiguous; all ``validators_refused``, no other kind ever repeating), and a repeated validator error is
 what :func:`~src.utils.is_stuck` already ends at the same count of three. What this rule
 adds over ``is_stuck`` is real and unmeasurable here: ``is_stuck`` reads only
 ``last_validation_errors``, which the attempt loop assigns at one place, so it is blind to
@@ -156,10 +158,14 @@ therefore zero for the whole rule. Two is the first count at which "this stage f
 same way twice" can be said at all, and the number worth reporting is that the trial's
 single backward edge would have been left alone.
 
-:data:`NO_RECOVERY_LEFT` fires on 1 of the 22 and takes one iteration away, at
-Astronomy_000 linear ``07_writing`` with all three auto-skips already spent -- the visit
-that ended that run as ``run_status: cancelled``. That it takes only one is the whole
-design of its third precondition, and the number the replay prints beside it. Without that
+:data:`NO_RECOVERY_LEFT` fires on 1 of the 22 and takes **nothing** away, at
+Astronomy_000 linear ``07_writing`` at attempt 3 with all three auto-skips already spent --
+the visit that ended that run as ``run_status: cancelled``. The replay prints
+``0 iteration(s) taken away`` beside it. It said *one* until this module moved
+:data:`STOP_AFTER_IDENTICAL_FAILURES` from two to three, which moved the escalate window
+with it: at attempt 3 the visit had nothing left to lose. Recorded because it is the shape
+of staleness this file is most exposed to -- a number measured correctly, invalidated by
+the same commit that measured it. Without that
 precondition the rule fires at the *first* attempt boundary of the writing stage on every
 run that reached it by routing to the deliverable, which is every run whose skip budget is
 spent, and ends the deliverable stage before it has run once -- the opposite of the trade
@@ -320,7 +326,8 @@ MIN_ATTEMPTS_AT_STAKE = 2
 #: the 1,911-byte skip stub. At **3** it fires on one visit and cuts 0 iterations; at 4 and
 #: 5 it fires on nothing. Three is shipped: the smallest value whose measured cost on both
 #: columns is zero. That it is also near-inert here is a fact about the population -- all
-#: four repeat events in these runs are ``validators_refused``, which
+#: repeats in these runs -- three maximal runs of lengths 2, 3 and 2, so four adjacent
+#: duplicate pairs -- are ``validators_refused``, which
 #: :func:`~src.utils.is_stuck` already ends at the same count -- and this rule reads the
 #: whole failure census rather than only ``last_validation_errors``, so what it adds is a
 #: reviewer or a cross-model reviewer or a backend repeating, which these three runs never
@@ -756,9 +763,13 @@ class RunSupervisor:
         """This visit's ceiling: *per_stage*, or what this stage holds, whichever is less.
 
         The value handed to ``attempts_exhausted`` in place of ``--max-attempts``. It is a
-        :func:`min` against the ceiling the caller passed in, so it can differ from it only
-        downwards, and only on a stage :data:`REALLOCATE` has already moved budget away
-        from. Every visit is funded, including the second and third: a backward edge is
+        :func:`min` against the ceiling **the pool was built with**, not against the
+        argument of this call, so it can differ from that ceiling only downwards and only
+        on a stage :data:`REALLOCATE` has already moved budget away from. The distinction is
+        invisible in production -- ``max_stage_attempts`` is set once in
+        :class:`~src.manager.ResearchManager` and never reassigned -- and it is written down
+        because the docstring used to claim the other one: calling this with 8 and then with
+        3 returns 8 both times. Every visit is funded, including the second and third: a backward edge is
         the capability this component exists beside, not one for it to price out.
 
         It takes no ``RunPaths``, and that absence is the fix rather than a tidy-up. The

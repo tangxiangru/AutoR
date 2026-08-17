@@ -274,10 +274,12 @@ def bought(entry: dict[str, str]) -> tuple[str, ...]:
     rather than worse, because the point of this column is to stop the rule being credited
     with a saving it did not make:
 
-    * an approval the cross-model reviewer then vetoed is not an approval. Six attempts in
-      this population have ``reviewer_choice: 5`` and ``cross_review`` reading
-      ``agrees: False`` on the same attempt; the veto is what the loop acted on, so the
-      attempt bought nothing.
+    * an approval the cross-model reviewer then vetoed is not an approval: the veto is what
+      the loop acted on, so the attempt bought nothing. No count is given for how often that
+      happens because three readings of "this population" produced three answers -- over the
+      cut iterations, over every attempt in the 22 visits, and over every attempt entry the
+      loader returns -- and a number that depends on an unstated slice is not a measurement.
+      Slice it yourself if you need one; the rule above does not.
     * ``obligation_recorded`` and ``obligations_deferred`` are not discharges. Only
       ``obligation_discharged`` counts.
     """
