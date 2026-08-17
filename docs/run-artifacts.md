@@ -30,6 +30,8 @@ runs/<run_id>/
 ├── preregistration_stamp.json  # AutoR's copy of the frozen hypothesis set
 ├── validity_review_stamp.json  # AutoR's copy of what each adversarial pass raised
 ├── stage_cost_ledger.json      # what each stage visit spent, and why each attempt failed
+├── supervisor_ledger.jsonl     # one line per run-supervisor ruling
+├── review_custody.jsonl        # one line per reviewer episode: what the run root did while it ran
 ├── logs.txt                    # human-readable workflow log
 ├── logs_raw.jsonl              # raw backend stream-json events
 ├── prompt_cache/               # the exact prompt sent for every attempt
@@ -58,13 +60,29 @@ The directory shape is created by `ensure_run_layout` and the paths are
 defined once, in `build_run_paths` ([`src/utils.py`](../src/utils.py)). If you
 need a path in code, take it from `RunPaths` rather than joining strings.
 
-Six files sit at the run root rather than under `workspace/` on purpose:
+Eight files sit at the run root rather than under `workspace/` on purpose:
 `obligations.json`, `review_policy.json`, `report_plan_stamp.json`,
-`preregistration_stamp.json`, `validity_review_stamp.json` and
-`stage_cost_ledger.json` are records *about* the run rather than part of its
-answer, and every stage prompt directs the agent at `workspace/` paths. Same
-reason `evolution/` is out here — and, like `evolution/`, it also keeps them out
-of a benchmark export that packages the workspace.
+`preregistration_stamp.json`, `validity_review_stamp.json`,
+`stage_cost_ledger.json`, `supervisor_ledger.jsonl` and `review_custody.jsonl`
+are records *about* the run rather than part of its answer, and every stage
+prompt directs the agent at `workspace/` paths. Same reason `evolution/` is out
+here — and, like `evolution/`, it also keeps them out of a benchmark export that
+packages the workspace.
+
+The last two are also out here because of *who* they are about. A supervisor
+ruling and a reviewer custody line are records of the harness watching an agent,
+and an agent that could edit them could edit the record of being caught.
+
+`review_custody.jsonl` holds one JSON object per reviewer subprocess — the solo
+gate, its verdict-only re-ask, every panel seat, the chair, and the adversarial
+validity pass — written whether or not anything moved, because only-on-breach
+would make "the census never ran" and "the census found nothing" the same
+record. Each line carries `stage`, `label`, `mutated`, the `added` / `changed` /
+`deleted` / `type_changed` path lists, `touched` (rewritten to the same bytes —
+a reviewer re-deriving an artifact, which is not a breach), `entries`, `took_ms`
+and `scan_errors`. Written by `record_episode`
+([`src/review_custody.py`](../src/review_custody.py)); see
+[`--review-custody`](cli-reference.md#reviewer-custody).
 
 ---
 

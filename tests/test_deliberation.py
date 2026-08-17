@@ -176,7 +176,7 @@ class _ScriptedPanel:
         )
 
         def make(key):
-            def run_prompt(*, paths, stage, attempt_no, prompt, label):
+            def run_prompt(*, paths, stage, attempt_no, prompt, label, watch=None):
                 self.labels.append(label)
                 if label == "crux_brief":
                     return 0, str(script.get("__brief__", "Standard practice is contested.")), ""

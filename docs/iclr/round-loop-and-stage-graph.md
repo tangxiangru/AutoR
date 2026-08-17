@@ -143,6 +143,29 @@ Deny the write tools as well, but the deny-list is not the mechanism — the cen
 own restore is advertised and never happens, and the demotion is the entire enforcement;
 that is the part that works.
 
+**Landed**, as `src/review_custody.py`, with two corrections the design did not survive
+contact with.
+
+*The census is over content, not modification time.* Replayed over 138 archived reviewer
+episodes (`tools/review_custody_replay.py`, population pinned by name), an mtime census
+fires on **138 of 138** with no exclusion list and **4 of 138** with one — and all four
+are the same behaviour: the reviewer re-running the doer's producer scripts in place to
+check they reproduce. Both of the two approvals among them say so in their own recorded
+reason. A gate that fires hardest on the most rigorous reviewer is the wrong gate, so a
+file whose digest is unchanged is recorded as `touched` and never charged.
+
+*The demotion is armed by a flag and off by default.* `--review-custody` defaults to
+`record`. The replay bounds the blast radius from above and cannot bound it from below:
+an archive keeps one modification time per file, so how many of those four a content
+census would also have caught is not answerable from disk. That is what the ledger is
+for.
+
+What it still cannot see is worth stating, because the reading that produced this
+mechanism also produced the counterexample: in the same 138 episodes there are three
+tool-level writes, and two of them go to a `~/.claude/projects/.../memory/` directory
+far outside any run root. The census claims *"the reviewer changed nothing it was
+judging"*, not *"the reviewer changed nothing"*.
+
 *Class: design gap, and the largest here. Effort: medium.*
 
 ### 4.2 A promotion should carry the authority that granted it
@@ -376,6 +399,11 @@ continuation file, and inline a bounded goal plus a memory subset rather than a 
 not adopt the general framing of "add a *what this stage has established* block": most of it
 duplicates the handoff context and the channel set already in the prompt, and this repository
 has already paid for sending memory and handoff together.
+
+**(1) and (2) are fixed** (#256). The parity test that came with the first is the general
+form: the two builders take five of the same optional content parameters, each gets a
+sentinel, and both prompts must carry all five — a parameter one builder accepts and
+drops is the same defect under another name. (3) stands.
 
 *Class: two live defects plus one false premise. Effort: small.*
 
