@@ -23,13 +23,33 @@ So the tests below are in two halves. The first half is arithmetic on
 :mod:`src.stage_cost` in isolation. The second half drives ``ResearchManager._run_stage``
 with a stub reviewer and asserts on the file it leaves behind, because a classifier that
 is right and unreached is exactly the defect being fixed one level up.
+
+The mutation sweep is shipped rather than described
+---------------------------------------------------
+A commit message saying "N mutations, all killed" is a number a reader has to believe.
+:data:`MUTATIONS` is the same claim as an instrument: every entry is a one-anchor edit to
+``src/stage_cost.py``, ``src/utils.py`` or the manager wiring that removes a rule this
+file is supposed to hold. Run it against a **scratch checkout**, because it edits the tree
+in place and restores it afterwards::
+
+    git worktree add --detach /tmp/sweep HEAD
+    cd /tmp/sweep && python3 -m tests.test_stage_cost_ledger --mutations
+
+It prints one line per mutation naming the tests that died, and exits non-zero if any
+survives, so "0 survivors" is re-derivable rather than asserted. Measured on this tree:
+47 tried, 47 killed. Seven of the tests here exist because a mutation survived the first
+pass -- the entries are kept afterwards precisely so the next edit to this area meets
+them.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import json
+import re
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from dataclasses import replace
@@ -1161,6 +1181,25 @@ class ManagerWritesTheLedgerTests(unittest.TestCase):
         self.assertIsNone(row["dominant_failure"])
         self.assertEqual(row["distinct_failures"], 0)
 
+    def test_a_cancelled_run_writes_its_spend_before_it_gives_up(self) -> None:
+        """The run that most needs the ledger read is the one that did not finish.
+
+        `_walk_stages` returns False without reaching `_complete_run`, so the abort branch
+        carries its own call. Every measured trial run ended here.
+        """
+        stage = STAGE_01
+        self._stub_operator(self._valid_draft(stage))
+        self.manager.reviewer = _StubReviewer(
+            [ReviewDecision(choice="6", decision_token="abort", reason="unrecoverable")]
+        )
+        self.assertFalse(self.manager._walk_stages(self.paths, start_stage=stage))
+        log = self.paths.logs.read_text(encoding="utf-8")
+        self.assertIn("| run_aborted ===", log)
+        self.assertIn("| stage_cost_ledger ===", log)
+        self.assertIn(
+            STAGE_01.slug, log.split("| stage_cost_ledger ===", 1)[1][:400]
+        )
+
     def test_finishing_a_run_puts_the_ledger_in_the_log_without_being_asked(self) -> None:
         """`_complete_run`, not the helper. A summary nobody calls is the shape of defect
         this repository has a whole test file about."""
@@ -1207,5 +1246,275 @@ class TheDeclaredPathIsTheRealOneTests(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+# ---------------------------------------------------------------------------
+# The mutation sweep, as an instrument
+# ---------------------------------------------------------------------------
+
+STAGE_COST = "src/stage_cost.py"
+MANAGER = "src/manager.py"
+UTILS = "src/utils.py"
+
+#: ``(what it breaks, file, the text to replace, what to replace it with)``.
+#:
+#: Each anchor must match exactly once, and the runner refuses the sweep rather than
+#: reporting a kill it did not make if it does not -- an anchor that stops matching after
+#: a refactor is a mutation silently not applied, which reads in the output exactly like
+#: one that was killed.
+MUTATIONS: tuple[tuple[str, str, str, str], ...] = (
+    ("classify_refusal loses the CRASHED_REASON branch", STAGE_COST,
+     "    if text.startswith(CRASHED_REASON):\n        return BACKEND_CRASHED\n", ""),
+    ("classify_refusal loses the UNREADABLE_REASON branch", STAGE_COST,
+     "    if text.startswith(UNREADABLE_REASON):\n        return BACKEND_UNREADABLE\n", ""),
+    ("classify_refusal loses the UNSUPPORTED_REASON branch", STAGE_COST,
+     "    if text.startswith(UNSUPPORTED_REASON):\n        return BACKEND_UNSUPPORTED\n", ""),
+    ("classify_refusal checks cross_review before the degraded prefixes", STAGE_COST,
+     '    text = reason or ""\n    if text.startswith(CRASHED_REASON):',
+     '    text = reason or ""\n    if cross_review:\n        return CROSS_REVIEW_VETOED\n'
+     "    if text.startswith(CRASHED_REASON):"),
+    ("classify_refusal ignores `automated`", STAGE_COST,
+     "    if not automated:\n        return HUMAN_REFUSED\n", ""),
+    ("failure_digest drops the kind from the hash input", STAGE_COST,
+     'return hashlib.sha256(f"{kind}|{normalized}".encode("utf-8")).hexdigest()[:12]',
+     'return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:12]'),
+    ("failure_digest drops the whitespace/case normalisation", STAGE_COST,
+     'normalized = " ".join((reason or "").split()).lower()', 'normalized = reason or ""'),
+    ("max_consecutive_repeat ignores the ordering", STAGE_COST,
+     "            run = run + 1 if digest == previous else 1\n", "            run = 1\n"),
+    ("attempt_digests keeps polish rounds", STAGE_COST,
+     "            for cost in self.costs\n            if cost.kind != POLISH_ROUND\n",
+     "            for cost in self.costs\n"),
+    ("failure_groups counts polish rounds as failures", STAGE_COST,
+     "            if cost.kind == POLISH_ROUND:\n                continue\n"
+     "            entry = groups.get(cost.digest)",
+     "            entry = groups.get(cost.digest)"),
+    ("failure_groups drops the reason text", STAGE_COST,
+     '"example": (cost.reason or "")[:FAILURE_EXAMPLE_CHARS],', '"example": "",'),
+    ("failure_groups is ordered by insertion, not by count", STAGE_COST,
+     "    ordered = sorted(groups.values(), "
+     'key=lambda item: (-int(item["count"]), int(item["_order"])))',
+     "    ordered = list(groups.values())"),
+    ("dominant_failure counts polish rounds", STAGE_COST,
+     "refusals = {kind: count for kind, count in census.items() if kind != POLISH_ROUND}",
+     "refusals = dict(census)"),
+    ("note_failure drops an unclassified kind", STAGE_COST,
+     "        if kind not in FAILURE_KINDS:\n"
+     '            reason = f"[{kind}] {reason}".strip()\n'
+     "            kind = UNCLASSIFIED_REFUSAL\n",
+     "        if kind not in FAILURE_KINDS:\n            return\n"),
+    ("note_outcome accepts an undeclared outcome", STAGE_COST,
+     "        if outcome not in OUTCOMES:\n            outcome = OUTCOME_UNKNOWN\n", ""),
+    ("note_outcome lets a later outcome clear auto_skipped", STAGE_COST,
+     "        if outcome == OUTCOME_AUTO_SKIPPED:\n            self.auto_skipped = True\n",
+     "        self.auto_skipped = outcome == OUTCOME_AUTO_SKIPPED\n"),
+    ("append_stage_cost_row hardcodes visit 1", STAGE_COST,
+     'visit = sum(1 for item in existing if item.get("stage") == row.stage) + 1',
+     "visit = 1"),
+    ("append_stage_cost_row lets the write raise", STAGE_COST,
+     "        return True\n    except Exception:\n        return False\n",
+     "        return True\n    except ZeroDivisionError:\n        return False\n"),
+    ("read_stage_cost_ledger lets a corrupt file raise", STAGE_COST,
+     "    except (OSError, ValueError):\n        return []\n",
+     "    except OSError:\n        return []\n"),
+    ("describe_failures says nothing about what was spent", STAGE_COST,
+     '        return "; ".join(parts) + f" ({shape})"', '        return "attempts were spent"'),
+    ("describe_failures reports an empty list instead of saying so", STAGE_COST,
+     '            return "no attempt in this stage run recorded a cause"', '            return ""'),
+    ("summarize_stage_cost stops taking the longest run", STAGE_COST,
+     '            max((_number(row.get("max_consecutive_repeat")) for row in rows), default=0)',
+     "            0"),
+    ("bypassed_row is not marked auto_skipped", STAGE_COST,
+     "        auto_skipped=True,\n        outcome=OUTCOME_BYPASSED,",
+     "        auto_skipped=False,\n        outcome=OUTCOME_BYPASSED,"),
+    ("the ledger moves inside workspace/", UTILS,
+     'stage_cost_ledger=run_root / "stage_cost_ledger.json",',
+     'stage_cost_ledger=workspace_root / "notes" / "stage_cost_ledger.json",'),
+    ("the review refusal is not charged", MANAGER,
+     "        if decision.choice in REVISION_CHOICES:\n"
+     "            self._note_stage_failure(\n                stage,\n                attempt_no,\n"
+     "                classify_refusal(decision.reason),\n"
+     '                decision.reason or decision.feedback or "",\n            )\n', ""),
+    ("the cross-model veto is filed as an ordinary refusal", MANAGER,
+     'classify_refusal(cross[1] or "", cross_review=True),', 'classify_refusal(cross[1] or ""),'),
+    ("the exhaustion message drops the cause again", MANAGER,
+     '                        f"Attempts spent on: {spent_on}. "\n'
+     '                        f"Last validation errors:',
+     '                        f"Last validation errors:'),
+    ("the finally stops writing the row", MANAGER,
+     "            self._stage_cost = None\n            self._record_stage_cost(paths, meter)\n",
+     "            self._stage_cost = None\n"),
+    ("_record_stage_cost stops guarding close()", MANAGER,
+     "        try:\n            written = append_stage_cost_row(paths, meter.close())\n"
+     "        except Exception:\n            written = False\n",
+     "        written = append_stage_cost_row(paths, meter.close())\n"),
+    ("_skip_stage stops recording the outcome", MANAGER,
+     "        self._note_stage_outcome(\n            stage,\n"
+     '            OUTCOME_AUTO_SKIPPED if kind == "auto" else OUTCOME_HUMAN_SKIPPED,\n'
+     "            reason,\n        )\n", ""),
+    ("_route_to_deliverable stops rowing the stages it steps over", MANAGER,
+     "        for slug in bypassed:\n            skipped_stage = stage_for_slug(slug)\n"
+     "            if skipped_stage is None:\n                continue\n"
+     "            append_stage_cost_row(\n"
+     '                paths, bypassed_row(skipped_stage, note=f"stepped over: {reason}")\n'
+     "            )\n", ""),
+    ("the crux attempt is not charged", MANAGER,
+     "                self._note_stage_failure(stage, attempt_no, CRUX_RAISED, crux_feedback)\n",
+     ""),
+    ("the validators refusal is not charged", MANAGER,
+     "                        self._note_stage_failure(\n"
+     '                            stage, attempt_no, VALIDATORS_REFUSED, "; ".join(validation_errors)\n'
+     "                        )\n", ""),
+    ("the human refusal at the manual gate is not charged", MANAGER,
+     "            if choice in REVISION_CHOICES:\n                self._note_stage_failure(\n"
+     '                    stage, attempt_no, HUMAN_REFUSED, f"the operator chose option {choice}"\n'
+     "                )\n", ""),
+    ("the human refusal is filed under the automated reviewer", MANAGER,
+     'stage, attempt_no, HUMAN_REFUSED, f"the operator chose option {choice}"',
+     'stage, attempt_no, REVIEWER_REFUSED, f"the operator chose option {choice}"'),
+    ("the stage run is not counted as an operator call", MANAGER,
+     "            self._note_operator_call(stage)\n"
+     "            result = self._operator_for(stage).run_stage(\n",
+     "            result = self._operator_for(stage).run_stage(\n"),
+    ("the missing-draft repair is not counted as an operator call", MANAGER,
+     '                    "Primary attempt did not produce stage summary draft. '
+     'Triggering repair pass.",\n                )\n                self._note_operator_call(stage)\n',
+     '                    "Primary attempt did not produce stage summary draft. '
+     'Triggering repair pass.",\n                )\n'),
+    ("the validation-path repair is not counted as an operator call", MANAGER,
+     '                    "\\n".join(validation_errors),\n                )\n'
+     "                self._note_operator_call(stage)\n",
+     '                    "\\n".join(validation_errors),\n                )\n'),
+    ("the approval gate is not counted as a review call", MANAGER,
+     "        self._note_review_call(stage)\n        decision = reviewer.review_stage(",
+     "        decision = reviewer.review_stage("),
+    ("the cross-model audit is not counted as a review call", MANAGER,
+     "        self._note_review_call(stage)\n        verdict = self.cross_reviewer.audit(",
+     "        verdict = self.cross_reviewer.audit("),
+    ("the attempt itself is not counted", MANAGER,
+     "            if self._stage_cost is not None:\n"
+     "                self._stage_cost.note_attempt()\n", ""),
+    ("the visit is never marked exhausted", MANAGER,
+     "                if self._stage_cost is not None:\n"
+     "                    self._stage_cost.note_exhausted()\n", ""),
+    ("the approval outcome is not recorded", MANAGER,
+     "                self._note_stage_outcome(stage, OUTCOME_APPROVED)\n", ""),
+    ("the polish round is not counted", MANAGER,
+     "                        if self._stage_cost is not None:\n"
+     "                            self._stage_cost.note_polish_round(attempt_no)\n", ""),
+    ("the meter forgets which stage a failure is for", MANAGER,
+     "if meter is None or meter.stage.slug != stage.slug:\n            return\n"
+     "        meter.note_failure(attempt_no, kind, reason)",
+     "if meter is None:\n            return\n"
+     "        meter.note_failure(attempt_no, kind, reason)"),
+    ("the raised visit is not recorded as raised", MANAGER,
+     "        except BaseException:\n            meter.note_outcome(OUTCOME_RAISED)\n            raise\n",
+     "        except BaseException:\n            raise\n"),
+    ("the run never logs its own spend", MANAGER,
+     "        self._log_stage_cost_summary(paths)\n\n"
+     "        # A run that concluded it cannot answer its question reached the end of the\n",
+     "\n        # A run that concluded it cannot answer its question reached the end of the\n"),
+    ("the aborted run never logs its own spend", MANAGER,
+     "                self._log_stage_cost_summary(paths)\n"
+     '                self._print("Run aborted.")\n',
+     '                self._print("Run aborted.")\n'),
+)
+
+
+#: Tests that fail under *every* mutation for a reason that is not the mutation.
+#:
+#: :meth:`TheSweepIsRunnableTests.test_every_anchor_matches_its_file_exactly_once` reads
+#: the anchors against the tree, and applying a mutation is precisely what stops its own
+#: anchor from matching -- so it dies 48 times out of 48 and would report a kill for a
+#: rule nobody holds. A false kill is worse than a survivor: a survivor is visible and a
+#: false kill is a green number covering a hole. Named rather than inferred, because a
+#: rule of the form "ignore tests that always fail" would also hide a real one.
+SWEEP_SELF_TESTS = frozenset({"test_every_anchor_matches_its_file_exactly_once"})
+
+
+def _dead_tests(root: Path) -> set[str]:
+    proc = subprocess.run(
+        [sys.executable, "-m", "unittest", __spec__.name if __spec__ else __name__, "-v"],
+        cwd=root, capture_output=True, text=True,
+    )
+    out = proc.stdout + proc.stderr
+    dead = set(re.findall(r"^(\w+) \(tests\.[\w.]+\) \.\.\. (?:FAIL|ERROR)", out, re.M))
+    dead |= set(re.findall(r"^(?:FAIL|ERROR): (\w+) ", out, re.M))
+    return dead - SWEEP_SELF_TESTS
+
+
+def run_mutations(root: Path | None = None) -> int:
+    """Apply each of :data:`MUTATIONS` in turn and report what died. Returns the survivors.
+
+    Restores every file in a ``finally``, so an interrupted sweep leaves the tree as it
+    found it -- but it does edit the tree, so run it in a scratch checkout.
+    """
+    root = root or Path(__file__).resolve().parent.parent
+    baseline = _dead_tests(root)
+    if baseline:
+        print(f"REFUSED: the tree is not green before mutating: {sorted(baseline)}")
+        return len(baseline)
+    print(f"baseline green; {len(MUTATIONS)} mutations to try\n")
+    survivors: list[str] = []
+    for name, relative, old, new in MUTATIONS:
+        path = root / relative
+        text = path.read_text(encoding="utf-8")
+        if text.count(old) != 1:
+            print(f"NOT APPLIED ({text.count(old)} anchor matches): {name}")
+            survivors.append(name)
+            continue
+        path.write_text(text.replace(old, new), encoding="utf-8")
+        try:
+            dead = _dead_tests(root)
+        finally:
+            path.write_text(text, encoding="utf-8")
+        if dead:
+            print(f"killed  {name}\n            by: {', '.join(sorted(dead))}")
+        else:
+            print(f"SURVIVED  {name}")
+            survivors.append(name)
+    print(f"\ntried {len(MUTATIONS)}, killed {len(MUTATIONS) - len(survivors)}, "
+          f"survivors {len(survivors)}")
+    for name in survivors:
+        print("   SURVIVOR:", name)
+    return len(survivors)
+
+
+class TheSweepIsRunnableTests(unittest.TestCase):
+    """The instrument, checked without running it: 47 subprocess suites is not a unit test.
+
+    What can go stale without anyone noticing is an *anchor*, and an anchor that no longer
+    matches is a mutation silently not applied. Checking every anchor against the tree it
+    names costs three file reads and turns "0 survivors" back into a statement about the
+    current code rather than about the code when the sweep was last run by hand.
+    """
+
+    def test_every_anchor_matches_its_file_exactly_once(self) -> None:
+        repo = Path(__file__).resolve().parent.parent
+        for name, relative, old, _new in MUTATIONS:
+            with self.subTest(mutation=name):
+                text = (repo / relative).read_text(encoding="utf-8")
+                self.assertEqual(
+                    text.count(old), 1,
+                    f"{name}: anchor matches {text.count(old)} times in {relative}",
+                )
+
+    def test_no_mutation_leaves_the_file_unchanged(self) -> None:
+        for name, _relative, old, new in MUTATIONS:
+            with self.subTest(mutation=name):
+                self.assertNotEqual(old, new, f"{name} is not a mutation")
+
+    def test_the_self_test_exclusion_names_a_test_that_exists(self) -> None:
+        """An exclusion pointing at nothing would silently stop excluding."""
+        for name in SWEEP_SELF_TESTS:
+            self.assertTrue(hasattr(TheSweepIsRunnableTests, name), name)
+
+    def test_the_sweep_covers_all_three_files_it_claims_to(self) -> None:
+        self.assertEqual(
+            {relative for _n, relative, _o, _w in MUTATIONS},
+            {STAGE_COST, MANAGER, UTILS},
+        )
+
+
 if __name__ == "__main__":
+    if "--mutations" in sys.argv:
+        raise SystemExit(1 if run_mutations() else 0)
     unittest.main()
