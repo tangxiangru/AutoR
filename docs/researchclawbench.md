@@ -868,47 +868,44 @@ will do — which is the cheapest way to see what the adapter writes where.
 
 ---
 
-## About a tenth of the weight is scored by nobody, and half of it is on disk
+## About a tenth of the weight is scored by nobody, and a third of that is on disk
 
 A task-by-task study of the 2026-08-16 arm found 16 criteria, **4.00 of 40.0 total weight
 (10.0%)**, where AutoR's new code, AutoR's pre-fix code and a bare agent all score at or
-below 10. The study called that the remaining headroom. A first correction said it was not
-headroom at all — that those criteria name things which live only in the target paper,
-which ResearchClawBench does not ship — and reported that 2 of 30 distinctive identifiers
-appeared in the supplied inputs.
+below 10.
 
-**That correction was wrong, and its error is the most useful thing in this section.** It
-shelled out to `pdftotext`, which is not installed on the machine it ran on, and caught
-the `FileNotFoundError` under `except (OSError, ...)`. Every PDF contributed the empty
-string. Every term in every paper came back "absent", and the number agreed with the
-conclusion the author had already reached.
+The question is whether that is headroom or floor, and it turns on one measurement: do
+the things those criteria name — an analysis, a dataset, a tool, an event — appear in what
+the benchmark actually hands the agent? **That measurement has been taken four times and
+has been wrong three times, each time in the direction of whatever the author expected:**
 
-Read with an extractor that works, the answer is **14 of 30**:
+| attempt | answer | what was wrong with it |
+|---:|---:|:---|
+| 1 | 30 of 30 present | searched a corpus that included `_score.json`, the judge's own output, which contains the criteria verbatim |
+| 2 | 2 of 30 | shelled out to `pdftotext`, which is not installed here, and caught the `FileNotFoundError` as though the PDFs were empty |
+| 3 | 14 of 30 | substring match: counted "shape" as an occurrence of `SHAP` |
+| **4** | **10 of 30** | word-boundary match over text from a working extractor |
 
-| in the supplied papers, and unmined | not on disk |
-|:---|:---|
-| `SHAP` (17 occurrences, Neuroscience_000) | `FlyWire`, `FAFB`, `FlyTracing` |
-| `CAPRI` (37) and `HADDOCK3` (25), Chemistry_002 | `NeoAgDT`, `EmbedNet`, `DIDS`, `MFL` |
-| `NetMHCpan` (5, Life_001) | `Lab1` / `Lab2`, `CSDS`, `Qwen2.5-3B` |
+The flagship example of attempts 2 and 3 was `SHAP` in Neuroscience_000, argued in both
+directions and false in both: with a word boundary it occurs **0 times** in those papers,
+and the seventeen "hits" were `shape`.
 
-So the tenth splits roughly in half. **The half that is present is headroom nobody mined**
-— three agents, including one with no harness, all failed to read the supplied papers for
-the analyses they name. The half that is absent is the floor for an agent not given the
-document it is graded against, and any claim about how much of this benchmark is reachable
-should be quoted against something under 100%.
+What survives is smaller and real. `CAPRI` appears **30 times** and `HADDOCK3` **22 times**
+in Chemistry_002's supplied papers, and the two criteria naming them scored 5 and 0.
+`NetMHCpan` appears 5 times in Life_001's. Those are analyses the task handed over and
+nobody ran — headroom, and the `mine-the-papers-you-were-given` skill is aimed at it.
 
-Fetching the target paper from the web would reach the second half. That is a
-research-integrity question rather than an engineering one — on a reproduction benchmark,
-reading the target's results and restating them is close to copying the answer — and it is
+The rest — `FlyWire`, `FAFB`, `NeoAgDT`, `EmbedNet`, `DIDS`, `Lab1`/`Lab2`, `Qwen2.5-3B`,
+`SHAP` — is not in the workspace under any reading, and is the floor for an agent not
+given the document it is graded against. Fetching the target paper from the web would
+reach it; on a reproduction benchmark that is close to copying the answer, and it is
 recorded here rather than taken.
 
 `python tools/unreachable_criteria.py --arms <score dirs> --runs <workspace root>`
-re-derives it, and now **refuses to judge a task whose supplied files it could not read**
-rather than counting them as empty. An input a tool cannot open is not an input that lacks
-the term; silence counted as absence is how a measurement tells you what you already
-believed. Two earlier versions were wrong in that same direction — one also searched a
-corpus that included `_score.json`, the judge's own output, which contains the criteria
-verbatim, and duly found 30 of 30 "present".
+re-derives it. It refuses to judge a task whose supplied files it could not read, rather
+than counting them empty, because **an input a tool cannot open is not an input that lacks
+the term** — and it matches on word boundaries, because a substring match is how attempt 3
+found an analysis that is not there.
 
 ## Measuring a change against the benchmark score
 
