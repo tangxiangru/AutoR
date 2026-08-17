@@ -563,6 +563,86 @@ def plan_withdrawal(paths: RunPaths, stage: StageSpec) -> list[Withdrawal]:
     return plan
 
 
+def snapshot(paths: RunPaths) -> dict[str, str]:
+    """Where every tracked file stands right now, as a version identifier per path.
+
+    Not a copy of the workspace. The blobs behind those versions are already in the
+    content-addressed store, so a snapshot is a set of pointers into it — cheap enough to
+    take whenever the walk leaves a stage, which is what makes it usable as the boundary of
+    an excursion.
+
+    A path absent from a snapshot is a path that did not exist at that moment, which is
+    what :func:`plan_restore` reads as "delete this on the way back".
+    """
+
+    ledger = load_ledger(paths)
+    return {
+        rel_path: entry.version_uid
+        for rel_path, entry in ledger.entries.items()
+        if entry.live and entry.version_uid
+    }
+
+
+def plan_restore(paths: RunPaths, marks: Mapping[str, str]) -> list[Withdrawal]:
+    """What it takes to put the workspace back to a snapshot. Read-only.
+
+    Expressed as the same :class:`Withdrawal` list a stage-range withdrawal produces, so
+    one applier serves both. The difference is only in how the target version is chosen:
+    by stage number there, by recorded identifier here.
+
+    A file whose version has not moved is not in the plan. A file created since the
+    snapshot is deleted. A file that has moved is rewound to the version the snapshot
+    names, if that version is still in the chain — a chain trimmed by an intervening
+    withdrawal may no longer carry it, and the honest answer then is to delete rather than
+    to leave a later version in place and call it restored.
+    """
+
+    ledger = load_ledger(paths)
+    plan: list[Withdrawal] = []
+    for rel_path, entry in sorted(ledger.entries.items()):
+        wanted = marks.get(rel_path)
+        if wanted is not None and entry.version_uid == wanted:
+            continue
+        target = (
+            next((version for version in entry.versions if version.version_uid == wanted), None)
+            if wanted is not None
+            else None
+        )
+        plan.append(Withdrawal(entry=entry, restore_to=target))
+    return plan
+
+
+def trim_to_snapshot(paths: RunPaths, marks: Mapping[str, str]) -> None:
+    """Cut every version chain back to the version the snapshot names.
+
+    Called after the files have moved, so the ledger describes the workspace the restore
+    leaves rather than the one it found. Rows whose path is not in the snapshot are dropped
+    outright: :func:`plan_restore` deleted the file, and a row for a path that is not on
+    disk would make the next :func:`observe` read the next creation as a rewrite of
+    something that was never there.
+    """
+
+    ledger = load_ledger(paths)
+    entries: dict[str, ArtifactProvenance] = {}
+    for rel_path, entry in ledger.entries.items():
+        wanted = marks.get(rel_path)
+        if wanted is None:
+            continue
+        kept: list[ArtifactVersion] = []
+        for version in entry.versions:
+            kept.append(version)
+            if version.version_uid == wanted:
+                break
+        if kept:
+            entries[rel_path] = replace(
+                entry,
+                versions=tuple(kept),
+                invalidated_by_stage=None,
+                invalidated_reason="",
+            )
+    save_ledger(paths, ProvenanceLedger(next_uid=ledger.next_uid, entries=entries))
+
+
 def invalidate_from(
     paths: RunPaths,
     stage: StageSpec,
