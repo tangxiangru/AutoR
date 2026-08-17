@@ -120,6 +120,8 @@ from src.stage_cost import (
     run_call_cost,
     summarize_stage_cost,
 )
+from src.router import StageRouter
+from src.stage_graph import GraphState, StageGraph
 from src.supervisor import Intervention, RunSupervisor
 from src.terminal_ui import TerminalUI
 from src.utils import (
@@ -236,17 +238,95 @@ def _tests_of(node: ast.AST) -> list[tuple[str, ast.AST]]:
     return []
 
 
+#: Modules whose job is to hold, serialise or render the number, and which therefore have
+#: to branch on it.
+#:
+#: The rule this file enforces is not "no condition may read a cost" — that rule is the
+#: wrong shape and it accuses the recorder for recording. It is "no condition that changes
+#: **what the run does** may read a cost". A formatter asking "is this field absent, so do I
+#: print a dash" is not a run decision, and with alias propagation on there are 88 of them
+#: across these three: 43 in the renderer, 39 in the ledger, 6 in the recorder.
+#:
+#: The exemption is narrow and it is itself a gate. None of the three can start a stage,
+#: choose a move, end a visit or move a budget; they are reached only to write down and to
+#: display. Adding a fourth name here is adding a module that may see the money, and it
+#: needs the same argument. Everything that *can* change a run — the supervisor, the router,
+#: the manager, the evolution controller, the archive — is outside it and is scanned with
+#: aliases resolved.
+RECORDS_OR_RENDERS_THE_COST = (
+    "src/call_cost.py",
+    "src/stage_cost.py",
+    "src/terminal_ui.py",
+)
+
+
+def aliases_within(scope: ast.AST, watched: set[str]) -> set[str]:
+    """*watched*, plus every local that was assigned from something already in it.
+
+    Iterated to a fixpoint, because an alias can be assigned from an alias. Without this
+    the scan reads only the deciding expression, and
+
+        spent = meter.call_cost.total_cost_usd
+        if spent > 100.0:
+
+    names nothing watched at the point of the comparison. A reviewer built a working
+    escape on exactly that shape — a helper reading the bill into a local, a second helper
+    filtering on the first, and three lines in ``StageRouter.choose`` dropping the
+    expensive targets — and the whole suite stayed green while the router shopped on
+    price. The syntax half of that hole is this function; the behavioural half is
+    :meth:`TheSupervisorCannotSeeTheCostTests.test_the_router_rules_the_same_way_on_both_ledgers`,
+    and neither is sufficient alone.
+    """
+    known = set(watched)
+    for _ in range(8):  # a fixpoint in practice; bounded so a cycle cannot hang the suite
+        grew = False
+        for node in ast.walk(scope):
+            targets: list[ast.AST] = []
+            value: ast.AST | None = None
+            if isinstance(node, ast.Assign):
+                targets, value = list(node.targets), node.value
+            elif isinstance(node, (ast.AnnAssign, ast.AugAssign)) and node.value is not None:
+                targets, value = [node.target], node.value
+            if value is None or not (known & names_in(value)):
+                continue
+            for target in targets:
+                for name in names_in(target):
+                    if name not in known:
+                        known.add(name)
+                        grew = True
+        if not grew:
+            break
+    return known
+
+
 def decisions_reading(tree: ast.AST, module: str, watched: Iterable[str]) -> list[Decision]:
-    """Every place in *tree* where a decision reads one of *watched*."""
+    """Every place in *tree* where a decision reads one of *watched*, or an alias of one.
+
+    Aliases are resolved per function rather than per module: a local called ``value`` is
+    a cost in one function and an unrelated number in the next, and treating the whole
+    file as one scope would accuse the second.
+    """
     wanted = set(watched)
     found: list[Decision] = []
-    for node in ast.walk(tree):
-        for kind, test in _tests_of(node):
-            hit = sorted(wanted & names_in(test))
-            if hit:
-                found.append(
-                    Decision(module, getattr(test, "lineno", getattr(node, "lineno", 0)), kind, tuple(hit))
-                )
+    scopes: list[ast.AST] = [tree] + [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+    seen: set[tuple[int, str]] = set()
+    resolve_aliases = module not in RECORDS_OR_RENDERS_THE_COST
+    for scope in scopes:
+        local = aliases_within(scope, wanted) if resolve_aliases else wanted
+        for node in ast.walk(scope):
+            for kind, test in _tests_of(node):
+                hit = sorted(local & names_in(test))
+                if not hit:
+                    continue
+                line = getattr(test, "lineno", getattr(node, "lineno", 0))
+                if (line, kind) in seen:
+                    continue
+                seen.add((line, kind))
+                found.append(Decision(module, line, kind, tuple(hit)))
     return found
 
 
@@ -350,6 +430,60 @@ LITERAL_EXEMPTIONS: dict[str, str] = {
 MAY_IMPORT_THE_COST_VOCABULARY = ("src/call_cost.py",)
 
 COST_COLLECTIONS = ("COST_FIELDS", "TOKEN_FIELDS", "INERT_NAMES", "COUNTER_FIELDS")
+
+
+#: How a module says "I dispatched a backend call". Any of these and no `call_cost` means
+#: the call is spent and uncounted, so the module owes the scope note a mention.
+DISPATCH_MARKERS = ("run_prompt", "ReviewDecision(", "OperatorResult(")
+
+#: Modules that dispatch through another module rather than themselves, so the marker
+#: appears in them without a call of their own to price.
+DISPATCHES_THROUGH_SOMEONE_ELSE = ("src/utils.py", "src/manager.py")
+
+
+class TheScopeNoteNamesEveryUncountedCallerTests(unittest.TestCase):
+    """The total is allowed to be partial. It is not allowed to say it is not.
+
+    A reviewer found `COST_SCOPE_NOTE` claiming to cover "review calls" while
+    `ReviewPanel.review_stage` builds its `ReviewDecision` at six sites and sets `call_cost`
+    at none, and `src/deliberation.py` and `src/ideation_panel.py` dispatch their own
+    prompts the same way. Under `--review-panel` every seat's and the chair's backend call
+    was missing from a total that read as complete — an undercount that looks like a
+    measurement, which is worse than no number.
+
+    Derived rather than promised: the list comes off the tree, so threading a panel's cost
+    through is what takes its name out of the note, and a new unpriced caller fails here.
+    """
+
+    def test_every_module_that_dispatches_without_pricing_is_named(self) -> None:
+        unpriced: list[str] = []
+        for path, _tree in parsed_src():
+            relative = path.relative_to(REPO).as_posix()
+            if relative in DISPATCHES_THROUGH_SOMEONE_ELSE:
+                continue
+            text = path.read_text(encoding="utf-8")
+            if not any(marker in text for marker in DISPATCH_MARKERS):
+                continue
+            if "call_cost" in text:
+                continue
+            unpriced.append(relative)
+        missing = [
+            name
+            for name in unpriced
+            if name.rsplit("/", 1)[-1].removesuffix(".py").replace("_", " ") not in COST_SCOPE_NOTE
+            and name.rsplit("/", 1)[-1].removesuffix(".py").split("_")[0] not in COST_SCOPE_NOTE
+        ]
+        self.assertEqual(
+            missing,
+            [],
+            "these dispatch a backend call, report no cost, and are not named in "
+            f"COST_SCOPE_NOTE, so the total silently omits them: {missing}",
+        )
+
+    def test_the_note_does_not_claim_the_panels(self) -> None:
+        """The specific sentence that was false, kept false-able."""
+        self.assertIn("review panel", COST_SCOPE_NOTE)
+        self.assertIn("spent more than this says", COST_SCOPE_NOTE)
 
 
 class TheVocabularyCannotBeLaunderedTests(unittest.TestCase):
@@ -605,6 +739,74 @@ class TheSupervisorCannotSeeTheCostTests(unittest.TestCase):
         billed = [item.to_dict() for item in rulings()]
         for one, two in zip(free, billed):
             one.pop("at"), two.pop("at")
+        self.assertEqual(free, billed)
+
+    def test_the_router_rules_the_same_way_on_both_ledgers(self) -> None:
+        """The syntax gate has a floor, and this is what sits under it.
+
+        A reviewer built a working escape against the scan: a helper in
+        ``src/stage_cost.py`` reading the bill into a local, a second helper filtering a
+        comprehension on the first, and three lines in ``StageRouter.choose`` dropping the
+        expensive targets out of ``live``. The router shopped on price and every one of
+        the eighty syntax tests passed, because the deciding expression named no watched
+        field and no watched collection -- the names were spent one call earlier.
+
+        A syntactic gate always has another laundering path; there is no version of
+        ``names_in`` that closes the class. What closes it is asking the component for its
+        answer twice, over ledgers that differ in nothing but the money. This is the same
+        assertion the supervisor already gets, aimed at the other component that could
+        want it.
+        """
+        # Every stage that is a *target* of a move out of the nodes chosen from below,
+        # and the whole set is billed. A ledger whose expensive stage no edge points at
+        # cannot see a router that drops expensive targets — the first version of this
+        # test billed `01_literature_survey` and chose from 04 and 06, which reach it
+        # from neither, and the planted escape passed.
+        billed_stages = (
+            "02_hypothesis_generation",
+            "03_study_design",
+            "04_implementation",
+            "05_experimentation",
+            "06_analysis",
+            "01_literature_survey",
+        )
+        expensive = CallCost(40, 40, 5_117, 27_191_137, 644_146_902, 3_292_425, 574.67).to_dict()
+        cheap = [_row(slug, attempts=2, outcome="approved") for slug in billed_stages]
+        dear = [
+            _row(slug, attempts=2, outcome="approved", cost=expensive)
+            for slug in billed_stages
+        ]
+        self.assertNotEqual(cheap[0][RECORD_FIELD], dear[0][RECORD_FIELD])
+
+        def decisions() -> list[dict[str, object]]:
+            graph = StageGraph.adaptive()
+            out = []
+            for slug, number in (("06_analysis", 6), ("07_writing", 7)):
+                decision = StageRouter(None, mode="auto").choose(
+                    paths=self.paths,
+                    stage=next(item for item in STAGES if item.slug == slug),
+                    graph=graph,
+                    state=GraphState(),
+                )
+                out.append(
+                    {
+                        "target": decision.target,
+                        "kind": decision.kind,
+                        "reason": decision.reason,
+                        "default": decision.default_target,
+                        "agent_directed": decision.agent_directed,
+                        "offered": decision.offered,
+                        "blocked": decision.blocked,
+                        "refusal": decision.refusal,
+                        "at": number,
+                    }
+                )
+            return out
+
+        self._ledger(cheap)
+        free = decisions()
+        self._ledger(dear)
+        billed = decisions()
         self.assertEqual(free, billed)
 
     def test_the_open_meter_the_supervisor_holds_does_carry_a_cost(self) -> None:

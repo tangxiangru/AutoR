@@ -884,10 +884,22 @@ def _number(value: Any) -> float:
 #: ``ResearchManager._run_stage`` has closed the meter, so there is no visit to charge them
 #: to. ``tests/test_cost_is_recorded_and_unread.py`` derives the dispatch sites from the
 #: syntax and fails when a new one appears in neither column.
+#: What the total covers, and what it does not. Pinned against the tree by
+#: ``tests/test_cost_is_recorded_and_unread.py``: a module that dispatches a backend call
+#: and never sets ``call_cost`` has to be named here, so threading a panel's cost through
+#: is what takes its name back out, and adding a new unpriced caller fails the suite rather
+#: than quietly shrinking the total.
+#:
+#: The panels are the live gap and they are opt-in: ``--review-panel`` swaps the solo
+#: reviewer for ``ReviewPanel``, whose six ``ReviewDecision`` construction sites set no
+#: cost, and ``--deliberation`` and ``--ideation-panel`` dispatch their own prompts the
+#: same way. A run with any of them on spends more than this total says.
 COST_SCOPE_NOTE = (
     "Covers the operator, review and validity calls the manager dispatched inside a stage "
-    "visit. The routing agent's calls happen at a stage exit, outside any visit, and are "
-    "not in this total."
+    "visit. Outside the total: the routing agent, whose calls happen at a stage exit rather "
+    "than inside a visit, and the review panel, the deliberation voices and the ideation "
+    "proposers, none of which report a cost yet -- so a run with `--review-panel`, "
+    "`--deliberation` or `--ideation-panel` on spent more than this says."
 )
 
 #: The line a run with nothing to report prints. Says which of the two it is: a run whose
