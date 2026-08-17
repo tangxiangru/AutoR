@@ -516,51 +516,79 @@ standard error of it *and* reproduce its subject ordering by accident.
 The two rows this page carried as UNMEASURED were filled on 2026-08-17 by a three-task
 calibration: `fs:010`, `fs:024` and `fs:043`, one per subject, both arms, real operator, `opus`
 answering and reviewing, `--stage-timeout 3600 --max-attempts 2 --max-auto-skips 0`, judged by
-`gpt-5.1`. Six runs. It is the first real AutoR run of this benchmark that has ever happened.
+`gpt-5.1`. It is the first real AutoR run of this benchmark that has ever happened.
+
+It took two passes, and the reason is worth stating before the numbers: the first pass lost two
+of three `direct` runs to a timeout in the Claude CLI that has nothing to do with this benchmark
+or with AutoR. The table below is the second pass, with that timeout raised. The first pass is
+kept in the section after it, because a refusal that turned out to be an artifact of the harness
+is exactly the kind of thing a later reader needs to be able to tell apart from a refusal that
+was real.
 
 | task | arm | wall | backend calls | output tokens | answer chars | source | points |
 | --- | --- | ---: | ---: | ---: | ---: | --- | ---: |
 | `fs:010` | `direct` | 266 s | 1 | 23,719 | 43,075 | `agent` | **9.375** |
 | `fs:010` | `ideate` | 1,962 s | 9 | 153,848 | 3,731 | `synthesized` | **2.500** |
-| `fs:024` | `direct` | 609 s | 2 | 0 | 198 | `fallback` | refused |
+| `fs:024` | `direct` | 842 s | 1 | 63,370 | 122,933 | `agent` | **8.000** |
 | `fs:024` | `ideate` | 4,597 s | 16 | 335,157 | 236 | `fallback` | refused |
-| `fs:043` | `direct` | 607 s | 2 | 0 | 198 | `fallback` | refused |
+| `fs:043` | `direct` | 769 s | 1 | 54,368 | 121,923 | `agent` | **4.000** |
 | `fs:043` | `ideate` | 4,333 s | 20 | 307,352 | 70,606 | `synthesized` | **4.000** |
 
 **The `ideate` arm costs 33 to 77 minutes a task**, median 72 minutes, at 9 to 20 backend calls
-and 154,000 to 335,000 output tokens. Sixty tasks by two arms at a concurrency of six is
-therefore about a day of wall clock plus 2.4 hours of judging, which makes a full paired
-campaign affordable — and is the fact the sixty-task plan could not be frozen without.
+and 154,000 to 335,000 output tokens. The `direct` arm costs 4 to 14 minutes, median 13, at one
+call. Sixty tasks by two arms at a concurrency of six is therefore about a day of wall clock plus
+2.4 hours of judging, which makes a full paired campaign affordable — and is the fact the
+sixty-task plan could not be frozen without.
 
 ### No paired difference is published from this, and the harness is the reason
 
-Both arms refused above the plan's ceiling: the `direct` arm on two of three tasks, the `ideate`
-arm on one of three, against a `max_refusal_rate_for_publication` of 0.20. Refusals are not
-distributed at random across arms, so the surviving pairs are the subset where each arm happened
-to run cleanly, and a difference over them is biased by an amount nobody can estimate. The report
-withholds it and so does this page.
+The `ideate` arm refused on one of three tasks against a `max_refusal_rate_for_publication` of
+0.20. One refusal in three is 33%, so the report withholds the difference and so does this page.
+Refusals are not distributed at random across arms — the surviving pairs are the ones where the
+pipeline happened to converge — so a mean over them is biased by an amount nobody can estimate,
+and the bias runs in the direction that flatters the arm that refused.
 
-What can be said is the single observation. On `fs:010` the pipeline arm scored **6.875 points
-below** the single call, at 7.4 times the wall clock and 6.5 times the tokens, having written an
-answer one eleventh as long. One task is one task — but the gap is twenty times the judge's
-sampling noise, it points the same way as the sibling benchmark, where AutoR also lands below the
-bare CLI it can be configured to run on top of, and the mechanism is legible: this rubric awards
-points for enumerated specifics, and the synthesizer compresses.
+What can be said is the two pairs, as two observations rather than as a mean:
 
-### Why the arms refused, which is two different stories
+| task | `direct` | `ideate` | difference |
+| --- | ---: | ---: | ---: |
+| `fs:010` | 9.375 | 2.500 | **−6.875** |
+| `fs:043` | 4.000 | 4.000 | 0.000 |
 
-**The `direct` arm did not fail at AutoR.** Both refusals are the Claude CLI's own byte-stream
-idle timeout — `API Error: Stream idle timeout - no chunks received` — firing at about 300 s
-while the model was still thinking and had emitted nothing. Six of seven `direct` attempts died
-that way; `fs:024` reproduced it four times across two runs at two different concurrency levels,
-and the one that survived, `fs:010`, finished its call in 264 s, just under the ceiling. The CLI
-imposes a hard limit on how long a model may think before its first token, and the hardest
-questions on this benchmark are exactly the ones that exceed it.
-`CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS` is the knob; nothing in `fs_agent.py` reaches it, and
-raising it is the first thing to do before a full campaign.
+The pipeline arm did not win a task. It lost one by twenty times the judge's sampling noise and
+drew the other, at 7.4 and 5.6 times the wall clock. Two pairs is two pairs — but it points the
+same way as the sibling benchmark, where AutoR also lands below the bare CLI it can be configured
+to run on top of, and the mechanism is legible: this rubric awards points for enumerated
+specifics, the `direct` arm wrote 43,000 to 123,000 characters of them, and the synthesizer
+compresses to between 236 and 70,606.
 
-**The `ideate` arm's refusal is the one the design was built for.** `fs:024` spent 76 minutes and
-16 backend calls, approved no stage, and came out with `pipeline_completed: false`,
+### The first pass, and the timeout that produced it
+
+In the first pass the `direct` arm refused on two of three tasks and the numbers above for those
+two were `609 s / 2 calls / 0 output tokens / 198 characters / fallback`. Every one of those
+refusals was the Claude CLI's own `API Error: Stream idle timeout - no chunks received`, firing
+at almost exactly 302 s while the model was still thinking and had emitted nothing. Six of seven
+`direct` attempts died that way; `fs:024` reproduced it four times across two runs at two
+different concurrency levels, so it is not a load artifact; and the one that survived, `fs:010`,
+finished its call in 264 s — just under.
+
+**The knob is `CLAUDE_STREAM_IDLE_TIMEOUT_MS`, and the obvious guess is wrong.** Raising only
+`CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS` changed nothing and the next run failed again at 302.2 s;
+the function behind that error floors the *un-prefixed* variable at 300,000 ms. Both were then
+set to 1,800,000, which is the ceiling the CLI clamps to — a larger value is silently reduced,
+which is the worst kind of configuration, one that reads as set and is not. The two tasks that
+had failed four times between them then succeeded on the first attempt, and nothing else changed.
+
+Neither variable is reachable from `fs_agent.py`; both belong in the environment of whatever
+launches it, and raising them is the first thing to do before a campaign. The failure mode is
+worth remembering on its own: the process exits, a file exists, and only the metadata says the
+file is a placeholder — and because it fires on thinking time, what it removes is the hard
+questions, so a mean over the survivors reads high.
+
+### The refusal that was real
+
+**The `ideate` arm's refusal is the one this integration was designed for.** `fs:024` spent 76
+minutes and 16 backend calls, approved no stage, and came out with `pipeline_completed: false`,
 `stages_approved: []` and a `fallback` answer of 236 characters. The synthesizer refused to write
 an answer from zero approved stages rather than quietly asking the model the original question
 again — which would have produced a plausible document, a `synthesized` source and an exit code

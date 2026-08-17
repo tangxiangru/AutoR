@@ -998,18 +998,23 @@ answering and reviewing — puts the `ideate` arm at 33 to 77 minutes a task, me
 20 backend calls and 154k to 335k output tokens. Sixty tasks by two arms is about a day at a
 concurrency of six, which makes a full paired campaign affordable.
 
-**No difference is published from it.** Both arms refused above the plan's 20% ceiling — the
-single-call arm on two of three tasks, all of them the Claude CLI's 300 s byte-stream idle
-timeout firing while the model was still thinking, and the pipeline arm on one of three, a run
-that approved no stage and was refused by two clauses rather than being handed a synthesized
-answer. Refusals are not random across arms, so the survivors are biased and the report says so
-instead of averaging them.
+**No difference is published from it.** The pipeline arm refused on one of three tasks against
+the plan's 20% ceiling — a run that approved no stage and was refused by two clauses rather than
+being handed a synthesized answer. Refusals are not random across arms, so the survivors are
+biased in the direction that flatters the arm that refused, and the report says so instead of
+averaging them.
 
-The one complete pair is worth stating on its own terms: on `fs:010` the pipeline arm scored
-**2.500 against the single call's 9.375**, at 7.4× the wall clock and 6.5× the tokens, having
-written an answer one eleventh as long. One task is one task — but the gap is twenty times the
-judge's sampling noise and it points the same way as ResearchClawBench, where AutoR also lands
-below the bare CLI it can be configured to run on top of.
+The two pairs are worth stating as two observations: `fs:010` **2.500 against 9.375**, `fs:043`
+4.000 against 4.000. The pipeline arm did not win a task — it lost one by twenty times the
+judge's sampling noise and drew the other, at 7.4× and 5.6× the wall clock. Two pairs is two
+pairs, but it points the same way as ResearchClawBench, where AutoR also lands below the bare
+CLI it can be configured to run on top of.
+
+The first pass of that calibration lost two of three single-call runs to the Claude CLI's own
+300 s stream idle timeout, firing while the model was still thinking. `CLAUDE_STREAM_IDLE_TIMEOUT_MS`
+is the knob — not the `BYTE_`-prefixed one, which changed nothing — and 1,800,000 is the ceiling
+it clamps to. Raise both before any campaign: the failure exits cleanly, leaves a file behind,
+and fires on thinking time, so what it removes is the hard questions.
 
 The full table, why each arm refused, the ten admission clauses and the judge's measured noise
 are in [docs/frontierscience.md](docs/frontierscience.md).
