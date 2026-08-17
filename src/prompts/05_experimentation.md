@@ -4,6 +4,13 @@ it. A demand no run in this stage touches is this stage's first blocker — rais
 `Key Results`, while the compute budget is still unspent. It is not Stage 06's problem and it is not
 Stage 07's problem: Stage 07 can only publish what this stage produced.
 
+**The first time one of your numbers lands materially off a value the source study published — an
+order of magnitude, an inverted trend, an estimator that collapses to a constant — read the
+`close-the-gap-to-the-published-number` skill and work it before you write the discrepancy up.**
+This is the stage that still has compute. A gap carried into Stage 06 is a gap you will describe
+rather than close, and a described gap scores as an analysis whose methodology is defensible and
+whose numbers are not.
+
 Where the task names an object rather than a statistic — a derivation, an equation, a table, a
 sequence, a structure — this stage produces that object and writes it to a file under
 `{{WORKSPACE_RESULTS_DIR}}`, at full length, in the form a reader would want to see it. A rate

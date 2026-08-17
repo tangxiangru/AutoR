@@ -7,11 +7,11 @@ embedded does not exist. Below 1200 characters the report is refused outright �
 substance, not a word count: a report with no methodology, results and discussion has not been
 written.
 
-The skills `paper-writing`, `result-table`, `citation-discipline`,
-`the-supplied-item-is-the-graded-unit` and `draw-the-source-figure-panel-for-panel` are installed
-for this stage. Read the last two before you decide what the report leads with: one is about the
-object the task actually shipped keeping its own named section, the other about every result the
-source drew getting a panel of yours.
+Before you decide what the report leads with, read `the-supplied-item-is-the-graded-unit` and
+`draw-the-source-figure-panel-for-panel`: one is about the object the task actually shipped keeping
+its own named section, the other about every result the source drew getting a panel of yours.
+`paper-writing`, `result-table` and `citation-discipline` are named at the phases they belong to,
+below.
 
 ## What This Report Must Answer
 
@@ -33,7 +33,15 @@ in each `where` once the section exists.
 - **A demand the run cannot answer from its evidence is still owed its place.** Write what was asked,
   what the run established that bears on it, and what is missing — in that order, in the section a
   reader looks in for the answer. Do not compute, estimate, or narrate a number the run did not
-  produce: naming the gap is the honest maximum, and it beats silence.
+  produce and cannot cite: an invented number is worse than a gap.
+- **A published value is not an invented one.** Where the deliverable is out of this run's reach
+  entirely — a wet-lab measurement, licensed hardware, a six-week experiment — the field's own answer
+  is still reportable, and reporting it beats leaving the section empty. Give the value, name whose
+  it is, style it in any figure as an external reference rather than as one of your series, and never
+  count it as validation of your own pipeline. Then state what this run *does* establish about it and
+  the distance between the two. Read the `a-value-you-did-not-measure-still-has-a-source` skill; the
+  labelling is what separates a citation from a fabrication, and getting it right is worth a section
+  that would otherwise score as absent.
 - **Where the run's strongest result is not what the task asked for, both go in, in that order.** The
   task's answers take the title, the abstract and the opening of Results, and they get the figures;
   the run's other findings follow them. A report whose abstract is about the run rather than about
@@ -58,7 +66,8 @@ structured review artifacts.
   that carry them.
 - Generate the report's figures from real run artifacts, and wire them in so every reference resolves.
 - Distinguish verified empirical findings from provisional Stage 02 paper claims. Do not present provisional claims as confirmed results.
-- Trace every number in the report to a file the run actually produced.
+- Trace every number in the report to a file the run actually produced, or — for a value taken from
+  the literature — to the source it is attributed to.
 - Polish prose to reduce obvious AI writing artifacts without changing valid technical meaning.
 - Produce the structured review artifacts this stage is gated on.
 
@@ -95,6 +104,15 @@ written result sees all of it. Write for that.
   before the methodology.** Those are the results this run nominated as its headline findings
   back at Stage 03, before any of them existed. A declared headline that first appears in a
   table on page four was mis-ranked by its own author, and the stage gate now says so.
+- **Every term a figure has to be read against appears before the methodology too** — the
+  symbol, the source's equation number, the published target value, the definition of the axis.
+  A reader who forms a verdict on a picture from the opening of the report never reaches the
+  section that would have told them what they were looking at. Where the run reproduces
+  published work, read the `use-the-sources-own-names` skill: the source's name for a quantity
+  is the only handle a reader has for finding your verification of it.
+- **The opening is where the result goes, not where the shortfall goes.** A run whose report
+  begins with what it could not establish has spent the only paragraphs some readers see on the
+  weakest thing it has to say. The shortfall is owed its section; it is not owed the opening.
 
 This is the ordinary shape of a well-written paper; the grading only makes the cost of
 getting it wrong concrete.
@@ -180,6 +198,9 @@ Complete the stage in this order within a single stage conversation.
 
 ### Phase 1: Outline
 
+0. **Read the `publish-what-the-run-already-computed` skill and run its sweep first.** The outline
+   is decided here, and the objects it leaves out do not come back. Every object the task named as
+   an output that this run wrote to disk gets a body subsection before any other section is planned.
 1. Read the injected `## Writing Manifest` and the prior approved stage context. It lists the figures, result files, data files, and approved stage summaries available to you — use them directly rather than inventing equivalents.
 2. Identify the single central technical story of the report.
 3. Read the injected `# Report Plan`; the figure set was chosen at Stage 03 against the claims it carries. Your job is to publish it, not to re-choose it.
@@ -194,6 +215,12 @@ Figures are the highest-value part of this deliverable. The reviewer grades them
 image side by side with the corresponding figure from the published study and asking whether yours
 shows the same thing. They were chosen at Stage 03; this phase produces them.
 
+**Read the `the-canonical-figure` skill before you draw.** A diagnostic plot of your own pipeline
+and the source study's result plot are different objects, and only one of them is being compared to
+anything. **Read the `result-table` skill** before you build the results table, and
+**read `the-unit-of-analysis`** before you pool anything into a single number: a criterion
+written about per-stratum behaviour is not answered by an average over the strata.
+
 5. **Publish the planned figures in slot order, at most {{MAX_REPORT_FIGURES}} and preferably far
    fewer — the first {{JUDGE_VISIBLE_FIGURES}} are what a reviewer sees.** Every slot you
    do not publish needs `dropped_because` in `report_plan.json` and a sentence in `Key Results`;
@@ -201,6 +228,12 @@ shows the same thing. They were chosen at Stage 03; this phase produces them.
    Dropping is for a figure the results made impossible, not for one you ran out of time for:
    the plan's claims still have to be carried, and a report that ends up below three figures is
    one where the data, the main result and the evidence it holds are not all shown.
+   **A figure the opening of the report never explains is a figure a grader sees without a
+   caption.** A reader forming a verdict on a picture may have only the picture and the first
+   pages of the prose, so the count that matters is not how many figures you published but how
+   many of them are introduced and interpreted before the methodology. Publishing a further
+   figure that is first discussed on page five adds an image to the pile and no argument to it.
+   Three figures each explained in the opening beat ten of which two are.
 6. **Make the first figure a composite summary panel.** This is the single highest-return figure
    in the report, and it is slot 1's default role. Build one multi-panel figure that carries the
    whole result at a glance:
@@ -232,8 +265,9 @@ shows the same thing. They were chosen at Stage 03; this phase produces them.
     argues for the figures has to come before anything long.
 12. Report concrete numbers, not adjectives. "Accuracy improved to 0.87 from a 0.81 baseline
     (n=2,000, 5-fold CV, ±0.02)" is scoreable; "performance improved substantially" is not.
-13. Every quantitative claim must trace to a file under `{{WORKSPACE_RESULTS_DIR}}` or a figure in
-    `report/images/`. Say where a number came from when it is not obvious.
+13. Every quantitative claim must trace to a file under `{{WORKSPACE_RESULTS_DIR}}`, to a figure in
+    `report/images/`, or to a cited publication. Say where a number came from when it is not
+    obvious, and mark a literature value as one at the point it appears.
 14. Embed each figure at the point in the narrative where it is discussed, with a caption that
     states what the reader should conclude from it:
     `![Held-out AUROC by model class; the proposed method leads across all five folds.](images/main_result.png)`
@@ -244,6 +278,8 @@ shows the same thing. They were chosen at Stage 03; this phase produces them.
 
 ### Phase 4: Quality Polish
 
+Read the `paper-writing` skill before this phase.
+
 18. Remove AI-writing patterns where they actually weaken the prose.
 19. Run a reverse-outline check: the first sentences of paragraphs should form a coherent narrative.
 20. Check logic consistency — no contradiction between introduction and results, no terminology
@@ -253,12 +289,17 @@ shows the same thing. They were chosen at Stage 03; this phase produces them.
 
 ### Phase 5: Evidence Audit
 
+Read the `evidence-not-assertion` skill before this phase, and `citation-discipline` for any
+reference you are about to record.
+
 22. Write `{{WORKSPACE_ARTIFACTS_DIR}}/citation_verification.json`. The gate reads this file and
     refuses the stage without it; its required fields and schema are in
     `## Required Artifacts (schemas)` at the end of this file. Record verified and unresolved
     citations, missing figures, and broken refs or labels.
 
 ### Phase 6: Argue the Discussion
+
+Read the `answer-the-why-not-only-the-what` skill before this phase.
 
 If a `Reasoning This Run Already Settled` section appears in your context, the run argued
 those points and recorded the arguments instead of publishing them. Work the ones that bear
@@ -296,6 +337,9 @@ Minimum bar:
 ### Phase 8: Stage Summary
 
 26. Write the stage summary draft to `{{STAGE_OUTPUT_PATH}}`.
+27. Read the `record-what-you-learned` skill and act on it. This is the last stage that runs in this
+    configuration, so a note not written here is never written: the pool the next run in this field
+    inherits stays empty.
 
 ## Claim Provenance (required)
 

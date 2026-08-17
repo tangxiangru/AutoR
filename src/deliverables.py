@@ -50,6 +50,39 @@ DEMAND_VERBS = (
     "demonstrate", "show", "establish", "constrain", "test",
 )
 
+#: A brief that enumerates its deliverables under an `Output:` label is asking for them
+#: as *nouns*, and the verb gate above cannot see a noun phrase. Measured over the 40
+#: archived ResearchClawBench briefs: 53 sentences of 25 characters or more survive
+#: `research_brief` and are then dropped by the verb test, and 23 of those are enumerated
+#: `Input:` / `Output:` lines -- the lines that literally list what the run owes.
+#: Physics_000 is the clearest case. Its brief says "Output 2: Optimal size mismatch
+#: values between adjacent shells." and "Output 3: Shell sequences and paths formed via
+#: self-assembly in growth simulations."; neither contains a demand verb, so neither
+#: reached `# What the Task Asks For`, and the two graded criteria they name carry 0.70 of
+#: that task's weight (they scored 28 and 5 against the bare agent's 60 and 50).
+#:
+#: `Input:` stays out, for the reason the `_BRIEF_HEADINGS` note gives: a description of
+#: what the run *has* is not a description of what it *owes*, and admitting data blurbs is
+#: the dilution this module exists to avoid. Only the output side is admitted.
+#: The label is usually on its own, with the deliverables enumerated after it --
+#: ``Output:  1. Predicted stable multi-shell icosahedral structures.  2. Optimal size
+#: mismatch values between adjacent shells.  3. Shell sequences and paths formed via
+#: self-assembly in growth simulations.`` The sentence splitter breaks that on the
+#: enumerators, so by the time a sentence is tested the label is three sentences behind
+#: it and each item is a bare noun phrase. So the block is found first, and every
+#: sentence inside it is a demand.
+_OUTPUT_BLOCK = re.compile(
+    r"(?is)\b(?:outputs?|deliverables?)\s*:\s*(.*?)"
+    r"(?=\b(?:inputs?|deliverables?|scientific\s+(?:objective|goal)|research\s+(?:objective|goal)"
+    r"|task\s+description|evaluation|constraints?|notes?)\s*:|\Z)"
+)
+
+#: The leading label on a one-line ``Output: <noun phrase>``. Stripped only for the
+#: comparison against the block capture, never from the quote a run has to carry.
+_OUTPUT_LABEL = re.compile(
+    r"^\s*(?:\d+[.)]\s*)?(?:outputs?|deliverables?)\s*\d*\s*:\s*", re.IGNORECASE
+)
+
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n+")
 _WORD = re.compile(r"[a-z0-9]+")
 
@@ -68,14 +101,34 @@ def demanding_sentences(task_statement: str) -> list[str]:
 
     A research brief is mostly context; the demands are the handful of sentences with a
     verb like "derive" or "compare" in them. Those are what a report owes an answer to.
+
+    A sentence inside an ``Output:`` block is owed whether or not it contains a verb: see
+    `_OUTPUT_BLOCK`. "Shell sequences and paths formed via self-assembly in growth
+    simulations." is a deliverable written as a noun phrase, and the verb test alone
+    drops it.
+
+    Order is preserved and duplicates are dropped, so a sentence that is both labelled
+    and verb-bearing appears once.
     """
+    statement = task_statement or ""
+    declared: set[str] = set()
+    for block in _OUTPUT_BLOCK.findall(statement):
+        for raw in _SENTENCE_SPLIT.split(block):
+            sentence = _normalize(raw).strip("-*# \t")
+            if len(sentence) >= 25:
+                declared.add(_OUTPUT_LABEL.sub("", sentence))
+
     found: list[str] = []
-    for raw in _SENTENCE_SPLIT.split(task_statement or ""):
+    for raw in _SENTENCE_SPLIT.split(statement):
         sentence = _normalize(raw).strip("-*# \t")
-        if len(sentence) < 25:
+        if len(sentence) < 25 or sentence in found:
             continue
         lowered = sentence.lower()
-        if any(re.search(rf"\b{verb}\w*\b", lowered) for verb in DEMAND_VERBS):
+        # A one-line `Output: <noun phrase>` keeps its label in the quote and loses it
+        # for the comparison, because the block capture starts after the label.
+        if _OUTPUT_LABEL.sub("", sentence) in declared or any(
+            re.search(rf"\b{verb}\w*\b", lowered) for verb in DEMAND_VERBS
+        ):
             found.append(sentence)
     return found
 

@@ -552,7 +552,22 @@ concatenated up front and grow through the run; guidance that one stage needs
 in one situation belongs in a skill, which is read only when the model judges
 it relevant. Adding a skill costs nothing in prompts that do not use it.
 
-To add one: create `src/skills/<name>/SKILL.md` with matching frontmatter.
+**Pull-based is not the same as reachable.** Measured over a 40-task
+ResearchClawBench arm at `2ffaeb4` — 16 skills installed per run, 19.7 h median
+per run — the whole pack drew 78 `Skill` calls, and 31 of those were the single
+skill a rendered stage prompt names imperatively. Thirteen skills were never
+pulled once. Stage 05 pulled nothing in any of the forty runs. So a general skill
+also has to be *named*, in the prompt of the stage whose decision it covers, in
+the imperative: "Read the `x` skill before ...".
+`tests/test_a_skill_is_named_where_it_is_needed.py` holds that, and it knows
+which prompts the default configuration actually renders — `07_writing.md` and
+`08_dissemination.md` are not among them, so a skill named only there is a skill
+nobody is told about. Field skills are exempt: the discipline filter narrows them
+to two per run, and that is a small enough field of candidates for pull-based
+routing to work.
+
+To add one: create `src/skills/<name>/SKILL.md` with matching frontmatter, and
+name it in a rendered stage prompt.
 `validate_skill_pack` is what defines "well-formed", and
 `tests/test_run_skills.py` runs it over the shipped pack and then checks the
 install lands where the CLI looks — so a malformed skill fails the suite rather

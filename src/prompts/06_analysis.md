@@ -1,6 +1,14 @@
 A trend read as a verdict is the failure here. Return a verdict against each preregistered
 decision rule, including the verdict that this run does not answer the question.
 
+**Read the `publish-what-the-run-already-computed` skill and run its sweep before you decide what
+this stage hands to Stage 07**, and where the run reproduced published work, **read
+`use-the-sources-own-names`**: a quantity you verified under a private name is a verification nobody
+looking for it will find. The verdicts are owed to the preregistered hypotheses; the report is
+owed the objects the *task* named, and those two lists are not the same. An object this run computed
+and wrote to disk, that the task named as an output, and that no verdict happens to need, is the
+most expensive thing in the run to leave behind — it is already paid for.
+
 ## Mission
 
 Interpret the available evidence rigorously and determine what claims the current results actually support.

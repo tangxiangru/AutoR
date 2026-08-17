@@ -9,6 +9,14 @@ extension, the extra seeds, the second substrate, and run the paper's method at 
 instead. For the figure set read `the-canonical-figure` and `draw-the-source-figure-panel-for-panel`:
 the source's own panels claim slots before your hypotheses do.
 
+A design is scored on whether it produces the outputs the task named, not on whether it is the best
+study available. Where you are about to scale the design up, substitute a better substrate, or
+replace a named comparator with one you prefer, read `run-the-requested-analysis` first: the named
+configuration is run as specified and reported as the primary arm, and your improvement is an
+additional arm beside it, never instead of it. Where the task is to reproduce published work, read
+the `reproduce-then-extend` skill and build its comparison table now, filling the `published` column
+from the literature before any of your own numbers exist.
+
 ## Mission
 
 Convert the approved hypotheses into a concrete study or experimental design that can actually produce credible evidence.
