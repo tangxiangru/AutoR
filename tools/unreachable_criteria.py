@@ -163,13 +163,16 @@ def main() -> int:
                   "An input this tool cannot open is not an input that lacks the term.")
             refused += 1
             continue
-        text = raw.lower()
+        text = raw
         content = per_arm[0][task]["items"][index]["content"]
         terms = [w for w in dict.fromkeys(_IDENTIFIER.findall(content)) if w not in _GENERIC][:8]
         if not terms:
             print(f"  w={weight:.2f} {task}#{index}: names nothing specific enough to look for")
             continue
-        missing = [w for w in terms if w.lower() not in text]
+        # Word-boundary, because a substring match is how the previous version of this
+        # counted "shape" as an occurrence of SHAP and reported the flagship example of
+        # a paper naming an analysis nobody ran. `SHAP` occurs 0 times in those papers.
+        missing = [w for w in terms if not re.search(r"\b" + re.escape(w) + r"\b", text, re.I)]
         present += len(terms) - len(missing)
         absent += len(missing)
         print(f"  w={weight:.2f} {task}#{index}: supplied text {len(text):,} chars, "
