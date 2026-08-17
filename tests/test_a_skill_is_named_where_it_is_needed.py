@@ -37,10 +37,12 @@ This file makes it loud. It asserts four things:
    configuration renders — markdown output, `07_writing` as the final stage.
    A prompt for a format or a stage this configuration never reaches is allowed
    to name a skill, but it may not be the only place that skill is named.
-3. Every *general* skill in the pack is named by a rendered prompt. Field skills
-   are exempt: the discipline installer already narrows them to two per run, and
-   14 of the 20 field skills did launch at least once in the arm, so pull-based
-   routing demonstrably works once the field of candidates is small.
+3. Every *general* skill in the pack is named by a rendered prompt, or is
+   task-scoped and declares the stages the `task_shaped_skills` channel should
+   announce it at. Field skills are exempt: the discipline installer already
+   narrows them to two per run, and 15 of the 20 field skills did launch at least
+   once in the arm, so pull-based routing demonstrably works once the field of
+   candidates is small.
 4. The unreachable-by-construction allowlist has not outlived its cause.
 """
 
@@ -176,19 +178,64 @@ class SkillNamingTest(unittest.TestCase):
         for path in rendered:
             named_rendered |= _named_skills(path.read_text(encoding="utf-8"), self.known)
 
+        # A task-scoped skill is named too, just not by a file. The `task_shaped_skills`
+        # channel renders it into the prompt of every stage its own `stages:` field
+        # lists, for the runs whose brief its predicate matched — which is the only way
+        # to announce a skill that most runs should never be offered. Writing it into a
+        # prompt instead would announce it to the runs it is wrong for, which is the
+        # cost the routing exists to avoid. `validate_skill_pack` refuses a task-scoped
+        # skill that names no stages, so between the two gates no skill is unannounced.
+        by_channel = {
+            entry.name
+            for entry in read_skill_pack(SKILL_PACK)
+            if entry.task_scoped and entry.stages
+        }
         missing = sorted(
             name
             for name in self.known
             if not discipline_of(name)
             and name not in named_rendered
+            and name not in by_channel
             and name not in unreachable_by_construction
         )
         self.assertEqual(
             missing,
             [],
             "general skills no prompt this configuration renders tells the operator to "
-            f"read: {missing}. Name each one at the stage whose decision it covers, or "
-            "give it a field prefix so the installer routes it, or delete it.",
+            f"read: {missing}. Name each one at the stage whose decision it covers, give "
+            "it an `applies_when` predicate plus a `stages` field so the "
+            "`task_shaped_skills` channel names it, give it a field prefix so the "
+            "installer routes it, or delete it.",
+        )
+
+    def test_a_prompt_does_not_name_a_skill_most_runs_will_not_have(self) -> None:
+        """The mirror of the rule above, and the one that breaks silently.
+
+        A task-scoped skill is installed only for the runs whose brief its predicate
+        matched. A prompt file is rendered for every run. So an imperative naming in a
+        prompt file sends every other run to a directory that is not there — and
+        `test_every_skill_a_prompt_names_exists` cannot see it, because the skill does
+        exist in the pack; it is the *install* that is conditional.
+
+        This is a live hazard rather than a hypothetical: two skills that were named in
+        `07_writing_markdown.md` became task-scoped in the same change that added the
+        router, and the namings had to come out with them. The `task_shaped_skills`
+        channel is where a scoped skill is announced, because it renders per run.
+        """
+        offenders: list[str] = []
+        scoped = {
+            entry.name for entry in read_skill_pack(SKILL_PACK) if entry.task_scoped
+        }
+        for path in sorted(PROMPT_DIR.glob("*.md")):
+            for skill in sorted(_named_skills(path.read_text(encoding="utf-8"), self.known)):
+                if skill in scoped:
+                    offenders.append(f"{path.name} names `{skill}`")
+        self.assertEqual(
+            offenders,
+            [],
+            "a prompt is rendered for every run but these skills are installed only for "
+            f"some: {offenders}. Let the `task_shaped_skills` channel name them, or drop "
+            "the skill's `applies_when` so every run has it.",
         )
 
     def test_the_allowlist_has_not_outlived_its_cause(self) -> None:

@@ -1,6 +1,6 @@
 ---
 name: energy-canonical-configuration-before-the-enhanced-variant
-description: Use when the research task is in energy — batteries, electrochemistry, energy-system modelling and identification — at study design, analysis or writing. Run the default recipe with its conventional diagnostics, and give each claim its own plain panel
+description: Use at study design when you are about to run an improved variant of a system before its default configuration, or fold several claims into one panel. Covers running the default recipe with its conventional diagnostics first, and giving each claim its own plain panel.
 ---
 
 # Run the default recipe with its conventional diagnostics, and give each claim its own plain panel

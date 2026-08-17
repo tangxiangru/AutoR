@@ -26,6 +26,7 @@ from src.stage_graph import (
     Move,
     StageGraph,
     Visit,
+    WalkBudget,
     block_census,
     enter,
     format_block_census,
@@ -230,9 +231,10 @@ class AdaptiveTopologyTests(unittest.TestCase):
     def test_a_blocked_move_is_still_shown_to_the_router(self) -> None:
         """Hiding it would be the obvious design and it is the wrong one: an agent
         that can see why writing is closed routes to what opens it."""
-        moves = self.graph.moves(self.paths, "06_analysis", GraphState())
+        state = GraphState()
+        moves = self.graph.moves(self.paths, "06_analysis", state)
         self.assertIn("07_writing", {move.target for move in moves})
-        rendered = self.graph.describe_for_prompt(moves)
+        rendered = self.graph.describe_for_prompt(moves, WalkBudget.of(state, "06_analysis"))
         self.assertIn("07_writing", rendered)
         self.assertIn("**no**", rendered)
 
@@ -610,10 +612,17 @@ class BlockCensusTests(unittest.TestCase):
     def test_a_move_blocked_by_an_undeclared_kind_is_refused_at_construction(self) -> None:
         """The same refusal `Edge` makes about its kind. A kind outside
         `BLOCK_KINDS` would be tallied under a heading no reader can interpret, and
-        `default_move` branches on exactly these names."""
+        `default_move` branches on exactly these names.
+
+        The example used to be `"budget"`, which then became a kind and turned this
+        into a test of nothing that failed loudly rather than quietly. The
+        `assertNotIn` is so the next one says which half moved.
+        """
+        undeclared = "affordable"
+        self.assertNotIn(undeclared, BLOCK_KINDS)
         edge = StageGraph.adaptive().out_edges("06_analysis")[0]
         with self.assertRaises(ValueError):
-            Move(edge, GuardResult(False, "shut"), "shut", "budget")
+            Move(edge, GuardResult(False, "shut"), "shut", undeclared)
 
     def test_every_declared_kind_is_accepted(self) -> None:
         """The control. A refusal that rejects the vocabulary it is guarding would

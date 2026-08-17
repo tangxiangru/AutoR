@@ -1,6 +1,6 @@
 ---
 name: material-as-specified-run-and-stage-diagnostics
-description: Use when the research task is in material — atomistic simulation, interatomic potentials and materials property prediction — at study design, analysis or writing. Run the protocol as specified as the foreground result, and leave every stage's default diagnostic panel
+description: Use at study design and implementation when a protocol is specified and you have found a reason to deviate, or when a pipeline stage is about to run without its conventional diagnostic. Covers running the protocol as specified as the foreground result, and leaving every stage's default panel behind you.
 ---
 
 # Run the protocol as specified as the foreground result, and leave every stage's default diagnostic panel

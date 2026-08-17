@@ -23,7 +23,7 @@ survives a crash because it was never anywhere else.
 **No conversation crosses a stage boundary.** Stage 05 cannot see Stage 03's
 session. What crosses is `memory.md` — the approved stage summaries — plus
 `handoff/<slug>.md`, the same summaries cut down to Objective / Key Results /
-Files Produced (`write_stage_handoff`, `src/utils.py`), plus nineteen typed
+Files Produced (`write_stage_handoff`, `src/utils.py`), plus twenty typed
 channels in [`src/information_flow.py`](../src/information_flow.py), each of
 which declares which stages read it. Memory and the handoff are the free text;
 everything else that crosses a boundary is a typed channel or a JSON artifact.
@@ -169,7 +169,7 @@ touching a verdict — see **[framework.md](framework.md)**.
 
 | Module | Responsibility |
 | --- | --- |
-| [`src/rubric.py`](../src/rubric.py) | Nine weighted criteria read off disk with no backend call (`CRITERIA`), including `reproducibility` (3.0), which walks the same validity chain the gate walks, and `commitment` (1.5), which counts hedge patterns. Verdicts are read only through `_verdict_blind_outcomes`, so the score carries no gradient toward changing an answer. |
+| [`src/rubric.py`](../src/rubric.py) | Ten weighted criteria read off disk with no backend call (`CRITERIA`), including `reproducibility` (3.0), which walks the same validity chain the gate walks, and `commitment` (1.5), which counts hedge patterns. Verdicts are read only through `_verdict_blind_outcomes`, so the score carries no gradient toward changing an answer. |
 | [`src/evolution.py`](../src/evolution.py) | The champion ratchet. `consider()` scores each valid draft; `_revert()` copies the champion back over a losing polish round before the reviewer sees it; a round whose `verdict_digest` moved is rejected whatever it scored; a human-directed revision is exempt. `measure=True`, `rounds=2` by default. |
 | [`src/pareto.py`](../src/pareto.py) | Keeps drafts that are non-dominated on the criterion vector even when they lose on the weighted total (`frontier`). `complementary_pair` names the two whose merge has the most headroom — the only place two drafts are combined rather than ranked. |
 | [`src/archive.py`](../src/archive.py) | Cross-run record under `~/.autor/archive`. `record_run` stores route, edges and per-stage fitness; `edge_payoffs` compares runs that took an edge against runs that reached the same node and did not; `propose_variant` reorders priorities and can never open, add or remove a guard. Promotion requires a win within every `comparability_basis`, so halting early cannot raise mean fitness. |
@@ -204,7 +204,7 @@ for the argument.
 
 | Module | Responsibility |
 | --- | --- |
-| [`src/information_flow.py`](../src/information_flow.py) | Nineteen typed channels (`CHANNELS`). Each declares `produced_by`, a `consumed_by` set of real stage slugs, and a rationale for every narrowing. `render_inbound()` composes a stage's context per consumer; `dependency_edges()` prints the producer→consumer topology. |
+| [`src/information_flow.py`](../src/information_flow.py) | Twenty typed channels (`CHANNELS`). Each declares `produced_by`, a `consumed_by` set of real stage slugs, and a rationale for every narrowing. `render_inbound()` composes a stage's context per consumer; `dependency_edges()` prints the producer→consumer topology. |
 | [`src/prompt_fragments.py`](../src/prompt_fragments.py) | The rules every stage prompt shares, held once. `compose_stage_template` orders them: the stage's own instructions, then the output-format rules that constrain them, then `RUN_SAFETY`. |
 | [`src/intake.py`](../src/intake.py) | Stage 00: clarification-question parsing, resource classification and ingestion, `intake_context.json`. Runs before the graph walk begins. |
 | [`src/bootstrap.py`](../src/bootstrap.py) | `--paper-corpus`: scans your prior papers (PDF/LaTeX/BibTeX) into a researcher profile, citation neighborhood, and style profile. |

@@ -36,6 +36,12 @@ class ArtifactRecord:
     #: record stays in the index: a reader has to be able to see that the file is
     #: still on disk and no longer counts.
     live: bool = True
+    #: True when the stage that last wrote this file was skipped rather than approved.
+    #: Orthogonal to ``live``, and deliberately so: the file still counts everywhere a
+    #: live one does, because a skip is a decision to continue past a failure rather than
+    #: to repudiate the work. What the flag adds is that a reader can tell work the run
+    #: accepted from residue it merely kept.
+    from_unreviewed_stage: bool = False
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -51,6 +57,7 @@ class ArtifactRecord:
             "version_uid": self.version_uid,
             "content_hash": self.content_hash,
             "live": self.live,
+            "from_unreviewed_stage": self.from_unreviewed_stage,
         }
 
     @classmethod
@@ -68,6 +75,7 @@ class ArtifactRecord:
             version_uid=str(payload.get("version_uid", "")).strip(),
             content_hash=str(payload.get("content_hash", "")).strip(),
             live=bool(payload.get("live", True)),
+            from_unreviewed_stage=bool(payload.get("from_unreviewed_stage", False)),
         )
 
 
@@ -85,6 +93,9 @@ class ArtifactIndex:
     #: two different questions.
     artifacts: list[ArtifactRecord]
     withdrawn_count: int = 0
+    #: How many of the counted artifacts came from a stage that was skipped rather than
+    #: approved. Counted *within* ``artifact_count`` rather than subtracted from it.
+    unreviewed_count: int = 0
 
     @property
     def live_artifacts(self) -> list[ArtifactRecord]:
@@ -95,6 +106,7 @@ class ArtifactIndex:
             "generated_at": self.generated_at,
             "artifact_count": self.artifact_count,
             "withdrawn_count": self.withdrawn_count,
+            "unreviewed_count": self.unreviewed_count,
             "counts_by_category": dict(self.counts_by_category),
             "artifacts": [artifact.to_dict() for artifact in self.artifacts],
         }
@@ -116,6 +128,12 @@ class ArtifactIndex:
             },
             artifacts=artifacts,
             withdrawn_count=int(payload.get("withdrawn_count", len(artifacts) - len(live))),
+            unreviewed_count=int(
+                payload.get(
+                    "unreviewed_count",
+                    len([item for item in live if item.from_unreviewed_stage]),
+                )
+            ),
         )
 
 
@@ -160,6 +178,7 @@ def write_artifact_index(paths: RunPaths) -> ArtifactIndex:
         counts_by_category=counts_by_category,
         artifacts=artifacts,
         withdrawn_count=len(artifacts) - len(live),
+        unreviewed_count=len([item for item in live if item.from_unreviewed_stage]),
     )
     paths.artifact_index.write_text(
         json.dumps(index.to_dict(), indent=2, ensure_ascii=True) + "\n",
@@ -197,6 +216,19 @@ def format_artifact_index_for_prompt(index: ArtifactIndex, max_entries_per_categ
         lines.append(
             f"Withdrawn by a rollback and not counted: {index.withdrawn_count} "
             "(still on disk; do not build on them)"
+        )
+    if index.unreviewed_count:
+        # Counted, and flagged. These come from a stage that ran out of attempts and was
+        # skipped, so the run never accepted them -- but it did not repudiate them either,
+        # and the artifacts are frequently the only thing such a run has. Hiding them
+        # would take real measurements away from the stage that has to write up what the
+        # run actually found; saying nothing would let that stage treat residue as
+        # evidence. The honest position is the third one: they are here, and they are not
+        # accepted work.
+        lines.append(
+            f"Of those, {index.unreviewed_count} were last written by a stage that was "
+            "skipped rather than approved. They are real files and may be worth using, "
+            "and no reviewer accepted them -- say so if you rely on one."
         )
     for category in ("data", "results", "figures"):
         entries = [
@@ -239,8 +271,9 @@ def indexed_artifacts_for_category(index: ArtifactIndex, category: str) -> list[
 
 
 def _scan_artifacts(paths: RunPaths) -> list[ArtifactRecord]:
-    from .provenance import load_ledger
+    from .provenance import load_ledger, unreviewed_paths
 
+    unreviewed = unreviewed_paths(paths)
     # Read once. The index is rewritten on every stage boundary and by three other
     # callers, and re-reading the ledger per file would make the scan quadratic in a
     # run's own artifact count.
@@ -283,6 +316,7 @@ def _scan_artifacts(paths: RunPaths) -> list[ArtifactRecord]:
                     # Unattributed files count. Only an explicit withdrawal takes one
                     # out, for the same reason `provenance.is_live` fails open.
                     live=attribution.live if attribution else True,
+                    from_unreviewed_stage=Path(rel_path).as_posix() in unreviewed,
                 )
             )
     return records

@@ -363,6 +363,29 @@ def _verdicts(context: ChannelContext) -> str | None:
 _REVISIT_TARGETS: frozenset[str] = frozenset(edge.target for edge in REVISIT_EDGES)
 
 
+
+def _task_shaped_skills(context: ChannelContext) -> str:
+    """The skills a predicate selected for *this* run's brief, named for this stage.
+
+    Most of the pack is offered to every run, and the model chooses from a listing
+    of thirty entries -- sixteen from AutoR plus the fourteen Claude Code ships.
+    Measured over a 40-task arm it chose 1.75 of them per run, in 789 hours of
+    agent time. A skill written for one shape of task cannot win that competition
+    by description alone, and it should not have to: the router already decided it
+    was relevant before the run started.
+
+    So this channel is the router telling the stage what it decided, and nothing
+    more. It carries only skills whose `applies_when` matched this brief and whose
+    `stages` names this stage, so a run whose brief matches nothing gets no block
+    and pays nothing. The unconditional pack stays pull-based, which is the trade
+    the skill mechanism was built to make.
+    """
+    from .run_skills import format_skills_for_prompt
+
+    entries = getattr(context.manager, "_installed_skills", None) or []
+    return format_skills_for_prompt(list(entries), context.stage.slug)
+
+
 CHANNELS: tuple[Channel, ...] = (
     Channel(
         key="run_configuration",
@@ -686,6 +709,22 @@ CHANNELS: tuple[Channel, ...] = (
             "decision. Stage 00 and Stage 08 are no edge's target -- intake runs once "
             "before any withdrawal can have happened, and dissemination packages a result "
             "it cannot revisit."
+        ),
+    ),
+    Channel(
+        key="task_shaped_skills",
+        heading="## Skills Selected For This Task",
+        produced_by=None,
+        consumed_by=frozenset(ALL_STAGES),
+        build=_task_shaped_skills,
+        rationale=(
+            "Every stage, because which skills a task's shape calls for is a property "
+            "of the task and not of the stage: a brief that names an attribution "
+            "deliverable needs that skill at design time and again at writing. The "
+            "block is empty unless a skill's own `stages` field names the stage, so a "
+            "channel open to all eight costs nothing at the seven a given skill did "
+            "not ask for. Narrowing the channel instead of the skill would move the "
+            "routing decision away from the skill that knows it."
         ),
     ),
 )

@@ -1,6 +1,6 @@
 ---
 name: astronomy-figure-is-the-unit-of-result
-description: Use when the research task is in astronomy — observational astronomy, surveys, photometry and astrophysical inference — at study design, analysis or writing. Astronomy: the figure is the unit of result, and nothing is reported pooled
+description: Use at study design when choosing the figure list, and again before writing, when a result is about to be reported as a pooled number or a table. Covers why the figure is the unit a result is delivered in here, which panels a paper of this kind is expected to carry, and what a pooled number hides.
 ---
 
 # Astronomy: the figure is the unit of result, and nothing is reported pooled

@@ -1,6 +1,8 @@
 ---
 name: the-unit-of-analysis
-description: Use when deciding how to aggregate results, at analysis and figure planning. Covers why a pooled number hides the result, which strata a study is expected to report, and when an aggregate is the right answer.
+description: Use at analysis and figure planning when the brief names the units its data is grouped into — patients, cells, classes, labs, behaviours — and you are about to report one pooled number over all of them. Covers why the pooled number hides the result, which strata a study of this kind is expected to report, and when an aggregate is the right answer after all.
+applies_when: \b(patients?|subjects?|cohorts?|per[- ](cell|patient|unit|class|group|type|neuron|category)|cell types?|each (class|category|cohort|site|lab|condition)|stratif\w*|sub-?group)\b
+stages: 03_study_design, 06_analysis, 07_writing
 ---
 
 # Report at the unit the study is about, not only pooled

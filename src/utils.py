@@ -238,6 +238,12 @@ class RunPaths:
     #: of how the run reached its answer, not part of the answer, and a benchmark
     #: export that swept it up would ship the losing drafts alongside the report.
     evolution_dir: Path
+    #: One row per stage visit: wall clock, attempts, polish rounds, operator and review
+    #: invocations, whether it was auto-skipped, and why each attempt failed. Outside
+    #: ``workspace/`` for the reason ``report_plan_stamp.json`` is: a run's account of
+    #: what it spent must not be writable by the party whose spending it records. See
+    #: :mod:`src.stage_cost`.
+    stage_cost_ledger: Path
     #: Where the operator's agent CLI looks for project skills. The operator is
     #: invoked with ``cwd=run_root``, so this is the run's own ``.claude/skills``
     #: and not the AutoR checkout's.
@@ -496,6 +502,7 @@ def build_run_paths(run_root: Path) -> RunPaths:
         profile_dir=workspace_root / "profile",
         intake_context=run_root / "intake_context.json",
         evolution_dir=run_root / "evolution",
+        stage_cost_ledger=run_root / "stage_cost_ledger.json",
     )
 
 

@@ -25,13 +25,13 @@ place the product actually starts from, including ``studio.py``, without which t
 ``src/backend/`` package would read as dead.
 
 ``tests/`` and ``tools/`` are deliberately *not* roots. A test is the thing that keeps a
-dead symbol green -- twenty-five of the thirty-six symbols listed below have one -- so
+dead symbol green -- twenty-six of the thirty-six symbols listed below have one -- so
 counting a test as wiring would make the gate assert nothing. An instrument is not evidence:
 ``archive_sample_complexity`` was importing ``RunRecord`` and crashing on it at the same
 time. A symbol that only ``tools/`` reaches is still exempt, but by a line somebody wrote,
 and :attr:`Exempt.reached_from` makes that line checkable.
 
-That twenty-five is :func:`allowlisted_symbols_with_a_test`, printed by the census and pinned
+That twenty-six is :func:`allowlisted_symbols_with_a_test`, printed by the census and pinned
 against this sentence by
 :meth:`AllowlistIsHonestTests.test_the_stated_count_of_tested_symbols_is_the_measured_one`,
 because the first version of the sentence said twenty-one and no instrument could
@@ -64,10 +64,13 @@ the answer, when it happens, is an allowlist entry naming the framework that cal
 
 Measured precision
 ------------------
-1364 public definitions over 1225 distinct names in ``src/``, and 36 referenced by nothing
-outside ``tests/`` and ``tools/``. Six of the thirty-six arrived with FrontierScience, whose
-front end is not in the tree yet, so its dataset reader and its scorer are reached only
-from ``tools/score_fs_run.py``; the entry that names that is :data:`_FS_SCORER_ONLY`.
+1446 public definitions over 1302 distinct names in ``src/``, and 36 referenced by
+nothing outside ``tests/`` and ``tools/``. One of them was ``DATA_DIRNAME`` until a one-line
+wiring fix in ``src/rcb.py`` took it off the list, so reverting that line puts the population
+back up by one -- stated as a delta rather than as the absolute it used to be, because the
+absolute drifts with the tree and the sentence outlived two of them. Six more arrived with
+FrontierScience, whose dataset reader and scorer are reached only from
+``tools/score_fs_run.py``; the entry that names that is :data:`_FS_SCORER_ONLY`.
 
 Each of those 36 has exactly one *executable* occurrence of its name across ``main.py``,
 ``studio.py``, ``rcb_agent.py`` and ``src/`` -- its own definition -- and every other
@@ -83,8 +86,8 @@ The census prints the rate and the evidence under it, every occurrence labelled 
 
     python3 -m tests.test_declared_symbols_are_wired --census
 
-Its header carries 1364, 1225, 36, 25 and the rate, so those drift with the tree and none of
-them has to be believed.
+Its header carries 1446, 1302, 36, 26 and the rate, so those drift with the
+tree and none of them has to be believed.
 :meth:`AllowlistIsHonestTests.test_the_allowlist_is_exactly_what_the_scan_finds` keeps the
 36 honest.
 """
@@ -183,6 +186,7 @@ ALLOWLIST: dict[str, Exempt] = {
     "src/rcb_trial.py::driver_clause": Exempt(_DRIVER_ONLY, ("tools/rcb_trial.py",)),
     "src/rcb_trial.py::format_rcb_trial_report": Exempt(_DRIVER_ONLY, ("tools/rcb_trial.py",)),
     "src/rcb_trial.py::items_from_score_payloads": Exempt(_DRIVER_ONLY, ("tools/rcb_trial.py",)),
+    "src/rcb_trial.py::judge_draws_in": Exempt(_DRIVER_ONLY, ("tools/rcb_trial.py",)),
     "src/rcb_trial.py::next_action": Exempt(_DRIVER_ONLY, ("tools/rcb_trial.py",)),
     "src/frontierscience.py::load_dataset": Exempt(_FS_SCORER_ONLY, ("tools/score_fs_run.py",)),
     "src/frontierscience.py::resolve_task_keys": Exempt(
@@ -213,17 +217,16 @@ ALLOWLIST: dict[str, Exempt] = {
     ),
     # -- a prompt renderer with no channel to render into --------------------------------
     #
-    # `format_protocol_for_prompt` was here until #212 gave it a channel, which is what
-    # this exemption said it would take. The entry came off on the first rebase after
-    # that merge, because the other half of this gate refuses an exemption that has
-    # outlived its cause -- an allowlist nobody prunes stops being readable.
-    "src/run_skills.py::format_skills_for_prompt": Exempt(
-        "Same channel problem, plus its input is already dropped: `_install_skills` returns "
-        "the installed names and both call sites in `manager.py` discard the return value. "
-        "So wiring the renderer means first deciding that a stage should be told which "
-        "skills exist -- the pack is pull-based by design, and telling every stage about it "
-        "up front is the cost the skill mechanism was built to avoid."
-    ),
+    # `format_protocol_for_prompt` was here until #212 gave it a channel, and
+    # `format_skills_for_prompt` until the `task_shaped_skills` channel did the same.
+    # Both entries came off on the first rebase after their merge, because the other
+    # half of this gate refuses an exemption that has outlived its cause -- an
+    # allowlist nobody prunes stops being readable. The second one's argument is worth
+    # keeping in view: it said wiring the renderer meant deciding a stage should be
+    # told which skills exist, and that telling every stage about the whole pack is the
+    # cost the pull mechanism was built to avoid. That argument still holds, and the
+    # channel does not violate it -- it carries only the skills a predicate selected
+    # for this run's brief, which is a decision the model cannot see any other way.
     "src/stage_graph.py::admissible_moves": Exempt(
         "This module's docstring says '`admissible_moves` withdraws a revisit whose "
         "justification has not changed', and nothing calls it. It is a one-line filter over "

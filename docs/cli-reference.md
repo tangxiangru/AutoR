@@ -147,6 +147,21 @@ Two behaviours change unattended:
   skip summary so downstream stages know the work is missing, and continue
   until the `--max-auto-skips` budget runs out. Both outcomes are recorded in
   `logs.txt` as `unattended_auto_skip` and `unattended_abort`.
+- **A backward move spends the same pool, so the graph keeps part of it back.**
+  On `--stage-graph adaptive` a revisit re-runs a stage and a re-run stage can
+  exhaust, so `StageGraph.moves` withdraws every backward edge once what is left
+  is down to `DELIVERY_RESERVE` — the unit the run needs to reach a deliverable
+  instead of aborting at it. Only unattended: attended runs never spend the pool,
+  so the manager declares no budget at all.
+
+  The consequence at the bottom of the flag's range is worth knowing before you
+  set it. `--max-auto-skips 1` (or `0`) puts an unattended run at the reserve
+  before its first routing decision, so every backward edge is withdrawn for the
+  whole run and `adaptive` walks forward only — the flag silently selects the
+  topology. The default of 3 keeps them open until the *second* auto-skip is
+  spent. Withdrawals are on the record per visit in `evolution/stage_graph.json`
+  as `blocked` kind `budget`, so a run that degraded this way says so rather than
+  looking like one that was never offered the move.
 
 Prompts becoming hard errors is deliberate. It means a prompt added anywhere
 in the codebase later fails on its first unattended run instead of hanging an

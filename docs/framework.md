@@ -169,7 +169,7 @@ with a `previous_digest` is a record of the change rather than an erasure of it.
 
 ### 2.4 The improvement loop is scored by something it cannot influence
 
-`src/rubric.py` scores a draft on nine weighted criteria, **never calls a backend**, and is
+`src/rubric.py` scores a draft on ten weighted criteria, **never calls a backend**, and is
 **verdict-blind**: a refuted hypothesis with clean evidence outscores a supported one resting on an
 assertion. `src/evolution.py` keeps the champion and reverts a round that scores worse. On top of
 that, `verdict_digest()` hashes the `(id, verdict)` set, and any AutoR-initiated polish round that
@@ -193,7 +193,7 @@ exists to prevent, reached by a route the design did not consider. Declining to 
 fabrication is not the same as declining to *pay* for it. `_cap_quantification_by_fidelity` now caps
 the first criterion at the second wherever both apply, which makes the middle row 0.0; the cap is
 recorded in `observed` so a stage can still tell which half to fix, and Stage 04 is exempt because
-fidelity does not apply before there are results. `RUBRIC_VERSION` is `7` — it went to 3 when
+fidelity does not apply before there are results. `RUBRIC_VERSION` is `8` — it went to 3 when
 that cap landed, to 4 when the length gradient came out of `commitment`, to 5 when
 `artifact_breadth` learned to read the four workspace directories Stages 01, 02, 07 and 08 are
 told to write and `reproducibility` gained its Stage 02-03 link, to 6 when
@@ -443,7 +443,7 @@ write up an abandoned round is a correctness property rather than a routing pref
 The control loop, per step:
 
 1. **Compose the prompt.** `render_inbound(ChannelContext(...), CHANNELS)` builds the stage's inbound
-   context from the nineteen typed channels in [`information_flow.py`](../src/information_flow.py).
+   context from the twenty typed channels in [`information_flow.py`](../src/information_flow.py).
    Each channel declares `produced_by`, a `consumed_by` set of real stage slugs, and a written
    `rationale`; a test fails any channel that withholds itself from a stage without saying why.
 2. **Execute.** The prompt is written verbatim to `prompt_cache/` and handed to the coding agent CLI
@@ -554,7 +554,7 @@ An explicit `--flag`/`--no-flag` always beats the level. The validity chain is n
 | [`stage_graph.py`](../src/stage_graph.py) | Nodes, edges, guards, visit budgets, and the two topologies. |
 | [`router.py`](../src/router.py) | The agent's pick among admissible moves, and the refusal of an off-menu or unjustified one. |
 | [`research_rounds.py`](../src/research_rounds.py) | Stages 03–06 as a repeatable round with a recorded closing decision. |
-| [`information_flow.py`](../src/information_flow.py) | Nineteen typed context channels with declared readers and written rationales. |
+| [`information_flow.py`](../src/information_flow.py) | Twenty typed context channels with declared readers and written rationales. |
 
 ### Gates — what a stage must produce to be accepted
 
@@ -589,7 +589,7 @@ An explicit `--flag`/`--no-flag` always beats the level. The validity chain is n
 
 | Module | Owns |
 | --- | --- |
-| [`rubric.py`](../src/rubric.py) | Nine weighted criteria over a draft and the artifacts it names. Backend-free, verdict-blind, versioned. |
+| [`rubric.py`](../src/rubric.py) | Ten weighted criteria over a draft and the artifacts it names. Backend-free, verdict-blind, versioned. |
 | [`evolution.py`](../src/evolution.py) | The champion ratchet, the polish budget, the revert, and the `verdict_drift` rejection. |
 | [`pareto.py`](../src/pareto.py) | Non-dominated drafts kept beside the champion. |
 | [`ideation_panel.py`](../src/ideation_panel.py) | Five divergent Stage 02 proposers, Jaccard-deduplicated into a scored candidate pool. It decides nothing. |
@@ -612,7 +612,7 @@ An explicit `--flag`/`--no-flag` always beats the level. The validity chain is n
 | [`web_search.py`](../src/web_search.py) · [`mcp_web_search.py`](../src/mcp_web_search.py) | Gemini-backed search, readiness assessment, and a stdlib JSON-RPC MCP stdio server exposing it as a tool. |
 | [`backend_health.py`](../src/backend_health.py) | Telling "the model was unreachable" apart from "the research failed". |
 | [`prompt_fragments.py`](../src/prompt_fragments.py) | Shared prompt blocks generated from the validators' own constants, so a limit cannot drift between the gate and the instruction. |
-| [`run_skills.py`](../src/run_skills.py) · [`skills/`](../src/skills) | Forty-two craft skills installed into the run's working directory: twenty-two general, plus the two of twenty field skills belonging to the run's discipline. Pulled on demand, and named imperatively by the stage whose decision each one covers. |
+| [`run_skills.py`](../src/run_skills.py) · [`skills/`](../src/skills) | Forty-four craft skills, of which a run receives the ones two filters admit: the field filter on the name prefix, and an `applies_when` predicate over the run's own brief. Pulled on demand; named imperatively by the stage whose decision each covers, or announced per run by the `task_shaped_skills` channel. |
 
 ### Output and adapters
 
@@ -1204,7 +1204,7 @@ What a reader can take from this system, in descending order of how transferable
    explained rather than hidden, revisit-reason deduplication, and a learning component that is
    structurally forbidden from weakening the guards it learns around.
 
-5. **A typed information-flow layer for agent prompts.** Nineteen typed channels, each naming its producer,
+5. **A typed information-flow layer for agent prompts.** Twenty typed channels, each naming its producer,
    its consumers by stage slug, and a written rationale for every narrowing — with a test that fails
    a channel that withholds itself without an argument. It makes "what did this stage actually see?"
    a diffable topology instead of a reconstruction from `if` statements.

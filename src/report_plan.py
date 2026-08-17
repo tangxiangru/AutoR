@@ -96,6 +96,26 @@ SOURCE_ARTIFACT_ROOTS = ("results", "data", "outputs")
 #: distinct from every other slot's, so "exploratory" cannot be a wildcard used
 #: five times.
 EXPLORATORY_PREFIX = "exploratory:"
+
+#: A figure that redraws a result the source study published. Its own prefix because
+#: `exploratory:` was the only escape and it is the wrong word: a reproduction panel is
+#: the most committed claim in the plan, not an unpreregistered aside, and a schema that
+#: makes an author call it exploratory is telling them it ranks below their hypotheses.
+#:
+#: Observed on Physics_000. The run reproduced a packing theory to 110 of 111 published
+#: values — more of the source than either comparator managed — and scored 18.7 against a
+#: bare agent's 53.4. Every one of its eight slots was bound to one of its own six
+#: preregistered hypotheses plus two `exploratory:` ids; the source's first result was
+#: discharged as a headline number; the two magic-number series it turns on were on disk
+#: and neither was drawn. There was nothing wrong with the plan under this schema. There
+#: was no row in it for "the figure the paper published", so the figure had to displace a
+#: hypothesis to exist, and it lost that competition eight times.
+REPRODUCTION_PREFIX = "reproduces:"
+
+#: Both prefixes take a slug, and it is held to the same floor: a claim id that is only a
+#: prefix is a wildcard, and the distinctness rule below is what stops one claim owning
+#: five slots.
+CLAIM_PREFIXES = (EXPLORATORY_PREFIX, REPRODUCTION_PREFIX)
 MIN_EXPLORATORY_SLUG_CHARS = 3
 
 #: Floors under "a sentence was written". See the module docstring: these are
@@ -784,23 +804,30 @@ def validate_report_plan(
         if not item.supports:
             problems.append(
                 f"{label} names no claim it supports. Cite a hypothesis id from "
-                f"hypothesis_manifest.json, or `{EXPLORATORY_PREFIX}<slug>` for a question "
+                f"hypothesis_manifest.json, `{REPRODUCTION_PREFIX}<slug>` for a result the "
+                f"source study published, or `{EXPLORATORY_PREFIX}<slug>` for a question "
                 "the run did not preregister."
             )
         else:
             for identifier in item.supports:
-                if identifier.startswith(EXPLORATORY_PREFIX):
-                    slug = identifier[len(EXPLORATORY_PREFIX) :].strip()
+                prefix = next(
+                    (p for p in CLAIM_PREFIXES if identifier.startswith(p)), None
+                )
+                if prefix is not None:
+                    slug = identifier[len(prefix) :].strip()
                     if len(slug) < MIN_EXPLORATORY_SLUG_CHARS:
+                        kind = "reproduced result" if prefix == REPRODUCTION_PREFIX \
+                            else "exploratory question"
                         problems.append(
                             f"{label} supports `{identifier}`, whose slug is shorter than "
-                            f"{MIN_EXPLORATORY_SLUG_CHARS} characters. Name the exploratory "
-                            "question, so a second slot cannot quietly claim the same one."
+                            f"{MIN_EXPLORATORY_SLUG_CHARS} characters. Name the {kind}, so a "
+                            "second slot cannot quietly claim the same one."
                         )
                 elif known_ids is not None and identifier not in known_ids:
                     problems.append(
                         f"{label} supports `{identifier}`, which is not an id in "
-                        f"hypothesis_manifest.json. Cite a declared hypothesis, or label the "
+                        f"hypothesis_manifest.json. Cite a declared hypothesis, label a result "
+                        f"the source published `{REPRODUCTION_PREFIX}<slug>`, or label the "
                         f"question `{EXPLORATORY_PREFIX}<slug>`."
                     )
             if all(claimed[identifier] > 1 for identifier in item.supports):

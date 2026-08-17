@@ -193,7 +193,7 @@ nothing to have.
 
 ### The rubric
 
-Nine criteria, all read off disk rather than off the prose, so the score moves
+Ten criteria, all read off disk rather than off the prose, so the score moves
 when the work moves and not when the wording does.
 
 | Criterion | Weight | Measures | From |
@@ -207,6 +207,7 @@ when the work moves and not when the wording does.
 | `commitment` | 1.5 | reports completed work rather than intentions | all stages |
 | `reproducibility` | 3.0 | the machine-readable validity chain for this stage | all stages |
 | `deliverable_coverage` | 3.0 | **each demand of the task statement is spoken to, with a number an artifact holds** | all stages |
+| `source_figure_coverage` | 2.0 | each panel the source published has a figure of this run's, published and referenced | 06 |
 
 `numeric_fidelity` is the deep-review check. It extracts every measurement the
 draft reports and looks for it in `workspace/results` and `workspace/data`,
@@ -289,10 +290,14 @@ For each edge, the archive compares decisions that took it against decisions tha
 were **offered it and declined**.
 
 That distinction is the estimator. The obvious control arm — runs that reached the
-node and did not take the edge — pools four unrelated states: the guard was shut,
-`--final-stage` pruned the move, the visit budget was spent, or the topology never
-had the edge at all. Only the first kind of "did not" is a *choice*, and only a
-choice is evidence about a choice.
+node and did not take the edge — pools seven unrelated states: the guard was shut
+(`guard`), `--final-stage` pruned the move (`pruned`), the step budget or the
+per-stage visit budget was spent (`steps`, `visits`), the run had already concluded
+and every other move was moot (`concluded`), the delivery reserve withdrew a
+backward move the auto-skip pool could not afford (`budget`), or the topology never
+had the edge at all. None of those is a *choice* — the choice is the run that was
+offered the edge and declined it, and that is the only one the arm should hold.
+Only a choice is evidence about a choice.
 
 It is not a fine distinction. Five of the seven guards read the same disk predicates
 the rubric scores, so a shut guard is correlated with a weak run. Pooling those into
@@ -344,7 +349,7 @@ the estimator underneath is worth acting on.
 
 A stage's score is a weighted mean over the criteria that apply to it, and the late
 stages face more of them — Stage 02 is scored on seven criteria worth 16, Stage 06 on
-nine worth 21, including `numeric_fidelity`, the hardest. (Not *strictly* more at
+ten worth 23, including `numeric_fidelity`, the hardest. (Not *strictly* more at
 every step: 01, 02 and 03 face the same set, and so do 05 through 08. The count is
 non-decreasing and it rises twice.) So the *set of stages a run reached* is a free
 parameter of the objective.

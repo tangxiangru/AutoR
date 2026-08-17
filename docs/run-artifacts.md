@@ -29,6 +29,7 @@ runs/<run_id>/
 ├── report_plan_stamp.json      # AutoR's copy of the report plan's date and digest
 ├── preregistration_stamp.json  # AutoR's copy of the frozen hypothesis set
 ├── validity_review_stamp.json  # AutoR's copy of what each adversarial pass raised
+├── stage_cost_ledger.json      # what each stage visit spent, and why each attempt failed
 ├── logs.txt                    # human-readable workflow log
 ├── logs_raw.jsonl              # raw backend stream-json events
 ├── prompt_cache/               # the exact prompt sent for every attempt
@@ -57,13 +58,13 @@ The directory shape is created by `ensure_run_layout` and the paths are
 defined once, in `build_run_paths` ([`src/utils.py`](../src/utils.py)). If you
 need a path in code, take it from `RunPaths` rather than joining strings.
 
-Five files sit at the run root rather than under `workspace/` on purpose:
+Six files sit at the run root rather than under `workspace/` on purpose:
 `obligations.json`, `review_policy.json`, `report_plan_stamp.json`,
-`preregistration_stamp.json` and `validity_review_stamp.json` are records
-*about* the run rather than part of its answer, and every stage prompt
-directs the agent at `workspace/` paths. Same reason `evolution/` is out here —
-and, like `evolution/`, it also keeps them out of a benchmark export that
-packages the workspace.
+`preregistration_stamp.json`, `validity_review_stamp.json` and
+`stage_cost_ledger.json` are records *about* the run rather than part of its
+answer, and every stage prompt directs the agent at `workspace/` paths. Same
+reason `evolution/` is out here — and, like `evolution/`, it also keeps them out
+of a benchmark export that packages the workspace.
 
 ---
 
@@ -595,6 +596,112 @@ run resumed from an AutoR that predates this file has no stamp, and
 there is nothing to compare against, so the workspace copy is authoritative
 again, exactly as it was before.
 
+### `stage_cost_ledger.json`
+
+One row per **stage visit** — not per stage, because a backward edge re-runs one
+and the second run is a separate purchase against the same budget. Written by
+[`src/stage_cost.py`](../src/stage_cost.py): `ResearchManager._run_stage` opens a
+`StageCostMeter` on the way in and `append_stage_cost_row` closes it on every way
+out, including the way out where the visit raised.
+
+```json
+{
+  "version": 1,
+  "rows": [
+    {
+      "stage": "05_experimentation",
+      "stage_number": 5,
+      "visit": 1,
+      "started_at": "2026-08-16T09:14:02",
+      "wall_seconds": 4471.2,
+      "attempts": 3,
+      "polish_rounds": 0,
+      "operator_invocations": 3,
+      "review_invocations": 3,
+      "auto_skipped": true,
+      "outcome": "auto_skipped",
+      "exhausted": true,
+      "attempts_with_a_recorded_cause": 3,
+      "failure_census": { "reviewer_refused": 3 },
+      "distinct_failures": 1,
+      "max_repeat": 3,
+      "max_consecutive_repeat": 3,
+      "repeated_failure": true,
+      "dominant_failure": "reviewer_refused",
+      "failures": [
+        {
+          "digest": "732e18576fdc",
+          "kind": "reviewer_refused",
+          "count": 3,
+          "first_attempt": 1,
+          "last_attempt": 3,
+          "example": "The manifest states no falsifiable decision rule."
+        }
+      ],
+      "attempt_digests": [
+        { "attempt": 1, "kind": "reviewer_refused", "digest": "732e18576fdc" },
+        { "attempt": 2, "kind": "reviewer_refused", "digest": "732e18576fdc" },
+        { "attempt": 3, "kind": "reviewer_refused", "digest": "732e18576fdc" }
+      ],
+      "note": "auto-skip budget spent"
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `version` | `STAGE_COST_LEDGER_VERSION`. Bumped when a row grows or loses a field, so a reader that predates the change says so instead of reading a missing key as a zero. |
+| `visit` | `1` the first time the run entered this stage, `2` for the visit a backward edge produced. Assigned by `append_stage_cost_row` from the rows already on disk, never by the meter, so it is right across a resume and across two visits separated by half a run. |
+| `wall_seconds` | Monotonic clock across the visit. |
+| `attempts` | Iterations of the attempt loop. **Not the `--max-attempts` spend** — a polish round is an iteration the ceiling does not charge for, so the spend is `attempts - polish_rounds`. |
+| `polish_rounds` | Improvement rounds, each of them one of `attempts`. |
+| `operator_invocations` · `review_invocations` | Backend launches the manager itself dispatched, to do the work and to judge it. A reviewer's internal verdict re-ask and a panel's fan-out to its seats happen below that boundary and are deliberately not counted. |
+| `outcome` | One of `OUTCOMES`: `approved`, `auto_skipped`, `human_skipped`, `routed_to_deliverable`, `rolled_back`, `aborted`, `bypassed`, `raised`, `unknown`. `unknown` is kept rather than defaulted to `approved`, so a new exit path shows up as an unnamed one instead of as a success. |
+| `auto_skipped` | Whether this visit spent a slot from the run's `--max-auto-skips` pool. Set by the skip and never cleared by the route that refines it into `routed_to_deliverable`, because the slot was still spent. |
+| `attempts_with_a_recorded_cause` | How many of `attempts` produced a census entry. A visit that settled reads one below `attempts` — the iteration that settled it did not fail; a wider gap is a path that consumed budget and recorded nothing. |
+| `failure_census` | Counts per kind, in `FAILURE_KINDS` order. |
+| `max_repeat` · `max_consecutive_repeat` | The most times one failure occurred anywhere, and the longest unbroken run of it. Both, because "the same objection eight times running" and "two objections alternating" are different situations and only the second number tells them apart. |
+| `failures` | One entry per distinct failure, most frequent first, ties broken on first appearance. `example` is the first `FAILURE_EXAMPLE_CHARS` of the reason. |
+| `attempt_digests` | Every recorded cause in the order it happened. `failures` loses the ordering, and a rule about a failure repeating *consecutively* cannot be evaluated without it. |
+
+**`failure_census` keys** are the `FAILURE_KINDS`: `reviewer_refused`,
+`cross_review_vetoed`, `human_refused`, `validators_refused`, `backend_crashed`,
+`backend_unreadable`, `backend_unsupported`, `crux_raised`, `polish_round` and
+`unclassified_refusal`. The last exists so an attempt whose kind this module does
+not recognise is counted rather than dropped — a census that silently omits what
+it cannot name is the defect the ledger was written to remove, one level up. The
+three `backend_*` kinds mirror `AutomatedReviewer.is_degraded_verdict`, and
+`classify_refusal` imports its reason prefixes from `src/approval_agent.py`
+rather than re-spelling them, so the two readers cannot drift.
+
+**Stages the run never entered get a row too** (`outcome: bypassed`, zeroes
+everywhere a measurement would go): `_route_to_deliverable` steps over them into
+the run's not-completed list, and a ledger holding only the stages the run paid
+for is flatter than the run.
+
+**No token count and no dollar figure**, and the reason is not "we cannot know":
+the backend emits a `{"type": "result"}` event carrying `total_cost_usd` and a
+`usage` block, and `logs_raw.jsonl` keeps every one of them. What does not exist
+is a path from there to the manager — `OperatorResult` and `ReviewDecision` both
+carry none of it — so a cost field here would have to be derived by a second
+reader of the raw log, and a derived number in a spend record is the thing this
+file exists to stop. `test_the_reason_the_cost_is_missing_is_the_return_type_and_not_the_backend`
+fails the day that stops being true.
+
+Nothing here is a gate: the ledger refuses nothing. It is at the run root rather
+than under `workspace/` for the same reason the stamps are — the operator runs
+with `cwd=run_root` and every stage prompt directs it at `workspace/`, so a run's
+account of what it spent must not sit where the party whose spending it records
+is being sent to write. A copy also goes into `logs.txt` under the
+`stage_cost_ledger` heading, one line per visit and then the totals, on both the
+way out of a completed run and the abort branch.
+
+Absent until the first stage visit closes. A corrupt or unwritable ledger is
+never fatal: `read_stage_cost_ledger` returns `[]` and `append_stage_cost_row`
+returns `False`, because a stage that produced good work must not be lost
+because the account of it could not be written.
+
 ### `logs.txt` and `logs_raw.jsonl`
 
 `logs.txt` is the human-readable workflow log: stage starts, attempts,
@@ -717,7 +824,7 @@ losing drafts alongside the report.
 
 | Path | Contents |
 | --- | --- |
-| `stage_graph.json` | The walk. Top level: `path`, `route` (the visited slugs joined by `->`), `max_steps`, `max_visits`, `halted_because` and `halted_kind` — the last being what tells `--final-stage` (`pruned`, a completion) apart from a spent budget (`steps`/`visits`, a halt). Each visit in `path`: the stage, when it was entered and left, the move chosen out of it, its kind, the stated reason, what AutoR would have chosen, whether the agent chose it, the rubric total at the time, **the targets that were live at the moment of choosing (`offered`) and why the rest were not (`blocked`, target → `guard`/`visits`/`steps`/`pruned`/`concluded`)**, whether the move bypassed the router entirely (`bypassed` — a `/back`, a rollback, or a research-round decision; these are counted but never enter the archive's edge observations, because nothing chose between anything), and the research round this visit closed (`closed_round`). The choice set cannot be reconstructed afterwards: re-evaluating a guard needs the workspace as it was at that moment. |
+| `stage_graph.json` | The walk. Top level: `path`, `route` (the visited slugs joined by `->`), `max_steps`, `max_visits`, `halted_because` and `halted_kind` — the last being what tells `--final-stage` (`pruned`, a completion) apart from a spent budget (`steps`/`visits`, a halt). Each visit in `path`: the stage, when it was entered and left, the move chosen out of it, its kind, the stated reason, what AutoR would have chosen, whether the agent chose it, the rubric total at the time, **the targets that were live at the moment of choosing (`offered`) and why the rest were not (`blocked`, target → `guard`/`visits`/`steps`/`pruned`/`concluded`/`budget`)**, whether the move bypassed the router entirely (`bypassed` — a `/back`, a rollback, or a research-round decision; these are counted but never enter the archive's edge observations, because nothing chose between anything), and the research round this visit closed (`closed_round`). The choice set cannot be reconstructed afterwards: re-evaluating a guard needs the workspace as it was at that moment. |
 | `improvement_ledger.jsonl` | One row per measured round: stage, attempt, per-criterion scores, delta against the champion, the verdict (`first`, `promoted`, `frontier`, `regressed`, `directed`, `verdict_drift`), whether the draft was reverted, and the verdict digest. |
 | `routing_refusals.jsonl` | Every agent routing choice AutoR refused, why, and which edge it fell back to. |
 | `summary.json` | The settled champion score per stage. This is what the cross-run archive reads. |

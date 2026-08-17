@@ -12,17 +12,26 @@ been loaded.
 
 from __future__ import annotations
 
+import re
 import tempfile
 import unittest
 from pathlib import Path
 
 from src.run_skills import (
     discipline_of,
+    format_skills_for_prompt,
+    select_run_skills,
     install_run_skills,
     read_skill_pack,
     validate_skill_pack,
 )
-from src.utils import build_run_paths, ensure_run_layout
+from src.utils import (
+    TASK_BEGIN_MARKER,
+    TASK_END_MARKER,
+    build_run_paths,
+    ensure_run_layout,
+    write_text,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -88,7 +97,15 @@ class SkillInstallTest(unittest.TestCase):
             self.paths.skills_dir,
             self.paths.run_root / ".claude" / "skills",
         )
-        self.assertEqual(sorted(installed), sorted(entry.name for entry in read_skill_pack(SKILL_PACK)))
+        # Everything the router offers a run with no field and no brief, which is the
+        # unconditional half of the pack. Not "every skill in the pack": a task-scoped
+        # skill is deliberately absent here, and comparing against the whole pack would
+        # make this test fail every time one is added rather than when an install breaks.
+        self.assertEqual(
+            sorted(installed),
+            sorted(entry.name for entry in select_run_skills(read_skill_pack(SKILL_PACK))),
+        )
+        self.assertTrue(installed, "the unconditional pack is empty")
         for name in installed:
             with self.subTest(skill=name):
                 self.assertTrue((self.paths.skills_dir / name / "SKILL.md").is_file())
@@ -220,3 +237,250 @@ class DisciplineRoutingTest(unittest.TestCase):
         (foreign / "SKILL.md").write_text("---\nname: x\ndescription: y\n---\n", encoding="utf-8")
         install_run_skills(self.paths, self.pack, discipline="life")
         self.assertTrue(foreign.is_dir())
+
+
+class TaskShapedRoutingTest(unittest.TestCase):
+    """A skill written for one shape of task is offered only to tasks of that shape.
+
+    The field filter above narrows twenty field skills to two. It cannot go further:
+    four ResearchClawBench tasks share a field, so every run in a field is offered an
+    identical pack and the model picks from an undifferentiated listing of thirty
+    entries — sixteen from AutoR plus the fourteen Claude Code ships. Measured over a
+    40-task arm it picked 1.75 per run in 19.7 hours each.
+
+    `applies_when` is the second filter, and it is the one that makes two runs in the
+    same field differ. The predicate reads the research *brief*, never the task's
+    identifier: a table of benchmark ids would select the same tasks today and
+    generalise to nothing, while a claim about what a task asks for can be wrong in
+    public. `tools/skill_selectivity.py` is where it is checked against a corpus.
+    """
+
+    BRIEF_WITH = "Scientific Objective: quantify per-feature attribution over the cohort."
+    BRIEF_WITHOUT = "Scientific Objective: forecast the daily series and report RMSE."
+
+    def _pack(self, *skills: tuple[str, str]) -> Path:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        for name, frontmatter in skills:
+            (root / name).mkdir(parents=True)
+            (root / name / "SKILL.md").write_text(
+                f"---\nname: {name}\n{frontmatter}\n---\n\nbody\n", encoding="utf-8"
+            )
+        return root
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.paths = build_run_paths(Path(self._tmp.name) / "run_0001")
+        ensure_run_layout(self.paths)
+        self.pack = self._pack(
+            (
+                "scoped",
+                "description: Use when the brief names an attribution deliverable.\n"
+                "applies_when: attribution|salien\n"
+                "stages: 03_study_design, 06_analysis",
+            ),
+            ("always", "description: Use when writing anything at all, at every stage."),
+        )
+
+    def test_a_scoped_skill_is_installed_only_for_a_matching_brief(self) -> None:
+        write_text(self.paths.user_input, self.BRIEF_WITH)
+        self.assertEqual(sorted(install_run_skills(self.paths, self.pack)), ["always", "scoped"])
+        write_text(self.paths.user_input, self.BRIEF_WITHOUT)
+        self.assertEqual(install_run_skills(self.paths, self.pack), ["always"])
+
+    def test_a_brief_that_stops_matching_removes_the_skill_from_disk(self) -> None:
+        """The resume case. A pack narrowing that only ever adds is not a narrowing."""
+        write_text(self.paths.user_input, self.BRIEF_WITH)
+        install_run_skills(self.paths, self.pack)
+        self.assertTrue((self.paths.skills_dir / "scoped").is_dir())
+        write_text(self.paths.user_input, self.BRIEF_WITHOUT)
+        install_run_skills(self.paths, self.pack)
+        self.assertFalse((self.paths.skills_dir / "scoped").exists())
+
+    def test_a_missing_brief_installs_only_the_unconditional_skills(self) -> None:
+        """Fail closed, not open.
+
+        A task-scoped skill is by construction wrong for most runs, so admitting one on
+        missing information adds a description that competes with the rest and describes
+        a situation this run is probably not in.
+        """
+        self.assertEqual(install_run_skills(self.paths, self.pack), ["always"])
+
+    def test_applies_unless_vetoes_a_match(self) -> None:
+        pack = self._pack(
+            (
+                "scoped",
+                "description: Use when the brief names an attribution deliverable.\n"
+                "applies_when: attribution\napplies_unless: cohort\n"
+                "stages: 06_analysis",
+            ),
+        )
+        write_text(self.paths.user_input, self.BRIEF_WITH)  # says both
+        self.assertEqual(install_run_skills(self.paths, pack), [])
+        write_text(self.paths.user_input, "We need an attribution map per atom.")
+        self.assertEqual(install_run_skills(self.paths, pack), ["scoped"])
+
+    def test_the_predicate_reads_the_brief_and_not_the_wrapper(self) -> None:
+        """The benchmark contract is identical in every run; matching it matches everywhere.
+
+        `user_input.txt` carries AutoR's own preamble and the benchmark's workspace
+        contract around the task. A predicate matched against the whole file would fire
+        on "figures are mandatory" in all forty runs. `task_brief` narrows to the brief
+        for the same reason `research_brief` narrows the demand extractor.
+        """
+        wrapped = (
+            "# Benchmark Run\n\nFigures are mandatory; write report/report.md.\n\n"
+            f"{TASK_BEGIN_MARKER}\n## Task Description\n{self.BRIEF_WITHOUT}\n"
+            f"{TASK_END_MARKER}\n\n### Deliverables\nSaliency is not required here.\n"
+        )
+        write_text(self.paths.user_input, wrapped)
+        self.assertEqual(install_run_skills(self.paths, self.pack), ["always"])
+
+    def test_a_scoped_skill_survives_the_field_filter_independently(self) -> None:
+        pack = self._pack(
+            (
+                "earth-scoped",
+                "description: Use when the brief names an attribution deliverable in earth science.\n"
+                "applies_when: attribution\nstages: 06_analysis",
+            ),
+        )
+        write_text(self.paths.user_input, self.BRIEF_WITH)
+        self.assertEqual(install_run_skills(self.paths, pack, discipline="earth"), ["earth-scoped"])
+        self.assertEqual(install_run_skills(self.paths, pack, discipline="life"), [])
+
+    def test_a_malformed_predicate_removes_the_skill_rather_than_raising(self) -> None:
+        pack = self._pack(
+            ("broken", "description: Use when something happens, at some stage.\n"
+                       "applies_when: (unclosed\nstages: 06_analysis"),
+        )
+        write_text(self.paths.user_input, self.BRIEF_WITH)
+        self.assertEqual(install_run_skills(self.paths, pack), [])
+        self.assertTrue(any("not a valid regex" in p for p in validate_skill_pack(pack)))
+
+    def test_a_task_scoped_skill_that_no_stage_announces_is_refused(self) -> None:
+        """Selected and never mentioned is worse than unconditional.
+
+        It is offered to a minority of runs and told to none of them, and it costs a
+        predicate nobody reads. Over the measured arm the declarative form of naming a
+        skill produced zero launches in forty runs; the imperative form produced 31.
+        """
+        pack = self._pack(
+            ("orphan", "description: Use when the brief names an attribution deliverable.\n"
+                       "applies_when: attribution"),
+        )
+        self.assertTrue(any("names no stages" in p for p in validate_skill_pack(pack)))
+
+    def test_a_stage_that_does_not_exist_is_refused(self) -> None:
+        pack = self._pack(
+            ("wrong", "description: Use when the brief names an attribution deliverable.\n"
+                      "applies_when: attribution\nstages: 09_publication"),
+        )
+        self.assertTrue(any("not a stage" in p for p in validate_skill_pack(pack)))
+
+
+class SkillsNamedInThePromptTest(unittest.TestCase):
+    """What `format_skills_for_prompt` renders, and what it deliberately does not."""
+
+    def _entries(self) -> list:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        for name, extra in (
+            ("scoped-design", "applies_when: attribution\nstages: 03_study_design"),
+            ("scoped-analysis", "applies_when: attribution\nstages: 06_analysis"),
+            ("always", ""),
+        ):
+            (root / name).mkdir(parents=True)
+            (root / name / "SKILL.md").write_text(
+                f"---\nname: {name}\ndescription: Use when the situation arises, at a stage.\n"
+                f"{extra}\n---\n\nbody\n",
+                encoding="utf-8",
+            )
+        return read_skill_pack(root)
+
+    def test_only_the_scoped_skills_that_name_this_stage_are_rendered(self) -> None:
+        entries = self._entries()
+        block = format_skills_for_prompt(entries, "03_study_design")
+        self.assertIn("scoped-design", block)
+        self.assertNotIn("scoped-analysis", block)
+
+    def test_the_unconditional_pack_is_never_rendered(self) -> None:
+        """The whole point of the pull mechanism is not paying for it in every prompt.
+
+        This renderer sat unwired for several releases under exactly that objection, and
+        the objection was right about a roster of the whole pack. What is different about
+        a task-scoped skill is that a predicate chose it for *this* brief, and nothing
+        else in the prompt says so.
+        """
+        entries = self._entries()
+        for slug in ("03_study_design", "06_analysis", "07_writing"):
+            self.assertNotIn("always", format_skills_for_prompt(entries, slug))
+
+    def test_a_stage_with_no_selected_skill_gets_no_block(self) -> None:
+        self.assertEqual(format_skills_for_prompt(self._entries(), "01_literature_survey"), "")
+
+    def test_the_block_tells_the_operator_to_read_them(self) -> None:
+        """Imperative, because that is the form measured to work.
+
+        Over the 40-task arm the one skill a rendered prompt told the operator to *read*
+        fired in 31 of 40 runs; the three a prompt said were "installed for this stage"
+        fired in none.
+        """
+        block = format_skills_for_prompt(self._entries(), "03_study_design")
+        self.assertIn("Read each one", block)
+
+
+class DescriptionsDiscriminateTest(unittest.TestCase):
+    """Two skills a run is offered together must not open the same way.
+
+    The description is the only thing the model sees when choosing. All twenty field
+    descriptions used to open with one formula — "Use when the research task is in
+    <field> — <gloss> — at study design, analysis or writing." — which is 63% of the
+    average field description and which the installer already guarantees, because it
+    only copies that field's two skills into the run. So within a run the pair was
+    distinguished by a trailing clause of 56 to 134 characters, and six of the twenty
+    tails spent their first word re-naming the field a second time.
+
+    What that produced was all-or-nothing rather than choose-one: across the measured
+    arm, of the forty runs' eighty field-skill install opportunities, the runs that
+    opened a field skill mostly opened both of their pair in adjacent turns, and
+    fourteen of the twenty never launched at all.
+    """
+
+    def setUp(self) -> None:
+        self.entries = read_skill_pack(SKILL_PACK)
+        self.assertTrue(self.entries)
+
+    def _trigger(self, description: str) -> str:
+        """The first sentence — what a model reads before deciding to read on."""
+        return re.split(r"(?<=[.!?])\s", description.strip())[0].casefold()
+
+    def test_no_two_skills_share_a_trigger_sentence(self) -> None:
+        seen: dict[str, str] = {}
+        clashes: list[str] = []
+        for entry in self.entries:
+            trigger = self._trigger(entry.description)
+            if trigger in seen:
+                clashes.append(f"{seen[trigger]} and {entry.name}")
+            seen[trigger] = entry.name
+        self.assertEqual(clashes, [], f"skills opening identically: {clashes}")
+
+    def test_a_field_skill_does_not_spend_its_trigger_on_the_field(self) -> None:
+        """`install_run_skills` already guarantees the field; saying it carries no bit.
+
+        The field is in the directory name, in the skill name the model sees in its
+        listing, and in the install decision. A description that leads with it is
+        spending the only routing signal there is on something already known.
+        """
+        for entry in self.entries:
+            field = discipline_of(entry.name)
+            if not field:
+                continue
+            with self.subTest(skill=entry.name):
+                self.assertNotIn(
+                    f"the research task is in {field}",
+                    entry.description.casefold(),
+                    "the description opens with the clause the installer enforces",
+                )
