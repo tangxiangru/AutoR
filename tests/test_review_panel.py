@@ -80,7 +80,7 @@ class _ScriptedPanel:
             # below the boundary the row counts, so nothing here fills it -- but
             # `parse_with_retry` forwards the argument either way and a double that
             # refuses it is a double with the wrong signature.
-            def run_prompt(*, paths, stage, attempt_no, prompt, label, spend=None):
+            def run_prompt(*, paths, stage, attempt_no, prompt, label, spend=None, watch=None):
                 self.calls.append((label_key, label))
                 queue = remaining.get(label_key)
                 if not queue:
@@ -100,7 +100,7 @@ class _ScriptedPanel:
         chair_queue = list(script.get("__chair__", []))
         member_run = chair_member.run_prompt
 
-        def chair_aware_run(*, paths, stage, attempt_no, prompt, label, spend=None):
+        def chair_aware_run(*, paths, stage, attempt_no, prompt, label, spend=None, watch=None):
             # `panel_chair_verdict` is the chair's verdict-only re-ask, so it draws
             # from the chair's script rather than a seat's.
             if label.startswith("panel_chair"):
@@ -113,7 +113,7 @@ class _ScriptedPanel:
                 return 0, response, ""
             return member_run(
                 paths=paths, stage=stage, attempt_no=attempt_no, prompt=prompt,
-                label=label, spend=spend,
+                label=label, spend=spend, watch=watch,
             )
 
         chair_member.run_prompt = chair_aware_run
