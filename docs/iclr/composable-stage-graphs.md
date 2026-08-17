@@ -489,7 +489,7 @@ which parts are running.
 | Snapshot and restore of version pointers | implemented |
 | Excursions, and the walk-level ratchet that rewinds one that lost | implemented |
 | Selective withdrawal, taken on redo, with a stated fallback | implemented |
-| **Intra-stage checkpoints** | pending |
+| **Intra-stage checkpoints** | no caller in this execution model — see below |
 
 ### On selective withdrawal
 
@@ -518,3 +518,45 @@ stage's, and neither of those is "withdrew this stage".
 This is the mechanism paying for itself. A design that turned out wrong need not discard the
 measurement that revealed it — but only when nothing since has touched the same ground, and
 the system can now tell the difference instead of assuming one answer.
+
+### On intra-stage checkpoints
+
+The mechanism would be a boundary inside a stage at which the run can discard what has been
+done so far and carry on. Every other piece of this design points at it, and in AutoR it has
+no caller, for a reason worth stating rather than leaving as a gap.
+
+**A stage's attempts are one continued session, not independent tries.** The first attempt
+opens a session; every retry resumes it with a continuation prompt. Withdrawing the previous
+attempt's writes would leave the agent asked to carry on against a workspace it no longer
+recognises — the rewind and the continuation are directly opposed, and the continuation is
+the thing that makes a retry cheaper than a restart.
+
+So the boundary a checkpoint needs is not "between attempts"; it is a point at which the run
+*preempts* a stage, and this execution model has none. That is a property of the operator
+loop rather than of the composition model, and it is the piece a system with interruptible
+stages would add first.
+
+The corollary is worth keeping in view: the finest grain at which this design can currently
+withdraw is one stage, and the finest grain at which it can withdraw *exactly* is one
+instrumented write. Between those two lies everything an uninterruptible stage does.
+
+### An open question this surfaced
+
+A stage that exhausts its attempts is skipped. If its final draft validates it is kept and
+recorded as unreviewed; otherwise a stub replaces it, saying the work was not done. **Either
+way, the partial artifacts it wrote stay on disk, attributed to it, and count toward every
+forward gate** — the same shape as the defect in §1.1, at a site where the stage was never
+approved at all: the skip summary says the work is missing and the files say it is not.
+
+It is left open deliberately. The obvious fix is to withdraw the stage's contribution, and
+withdrawal here is destructive in a way the rest of this design is not: the artifacts may be
+real measurements that simply arrived without an accepted write-up. This repository already
+carries a scar from that exact trade — a skip once replaced a complete draft and thirteen
+figures with a 301-word stub, and the figure the task was scored on never reached the report.
+The non-destructive variant, marking them withdrawn in the ledger so the gates stop counting
+them while the files stay, has the opposite cost: the next stage stops being able to see
+partial work that might be worth using.
+
+Which of those is right is a question about research practice rather than about composition,
+and the mechanism supports either. It is recorded here as a decision waiting to be made, not
+as an oversight.
