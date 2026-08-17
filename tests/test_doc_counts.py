@@ -189,11 +189,19 @@ COUNTED_NOUNS: tuple[tuple[str, int], ...] = (
 #: not go stale and the third could, and nothing said which was which. It is
 #: tracked now, and the phrase it uses that the others do not — "typed context
 #: channels" — is a row above.
+#: The paper notes were outside the scan and one of them rotted exactly the way the
+#: comment above predicts: ``docs/iclr/composable-stage-graphs.md`` said "eighteen typed
+#: information channels" — a phrase already in ``COUNTED_NOUNS`` — through the two
+#: additions that took ``CHANNELS`` past it. Being a design note is not a reason to be
+#: exempt: it is the document that argues *from* the topology, so a wrong count there is
+#: an argument with a wrong premise rather than a stale sentence.
 TRACKED_DOCS = (
     "README.md",
     "docs/architecture.md",
     "docs/self-improvement.md",
     "docs/framework.md",
+    "docs/iclr/composable-stage-graphs.md",
+    "docs/iclr/round-loop-and-stage-graph.md",
 )
 
 #: ``(row label, live value)`` for the README table headed "Every number below comes

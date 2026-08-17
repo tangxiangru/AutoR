@@ -30,17 +30,18 @@ place the product actually starts from, including ``studio.py``, without which t
 ``src/backend/`` package would read as dead.
 
 ``tests/`` and ``tools/`` are deliberately *not* roots. A test is the thing that keeps a
-dead symbol green -- thirty-seven of the forty-nine symbols listed below have one -- so
+dead symbol green -- thirty-eight of the fifty symbols listed below have one -- so
 counting a test as wiring would make the gate assert nothing. An instrument is not evidence:
 ``archive_sample_complexity`` was importing ``RunRecord`` and crashing on it at the same
 time. A symbol that only ``tools/`` reaches is still exempt, but by a line somebody wrote,
 and :attr:`Exempt.reached_from` makes that line checkable.
 
-That thirty-seven is :func:`allowlisted_symbols_with_a_test`, printed by the census and pinned
+That thirty-eight is :func:`allowlisted_symbols_with_a_test`, printed by the census and pinned
 against this sentence by
 :meth:`AllowlistIsHonestTests.test_the_stated_count_of_tested_symbols_is_the_measured_one`,
-because the first version of the sentence said twenty-one and no instrument could
-contradict it.
+because two earlier versions of the sentence were wrong: it said twenty-one when the
+measurement said twenty, and then twenty when the measurement had moved to twenty-one.
+Neither could be contradicted by anything in the file.
 
 Why a flat reference check, and what it costs
 ---------------------------------------------
@@ -69,7 +70,7 @@ the answer, when it happens, is an allowlist entry naming the framework that cal
 
 Measured precision
 ------------------
-1589 public definitions over 1426 distinct names in ``src/``, and 49 referenced by
+1695 public definitions over 1523 distinct names in ``src/``, and 50 referenced by
 nothing outside ``tests/`` and ``tools/``. One of them was ``DATA_DIRNAME`` until a one-line
 wiring fix in ``src/rcb.py`` took it off the list, so reverting that line puts the population
 back up by one -- stated as a delta rather than as the absolute it used to be, because the
@@ -85,9 +86,9 @@ spending a run. The dataset reader is no longer among them: ``fs_agent.py``
 landed, it is in :data:`ENTRY_POINTS`, and ``load_dataset`` and ``resolve_task_keys`` came off
 the list -- which is what that exemption said would happen and why it was written that way.
 
-Each of those 49 has exactly one *executable* occurrence of its name across ``main.py``,
+Each of those 50 has exactly one *executable* occurrence of its name across ``main.py``,
 ``studio.py``, ``rcb_agent.py``, ``fs_agent.py`` and ``src/`` -- its own definition -- and
-every other textual hit is a comment or a docstring. **False-positive rate 0/49.** That is
+every other textual hit is a comment or a docstring. **False-positive rate 0/50.** That is
 not the scan
 marking its own homework. :func:`code_lines_naming` re-reads the roots with ``tokenize``,
 which cannot see inside a string or a comment and knows nothing about reference units;
@@ -100,10 +101,11 @@ The census prints the rate and the evidence under it, every occurrence labelled 
 
     python3 -m tests.test_declared_symbols_are_wired --census
 
-Its header carries 1589, 1426, 49, 37 and the rate, so those drift with the
+Its header carries 1695, 1523, 50, 38 and the rate, so those drift with the
 tree and none of them has to be believed.
 :meth:`AllowlistIsHonestTests.test_the_allowlist_is_exactly_what_the_scan_finds` keeps the
-49 honest.
+allowlist exactly the scan's output, so none of the four can go stale in one direction
+only.
 """
 
 from __future__ import annotations
@@ -242,6 +244,19 @@ _TRIAL_DRIVER_ONLY = (
 #: wrote down rather than a prefix that quietly grew to cover its neighbours. Seeded from
 #: the census described in this module's docstring.
 ALLOWLIST: dict[str, Exempt] = {
+    # -- declared for a gate, and wiring it would be the defect --------------------------
+    "src/call_cost.py::INERT_NAMES": Exempt(
+        "The list of names no condition under `src/` may read. Production must not "
+        "reference it, and that is the whole point rather than an oversight: a module "
+        "that imported it would be a module consulting the do-not-decide list at runtime, "
+        "which is one refactor away from deciding on the thing the list protects. It is "
+        "declared beside the fields it names so a field added to `COST_FIELDS` joins the "
+        "gate automatically, and read by "
+        "`tests/test_cost_is_recorded_and_unread.py`, which is the only reader it should "
+        "ever have. Wiring it means giving a runtime component an opinion about cost, "
+        "which is the change this repository refused.",
+        ("tests/test_cost_is_recorded_and_unread.py",),
+    ),
     # -- declared for an instrument, not for a run ---------------------------------------
     "src/rcb_trial.py::collect_rcb_pairs": Exempt(_DRIVER_ONLY, ("tools/rcb_trial.py",)),
     "src/rcb_trial.py::count_quota_hits": Exempt(_DRIVER_ONLY, ("tools/rcb_trial.py",)),
@@ -272,7 +287,9 @@ ALLOWLIST: dict[str, Exempt] = {
     "src/trial_driver.py::git_dirty": Exempt(_TRIAL_DRIVER_ONLY, ("tools/rcb_trial.py",)),
     "src/trial_driver.py::git_head": Exempt(_TRIAL_DRIVER_ONLY, ("tools/rcb_trial.py",)),
     "src/trial_driver.py::release_lock": Exempt(_TRIAL_DRIVER_ONLY, ("tools/rcb_trial.py",)),
-    "src/trial_driver.py::watch": Exempt(_TRIAL_DRIVER_ONLY, ("tools/rcb_trial.py",)),
+    "src/trial_driver.py::watch_until_stalled": Exempt(
+        _TRIAL_DRIVER_ONLY, ("tools/rcb_trial.py",)
+    ),
     "src/trial_driver.py::write_json": Exempt(_TRIAL_DRIVER_ONLY, ("tools/rcb_trial.py",)),
     "src/fs_scoring.py::ScoringRefused": Exempt(_FS_SCORER_ONLY, ("tools/score_fs_run.py",)),
     "src/fs_scoring.py::build_result": Exempt(_FS_SCORER_ONLY, ("tools/score_fs_run.py",)),

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping, Sequence
+
+from .call_cost import CallCost
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE_REGISTRY_PATH = REPO_ROOT / "templates" / "registry.yaml"
@@ -276,6 +278,15 @@ class OperatorResult:
     stderr: str
     stage_file_path: Path
     session_id: str | None = None
+    #: What the backend said this invocation cost. Defaults to the *unmeasured* report,
+    #: not to zero: an operator that reports nothing -- the fake one, a stub, a backend
+    #: whose stream carries no usage block -- must not be recorded as having spent
+    #: nothing. See :mod:`src.call_cost`, and note that this field is why
+    #: ``src/stage_cost.py`` can carry a dollar figure at all: its ledger row used to say
+    #: "wire it through ``OperatorResult`` and ``ReviewDecision`` first", and this is that
+    #: wire. Nothing decides on it; ``tests/test_cost_is_recorded_and_unread.py`` is the
+    #: gate that keeps it that way.
+    call_cost: CallCost = field(default_factory=CallCost)
 
 
 INTAKE_STAGE = StageSpec(0, "00_intake", "Research Intake")
@@ -805,6 +816,15 @@ def load_run_config(paths: RunPaths) -> dict[str, Any]:
     created_at = payload.get("created_at")
     if isinstance(created_at, str) and created_at.strip():
         config["created_at"] = created_at
+    # Fields this function does not own, carried through rather than dropped. The dict
+    # above names every key it normalises, and `save_run_config` does the same, so the
+    # pair silently deletes anything a third writer records. `Manager._install_skills`
+    # records `skill_pins` -- the statement that a run's skills were chosen by its task
+    # identifier rather than by its task statement -- and it did not survive one
+    # load/save round trip, while the matching log line did. That is the wrong half to
+    # keep: the log is read by someone already suspicious; the config is what a later
+    # reader parses.
+    config = {**{k: v for k, v in payload.items() if k not in config}, **config}
     return config
 
 
@@ -843,6 +863,17 @@ def save_run_config(paths: RunPaths, config: dict[str, Any]) -> None:
         normalized["created_at"] = created_at
     else:
         normalized["created_at"] = datetime.now().isoformat(timespec="seconds")
+    # Fields this function does not own, carried through rather than dropped.
+    #
+    # Everything above is named explicitly, so a key any other writer puts in the config
+    # does not survive one call to this. `Manager._install_skills` records `skill_pins`
+    # -- the statement that a run's skills were chosen by its task identifier rather
+    # than by its task statement -- and the key was gone before the file was written,
+    # while the matching log line survived. That is the wrong half to lose: the log is
+    # read by someone already suspicious, and the config is what a later reader parses.
+    #
+    # Merged under the normalised fields, so nothing here can override one of them.
+    normalized = {**{k: v for k, v in config.items() if k not in normalized}, **normalized}
     write_text(paths.run_config, json.dumps(normalized, indent=2, ensure_ascii=False))
 
 
@@ -884,6 +915,11 @@ def ensure_run_config(
         "web_search": normalize_web_search_mode(web_search or current.get("web_search")),
         "created_at": current.get("created_at") or datetime.now().isoformat(timespec="seconds"),
     }
+    # And the same carry-through here, because this builds its own dict from `current`
+    # field by field: an unknown key survives the load and is then dropped before
+    # `save_run_config` ever sees it. Three functions name their fields explicitly and
+    # all three have to carry what they do not own, or the round trip loses it.
+    updated = {**{k: v for k, v in current.items() if k not in updated}, **updated}
     save_run_config(paths, updated)
     return updated
 
@@ -1176,6 +1212,16 @@ def build_continuation_prompt(
     _deliverables = format_deliverables_for_prompt(task_statement(read_text(paths.user_input)))
     if _deliverables:
         sections.extend(["# What the Task Asks For", _deliverables])
+    # An obligation is a debt a reviewer attached to an approval and only a reviewer may
+    # discharge, so the stage that owes it has to be able to read it on the attempt that
+    # pays it. This block was a parameter the manager passed and this function never
+    # rendered: `# Obligations Carried Forward` reached attempt 1 through `build_prompt`
+    # and vanished from attempt 2 on, which is every attempt that exists because the
+    # first one was refused. The stage was then judged against a spec its prompt no
+    # longer carried, and `format_for_review_prompt` asked the inheriting reviewer
+    # whether a debt the doer could not see had been met.
+    if obligations_context:
+        sections.extend(["# Obligations Carried Forward", obligations_context.strip()])
     if intake_context_text:
         sections.extend([
             "# Intake Context (User-Provided Resources and Clarifications)",

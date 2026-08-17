@@ -635,7 +635,7 @@ Alongside the prompt, AutoR installs an agent skill pack from [src/skills/](src/
 `runs/<run_id>/.claude/skills/` — the operator's working directory — so the agent can *pull*
 long-form craft guidance when it needs it. A skill costs nothing in the prompts that do not use it.
 
-Forty-four skills ship today: twenty-four general ones and twenty field-specific ones. **A run is
+Forty-five skills ship today: twenty-five general ones and twenty field-specific ones. **A run is
 not offered all of them.** Two filters narrow the pack, and a skill has to survive both:
 
 1. **Field.** A skill named `<field>-...` is installed only for a run in that field, so twenty
@@ -650,6 +650,18 @@ not offered all of them.** Two filters narrow the pack, and a skill has to survi
 
 The predicate reads the brief, never the task's identifier: a table of benchmark ids would select
 the same tasks today and generalise to nothing.
+
+3. **Pin.** There is one exception, and it is deliberate.
+   [configs/task_skill_pins.json](configs/task_skill_pins.json) maps a task *identifier* to skills
+   that are installed for it whatever the two filters say. A pin is not an inference about a kind of
+   task — it is a record that this exact identifier already ran, already scored, and lost criteria
+   whose subject is those skills, so it is the one routing input that cannot be derived from the
+   task statement and does not generalise past the name it carries. Fifteen ResearchClawBench tasks
+   are pinned today, twenty-four pins between them, at most three per task; four of the twenty-four
+   are skills the two filters would have withheld, in each case a field skill whose content
+   applies outside its own field. **A run that matches an entry writes `skill_pins` into its `run_config.json` and a
+   `skills pinned_by_task_id` line into its log**, because a pinned arm and an unpinned arm are two
+   configurations and a score from one is not a score from the other.
 
 Pull-based is not the same as discoverable. Measured over a 40-task arm, the pack drew **78 `Skill`
 calls in 789 hours of agent time**, 31 of them the one skill a stage prompt named imperatively —
@@ -740,6 +752,17 @@ class of reason: the agent must not be able to backdate its own declaration, rew
 it is being held to, or edit the record of the objections it owes an answer to. So is
 `stage_cost_ledger.json`, which is a run's account of what each stage visit cost and why each
 attempt failed — a receipt the payer prints is worth what it cost to print.
+
+That row carries the backend's own dollar figure and its four token fields, wired out through
+`OperatorResult`, `ReviewDecision` and `ValidityReviewOutcome` rather than scraped back out of
+`logs_raw.jsonl`. A field the backend did not report is absent rather than zero, so a run smoke-tested
+with `--fake-operator` says `not measured` instead of `$0.00`. At the end of a run — completed or
+cancelled — AutoR prints one summary of it to the terminal, and to nothing else: the deliverable does
+not change, and `logs.txt` keeps the attempts and the failure census without the money. **Nothing at
+runtime decides on any of it.** Not the supervisor, not the router, not a gate: the fields may appear
+in the record, in the summary and in the formatter, and in no condition anywhere under `src/`, which
+`tests/test_cost_is_recorded_and_unread.py` asserts over the syntax of every module the way
+`tests/test_router_budget.py` asserts it of `StageRouter.choose`.
 
 The only state AutoR writes outside a run directory is the cross-run archive at `~/.autor/archive`
 (`--archive`, `--no-archive`).

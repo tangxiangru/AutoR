@@ -383,7 +383,8 @@ def _task_shaped_skills(context: ChannelContext) -> str:
     from .run_skills import format_skills_for_prompt
 
     entries = getattr(context.manager, "_installed_skills", None) or []
-    return format_skills_for_prompt(list(entries), context.stage.slug)
+    pinned = getattr(context.manager, "_pinned_skills", None) or frozenset()
+    return format_skills_for_prompt(list(entries), context.stage.slug, frozenset(pinned))
 
 
 CHANNELS: tuple[Channel, ...] = (

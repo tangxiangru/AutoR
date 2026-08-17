@@ -1,0 +1,194 @@
+{
+  "_what": "Skills forced into a run by its task identifier. Everything else AutoR routes on is derived from the task statement; this is derived from a previous run's SCORE, so it names identifiers and generalises to nothing outside them.",
+  "_provenance": "Built from the ResearchClawBench arm pinned at 2ffaeb4 (/rmeng_data/robtang/rcb_runs/arm_2ffaeb4), scored with gpt-5.1 under the 15-image window: AutoR 31.35 against bare Claude Code 31.53 over 40 tasks. Each entry was assigned criterion by criterion from that arm's per-criterion scores and the judge's written reasoning for BOTH arms, then adversarially re-checked against the skill bodies. 23 tasks that scored below 26 or lost to the bare agent were assessed; 8 were given no pin, because their remaining gap is below the 3.4-point single-draw rescoring noise or the shipped data cannot support the criteria at all. Three pins across Material_001 and Life_001 were left unverified when their checking agent died mid-response; a later pass dropped all three -- two as already installed and already named at the right stage, one as aimed 1.01 sd below the rescoring noise at a criterion of a task AutoR had won. Life_001 came out of the table entirely.",
+  "_declares_itself": "A run that matches an entry writes `skill_pins` into its run_config.json and a `skills pinned_by_task_id` line into its log. A pinned arm and an unpinned arm are two configurations; a score from one is not a score from the other, and the artifact says so without anyone having to remember.",
+  "_maximum": "Three per task. The measured failure of this pack is that a run reads 1.75 skills out of about thirty offered; handing one eight more descriptions reproduces the problem a pin is meant to solve.",
+  "_columns": "task id -> skill names. Commentary per task is in _rationale: `autor` and `control` are that task's two scores, `net` is autor - control over the whole task, `recoverable` is the sum of weight x (control - autor) over only the criteria where the control scored higher, `headroom` is the sum of weight x (100 - autor) over every criterion, and `new_to_this_run` lists the pins the two routing filters would not have installed. `recoverable` and `net` differ whenever AutoR wins some criteria and loses others, which is most tasks; `net` is the number that says whether the task was lost.",
+  "_rationale": {
+    "Physics_000": {
+      "autor": 18.7,
+      "control": 53.4,
+      "new_to_this_run": [],
+      "net": -34.7,
+      "recoverable": 34.7,
+      "headroom": 81.3
+    },
+    "Information_002": {
+      "autor": 9,
+      "control": 33.1,
+      "new_to_this_run": [],
+      "net": -24.1,
+      "recoverable": 24.1,
+      "headroom": 91.0
+    },
+    "Neuroscience_003": {
+      "autor": 35.25,
+      "control": 55.55,
+      "new_to_this_run": [],
+      "net": -20.3,
+      "recoverable": 22.1,
+      "headroom": 64.8
+    },
+    "Chemistry_003": {
+      "autor": 24.5,
+      "control": 39.3,
+      "new_to_this_run": [],
+      "net": -14.8,
+      "recoverable": 16.3,
+      "headroom": 75.5
+    },
+    "Material_000": {
+      "autor": 4.5,
+      "control": 17.9,
+      "new_to_this_run": [],
+      "net": -13.4,
+      "recoverable": 13.4,
+      "headroom": 95.5
+    },
+    "Material_003": {
+      "autor": 35.7,
+      "control": 47.2,
+      "new_to_this_run": [
+        "life-full-study-skeleton-including-the-wet-lab-half"
+      ],
+      "net": -11.5,
+      "recoverable": 11.5,
+      "headroom": 64.3
+    },
+    "Life_002": {
+      "autor": 17,
+      "control": 26.5,
+      "new_to_this_run": [
+        "information-exhibit-the-intermediate-objects"
+      ],
+      "net": -9.5,
+      "recoverable": 15.5,
+      "headroom": 83.0
+    },
+    "Energy_000": {
+      "autor": 20.3,
+      "control": 27.8,
+      "new_to_this_run": [
+        "material-as-specified-run-and-stage-diagnostics"
+      ],
+      "net": -7.5,
+      "recoverable": 7.5,
+      "headroom": 79.7
+    },
+    "Chemistry_000": {
+      "autor": 36,
+      "control": 41.3,
+      "new_to_this_run": [],
+      "net": -5.3,
+      "recoverable": 13.0,
+      "headroom": 64.0
+    },
+    "Math_003": {
+      "autor": 23.75,
+      "control": 27.25,
+      "new_to_this_run": [],
+      "net": -3.5,
+      "recoverable": 5.25,
+      "headroom": 76.2
+    },
+    "Earth_002": {
+      "autor": 33,
+      "control": 35.4,
+      "new_to_this_run": [
+        "information-fill-the-whole-results-grid"
+      ],
+      "net": -2.4,
+      "recoverable": 10.6,
+      "headroom": 67.0
+    },
+    "Material_002": {
+      "autor": 48.45,
+      "control": 49.22,
+      "new_to_this_run": [],
+      "net": -0.77,
+      "recoverable": 9.9,
+      "headroom": 51.6
+    },
+    "Material_001": {
+      "autor": 11.9,
+      "control": 12,
+      "new_to_this_run": [],
+      "net": -0.1,
+      "recoverable": 9.55,
+      "headroom": 88.1,
+      "note": "Net -0.10: a tie, not a loss, and it is here for one criterion. Index 1 (weight 0.35, AutoR 2, control 25, 8.05 recoverable) wanted the generated lattice parameters in angstrom with a KL divergence and a coverage fraction; AutoR reported an entropy in bits instead, and the shipped file's two 101-value lattice arrays -- which it parsed -- are plotted nowhere. The pinned skill is the only one in the pack that says to print the landmark scalar in the property's own physical unit, it is a material skill so a Material run installs it anyway, and no prompt names it -- so the pin is the only channel that puts it in front of this run."
+    },
+    "Neuroscience_000": {
+      "autor": 14,
+      "control": 9.4,
+      "new_to_this_run": [],
+      "net": 4.6,
+      "recoverable": 0,
+      "headroom": 86.0,
+      "note": "Recoverable is 0.00: there is no criterion here where the control scored higher. The pin aims at uncontested zero instead -- criteria both arms scored 0 on, worth 0.60 of Neuroscience_000's weight and 0.40 of Astronomy_001's. That is the best target on the board for raising a score and the worst for demonstrating anything, because there is no second measurement to compare against."
+    },
+    "Astronomy_001": {
+      "autor": 26,
+      "control": 20.2,
+      "new_to_this_run": [],
+      "net": 5.8,
+      "recoverable": 0,
+      "headroom": 74.0,
+      "note": "Recoverable is 0.00: there is no criterion here where the control scored higher. The pin aims at uncontested zero instead -- criteria both arms scored 0 on, worth 0.60 of Neuroscience_000's weight and 0.40 of Astronomy_001's. That is the best target on the board for raising a score and the worst for demonstrating anything, because there is no second measurement to compare against."
+    }
+  },
+  "Physics_000": [
+    "run-the-conditions-the-source-ran",
+    "draw-the-source-figure-panel-for-panel"
+  ],
+  "Information_002": [
+    "the-supplied-item-is-the-graded-unit"
+  ],
+  "Neuroscience_003": [
+    "run-the-conditions-the-source-ran"
+  ],
+  "Chemistry_003": [
+    "close-the-gap-to-the-published-number",
+    "draw-the-source-figure-panel-for-panel"
+  ],
+  "Material_000": [
+    "train-the-named-architecture",
+    "the-canonical-figure"
+  ],
+  "Material_003": [
+    "a-value-you-did-not-measure-still-has-a-source",
+    "life-full-study-skeleton-including-the-wet-lab-half"
+  ],
+  "Life_002": [
+    "the-supplied-item-is-the-graded-unit",
+    "information-exhibit-the-intermediate-objects"
+  ],
+  "Energy_000": [
+    "material-as-specified-run-and-stage-diagnostics",
+    "run-the-conditions-the-source-ran"
+  ],
+  "Chemistry_000": [
+    "the-attribution-is-the-deliverable"
+  ],
+  "Math_003": [
+    "run-the-conditions-the-source-ran"
+  ],
+  "Earth_002": [
+    "draw-the-source-figure-panel-for-panel",
+    "information-fill-the-whole-results-grid"
+  ],
+  "Material_002": [
+    "draw-the-source-figure-panel-for-panel",
+    "close-the-gap-to-the-published-number"
+  ],
+  "Material_001": [
+    "material-landmark-scalars-in-physical-units"
+  ],
+  "Neuroscience_000": [
+    "the-attribution-is-the-deliverable"
+  ],
+  "Astronomy_001": [
+    "the-canonical-figure",
+    "draw-the-source-figure-panel-for-panel"
+  ]
+}

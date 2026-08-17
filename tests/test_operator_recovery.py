@@ -262,6 +262,73 @@ class OperatorRecoveryTests(unittest.TestCase):
             self.assertIsNone(resolved)
 
 
+class SecondEntryToAStageTests(unittest.TestCase):
+    """A session id is spent once, and a stage is entered more than once.
+
+    `--session-id` accepts a uuid the first time and answers `Error: Session ID <uuid>
+    is already in use.` the second. That string matches none of the four patterns in
+    `_looks_like_resume_failure`, so the fallback in `_run_real` never fires and the
+    attempt burns with nothing written. Every entry to a stage other than Studio's
+    pending-feedback path starts the attempt loop at `continue_session = False` and
+    builds a fresh prompt, so a revisit edge, `--redo-stage` and `--resume-run` into an
+    unapproved stage all reached the CLI with an id it had already seen.
+    """
+
+    def _session_flag(self, command: list[str]) -> tuple[str, str]:
+        for flag in ("--session-id", "--resume"):
+            if flag in command:
+                return flag, command[command.index(flag) + 1]
+        self.fail(f"No session flag found in command: {command}")
+
+    def _operator_and_paths(self, tmp_dir: str):
+        paths = build_run_paths(Path(tmp_dir) / "run")
+        ensure_run_layout(paths)
+        write_text(paths.user_input, "Second entry")
+        initialize_memory(paths, "Second entry")
+        return ClaudeOperator(fake_mode=False, output_stream=io.StringIO()), paths
+
+    def _run(self, operator, paths, stage, *, continue_session: bool, seen: list) -> None:
+        def fake_stream(*args, **kwargs):
+            seen.append(self._session_flag(kwargs["command"]))
+            write_text(paths.stage_tmp_file(stage), "# Stage 01: Literature Survey\n")
+            return (0, "completed", "", None,
+                    {"raw_line_count": 1, "non_json_line_count": 0, "malformed_json_count": 0})
+
+        with patch("src.operator.shutil.which", return_value="/usr/bin/claude"), patch.object(
+            operator, "_run_streaming_command", side_effect=fake_stream
+        ):
+            operator._run_real(stage, "prompt", paths, attempt_no=1, continue_session=continue_session)
+
+    def test_a_second_entry_does_not_replay_the_first_entrys_session_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            operator, paths = self._operator_and_paths(tmp_dir)
+            seen: list[tuple[str, str]] = []
+            self._run(operator, paths, STAGE_01, continue_session=False, seen=seen)
+            self._run(operator, paths, STAGE_01, continue_session=False, seen=seen)
+
+            self.assertEqual([flag for flag, _ in seen], ["--session-id", "--session-id"])
+            self.assertNotEqual(seen[0][1], seen[1][1])
+
+    def test_a_continuation_still_resumes_the_id_the_entry_persisted(self) -> None:
+        """The control. Fixing the entry must not stop a retry continuing its session."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            operator, paths = self._operator_and_paths(tmp_dir)
+            seen: list[tuple[str, str]] = []
+            self._run(operator, paths, STAGE_01, continue_session=False, seen=seen)
+            self._run(operator, paths, STAGE_01, continue_session=True, seen=seen)
+
+            self.assertEqual([flag for flag, _ in seen], ["--session-id", "--resume"])
+            self.assertEqual(seen[0][1], seen[1][1])
+
+    def test_two_stages_never_share_one_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            operator, paths = self._operator_and_paths(tmp_dir)
+            seen: list[tuple[str, str]] = []
+            self._run(operator, paths, STAGE_01, continue_session=False, seen=seen)
+            self._run(operator, paths, STAGE_05, continue_session=False, seen=seen)
+            self.assertNotEqual(seen[0][1], seen[1][1])
+
+
 class TestResumeFailureDetection(unittest.TestCase):
     def setUp(self) -> None:
         self.op = ClaudeOperator(fake_mode=True)

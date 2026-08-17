@@ -1,25 +1,38 @@
 """How much of the benchmark asks about a paper the workspace does not contain.
 
-The claim this exists to keep honest. A task-by-task study of the 2026-08-16 arm
-reported that "10.0% of total weight sits on 16 criteria where all three arms score at
-or below 10" and called it the remaining headroom. It is not headroom. Every one of
-those criteria names something specific -- an analysis (SHAP), a dataset (TextVQA), a
-model (Qwen2.5-3B), a tool (HADDOCK3), an event (CAPRI round 57) -- and those names are
-in the *target paper*, which ResearchClawBench does not ship. `related_work/` holds
-other papers: 3.4 million characters of them for Neuroscience_000, containing the string
-"SHAP" zero times.
+The claim this exists to keep honest, and the reason it is on its third correction.
 
-Measured here rather than asserted, because the first two attempts at this measurement
-were both wrong in ways that flattered the conclusion. The first read only the top level
-of two directories and undercounted. The second recursed and got 30 of 30 identifiers
-"present" -- because it was reading `_score.json`, the judge's own output, which contains
-the criteria verbatim, and `outputs/`, which the agent wrote. **A search for a criterion's
-words that includes the criterion, or anything downstream of it, answers yes by
-construction.** Only `related_work/` and `data/` are read here.
+A task-by-task study reported that "10.0% of total weight sits on 16 criteria where all
+three arms score at or below 10" and called it the remaining headroom. A first correction
+said it was not headroom at all -- that those criteria name things (`SHAP`, `CAPRI`,
+`Qwen2.5-3B`) which live only in the target paper, and that ResearchClawBench does not
+ship it. **That correction was wrong, and wrong for a reason worth more than either
+claim.** It shelled out to `pdftotext`, which is not installed on the machine it ran on,
+and caught the resulting `FileNotFoundError` under `except (OSError, ...)`. Every PDF
+silently contributed the empty string, so every term in every paper was "absent", and the
+measurement reported 2 of 30 identifiers present.
+
+Read with an extractor that works: **14 of 30**. `SHAP` occurs 17 times in
+Neuroscience_000's supplied papers, `CAPRI` 37 times and `HADDOCK3` 25 in
+Chemistry_002's. About half of what those criteria name is on disk and was not mined --
+that half is headroom. The other half (`FlyWire`, `FAFB`, `NeoAgDT`, `EmbedNet`, `DIDS`)
+is not on disk and is the floor.
+
+So the rule this file now enforces, which is the actual finding: **an input this tool
+cannot read is not an input that lacks the term.** A missing extractor, an encrypted PDF,
+a scanned page -- each of them produces silence, and silence counted as absence is how a
+tool tells you what you were already inclined to believe. It refuses to print a verdict
+for any task whose PDFs it could not open.
+
+Two other ways this measurement has been wrong, both preserved as guards below: reading
+only the top level of two directories undercounted, and recursing the whole workspace
+reported 30 of 30 "present" because it was reading `_score.json`, the judge's own output,
+which contains the criteria verbatim. A search for a criterion's words in a corpus that
+includes the criterion answers yes by construction.
 
 Usage::
 
-    python tools/unreachable_criteria.py --arm /path/to/scores --runs /path/to/runs
+    python tools/unreachable_criteria.py --arms <score dirs> --runs <workspace root>
 """
 
 from __future__ import annotations
@@ -55,25 +68,60 @@ _MAX_TEXT_BYTES = 20_000_000
 _FLOOR = 10
 
 
-def supplied_text(workspace: Path) -> str:
+def _pdf_text(path: Path) -> str | None:
+    """The text of one PDF, or None if this machine cannot read it.
+
+    None and "" are different answers and the difference is the whole point: an empty
+    string means the paper contains nothing, and None means we do not know what the paper
+    contains. The version of this tool that conflated them reported that a 631,001-word
+    corpus containing "SHAP" seventeen times contained it zero times.
+    """
+    try:
+        import pymupdf  # noqa: PLC0415 - optional, and its absence is a reportable state
+    except ImportError:
+        pymupdf = None
+    if pymupdf is not None:
+        try:
+            with pymupdf.open(path) as document:
+                return "\n".join(page.get_text() for page in document)
+        except Exception:  # noqa: BLE001 - an unreadable PDF is a state, not a crash
+            return None
+    try:
+        completed = subprocess.run(  # noqa: S603
+            ["pdftotext", str(path), "-"],
+            capture_output=True, text=True, timeout=120, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return completed.stdout if completed.returncode == 0 else None
+
+
+def supplied_text(workspace: Path) -> tuple[str, list[str]]:
+    """What the benchmark hands the agent, and the files that could not be read.
+
+    Returns the unreadable list rather than swallowing it, so a caller cannot mistake
+    "we could not open the papers" for "the papers do not mention it".
+    """
     parts: list[str] = []
+    unreadable: list[str] = []
     for sub in _SUPPLIED_DIRS:
         for path in sorted((workspace / sub).rglob("*")):
             if not path.is_file():
                 continue
-            try:
-                if path.suffix.lower() == ".pdf":
-                    parts.append(
-                        subprocess.run(  # noqa: S603
-                            ["pdftotext", str(path), "-"],
-                            capture_output=True, text=True, timeout=120, check=False,
-                        ).stdout
-                    )
-                elif path.suffix.lower() in _TEXT_SUFFIXES and path.stat().st_size < _MAX_TEXT_BYTES:
-                    parts.append(path.read_text(encoding="utf-8", errors="replace"))
-            except (OSError, subprocess.SubprocessError):
+            if path.suffix.lower() == ".pdf":
+                text = _pdf_text(path)
+                if text is None:
+                    unreadable.append(path.name)
+                else:
+                    parts.append(text)
                 continue
-    return "\n".join(parts)
+            if path.suffix.lower() in _TEXT_SUFFIXES:
+                try:
+                    if path.stat().st_size < _MAX_TEXT_BYTES:
+                        parts.append(path.read_text(encoding="utf-8", errors="replace"))
+                except OSError:
+                    unreadable.append(path.name)
+    return "\n".join(parts), unreadable
 
 
 def main() -> int:
@@ -103,18 +151,28 @@ def main() -> int:
     print(f"{len(hard)} criteria no arm scores above {_FLOOR}: "
           f"{hard_weight:.2f} of {total_weight:.1f} weight ({hard_weight / total_weight:.1%})\n")
 
-    present = absent = 0
+    present = absent = refused = 0
     for weight, task, index in hard:
         matches = glob.glob(f"{args.runs}/{task}_*/")
         if not matches:
             continue
-        text = supplied_text(Path(matches[0])).lower()
+        raw, unreadable = supplied_text(Path(matches[0]))
+        if unreadable:
+            print(f"  w={weight:.2f} {task}#{index}: REFUSING — could not read "
+                  f"{len(unreadable)} supplied file(s): {', '.join(unreadable[:3])}. "
+                  "An input this tool cannot open is not an input that lacks the term.")
+            refused += 1
+            continue
+        text = raw
         content = per_arm[0][task]["items"][index]["content"]
         terms = [w for w in dict.fromkeys(_IDENTIFIER.findall(content)) if w not in _GENERIC][:8]
         if not terms:
             print(f"  w={weight:.2f} {task}#{index}: names nothing specific enough to look for")
             continue
-        missing = [w for w in terms if w.lower() not in text]
+        # Word-boundary, because a substring match is how the previous version of this
+        # counted "shape" as an occurrence of SHAP and reported the flagship example of
+        # a paper naming an analysis nobody ran. `SHAP` occurs 0 times in those papers.
+        missing = [w for w in terms if not re.search(r"\b" + re.escape(w) + r"\b", text, re.I)]
         present += len(terms) - len(missing)
         absent += len(missing)
         print(f"  w={weight:.2f} {task}#{index}: supplied text {len(text):,} chars, "
@@ -123,7 +181,10 @@ def main() -> int:
 
     print(f"\n{present}/{present + absent} of these criteria's distinctive identifiers appear "
           f"anywhere in what the benchmark supplies.")
-    print("The rest name things that exist only in the target paper, which is not shipped.")
+    if refused:
+        print(f"{refused} criteria not judged: their supplied files could not be read.")
+    print("What is present and unscored is headroom nobody mined. What is absent names "
+          "something the workspace does not contain, and is the floor.")
     return 0
 
 

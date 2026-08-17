@@ -401,7 +401,7 @@ def finish_run(plan: FsTrialPlan, record: Mapping[str, Any], *, stalled: bool) -
 def reap(plan: FsTrialPlan, running: dict[tuple[str, str], dict[str, Any]]) -> None:
     """Finish every child that has exited, and kill every child that has stopped beating.
 
-    The watchdog is here rather than in :func:`src.trial_driver.watch` because that one
+    The watchdog is here rather than in :func:`src.trial_driver.watch_until_stalled` because that one
     blocks on a single child, which is the right shape for a serial driver and the wrong
     one for this. The heartbeat it reads is the same: ``logs_raw.jsonl``'s mtime, the only
     second-granularity signal an AutoR run emits.

@@ -114,6 +114,12 @@ detail behind it.
 - **[ui-design/](ui-design/)** — the Studio design record: information
   architecture, screen specs, system architecture, development plan, and
   reference screenshots. These are design documents, not user documentation.
+- **[iclr/](iclr/)** — the framework-paper notes.
+  [composable-stage-graphs.md](iclr/composable-stage-graphs.md) states the
+  composition model behind rollback, staleness and the walk ratchet;
+  [round-loop-and-stage-graph.md](iclr/round-loop-and-stage-graph.md) reads
+  AMAP-ML's LongHorizon-Harness against it and records what the stage graph
+  should take from a round loop, and what it should not.
 
 ### Project notices
 

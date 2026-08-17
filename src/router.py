@@ -170,6 +170,7 @@ class StageRouter:
         final_stage: StageSpec | None = None,
         declared: tuple[str, str] | None = None,
         skips_left: int | None = None,
+        required: tuple[str, str] | None = None,
     ) -> RoutingDecision:
         # `skips_left` reaches the graph and stops there. It is deliberately not shown
         # to the agent here and not weighed by anything in this module: the decision
@@ -248,6 +249,44 @@ class StageRouter:
             )
             return RoutingDecision(
                 target, chosen.edge.kind, reason, default_target, agent_directed=True,
+                offered=offered, blocked=blocked_kinds,
+            )
+
+        # The run supervisor's redirect: a target it requires, with the reason it gave.
+        #
+        # Ranked below a closed round's decision and above the backend. A round has
+        # reasoned about the *results* and written its conclusion to disk; the supervisor
+        # has reasoned about the *spend*, which is the weaker claim about where the run
+        # should go next, so a round that has spoken is not overruled by it.
+        #
+        # Checked against `live` exactly as `declared` is, and refused the same way. That
+        # is the whole of "only an edge the guards already leave open": there is no branch
+        # here that consults a blocked move, so a redirect cannot open one.
+        #
+        # `agent_directed=False`, deliberately. The archive learns which moves the *agent*
+        # chose pay off, and recording a move the agent did not make as one it did is the
+        # one thing the offered/blocked bookkeeping exists to keep out.
+        if required is not None and declared is None:
+            target, reason = required
+            chosen = next((move for move in live if move.edge.target == target), None)
+            if chosen is None:
+                unavailable = next((move for move in moves if move.edge.target == target), None)
+                detail = (
+                    f"the supervisor required `{target}`: {unavailable.blocked_because}"
+                    if unavailable is not None
+                    else f"the supervisor required `{target}`, which is not a move out of {stage.slug}"
+                )
+                return self._refuse(
+                    paths, stage, default, default_target, detail,
+                    offered=offered, blocked=blocked_kinds,
+                )
+            append_log_entry(
+                paths.logs,
+                f"{stage.slug} route_required_by_supervisor",
+                f"target: {target}\nreason: {reason}",
+            )
+            return RoutingDecision(
+                target, chosen.edge.kind, reason, default_target, agent_directed=False,
                 offered=offered, blocked=blocked_kinds,
             )
 

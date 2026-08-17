@@ -1484,7 +1484,7 @@ class StallTests(unittest.TestCase):
         )
         started = time.time()
         with tempfile.TemporaryDirectory() as tmp:
-            stalled = self.tool.watch(child, Path(tmp), stall_seconds=1)
+            stalled = self.tool.watch_until_stalled(child, Path(tmp), stall_seconds=1)
         self.assertTrue(stalled)
         self.assertLess(time.time() - started, 30)
         self.assertIsNotNone(child.poll())
@@ -1502,7 +1502,7 @@ class StallTests(unittest.TestCase):
                 ],
                 start_new_session=True,
             )
-            self.assertFalse(self.tool.watch(child, workspace, stall_seconds=2))
+            self.assertFalse(self.tool.watch_until_stalled(child, workspace, stall_seconds=2))
         self.assertEqual(child.returncode, 0)
 
 

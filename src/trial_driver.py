@@ -393,8 +393,18 @@ def foreign_runs() -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def watch(child: subprocess.Popen, workspace: Path, stall_seconds: int) -> bool:
-    """Wait, killing only on a stalled heartbeat. No per-run wall clock."""
+def watch_until_stalled(child: subprocess.Popen, workspace: Path, stall_seconds: int) -> bool:
+    """Wait, killing only on a stalled heartbeat. No per-run wall clock.
+
+    Named for what it waits on rather than `watch`, and the extra word is not taste.
+    `tests/test_declared_symbols_are_wired` matches bare identifiers across every module
+    under `src/`, so while this was `watch` an unrelated local of that name in
+    `src/approval_agent.py` laundered it into reading as wired: a kernel function reached
+    only from `tools/` looked reachable from a run, and the exemption naming that trade
+    could not be kept. `git_contrast_log` was renamed off `contrast_log` for the same
+    reason one commit earlier. Two drivers and a custody watcher sharing one English word
+    is not a collision worth defending.
+    """
     last_seen = time.time()
     while child.poll() is None:
         # A second. The run takes hours, so the polling cost is nothing, and the

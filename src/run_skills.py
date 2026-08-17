@@ -41,6 +41,7 @@ of "this fires on the tasks it was written for" is checked before it lands.
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 from dataclasses import dataclass, field
@@ -286,8 +287,55 @@ def discipline_of(name: str) -> str:
     return head if head in DISCIPLINE_PREFIXES else ""
 
 
+#: Skills forced into a named run, by an identifier the caller supplies.
+#:
+#: The two filters below are inferences: a field prefix and a regex over the brief are
+#: guesses about what a task needs, made from the task alone. A pin is not a guess. It
+#: is a record of an *outcome already observed* — this identifier ran, it scored, and
+#: these are the skills whose bodies address the criteria it lost — so it is the one
+#: routing input that cannot be derived from the task statement, and the one that does
+#: not generalise past the identifier it names.
+#:
+#: That asymmetry is why a pin has to announce itself. `pinned_skills_note` goes into
+#: the run config and the log, so a score taken from a pinned run says on its face that
+#: it was pinned. A pinned arm and an unpinned arm are two configurations, and a number
+#: from one is not a number from the other.
+DEFAULT_PINS_FILENAME = "task_skill_pins.json"
+
+
+def load_task_pins(path: Path) -> dict[str, list[str]]:
+    """The pin table, or {} when there is not one.
+
+    Shape: ``{"<task id>": ["skill-name", ...]}``. Keys that are not strings mapping to
+    a list of strings are dropped rather than raising -- a malformed table must not stop
+    a run, for the same reason `Manager._install_skills` catches `OSError`. Any key
+    beginning ``_`` is a note for a human and is ignored.
+    """
+    try:
+        raw = json.loads(read_text(path))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    table: dict[str, list[str]] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str) or key.startswith("_"):
+            continue
+        if isinstance(value, list) and all(isinstance(name, str) for name in value):
+            table[key] = list(value)
+    return table
+
+
+def pins_for(task_id: str | None, table: dict[str, list[str]]) -> frozenset[str]:
+    return frozenset(table.get(task_id or "", ()))
+
+
 def select_run_skills(
-    entries: list[SkillPackEntry], *, discipline: str | None = None, brief: str = ""
+    entries: list[SkillPackEntry],
+    *,
+    discipline: str | None = None,
+    brief: str = "",
+    pinned: frozenset[str] = frozenset(),
 ) -> list[SkillPackEntry]:
     """The subset of the pack a run with this field and this brief is offered.
 
@@ -301,14 +349,22 @@ def select_run_skills(
     for most runs, so admitting one on missing information adds a description that
     competes with the rest and describes a situation this run is probably not in.
     A run with no brief is a run nothing was asked of yet.
+
+    ``pinned`` overrides both. A name in it is installed whatever its field prefix and
+    whatever its predicate says, because a pin is evidence about this identifier's
+    observed outcome and the two filters are inferences about tasks in general. A
+    pinned name that is not in the pack is ignored here; `validate_task_pins` is where
+    that is reported.
     """
     if discipline:
         wanted = discipline.casefold()
         entries = [
             entry for entry in entries
-            if not discipline_of(entry.name) or discipline_of(entry.name) == wanted
+            if entry.name in pinned
+            or not discipline_of(entry.name)
+            or discipline_of(entry.name) == wanted
         ]
-    return [entry for entry in entries if entry.applies_to(brief)]
+    return [entry for entry in entries if entry.name in pinned or entry.applies_to(brief)]
 
 
 def install_run_skills(
@@ -317,6 +373,7 @@ def install_run_skills(
     *,
     discipline: str | None = None,
     brief: str | None = None,
+    pinned: frozenset[str] = frozenset(),
 ) -> list[str]:
     """Copy the skills this run is offered into its ``.claude/skills/``.
 
@@ -332,6 +389,9 @@ def install_run_skills(
     reads it from ``paths.user_input``, which is where every route into a run puts
     it; pass a string to route on something else, and pass ``""`` to install only
     the unconditional skills.
+
+    ``pinned`` is the set of skill names this run's identifier is pinned to; they are
+    installed regardless of the two filters. See `load_task_pins`.
     """
     entries = read_skill_pack(source_dir)
     all_names = {entry.name for entry in entries}
@@ -339,6 +399,7 @@ def install_run_skills(
         entries,
         discipline=discipline,
         brief=task_brief(paths) if brief is None else brief,
+        pinned=pinned,
     )
     paths.skills_dir.mkdir(parents=True, exist_ok=True)
     wanted = {entry.name for entry in entries}
@@ -360,37 +421,94 @@ def install_run_skills(
     return installed
 
 
-def format_skills_for_prompt(entries: list[SkillPackEntry], stage_slug: str) -> str:
-    """The task-scoped skills this stage should be told about, with their triggers.
+def format_skills_for_prompt(
+    entries: list[SkillPackEntry], stage_slug: str, pinned: frozenset[str] = frozenset()
+) -> str:
+    """The skills chosen *for this run* that this stage should be told about.
 
-    Deliberately *not* a roster of the whole pack. That was the objection this
-    renderer sat unwired under for several releases, and it was a good one: the
-    pack is pull-based, and reprinting twenty-four descriptions into every stage
-    prompt is the cost the pull mechanism exists to avoid.
+    Deliberately not a roster of the whole pack. That was the objection this renderer
+    sat unwired under for several releases, and it was a good one: the pack is
+    pull-based, and reprinting two dozen descriptions into every stage prompt is the
+    cost the pull mechanism exists to avoid.
 
-    What is different about a task-scoped skill is that it was selected *for this
-    run*, by a predicate over this run's own brief, and the model has no way to
-    know that. It sees the same undifferentiated listing of thirty entries it sees
-    on every task. So the block is small by construction -- the skills whose
-    predicate matched, that name this stage -- and it says why each one is here.
-    A run whose brief matches nothing gets no block at all.
+    What is different about the skills here is that something decided they were for
+    this run, and the model has no way to see that: it gets the same undifferentiated
+    listing of about thirty entries it gets on every task. Two groups, because the two
+    decisions have different standing and a reader should be able to tell them apart:
 
-    Named imperatively, because that is the form measured to work: over a 40-task
-    arm the one skill a rendered prompt told the operator to *read* fired in 31 of
-    40 runs, and the three a prompt said were "installed for this stage" fired in
-    none.
+    * **shape** -- a predicate over this run's brief matched, and the skill named this
+      stage. An inference, and it can be wrong about this task.
+    * **pinned** -- this run's identifier is in the pin table. Not an inference: a
+      record of what a previous run of the same task lost. Announced at every stage,
+      because a pin is short by construction and the stage that needed it is usually
+      the one that had already gone wrong before anyone looked.
+
+    Named imperatively, because that is the form measured to work: over a 40-task arm
+    the one skill a rendered prompt told the operator to *read* fired in 31 of 40 runs,
+    and the three a prompt said were "installed for this stage" fired in none.
     """
-    selected = sorted(
-        (entry for entry in entries if entry.task_scoped and stage_slug in entry.stages),
+    by_shape = sorted(
+        (
+            entry
+            for entry in entries
+            if entry.task_scoped and stage_slug in entry.stages and entry.name not in pinned
+        ),
         key=lambda entry: entry.name,
     )
-    if not selected:
+    by_pin = sorted(
+        (entry for entry in entries if entry.name in pinned), key=lambda entry: entry.name
+    )
+    if not by_shape and not by_pin:
         return ""
-    lines = [
-        "This run's task has a shape that these skills were written for. **Read each one "
-        "before you act on this stage.** They are not installed for every run; they were "
-        "selected against the brief you were given.",
-        "",
-    ]
-    lines.extend(f"- `{entry.name}` — {entry.description}" for entry in selected)
+
+    lines: list[str] = []
+    if by_shape:
+        lines += [
+            "This run's task has a shape that these skills were written for. **Read each one "
+            "before you act on this stage.** They are not installed for every run; they were "
+            "selected against the brief you were given.",
+            "",
+        ]
+        lines += [f"- `{entry.name}` — {entry.description}" for entry in by_shape]
+    if by_pin:
+        if lines:
+            lines.append("")
+        lines += [
+            "**These skills are pinned to this task by name.** An earlier run of this exact "
+            "task was scored, and these are the skills whose subject is what it lost. That is "
+            "a stronger reason than any of the others in your context: it is not advice about "
+            "tasks like this one, it is a record of this one. **Read every one of them before "
+            "you plan this stage**, and treat what they describe as the failure most likely to "
+            "be repeated here.",
+            "",
+        ]
+        lines += [f"- `{entry.name}` — {entry.description}" for entry in by_pin]
     return "\n".join(lines)
+
+
+def validate_task_pins(table: dict[str, list[str]], source_dir: Path) -> list[str]:
+    """Problems in a pin table, in the same shape `validate_skill_pack` reports.
+
+    A pin naming a skill that does not exist is the failure mode this catches, and it
+    is silent otherwise: `select_run_skills` filters the pack, so an unknown name
+    simply selects nothing and the task runs with the pack it would have had anyway.
+    A renamed skill breaks every pin that names it.
+    """
+    known = {entry.name for entry in read_skill_pack(source_dir)}
+    problems: list[str] = []
+    for task_id, names in sorted(table.items()):
+        if not names:
+            problems.append(f"{task_id} is pinned to an empty list; drop the entry instead.")
+        for name in names:
+            if name not in known:
+                problems.append(f"{task_id} is pinned to {name!r}, which is not in {source_dir}.")
+        if len(set(names)) != len(names):
+            problems.append(f"{task_id} names the same skill twice.")
+    return problems
+
+
+def pinned_skills_note(task_id: str | None, pinned: frozenset[str]) -> str:
+    """One line for the run config and the log, so a pinned score says that it is one."""
+    if not pinned:
+        return ""
+    return f"{task_id or '<unknown task>'}: " + ", ".join(sorted(pinned))

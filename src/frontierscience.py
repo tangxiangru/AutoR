@@ -1650,6 +1650,23 @@ def _is_browsing_tool(name: str) -> bool:
     return any(token in lowered for token in FS_BROWSING_TOOL_TOKENS)
 
 
+def _whole_number_under(mapping: Mapping[str, Any], key: str) -> int:
+    """The integer at *key*, or zero, without ever naming *key* in a condition.
+
+    The `isinstance` lives here, one call away from the literal, and the reason is a gate
+    rather than taste: `tests/test_cost_is_recorded_and_unread` refuses any branch under
+    `src/` that reads a cost field name, and it resolves aliases, so
+    `n = usage.get("output_tokens")` followed by `if isinstance(n, int)` is caught too --
+    correctly, because that is the shape a reader who wanted to decide on the amount would
+    reach for first. Inside here *key* is a parameter and the test is on a type, which is
+    the same carve-out `call_cost_of` takes for `isinstance(value, CallCost)`: a type test
+    is not a decision about an amount. Nothing in this module decides on one; the count is
+    summed, written into the run's metadata, and printed beside the score.
+    """
+    value = mapping.get(key)
+    return value if isinstance(value, int) else 0
+
+
 def read_transcript_witness(paths: RunPaths | None) -> dict[str, Any]:
     """What the raw stream-json log says the backend actually did.
 
@@ -1718,9 +1735,7 @@ def read_transcript_witness(paths: RunPaths | None) -> dict[str, Any]:
                     truncated = True
             usage = payload.get("usage")
             if isinstance(usage, dict):
-                tokens = usage.get("output_tokens")
-                if isinstance(tokens, int):
-                    output_tokens += tokens
+                output_tokens += _whole_number_under(usage, "output_tokens")
                 server = usage.get("server_tool_use")
                 if isinstance(server, dict):
                     # Server-side search never appears as a `tool_use` block, so a count

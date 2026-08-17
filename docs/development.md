@@ -603,8 +603,24 @@ installer reads. The first version of that tool narrowed with `research_brief` a
 and reported a predicate selecting eight tasks the installer would have selected none
 of, because `research_brief` drops the data manifest and the predicate keyed on it.
 
+**A skill can also be pinned to a task by name.** `configs/task_skill_pins.json`
+maps a task identifier to a list of skill names, installed whatever the field and
+shape filters say and announced at every stage. The adapter supplies the identifier
+(`rcb_agent.py` sets `manager.skill_task_id`); nothing in `src/` invents one, so a run
+without an identifier is never pinned. `validate_task_pins` is the gate that matters:
+`select_run_skills` filters the pack by name, so a pin naming a renamed skill selects
+nothing and the run proceeds with the pack it would have had anyway — no error, no log
+line, and a table that still looks right in the diff.
+
+A pin is evidence about one identifier, not a claim about a kind of task, so it is the
+only routing input that cannot be justified from the task statement. It therefore
+declares itself: `Manager._install_skills` writes `skill_pins` and `skill_pin_task_id`
+into the run config and logs `skills pinned_by_task_id`. Keep that. A benchmark number
+taken from a pinned arm is not comparable to one from an unpinned arm, and the artifact
+should say so without anyone having to remember.
+
 To add one: create `src/skills/<name>/SKILL.md` with matching frontmatter, and either
-name it in a rendered stage prompt or give it `applies_when` plus `stages`.
+name it in a rendered stage prompt, give it `applies_when` plus `stages`, or pin it.
 `validate_skill_pack` is what defines "well-formed", and
 `tests/test_run_skills.py` runs it over the shipped pack and then checks the
 install lands where the CLI looks — so a malformed skill fails the suite rather

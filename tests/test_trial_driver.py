@@ -76,7 +76,7 @@ MOVED = (
     "process_cmdline",
     "read_json",
     "release_lock",
-    "watch",
+    "watch_until_stalled",
     "write_json",
 )
 

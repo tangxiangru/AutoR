@@ -22,11 +22,13 @@ from __future__ import annotations
 
 import json
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from .approval_agent import extract_json_payload
+from .call_cost import CallCost, cost_from_stream_meta
 from .review_panel import PANEL_DIRNAME
+from .review_custody import DEFAULT_CUSTODY_MODE, CustodyWatch
 from .terminal_ui import TerminalUI
 from .utils import (
     RunPaths,
@@ -81,11 +83,19 @@ RESPONSE_STATUSES = ("addressed", "rebutted", "accepted_limitation")
 COMPLETED = "completed"
 CRASHED = "crashed"
 UNREADABLE = "unreadable"
+#: The pass ran and changed the run root while running. Its findings are kept -- see
+#: :meth:`ValidityReviewer.review` -- and its clean bill is not credited.
+TAMPERED = "tampered"
 
-#: The completions under which the stage was not attacked at all. ``reviewer_failed``
-#: in the written artifact is derived from this, so the field docs/run-artifacts.md
-#: documents keeps answering exactly the question it answered before.
-DEGRADED_COMPLETIONS = (CRASHED, UNREADABLE)
+#: The completions under which the stage did not get a review it can stand on.
+#:
+#: It was two, and both meant the reviewer never looked. ``TAMPERED`` is the third and
+#: means something else: it looked, and it moved what it was looking at, so its silence
+#: is not evidence of anything. ``reviewer_failed`` in the written artifact is derived
+#: from this and therefore now answers the slightly wider question -- *is this stage's
+#: attack usable* rather than *did the attack run* -- which is the question every reader
+#: of the field was already using it to answer.
+DEGRADED_COMPLETIONS = (CRASHED, UNREADABLE, TAMPERED)
 
 
 def is_degraded_completion(completion: str) -> bool:
@@ -160,6 +170,11 @@ class ValidityReviewOutcome:
 
     completion: str
     findings: list[ValidityFinding]
+    #: What the adversarial pass cost, when it made a backend call at all. The unmeasured
+    #: report on every path that returns without one -- the stage that is not reviewed, the
+    #: findings carried over from a panel, fake-operator mode -- because those spent nothing
+    #: and "spent nothing" is not the same claim as "cost zero dollars".
+    call_cost: CallCost = field(default_factory=CallCost)
 
     @property
     def degraded(self) -> bool:
@@ -571,9 +586,16 @@ def findings_from_panel(paths: RunPaths, stage: StageSpec) -> list[ValidityFindi
 class ValidityReviewer:
     """Runs the red-team pass. Shares the operator machinery with the approval gate."""
 
-    def __init__(self, operator, *, ui: TerminalUI | None = None) -> None:
+    def __init__(
+        self,
+        operator,
+        *,
+        ui: TerminalUI | None = None,
+        custody_mode: str = DEFAULT_CUSTODY_MODE,
+    ) -> None:
         self._operator = operator
         self.ui = ui or TerminalUI()
+        self.custody_mode = custody_mode
 
     @property
     def fake_mode(self) -> bool:
@@ -647,6 +669,8 @@ class ValidityReviewer:
                 }
             },
         )
+        watch = CustodyWatch(paths, mode=self.custody_mode)
+        watch.open()
         exit_code, stdout_text, stderr_text, _observed, _meta = self._operator._run_streaming_command(  # noqa: SLF001
             command=command,
             cwd=invocation_cwd,
@@ -656,6 +680,12 @@ class ValidityReviewer:
             mode="validity_review",
             stdin_text=stdin_text,
         )
+        breach = watch.close(stage_slug=stage.slug, label="validity_review")
+        # Carried out on all three paths below, including the two that produced no
+        # findings. A red-team pass that crashed still bought the tokens it burned, and a
+        # cost recorded only when the call succeeded would under-report exactly the visits
+        # whose spend is worth reading.
+        call_cost = cost_from_stream_meta(_meta)
         if exit_code != 0:
             # A red-team pass that did not run is recorded as not having run.
             # Writing an empty finding list would read as "nothing wrong".
@@ -666,7 +696,7 @@ class ValidityReviewer:
                 note=f"the validity reviewer failed with exit code {exit_code} and raised nothing",
                 completion=CRASHED,
             )
-            return ValidityReviewOutcome(CRASHED, [])
+            return ValidityReviewOutcome(CRASHED, [], call_cost)
 
         payload = self._extract_json(stdout_text)
         if payload is None:
@@ -685,11 +715,30 @@ class ValidityReviewer:
                 ),
                 completion=UNREADABLE,
             )
-            return ValidityReviewOutcome(UNREADABLE, [])
+            return ValidityReviewOutcome(UNREADABLE, [], call_cost)
 
         findings = self._findings_from(payload)
+        # The one place the borrowed demotion inverts, and it must not be copied straight.
+        # `validate_validity_response` returns early on an empty finding list -- "no review
+        # ran, or it found nothing; either way there is nothing owed" -- so discarding a
+        # tampering reviewer's findings would delete the next stage's obligation and make
+        # a gate *pass*. The findings go through untouched and the completion carries the
+        # doubt: the stage still owes exactly what it owed, and the run stops calling this
+        # pass completed.
+        if watch.arms_a_demotion and breach.mutated:
+            self._write_review(
+                paths,
+                stage,
+                findings,
+                note=(
+                    "the validity reviewer changed the run root while attacking it -- "
+                    + breach.summary()
+                ),
+                completion=TAMPERED,
+            )
+            return ValidityReviewOutcome(TAMPERED, findings, call_cost)
         self._write_review(paths, stage, findings)
-        return ValidityReviewOutcome(COMPLETED, findings)
+        return ValidityReviewOutcome(COMPLETED, findings, call_cost)
 
     def _write_review(
         self,

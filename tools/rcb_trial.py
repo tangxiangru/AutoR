@@ -104,7 +104,7 @@ from src.trial_driver import (  # noqa: E402,F401
     process_cmdline,
     read_json,
     release_lock,
-    watch,
+    watch_until_stalled,
     write_json,
 )
 
@@ -414,7 +414,7 @@ def launch(plan: TrialPlan, task: str, arm: str, attempt: int) -> dict[str, Any]
     state["child_pgid"] = os.getpgid(child.pid)
     write_json(path, state)
 
-    stalled = watch(child, workspace, plan.stall_seconds)
+    stalled = watch_until_stalled(child, workspace, plan.stall_seconds)
 
     finish = dict(state)
     finish.update(harvest(workspace, stdout_path, task_id=task))

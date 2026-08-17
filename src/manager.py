@@ -75,8 +75,10 @@ from .experiment_manifest import write_experiment_manifest
 from .hypothesis_manifest import write_hypothesis_manifest
 from .information_flow import CHANNELS, ChannelContext, render_inbound
 from .prompt_fragments import compose_stage_template
+from .review_custody import CUSTODY_MODES, DEFAULT_CUSTODY_MODE
 from .validity_review import (
     RESTORE_WITNESS_HEADING,
+    TAMPERED as VALIDITY_TAMPERED,
     ValidityReviewer,
     ValidityReviewOutcome,
     restore_validity_review,
@@ -106,7 +108,16 @@ from .report_plan import (
     recorded_report_plan_stamp,
     stamp_report_plan,
 )
-from .run_skills import SkillPackEntry, install_run_skills, read_skill_pack
+from .run_skills import (
+    DEFAULT_PINS_FILENAME,
+    SkillPackEntry,
+    install_run_skills,
+    load_task_pins,
+    pinned_skills_note,
+    pins_for,
+    read_skill_pack,
+    validate_task_pins,
+)
 from .skill_evolution import install_learned_skill
 from .manifest import (
     ensure_run_manifest,
@@ -126,6 +137,12 @@ from .manifest import (
 from .operator_protocol import OperatorProtocol
 from .evolution import EvolutionConfig, EvolutionController
 from .router import StageRouter, format_decision
+from .supervisor import (
+    INTERVENTION_EFFECTS,
+    REDIRECT,
+    Intervention,
+    RunSupervisor,
+)
 from .stage_comments import (
     assess_revision,
     build_comment_feedback,
@@ -161,6 +178,7 @@ from .stage_cost import (
     append_stage_cost_row,
     bypassed_row,
     classify_refusal,
+    format_run_cost_report,
     format_stage_cost_summary,
     read_stage_cost_ledger,
 )
@@ -201,6 +219,8 @@ from .writing_manifest import (
     generate_report_review,
 )
 from .utils import (
+    save_run_config,
+    load_run_config,
     DEFAULT_REFINEMENT_SUGGESTIONS,
     DEFAULT_ROUTING_MODE,
     DEFAULT_STAGE_GRAPH,
@@ -285,7 +305,13 @@ class ResearchManager:
         archive_steer: bool = False,
         archive: "Any | None" = None,
         cross_reviewer: GeminiCrossReviewer | None = None,
+        custody_mode: str = DEFAULT_CUSTODY_MODE,
     ) -> None:
+        #: Whether a reviewer episode is censused, and whether a breach demotes its
+        #: verdict. Held here as well as on the reviewer because the adversarial validity
+        #: pass is built per stage from ``self.operator`` and has no reviewer to read it
+        #: off. See :mod:`src.review_custody`.
+        self.custody_mode = custody_mode if custody_mode in CUSTODY_MODES else DEFAULT_CUSTODY_MODE
         self.project_root = project_root
         self.runs_dir = runs_dir
         self.operator = operator
@@ -295,10 +321,16 @@ class ResearchManager:
         #: Research field of this run, when the caller knows it. Narrows the field-specific
         #: half of the skill pack; None installs all of it.
         self.skill_discipline: str | None = None
+        #: The benchmark task identifier, when the caller knows one. Only the pin table
+        #: reads it: every other routing input is derived from the task statement, and
+        #: an identifier is not a property of the research question.
+        self.skill_task_id: str | None = None
         #: The pack entries this run was actually offered, kept so a stage prompt can
         #: name the ones a predicate selected for this brief. Empty until
         #: `_install_skills` has run.
         self._installed_skills: list[SkillPackEntry] = []
+        #: The subset of those that are there because this task id is pinned to them.
+        self._pinned_skills: frozenset[str] = frozenset()
         self.output_stream = output_stream
         self.ui = ui or TerminalUI(output_stream=output_stream)
         self.approval_mode = "agent" if reviewer is not None else "manual"
@@ -347,6 +379,14 @@ class ResearchManager:
         self._stage_cost: "StageCostMeter | None" = None
         self.unattended = unattended
         self.max_auto_skips = max_auto_skips
+        #: The run-level supervisor. Built here rather than passed in because there is no
+        #: configuration to make: every threshold it applies was measured, and a knob on a
+        #: measured value is an invitation to unmeasure it. It reads the stage cost ledger
+        #: and can only ever slow the run down; see :mod:`src.supervisor`.
+        self.supervisor = RunSupervisor(
+            stage_slugs=[item.slug for item in STAGES],
+            max_auto_skips=max_auto_skips,
+        )
         #: How many times Stages 03-06 may run. 1 keeps the historical
         #: single-pass behaviour; the round decision is recorded either way,
         #: so a one-round run still says whether it converged or just stopped.
@@ -752,6 +792,10 @@ class ResearchManager:
                 )
                 save_graph_state(paths, state)
                 self._log_stage_cost_summary(paths)
+                # On the abort branch as well as the clean one. A run that was cancelled
+                # spent everything it spent and produced less for it, which is the run
+                # whose bill a reader most wants in front of them.
+                self._report_run_cost(paths)
                 self._print("Run aborted.")
                 return False
 
@@ -818,6 +862,12 @@ class ResearchManager:
         # window after that heading -- an entry inserted above it pushes the disclosure
         # out of the window and turns a passing banner into a missing one.
         self._log_stage_cost_summary(paths)
+        # Terminal only, and after the log entry rather than before it: `logs.txt` is
+        # position-sensitive for two other tests and this writes nothing to it. Beside
+        # that entry rather than at the bottom of this method, so it covers all three ways
+        # a walk ends here -- completed, halted and abandoned -- and not only the one that
+        # reaches the end. Same reason `_record_block_census` sits where it does.
+        self._report_run_cost(paths)
 
         # A run that concluded it cannot answer its question reached the end of the
         # graph legitimately, and it did not produce what it set out to produce.
@@ -972,6 +1022,22 @@ class ResearchManager:
             state.path[-1].closed_round = self._closed_round
 
         intent = self._round_intent
+        # The other boundary. A stage that has now ended two visits without an approval is
+        # not one a third visit fixes, and the supervisor says so by naming a forward move
+        # -- but only one the guards already left open, which is why the admissible set is
+        # computed here and handed in rather than looked up there.
+        exit_ruling = self.supervisor.review_stage_exit(
+            paths=paths,
+            stage_slug=stage.slug,
+            admissible_forward=[
+                move.target
+                for move in self.stage_graph.moves(
+                    paths, stage.slug, state, final_stage=self._final_stage
+                )
+                if move.admissible and move.edge.kind in {"advance", "finish"}
+            ],
+        )
+        self._note_supervisor_ruling(paths, stage, exit_ruling)
         decision = self.router.choose(
             paths=paths,
             stage=stage,
@@ -998,6 +1064,11 @@ class ResearchManager:
             skips_left=(
                 self.max_auto_skips - len(self.auto_skipped_stages)
                 if self.unattended
+                else None
+            ),
+            required=(
+                (exit_ruling.target, exit_ruling.because)
+                if exit_ruling.kind == REDIRECT
                 else None
             ),
         )
@@ -2333,6 +2404,44 @@ class ResearchManager:
         except Exception:
             pass
 
+    def _deliverable_stage_number(self) -> int:
+        """The stage a run out of budget would be routed to, as a number.
+
+        The same value ``_route_to_deliverable`` computes, read from the same two places
+        so the supervisor's last-resort rule and the routing it describes cannot disagree:
+        the writing node, unless ``--final-stage`` names an earlier one, in which case the
+        run was told to stop there and there is nothing beyond it either.
+        """
+        target = WRITING_STAGE
+        if self._final_stage is not None and self._final_stage.number < target.number:
+            target = self._final_stage
+        return target.number
+
+    def _note_supervisor_ruling(
+        self, paths: RunPaths, stage: StageSpec, ruling: "Intervention"
+    ) -> None:
+        """Put an acting ruling in the run log, beside everything else the run did.
+
+        Only the ones that act. Every ruling including the ones that changed nothing is
+        already in the supervisor's own ledger, which is what an audit reads; copying a
+        hundred and fifty ``continue``s into ``logs.txt`` would bury the two or three that
+        mattered under the ones that did not.
+        """
+        if not ruling.acts:
+            return
+        try:
+            append_log_entry(
+                paths.logs,
+                f"{stage.slug} supervisor_{ruling.kind}",
+                (
+                    f"rule: {ruling.rule}\n"
+                    f"permitted: {INTERVENTION_EFFECTS[ruling.kind]}\n"
+                    f"because: {ruling.because}"
+                ),
+            )
+        except Exception:
+            pass
+
     def _note_stage_failure(self, stage: StageSpec, attempt_no: int, kind: str, reason: str = "") -> None:
         """Charge one consumed attempt to the open meter, if this stage owns it.
 
@@ -2350,16 +2459,35 @@ class ResearchManager:
 
         Counted at the manager's own call sites rather than inferred from the transcript,
         and counted *before* the call rather than after, so a launch that then raises is
-        still on the row. The backend's own cost report never reaches here --
-        `OperatorResult` carries no usage block; see `src/stage_cost.py` for what would
-        have to change -- so this is the one figure about spend the harness can state
-        without guessing, and the row says exactly what it counts rather than implying a
-        bill.
+        still on the row. What the launch went on to cost is charged separately by
+        `_note_call_cost`, after it returns: a call that raised has a counter and no cost
+        report, and those are two different facts about it.
         """
         meter = self._stage_cost
         if meter is None or meter.stage.slug != stage.slug:
             return
         meter.note_operator_call()
+
+    def _note_call_cost(self, stage: StageSpec, cost: object) -> None:
+        """Charge one backend call's own cost report to the open meter.
+
+        Called with whatever the operator layer returned -- `OperatorResult.call_cost`,
+        `ReviewDecision.call_cost`, `ValidityReviewOutcome.call_cost` -- and never with a
+        number this file worked out. The stage check is the same one `_note_operator_call`
+        makes and is there for the same reason: `_collect_review_decision` is also reached
+        from intake and from the two bootstrap loops, which run outside any stage visit,
+        and a call made there must not be billed to whichever stage happens to be open.
+
+        Nothing is charged twice. There are five call sites over four dispatch paths --
+        the stage run, the summary repair (two of them, one per branch that triggers it),
+        the approval gate and the adversarial pass -- and each hands its own result here
+        once, immediately after the call it came from. A repair pass is a separate backend
+        launch with a separate report, not a second reading of the first.
+        """
+        meter = self._stage_cost
+        if meter is None or meter.stage.slug != stage.slug:
+            return
+        meter.note_call_cost(cost)
 
     def _note_review_call(self, stage: StageSpec) -> None:
         """One backend launch dispatched to judge the stage's work.
@@ -2386,12 +2514,47 @@ class ResearchManager:
         The ledger is the machine-readable copy and this is the human one. Written on the
         way out of a run whether it completed or was cancelled, because a cancelled run is
         the one whose spend is worth reading.
+
+        Attempts, wall clock and the failure census only. The tokens and the dollars go to
+        the terminal, once, in `_report_run_cost`, and to nowhere else: the run's output is
+        the paper, and a second file carrying the bill is a second thing that has to stay
+        true.
         """
         try:
             append_log_entry(
                 paths.logs,
                 "stage_cost_ledger",
                 format_stage_cost_summary(read_stage_cost_ledger(paths)),
+            )
+        except Exception:
+            pass
+
+    def _report_run_cost(self, paths: RunPaths) -> None:
+        """Print what the run cost, once, at the end, to the terminal and to nothing else.
+
+        The whole of "report tokens and dollars at the end of the run". Three things this
+        deliberately does not do, each of them asked for by name:
+
+        * It does not write a file. Not `logs.txt`, not `workspace/report/`, not the PDF —
+          the deliverable does not change. The machine-readable copy already exists as
+          `stage_cost_ledger.json`, so a second one would be a second thing to keep true.
+        * It does not decide anything. The numbers reach `self.ui` and stop;
+          `tests/test_cost_is_recorded_and_unread.py` walks the syntax of every module
+          under `src/` and fails if any of them reaches a condition.
+        * It does not report a bare token count. `format_run_cost_report` names the four
+          usage fields separately and spells out the addends of any sum, because
+          `input_tokens` alone is the uncached remainder and understates a measured run by
+          five orders of magnitude.
+
+        Best-effort, like every other closing report here: a run that produced good work is
+        not lost because the account of it could not be printed.
+        """
+        try:
+            rows = read_stage_cost_ledger(paths)
+            self.ui.panel(
+                "What this run cost",
+                format_run_cost_report(rows).splitlines(),
+                color=self.ui.FG_CYAN,
             )
         except Exception:
             pass
@@ -2465,9 +2628,31 @@ class ResearchManager:
             # "no attempts allowed" and every stage fails before it starts, which is the
             # opposite of no limit. Same predicate, offset by one to match the `>=`.
             stuck = is_stuck(recent_failures)
-            if stuck or attempts_exhausted(
+            # The supervisor is asked here, before the attempt is bought, because the
+            # failure it exists to prevent is a visit grinding through attempt after
+            # attempt inside one stage: asked only at the stage boundary it would watch
+            # the money leave and comment afterwards. It rules on the harness-written cost
+            # ledger and the open meter, never on anything under `workspace/`.
+            ruling = self.supervisor.review_attempt(
+                paths=paths,
+                stage_slug=stage.slug,
+                stage_number=stage.number,
+                meter=self._stage_cost,
+                attempt_no=attempt_no,
+                auto_skips_spent=len(self.auto_skipped_stages),
+                deliverable_number=self._deliverable_stage_number(),
+                per_stage_ceiling=self.max_stage_attempts,
+            )
+            self._note_supervisor_ruling(paths, stage, ruling)
+            # `attempt_ceiling` is a `min` against `--max-attempts`, so this can differ
+            # from the ceiling the run was started with only downwards, and only on a
+            # stage `reallocate` has already moved budget away from. It is a *per-visit*
+            # ceiling, which is what `loop_attempts` counts against: every entry to a
+            # stage is funded, so a backward edge still buys a real visit.
+            ceiling = self.supervisor.attempt_ceiling(stage.slug, self.max_stage_attempts)
+            if stuck or ruling.ends_the_visit or attempts_exhausted(
                 loop_attempts - (polish_rounds - entry_polish_rounds) + 1,
-                self.max_stage_attempts,
+                ceiling,
             ):
                 # What the attempts were spent on, from the meter rather than from
                 # `last_validation_errors`. That list is assigned at exactly one place --
@@ -2487,15 +2672,35 @@ class ResearchManager:
                 if self._stage_cost is not None:
                     self._stage_cost.note_exhausted()
                 if stuck:
+                    # `is_stuck` first, and the supervisor second, where both would fire.
+                    # They agree on the count -- `STUCK_AFTER_IDENTICAL_FAILURES` and
+                    # `STOP_AFTER_IDENTICAL_FAILURES` are both three -- so on a repeated
+                    # *validator* refusal they land on the same attempt, and whichever is
+                    # asked first writes the message. `is_stuck` is the more specific of
+                    # the two: it names the validation errors that repeated. The
+                    # supervisor's own reason for existing beside it is that it covers what
+                    # `is_stuck` cannot see -- a reviewer refusing three times, a backend
+                    # not answering three times -- neither of which reaches
+                    # `last_validation_errors`. Letting the general rule pre-empt the
+                    # specific one trades a message naming the errors for one naming a rule.
                     error = (
                         f"{STUCK_AFTER_IDENTICAL_FAILURES} consecutive attempts failed in "
                         f"exactly the same way, so another one cannot help. Attempts spent "
                         f"on: {spent_on}. Repeated "
                         f"validation errors: {'; '.join(last_validation_errors) or 'None recorded.'}"
                     )
+                elif ruling.ends_the_visit:
+                    # Named as the supervisor's, not folded into the exhaustion message:
+                    # a stage the run chose to stop paying for and a stage that ran out of
+                    # tries are different events, and only one of them has a rule behind
+                    # it that can be looked up.
+                    error = (
+                        f"The run supervisor ruled `{ruling.kind}` under `{ruling.rule}`: "
+                        f"{ruling.because}. Attempts spent on: {spent_on}."
+                    )
                 else:
                     error = (
-                        f"Exceeded {self.max_stage_attempts} attempts in the current stage run. "
+                        f"Exceeded {ceiling} attempts in the current stage run. "
                         f"Attempts spent on: {spent_on}. "
                         f"Last validation errors: {'; '.join(last_validation_errors) or 'None recorded.'}"
                     )
@@ -2504,13 +2709,24 @@ class ResearchManager:
                     + (
                         f"made no progress across {STUCK_AFTER_IDENTICAL_FAILURES} identical failures."
                         if stuck
-                        else f"failed after {self.max_stage_attempts} attempts in this run."
+                        else f"was stopped by the run supervisor: {ruling.because}."
+                        if ruling.ends_the_visit
+                        else f"failed after {ceiling} attempts in this run."
                     ),
                     level="error",
                 )
                 append_log_entry(
                     paths.logs,
-                    f"{stage.slug} " + ("stage_stuck" if stuck else "max_attempts_exceeded"),
+                    f"{stage.slug} "
+                    + (
+                        # Same precedence as the message above, for the same reason: the
+                        # specific rule names its cause, the general one names itself.
+                        "stage_stuck"
+                        if stuck
+                        else f"supervisor_{ruling.kind}"
+                        if ruling.ends_the_visit
+                        else "max_attempts_exceeded"
+                    ),
                     error,
                 )
                 mark_stage_failed_manifest(paths, stage, error)
@@ -2550,6 +2766,7 @@ class ResearchManager:
                 attempt_no,
                 continue_session=continue_session,
             )
+            self._note_call_cost(stage, result.call_cost)
             if result.session_id:
                 sync_stage_session_id(paths, stage, result.session_id)
             append_log_entry(
@@ -2586,6 +2803,7 @@ class ResearchManager:
                     paths=paths,
                     attempt_no=attempt_no,
                 )
+                self._note_call_cost(stage, repair_result.call_cost)
                 append_log_entry(
                     paths.logs,
                     f"{stage.slug} attempt {attempt_no} repair_result",
@@ -2645,6 +2863,7 @@ class ResearchManager:
                     paths=paths,
                     attempt_no=attempt_no,
                 )
+                self._note_call_cost(stage, repair_result.call_cost)
                 append_log_entry(
                     paths.logs,
                     f"{stage.slug} attempt {attempt_no} repair_result",
@@ -3237,6 +3456,7 @@ class ResearchManager:
             stage_markdown=stage_markdown,
             suggestions=suggestions,
         )
+        self._note_call_cost(stage, decision.call_cost)
         # Before anything downstream reads the verdict. `_settle_obligations` branches on
         # `decision.choice == "5"` to record what this stage deferred, and the effort plan
         # counts a refusal as a contest -- a promotion patched in after the return would be
@@ -4415,9 +4635,13 @@ class ResearchManager:
         self.ui.show_status(
             f"Adversarial validity review of {stage.stage_title}...", level="info"
         )
-        reviewer = ValidityReviewer(self.operator, ui=self.ui)
+        reviewer = ValidityReviewer(self.operator, ui=self.ui, custody_mode=self.custody_mode)
         outcome = self._attempt_validity_review(paths, stage, stage_markdown, reviewer, attempt_no=1)
-        if outcome.degraded:
+        # `and not tampered`: the re-ask exists for "a single 429 or a truncated stream",
+        # and a tamper is neither. A second call would hand a reviewer that already used
+        # one write window a second one, and there is nothing about a tamper that a
+        # retry repairs.
+        if outcome.degraded and outcome.completion != VALIDITY_TAMPERED:
             # Exactly once. A second failure is evidence about the backend, not about
             # this prompt, and a third call would buy the same empty list at the same
             # price. What the re-ask does buy back is the routine case: a single 429 or
@@ -4492,7 +4716,7 @@ class ResearchManager:
         from .validity_review import CRASHED
 
         try:
-            return reviewer.review(
+            outcome = reviewer.review(
                 paths=paths,
                 stage=stage,
                 stage_markdown=stage_markdown,
@@ -4505,6 +4729,12 @@ class ResearchManager:
                 f"The adversarial validity review did not run (attempt {attempt_no}): {exc}",
             )
             return ValidityReviewOutcome(CRASHED, [])
+        # Charged on both attempts, and on the crashed one too: an adversarial pass that
+        # burned tokens and raised nothing still cost what it cost. `_note_call_cost`
+        # ignores it when no meter for this stage is open, which is the same guard every
+        # other charge in this file goes through.
+        self._note_call_cost(stage, outcome.call_cost)
+        return outcome
 
     def validity_disclosure(self) -> str:
         """The run's banner line when a stage was approved but never attacked.
@@ -4727,9 +4957,17 @@ class ResearchManager:
         must not fail because a skill file is unreadable, since skills are
         guidance and every stage has a complete prompt without them.
         """
+        pin_table = load_task_pins(self.project_root / "configs" / DEFAULT_PINS_FILENAME)
+        # Checked here rather than only in the suite, because the way a pin table dies is
+        # silent: `select_run_skills` filters the pack by name, so a pin naming a renamed
+        # skill selects nothing and the run proceeds with the pack it would have had.
+        # No error, no missing file, and a table that still reads correctly in the diff.
+        for problem in validate_task_pins(pin_table, self.skills_dir):
+            append_log_entry(paths.logs, "skills pin_table_problem", problem)
+        pinned = pins_for(self.skill_task_id, pin_table)
         try:
             installed = install_run_skills(
-                paths, self.skills_dir, discipline=self.skill_discipline
+                paths, self.skills_dir, discipline=self.skill_discipline, pinned=pinned
             )
             # Kept, not discarded. Discarding it is why `format_skills_for_prompt`
             # had no caller and sat under a named exemption in
@@ -4741,6 +4979,27 @@ class ResearchManager:
             self._installed_skills = [
                 entry for entry in read_skill_pack(self.skills_dir) if entry.name in chosen
             ]
+            self._pinned_skills = frozenset(pinned & chosen)
+            # A pin is the one routing input that does not follow from the task
+            # statement, so a run that was pinned has to say so where a reader of its
+            # result will find it. Both the human-readable log and the machine-readable
+            # config, because the two are read by different people.
+            note = pinned_skills_note(self.skill_task_id, self._pinned_skills)
+            if note:
+                append_log_entry(
+                    paths.logs,
+                    "skills pinned_by_task_id",
+                    "This run received skills pinned to its task identifier, not chosen "
+                    "from its task statement. A score from this run is not comparable to "
+                    f"one from an unpinned run of the same task.\n{note}",
+                )
+                try:
+                    config = load_run_config(paths)
+                    config["skill_pins"] = sorted(self._pinned_skills)
+                    config["skill_pin_task_id"] = self.skill_task_id
+                    save_run_config(paths, config)
+                except (OSError, TypeError, ValueError):
+                    pass
             # The third layer: what earlier runs in this field wrote down for whoever came
             # next. Installed after the fixed pack so a field with no history costs nothing,
             # and best-effort like the rest -- guidance a run cannot read is guidance it does
