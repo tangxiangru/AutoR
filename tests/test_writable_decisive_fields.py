@@ -34,8 +34,13 @@ one behind the tuple is the same defect one level up from the one this file is a
 
 **What is derived and what is declared.** The population is derived: the ``validate_*``
 functions are parsed out of ``src/*.py`` at module scope and on classes, the guards come
-from ``stage_graph.GUARDS`` and the assessors from ``scorecard.FEATURES``, so a new gate
-fails this file rather than joining the tree unclassified. Each declared path is resolved
+from ``stage_graph.GUARDS``, the assessors from ``scorecard.FEATURES`` and the run
+supervisor's rules from ``supervisor.SUPERVISOR_RULES``, so a new gate fails this file
+rather than joining the tree unclassified. The supervisor is here because it decides
+things -- it can end a stage visit and move an attempt budget -- and the question this
+file asks about a decider is the one its own design turns on: the operator writes under
+``workspace/``, so a supervisor that read anything there would be one the supervised party
+writes. Each declared path is resolved
 against ``build_run_paths``, so a renamed ``RunPaths`` field fails too, and *whether a path
 is under* ``workspace/`` is computed rather than asserted.
 
@@ -59,6 +64,7 @@ from typing import Callable, NamedTuple
 
 from src.scorecard import DROP, FEATURES, KEEP, build_scorecard
 from src.stage_graph import GUARDS, GraphState, Visit
+from src.supervisor import SUPERVISOR_RULES
 from src.utils import STAGES, RunPaths, build_run_paths, ensure_run_layout
 
 REPO = Path(__file__).resolve().parent.parent
@@ -379,6 +385,63 @@ GATES: tuple[Gate, ...] = (
         "As review_panel, with the ledger at reviews/effort.json: `summary.run_as_routine` "
         "is the number the verdict turns on.",
     ),
+    # ------------------------------------------------- the run supervisor's rules
+    #
+    # Not gates in the sense the rest of this table is -- none of them lets anything
+    # through, and by construction none of them can: `AttemptAllowance.visit_ceiling` is a
+    # `min` against the run's own `--max-attempts` and there is no path from a ruling to an
+    # approval. They are here because they *refuse* spending, and the question this file
+    # asks of a refusal is who wrote the field it turns on. Every one of them reads
+    # `stage_cost_ledger.json` or an in-memory meter the harness fills, and nothing else.
+    Gate(
+        "supervisor:nothing_to_decide",
+        (),
+        NO_FIELD,
+        "The default ruling. It reads the same fields as the rules that did not fire and "
+        "acts on none of them, so there is no decisive field. In the table for the reason "
+        "`guard:always` is: a rule that decides nothing and a rule nobody classified look "
+        "the same from outside.",
+    ),
+    Gate(
+        "supervisor:unchanging_failure",
+        ("stage_cost_ledger",),
+        HARNESS,
+        "Ends a stage visit when the same failure digest has repeated. The digests come "
+        "from the open `StageCostMeter`, which the manager fills at its own branch points "
+        "and closes into `stage_cost_ledger.json` at the run root; the agent authors the "
+        "*reason text* a reviewer or validator wrote about its draft, but not the record "
+        "that the refusal happened, and cannot reach either file. Ending a visit hands to "
+        "the stage-exhaustion path, whose outcomes are a skip stub and an abort.",
+    ),
+    Gate(
+        "supervisor:disproportionate_spend",
+        ("stage_cost_ledger",),
+        HARNESS,
+        "Moves a stage's unspent attempt allowance to the stages that have not run, on "
+        "the charged-attempt counts in `stage_cost_ledger.json`. Counts, written by the "
+        "manager as it dispatches: nothing here reads a claim. The total is conserved and "
+        "the per-visit ceiling stays a `min` against `--max-attempts`, so the move cannot "
+        "buy an attempt the run had not already bought.",
+    ),
+    Gate(
+        "supervisor:unfunded_revisit",
+        ("stage_cost_ledger",),
+        HARNESS,
+        "Names a forward move when a stage has ended two visits without an approval. The "
+        "outcome field it counts is written by the manager on the way out of each visit. "
+        "It picks from the admissible set the graph hands it and the router checks the "
+        "name against the live moves again, so it can only ever remove alternatives.",
+    ),
+    Gate(
+        "supervisor:no_recovery_left",
+        (),
+        NO_FIELD,
+        "Marks the run for a human and stops spending when the auto-skip budget is spent "
+        "and the run is at or past the stage that writes the deliverable. Both inputs are "
+        "the manager's own in-memory state -- `auto_skipped_stages` and the stage number "
+        "-- so there is no file and nobody to trust. It reproduces the condition "
+        "`_route_to_deliverable` returns False on rather than adding one.",
+    ),
 )
 
 
@@ -421,6 +484,7 @@ def _gates_in_the_tree() -> set[str]:
         found |= _validators_in(path.read_text(encoding="utf-8"), path.stem)
     found |= {f"guard:{name}" for name in GUARDS}
     found |= {f"scorecard:{feature['key']}" for feature in FEATURES}
+    found |= {f"supervisor:{rule}" for rule in SUPERVISOR_RULES}
     return found
 
 
