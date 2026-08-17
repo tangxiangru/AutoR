@@ -133,23 +133,160 @@ class PairTests(unittest.TestCase):
         self.assertAlmostEqual(pair.difference, 0.05, places=6)
         self.assertFalse(pair.same_shape)
 
-    def test_a_shape_change_is_counted_rather_than_folded_in(self) -> None:
-        """That a capability changes how far a run gets is a result. Averaging it
-        into a mean over shared stages would hide the thing worth reporting."""
+    def test_a_shape_change_is_set_aside_rather_than_folded_in(self) -> None:
+        """That a capability changes how far a run gets is a result, and not a score.
+
+        The shape-differing pair used to be *counted* and *averaged at the same time*:
+        `shape_changes` said one and the mean above it was taken over both pairs. The
+        two pairs here disagree in sign on purpose — the same-shape pair is +0.05 and
+        the shape-differing one is -0.20 — so a mean that still included the second one
+        would come out negative and a reader would take the sign of the thing that was
+        supposed to have been set aside.
+        """
         result = collect_pairs(
             [
                 run("g1", "off", stages=flat(0.70)),
-                run("g1", "on", stages=flat(0.70, EIGHT[:4])),
+                run("g1", "on", stages=flat(0.50, EIGHT[:4])),
                 run("g2", "off", stages=flat(0.70)),
-                run("g2", "on", stages=flat(0.70)),
+                run("g2", "on", stages=flat(0.75)),
             ],
             capability="effort_tiers",
             control_arm="off",
             treatment_arm="on",
         )
-        self.assertEqual((result.n, result.shape_changes), (2, 1))
-        self.assertAlmostEqual(result.mean_difference, 0.0, places=6)
-        self.assertIn("did not reach the same stages", format_trial_report(result))
+        self.assertEqual((result.n, result.shape_changes), (1, 1))
+        self.assertEqual(
+            ([pair.trial_id for pair in result.comparable_pairs],
+             [pair.trial_id for pair in result.shape_changed_pairs]),
+            (["g2"], ["g1"]),
+        )
+        self.assertAlmostEqual(result.mean_difference, 0.05, places=6)
+        self.assertAlmostEqual(result.shape_changed_mean, -0.20, places=6)
+        self.assertEqual((result.wins, result.losses), (1, 0))
+
+        text = format_trial_report(result)
+        self.assertIn("pairs: **1** same-shape (+1 shape-differing)", text)
+        self.assertIn("mean difference: **+0.0500**", text)
+        self.assertIn("set aside: 1 shape-differing pair(s)", text)
+        self.assertIn("**-0.2000**", text)
+        self.assertIn("did not reach the same stages", text)
+
+    def test_the_p_value_and_its_floor_are_over_the_same_pairs_as_the_mean(self) -> None:
+        """The crack this module already records at ``MAX_EXACT_PAIRS``, not reopened.
+
+        `floor` divides by `n` and `p_value` enumerates `differences`. Set the mean
+        aside from some pairs and leave either of those reading `pairs` and the report
+        prints a p from one sample beside a floor from another — which is exactly the
+        shape the header calls out as breaking the underpowered refusal at the point it
+        matters.
+        """
+        records = []
+        for index in range(4):
+            records += [
+                run(f"g{index}", "off", stages=flat(0.70)),
+                run(f"g{index}", "on", stages=flat(0.75)),
+            ]
+        # Two of the four pairs lose their shape; the statistics must fall to n = 2.
+        records += [
+            run("h0", "off", stages=flat(0.70)),
+            run("h0", "on", stages=flat(0.75, EIGHT[:3])),
+            run("h1", "off", stages=flat(0.70)),
+            run("h1", "on", stages=flat(0.75, EIGHT[:3])),
+        ]
+        result = collect_pairs(
+            records, capability="effort_tiers", control_arm="off", treatment_arm="on"
+        )
+        self.assertEqual((result.n, result.shape_changes), (4, 2))
+        self.assertEqual(len(result.differences), result.n)
+        self.assertAlmostEqual(result.floor, min_attainable_p(4), places=12)
+        self.assertAlmostEqual(result.p_value, sign_flip_p(result.differences), places=12)
+
+    def test_a_declared_composition_is_what_makes_a_one_key_measure_see_a_shape_change(
+        self,
+    ) -> None:
+        """The half a benchmark total cannot see, and the half it always could.
+
+        `src.rcb_trial` gives every record one `stage_fitness` key, so the key sets of
+        two arms that got through pairing are equal by construction and `same_shape` was
+        true of every pair it ever saw. The producer knows better and now says so. Same
+        two records both ways, so the only thing that moved is the declaration.
+        """
+        records = [
+            run("g1", "off", stages={"Energy_001|abc": 40.0}),
+            run("g1", "on", stages={"Energy_001|abc": 60.0}),
+        ]
+        kwargs = dict(capability="effort_tiers", control_arm="off", treatment_arm="on")
+
+        undeclared = collect_pairs(records, **kwargs)
+        self.assertEqual((undeclared.n, undeclared.shape_changes), (1, 0))
+
+        declared = collect_pairs(
+            records,
+            **kwargs,
+            composition={
+                ("g1", "off"): ("01_s", "02_s", "03_s", "04_s"),
+                ("g1", "on"): tuple(EIGHT[:7]),
+            },
+        )
+        self.assertEqual((declared.n, declared.shape_changes), (0, 1))
+        self.assertAlmostEqual(declared.shape_changed_mean, 20.0, places=6)
+
+        agreeing = collect_pairs(
+            records,
+            **kwargs,
+            composition={("g1", "off"): tuple(EIGHT), ("g1", "on"): tuple(EIGHT)},
+        )
+        self.assertEqual((agreeing.n, agreeing.shape_changes), (1, 0))
+
+    def test_a_sample_that_is_all_shape_differing_does_not_read_as_a_null(self) -> None:
+        """The state the live trial is actually in, and the sentence it needs.
+
+        With every pair set aside the mean is over nothing and prints `+0.0000`, which
+        reads off the page as "measured, no effect". The report has to say the mean is
+        over nothing, next to the mean.
+        """
+        result = collect_pairs(
+            [
+                run("g1", "off", stages=flat(0.70)),
+                run("g1", "on", stages=flat(0.50, EIGHT[:4])),
+            ],
+            capability="effort_tiers",
+            control_arm="off",
+            treatment_arm="on",
+        )
+        self.assertEqual((result.n, result.shape_changes), (0, 1))
+        text = format_trial_report(result)
+        self.assertIn("there is no same-shape pair yet", text)
+        self.assertIn("mean difference: **+0.0000**", text)
+        self.assertIn("set aside: 1 shape-differing pair(s)", text)
+
+    def test_the_criterion_table_is_over_the_pairs_the_scalar_is_over(self) -> None:
+        """One population, or `concentration` is a percentage of a different number.
+
+        The table is the total's decomposition — on the benchmark path the column sums
+        to the scalar above it — and the report prints a concentration read off it
+        against a floor read off its width. Leave the table on every pair while the
+        mean moves to the same-shape ones and both the share and the support count are
+        computed over a sample the number beside them was not.
+
+        The shape-differing pair moves the criterion by -0.20 and the same-shape pair by
+        +0.05, so support of 2 or a mean of -0.075 is the mutation showing.
+        """
+        result = collect_pairs(
+            [
+                run("g1", "off", stages=flat(0.70), criteria={"c": 0.70}),
+                run("g1", "on", stages=flat(0.50, EIGHT[:4]), criteria={"c": 0.50}),
+                run("g2", "off", stages=flat(0.70), criteria={"c": 0.70}),
+                run("g2", "on", stages=flat(0.75), criteria={"c": 0.75}),
+            ],
+            capability="effort_tiers",
+            control_arm="off",
+            treatment_arm="on",
+        )
+        self.assertEqual((result.n, result.shape_changes), (1, 1))
+        self.assertEqual(result.criterion_support(), {"c": 1})
+        self.assertAlmostEqual(result.criterion_differences()["c"], 0.05, places=6)
+        self.assertAlmostEqual(result.mean_difference, 0.05, places=6)
 
 
 class CollectionTests(unittest.TestCase):

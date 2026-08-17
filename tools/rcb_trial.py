@@ -72,6 +72,7 @@ from src.rcb_trial import (  # noqa: E402
     driver_clause,
     format_rcb_trial_report,
     items_from_score_payloads,
+    judge_draws_in,
     next_action,
 )
 
@@ -684,14 +685,33 @@ def score_path(plan: TrialPlan, task: str, arm: str, attempt: int, label: str, r
     )
 
 
-def score_once(plan: TrialPlan, state: Mapping[str, Any], out: Path) -> bool:
+def score_once(plan: TrialPlan, state: Mapping[str, Any], out: Path, *, draws: int) -> bool:
+    """One score file, holding ``draws`` judge passes over the same workspace.
+
+    ``draws`` is keyword-only and has no default, which is the whole of the fix for the
+    knob that did not arrive. The plan declared ``replicates: 3`` and this function built
+    a command line with no ``--draws`` on it, so ``score_rcb_run.py`` took its own default
+    of 1 and every score file the driver has ever written says ``"draws": 1`` and
+    ``"total_spread": null`` — including the one the first live pair's 8.5-point gap was
+    read off. The plan's count reached ``final_pass``'s file loop and stopped there, one
+    layer above the process that talks to the judge, on a path a trial in flight has not
+    taken yet. A default here would have let the same call site keep saying nothing;
+    naming the count at each of the two call sites is what makes the spend legible.
+
+    The two realisations are equivalent and :func:`judge_draws_in` is what makes them so:
+    ``final_pass`` spends the budget as ``replicates`` separately checkpointed files of
+    one draw each, so a judge flake costs one draw rather than all of them, and the
+    in-loop score has only one file and spends it as one file of ``replicates`` draws.
+    Either way the arm's recorded draw count is the plan's.
+    """
     workspace = Path(str(state["workspace"]))
     if plan.judge_kind == "fake":
-        return fake_score(plan, workspace, out)
+        return fake_score(plan, workspace, out, draws=draws)
     argv = [
         sys.executable, str(REPO_ROOT / "tools" / "score_rcb_run.py"),
         "--workspace", str(workspace), "--bench", plan.bench,
         "--judge", plan.judge_kind, "--model", plan.judge_model, "--out", str(out),
+        "--draws", str(draws),
     ]
     env = dict(os.environ)
     # Only pins the iteration order of the bench's `IMAGE_EXTENSIONS` set, which decides
@@ -706,7 +726,7 @@ def score_once(plan: TrialPlan, state: Mapping[str, Any], out: Path) -> bool:
     return done.returncode == 0 and out.exists()
 
 
-def fake_score(plan: TrialPlan, workspace: Path, out: Path) -> bool:
+def fake_score(plan: TrialPlan, workspace: Path, out: Path, *, draws: int = 1) -> bool:
     """A deterministic stand-in judge, for exercising the harness without spending it.
 
     It reads the real checklist, so weights, item count, types and ordering are the
@@ -714,7 +734,19 @@ def fake_score(plan: TrialPlan, workspace: Path, out: Path) -> bool:
     ``FAKE_QUALITY`` line, which is the one thing the fake judge reads out of it, so a
     dry run produces a real, signed, non-zero difference instead of two identical
     columns that would let a broken seam pass.
+
+    ``draws`` is folded by :func:`tools.score_rcb_run.aggregate_draws`, the function the
+    real scorer folds with, and the fabricated score moves with the draw index. Both
+    halves are the point. A fake judge that ignored ``draws`` would write ``"draws": 1``
+    into every dry run, so the seam this branch exists to exercise — a declared replicate
+    count arriving at the process that talks to the judge — would be exercised on the one
+    path no test can afford to take. And a fake judge that repeated an identical draw
+    would report a spread of exactly 0.0 over three of them, which is the reading
+    ``resolution_is_measured`` exists to keep off the page: a stochastic judge that
+    resolved every item perfectly.
     """
+    from tools.score_rcb_run import aggregate_draws
+
     meta = read_json(workspace / "_meta.json")
     task = str(meta.get("task_id") or "")
     checklist = json.loads(
@@ -728,46 +760,50 @@ def fake_score(plan: TrialPlan, workspace: Path, out: Path) -> bool:
     for line in text.splitlines():
         if line.startswith("FAKE_QUALITY:"):
             quality = float(line.split(":", 1)[1])
-    items = []
-    total_weighted = 0.0
-    total_weight = 0.0
-    for index, entry in enumerate(checklist):
-        weight = float(entry.get("weight", 0.0))
-        seed = hashlib.sha256(
-            f"{task}|{index}|{workspace.name}|{out.name}".encode("utf-8")
-        ).digest()
-        jitter = seed[0] % 5
-        score = max(0, min(100, int(20 + quality + jitter)))
-        items.append(
+    drawn: list[dict] = []
+    for draw_no in range(max(1, draws)):
+        items = []
+        total_weighted = 0.0
+        total_weight = 0.0
+        for index, entry in enumerate(checklist):
+            weight = float(entry.get("weight", 0.0))
+            seed = hashlib.sha256(
+                f"{task}|{index}|{workspace.name}|{out.name}|{draw_no}".encode("utf-8")
+            ).digest()
+            jitter = seed[0] % 5
+            score = max(0, min(100, int(20 + quality + jitter)))
+            items.append(
+                {
+                    "index": index,
+                    "type": entry.get("type", "text"),
+                    "content": str(entry.get("content", ""))[:200],
+                    "weight": weight,
+                    "score": score,
+                    "reasoning": "fake judge",
+                }
+            )
+            total_weighted += weight * score
+            total_weight += weight
+        drawn.append(
             {
-                "index": index,
-                "type": entry.get("type", "text"),
-                "content": str(entry.get("content", ""))[:200],
-                "weight": weight,
-                "score": score,
-                "reasoning": "fake judge",
+                "run_id": meta.get("run_id"),
+                "task_id": task,
+                "items": items,
+                "total_weight": total_weight,
+                "total_score": round(total_weighted / total_weight, 2) if total_weight else 0,
+                "judge_model": plan.judge_model,
+                "judge_calls": len(items),
+                "judge_failures": [],
+                "checklist_items_expected": len(checklist),
+                # The real sweep, not an empty list: which images the judge is shown is
+                # 60.6% of the benchmark's weight, and a dry run that reports none of them
+                # exercises none of the reporting that exists to say so.
+                "images_shown": [str(path) for path in bench_image_sweep(workspace)[:5]],
+                "images_available": len(bench_image_sweep(workspace)),
+                "bench_revision": "fake-bench",
             }
         )
-        total_weighted += weight * score
-        total_weight += weight
-    payload = {
-        "run_id": meta.get("run_id"),
-        "task_id": task,
-        "items": items,
-        "total_weight": total_weight,
-        "total_score": round(total_weighted / total_weight, 2) if total_weight else 0,
-        "judge_model": plan.judge_model,
-        "judge_calls": len(items),
-        "judge_failures": [],
-        "checklist_items_expected": len(checklist),
-        # The real sweep, not an empty list: which images the judge is shown is 60.6% of
-        # the benchmark's weight, and a dry run that reports none of them exercises none
-        # of the reporting that exists to say so.
-        "images_shown": [str(path) for path in bench_image_sweep(workspace)[:5]],
-        "images_available": len(bench_image_sweep(workspace)),
-        "bench_revision": "fake-bench",
-    }
-    write_json(out, payload)
+    write_json(out, aggregate_draws(drawn))
     return True
 
 
@@ -779,6 +815,11 @@ def final_pass(plan: TrialPlan) -> None:
     across the trial would ride into the published difference unmeasured. The published
     scores all come from one continuous pass with the same judge, and the replicates
     inside it are what turn the noise band from folklore into a measurement.
+
+    ``draws=1`` per file, and the loop is the replication. That split is the reason a
+    lost draw costs one draw: the scorer writes nothing at all when any judge call in an
+    invocation fails, so asking one invocation for all three would make the judge's worst
+    minute cost the whole arm's replication rather than a third of it.
     """
     lost: list[str] = []
     for state in all_states(plan):
@@ -794,7 +835,7 @@ def final_pass(plan: TrialPlan) -> None:
                 # A judge failure inside one replicate is a reason to redraw that
                 # replicate, not to kill the pair. Escalating on the first flake would
                 # hand a four-day trial to the judge's worst minute.
-                if score_once(plan, state, out):
+                if score_once(plan, state, out, draws=1):
                     break
             else:
                 # Giving up quietly is how an arm scored once was published as an arm
@@ -839,7 +880,9 @@ def evidence_for(plan: TrialPlan, state: Mapping[str, Any]) -> ArmEvidence | Non
         # Whatever landed on disk, never what the plan asked for. Two arms averaged over
         # different numbers of judge draws are not comparable, and putting the count in
         # the digest is what makes the composition refusal that already exists say so.
-        judge_replicates=len(payloads),
+        # `judge_draws_in` and not `len(payloads)`: a file is a checkpoint, not a draw,
+        # and one file the scorer wrote with `--draws 3` used to be counted as one.
+        judge_replicates=judge_draws_in(payloads),
     )
     facts = {
         "meta_status": state.get("meta_status"),
@@ -850,6 +893,14 @@ def evidence_for(plan: TrialPlan, state: Mapping[str, Any]) -> ArmEvidence | Non
         "report_md_count": state.get("report_md_count"),
         "report_md_present": state.get("report_md_present"),
         "last_event": state.get("last_event"),
+        # Reported, never gated. `run_status: cancelled` is how the manifest records a
+        # run whose auto-skip budget ran out and which was routed to the deliverable
+        # stage to write what it had; two of the three finished runs of the live
+        # stage-graph trial ended that way. It comes off `run_manifest.json`, which is
+        # inside the run root and therefore writable by the party a gate would
+        # constrain, so no admission clause reads it and none may: it is a label on a
+        # number, not a verdict.
+        "run_status": state.get("run_status"),
         "resource_exhausted_hits": state.get("resource_exhausted_hits", 0),
         "revision_at_launch": state.get("revision_at_launch"),
         "revision_at_finish": state.get("revision_at_finish"),
@@ -1144,7 +1195,15 @@ def cmd_run(plan: TrialPlan) -> int:
                 out = score_path(
                     plan, action.task_id, action.arm, action.attempt, "early", 0
                 )
-                score_once(plan, state, out)
+                # `draws=plan.replicates`, because this is the one score that exists while
+                # a trial is in flight and it is what anybody reads for days. Left at one
+                # draw it published `total_spread: null` beside a gap of 8.5 points, on a
+                # judge whose measured spread over eight draws of one unchanged artifact
+                # set was 8.5 — so the number on screen could not say whether it had
+                # measured anything. One file rather than `replicates` of them: the early
+                # score is not checkpointed and is thrown away by `final_pass`, so there is
+                # nothing here for a per-file retry to salvage.
+                score_once(plan, state, out, draws=plan.replicates)
                 # The in-loop score exists so a systematically-refusing gate is visible
                 # after run one instead of after day five. It never enters a number.
                 evidence_state = dict(state)
@@ -1186,9 +1245,14 @@ def _announce_admission(plan: TrialPlan, state: Mapping[str, Any], out: Path) ->
         arm=str(state.get("arm") or ""),
         run_id=str(state.get("run_id") or ""),
         workspace=str(state.get("workspace") or ""),
-        env=RunEnvironment(),
+        # Only the draw count is filled: the rest of the environment is a gate the final
+        # pass applies and this is a one-arm probe, but a probe that said "0 draws" over
+        # a file the scorer had drawn three times would misreport the one thing this
+        # branch just changed.
+        env=RunEnvironment(judge_replicates=judge_draws_in([payload])),
         items=items_from_score_payloads([payload]),
         published_total=float(payload.get("total_score") or 0.0),
+        replicates_requested=int(plan.replicates),
         judge_failures=tuple(str(x) for x in (payload.get("judge_failures") or [])),
         checklist_items_expected=int(
             payload.get("checklist_items_expected") or len(payload.get("items") or [])
@@ -1210,6 +1274,18 @@ def _announce_admission(plan: TrialPlan, state: Mapping[str, Any], out: Path) ->
     )
     ok, failed = admit_arm(evidence)
     print(f"  admission: {'ADMITTED' if ok else 'REFUSED — ' + ', '.join(failed)}")
+    # On the operator's stdout while it happens, for the same reason the report prints it:
+    # a total whose sampling is unstated cannot be compared with another one, and this is
+    # the number they will be reading for the four days before the final pass exists.
+    print(
+        f"  judge draws: {evidence.replicates} of {plan.replicates} planned"
+        + ("" if evidence.replicates > 1 else "  (spread unmeasured)")
+    )
+    if state.get("run_status") and state.get("run_status") != "completed":
+        print(
+            f"  run_status: {state.get('run_status')} — the deliverable this score is of "
+            "was truncated"
+        )
 
 
 def main(argv: Sequence[str] | None = None) -> int:

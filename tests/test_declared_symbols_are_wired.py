@@ -25,13 +25,13 @@ place the product actually starts from, including ``studio.py``, without which t
 ``src/backend/`` package would read as dead.
 
 ``tests/`` and ``tools/`` are deliberately *not* roots. A test is the thing that keeps a
-dead symbol green -- nineteen of the thirty symbols listed below have one -- so counting
+dead symbol green -- twenty of the thirty-one symbols listed below have one -- so counting
 a test as wiring would make the gate assert nothing. An instrument is not evidence:
 ``archive_sample_complexity`` was importing ``RunRecord`` and crashing on it at the same
 time. A symbol that only ``tools/`` reaches is still exempt, but by a line somebody wrote,
 and :attr:`Exempt.reached_from` makes that line checkable.
 
-That nineteen is :func:`allowlisted_symbols_with_a_test`, printed by the census and pinned
+That twenty is :func:`allowlisted_symbols_with_a_test`, printed by the census and pinned
 against this sentence by
 :meth:`AllowlistIsHonestTests.test_the_stated_count_of_tested_symbols_is_the_measured_one`,
 because the first version of the sentence said twenty-one and no instrument could
@@ -64,7 +64,7 @@ the answer, when it happens, is an allowlist entry naming the framework that cal
 
 Measured precision
 ------------------
-1111 public definitions over 1011 distinct names in ``src/``, and 31 referenced by nothing
+1260 public definitions over 1142 distinct names in ``src/``, and 31 referenced by nothing
 outside ``tests/`` and ``tools/``. It was 32 before this landed: ``DATA_DIRNAME`` had a
 one-line wiring fix and got it, so reverting that one line in ``src/rcb.py`` is how the 32
 comes back.
@@ -83,7 +83,7 @@ The census prints the rate and the evidence under it, every occurrence labelled 
 
     python3 -m tests.test_declared_symbols_are_wired --census
 
-Its header carries 1111, 1011, 31, 20 and the rate, so those drift with the tree and none of
+Its header carries 1260, 1142, 31, 20 and the rate, so those drift with the tree and none of
 them has to be believed. The 32 is the only figure here that is not in the header, because
 it is the population before the fix in ``src/rcb.py``.
 :meth:`AllowlistIsHonestTests.test_the_allowlist_is_exactly_what_the_scan_finds` keeps the
@@ -168,6 +168,7 @@ ALLOWLIST: dict[str, Exempt] = {
     "src/rcb_trial.py::driver_clause": Exempt(_DRIVER_ONLY, ("tools/rcb_trial.py",)),
     "src/rcb_trial.py::format_rcb_trial_report": Exempt(_DRIVER_ONLY, ("tools/rcb_trial.py",)),
     "src/rcb_trial.py::items_from_score_payloads": Exempt(_DRIVER_ONLY, ("tools/rcb_trial.py",)),
+    "src/rcb_trial.py::judge_draws_in": Exempt(_DRIVER_ONLY, ("tools/rcb_trial.py",)),
     "src/rcb_trial.py::next_action": Exempt(_DRIVER_ONLY, ("tools/rcb_trial.py",)),
     # -- called by the operator, not by AutoR ---------------------------------------------
     #
