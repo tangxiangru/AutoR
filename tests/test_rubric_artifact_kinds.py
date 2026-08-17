@@ -583,6 +583,10 @@ PATH_OWNERS: tuple[tuple[str, str, str], ...] = (
     ("artifacts/paper_package/paper.pdf", "agent", ""),
     ("artifacts/release_package", "agent", ""),
     ("artifacts/self_review.json", "agent", ""),
+    # Written at Stage 01 by a run following `draw-the-source-figure-panel-for-panel`,
+    # and read by `source_figure_coverage`. Agent-owned on purpose: the criterion is a
+    # gradient for runs that record what the source published, and absent it scores 1.0.
+    ("notes/source_figures.json", "agent", ""),
     ("literature/claims.json", "agent", ""),
     ("literature/sources.json", "agent", ""),
     # Written by `--fake-operator`, which stands in for the agent. Excluding these
