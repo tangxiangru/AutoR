@@ -606,7 +606,7 @@ out, including the way out where the visit raised.
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "rows": [
     {
       "stage": "05_experimentation",
@@ -643,7 +643,16 @@ out, including the way out where the visit raised.
         { "attempt": 2, "kind": "reviewer_refused", "digest": "732e18576fdc" },
         { "attempt": 3, "kind": "reviewer_refused", "digest": "732e18576fdc" }
       ],
-      "note": "auto-skip budget spent"
+      "note": "auto-skip budget spent",
+      "call_cost": {
+        "result_events": 6,
+        "priced_events": 6,
+        "input_tokens": 412,
+        "cache_creation_input_tokens": 1904331,
+        "cache_read_input_tokens": 44712008,
+        "output_tokens": 228104,
+        "total_cost_usd": 41.87
+      }
     }
   ]
 }
@@ -664,6 +673,7 @@ out, including the way out where the visit raised.
 | `max_repeat` · `max_consecutive_repeat` | The most times one failure occurred anywhere, and the longest unbroken run of it. Both, because "the same objection eight times running" and "two objections alternating" are different situations and only the second number tells them apart. |
 | `failures` | One entry per distinct failure, most frequent first, ties broken on first appearance. `example` is the first `FAILURE_EXAMPLE_CHARS` of the reason. |
 | `attempt_digests` | Every recorded cause in the order it happened. `failures` loses the ordering, and a rule about a failure repeating *consecutively* cannot be evaluated without it. |
+| `call_cost` | What the backend charged for this visit. `src/call_cost.py` declares the fields; the two counters say how much of the visit the numbers cover, and every measured field is `null` rather than `0` when nothing reported it. |
 
 **`failure_census` keys** are the `FAILURE_KINDS`: `reviewer_refused`,
 `cross_review_vetoed`, `human_refused`, `validators_refused`, `backend_crashed`,
@@ -680,14 +690,40 @@ everywhere a measurement would go): `_route_to_deliverable` steps over them into
 the run's not-completed list, and a ledger holding only the stages the run paid
 for is flatter than the run.
 
-**No token count and no dollar figure**, and the reason is not "we cannot know":
-the backend emits a `{"type": "result"}` event carrying `total_cost_usd` and a
-`usage` block, and `logs_raw.jsonl` keeps every one of them. What does not exist
-is a path from there to the manager — `OperatorResult` and `ReviewDecision` both
-carry none of it — so a cost field here would have to be derived by a second
-reader of the raw log, and a derived number in a spend record is the thing this
-file exists to stop. `test_the_reason_the_cost_is_missing_is_the_return_type_and_not_the_backend`
-fails the day that stops being true.
+**The tokens and the dollars**, wired rather than scraped. This section used to
+say the row carried neither, and the reason it gave was a missing path: the
+backend emits a `{"type": "result"}` event carrying `total_cost_usd` and a
+`usage` block, `logs_raw.jsonl` keeps every one, and nothing carried it to the
+manager. That path now exists — `ClaudeOperator._run_streaming_command` prices
+the stream, `OperatorResult.call_cost`, `ReviewDecision.call_cost` and
+`ValidityReviewOutcome.call_cost` carry it, and `StageCostMeter.note_call_cost`
+charges it to the open visit. Nothing reads the raw log a second time, which
+matters because there are two traps in it and a second reader is a second chance
+to hit either.
+
+*`total_cost_usd` is per call and the values sum.* It is not monotone within a
+session id, so no cumulative reading survives.
+`tools/log_cost_census.py` prints both readings side by side.
+
+*`input_tokens` is the uncached remainder only.* All four usage fields are
+recorded separately and any single total is printed beside the names of the
+fields it sums, because reading `input_tokens` as "tokens used" understates a
+cached run by five orders of magnitude.
+
+*Absent is not zero.* A backend that reports nothing leaves every measured field
+`null` and the terminal report prints `not measured`. The fake operator makes no
+call at all and must not publish `$0.00`; a stage the run stepped over
+(`outcome: bypassed`) is unmeasured for the same reason, and `$0.00` there would
+be a derived claim rather than an observation.
+
+*And nothing decides on it.* The fields may appear in this record, in
+`summarize_stage_cost` and in `format_run_cost_report`, and in no condition
+anywhere under `src/` — no comparison, no boolean operator, no `if`, no
+comprehension filter, no `sorted` key, no `max`.
+`tests/test_cost_is_recorded_and_unread.py` asserts that over the syntax of
+every module, and asserts it twice for the run supervisor: once over its syntax
+and once by replaying its rulings against two ledgers that differ only in what
+they cost.
 
 Nothing here is a gate: the ledger refuses nothing. It is at the run root rather
 than under `workspace/` for the same reason the stamps are — the operator runs
@@ -695,7 +731,10 @@ with `cwd=run_root` and every stage prompt directs it at `workspace/`, so a run'
 account of what it spent must not sit where the party whose spending it records
 is being sent to write. A copy also goes into `logs.txt` under the
 `stage_cost_ledger` heading, one line per visit and then the totals, on both the
-way out of a completed run and the abort branch.
+way out of a completed run and the abort branch. That copy carries the attempts,
+the wall clock and the failure census and **not** the money: the tokens and the
+dollars go to the terminal once, from `ResearchManager._report_run_cost`, and to
+no file at all. `workspace/report/` and the PDF do not change.
 
 Absent until the first stage visit closes. A corrupt or unwritable ledger is
 never fatal: `read_stage_cost_ledger` returns `[]` and `append_stage_cost_row`

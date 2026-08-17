@@ -749,6 +749,17 @@ it is being held to, or edit the record of the objections it owes an answer to. 
 `stage_cost_ledger.json`, which is a run's account of what each stage visit cost and why each
 attempt failed — a receipt the payer prints is worth what it cost to print.
 
+That row carries the backend's own dollar figure and its four token fields, wired out through
+`OperatorResult`, `ReviewDecision` and `ValidityReviewOutcome` rather than scraped back out of
+`logs_raw.jsonl`. A field the backend did not report is absent rather than zero, so a run smoke-tested
+with `--fake-operator` says `not measured` instead of `$0.00`. At the end of a run — completed or
+cancelled — AutoR prints one summary of it to the terminal, and to nothing else: the deliverable does
+not change, and `logs.txt` keeps the attempts and the failure census without the money. **Nothing at
+runtime decides on any of it.** Not the supervisor, not the router, not a gate: the fields may appear
+in the record, in the summary and in the formatter, and in no condition anywhere under `src/`, which
+`tests/test_cost_is_recorded_and_unread.py` asserts over the syntax of every module the way
+`tests/test_router_budget.py` asserts it of `StageRouter.choose`.
+
 The only state AutoR writes outside a run directory is the cross-run archive at `~/.autor/archive`
 (`--archive`, `--no-archive`).
 

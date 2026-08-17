@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 import re
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable
 
+from .call_cost import CallCost, CostTally, cost_from_stream_meta
 from .deliverables import COVERAGE_FILENAME
 from .operator import ClaudeOperator
 from .obligations import format_for_review_prompt, load_ledger
@@ -239,6 +240,12 @@ class ReviewDecision:
     #: the revision is asked to change these spans and leave the rest alone, and the next
     #: draft is diffed against them.
     comments: list[Any] = field(default_factory=list)
+    #: What this verdict cost, summed over the review call and the verdict-only re-ask.
+    #: The unmeasured report by default, which is what a fake reviewer, a stubbed one and
+    #: a backend without a usage block all produce -- a fake reviewer is free of charge and
+    #: recording it as ``$0.00`` would be a measurement nobody took. Set in exactly one
+    #: place, :meth:`AutomatedReviewer.review_stage`, from the sink it hands its own calls.
+    call_cost: CallCost = field(default_factory=CallCost)
 
 
 class AutomatedReviewer:
@@ -281,6 +288,37 @@ class AutomatedReviewer:
         stage_markdown: str,
         suggestions: list[str],
     ) -> ReviewDecision:
+        """One verdict, with what the backend charged for it attached.
+
+        A wrapper rather than a field set at each ``return``, because there are eight of
+        them and they are in four different methods: three in :meth:`_review_stage`, three
+        in :meth:`_parse_decision` and two in :meth:`_unreadable_verdict`, all of them
+        reachable through :meth:`parse_with_retry`. A cost attached at seven of the eight
+        would be a number that is right except on the path nobody exercised, and the two in
+        :meth:`_unreadable_verdict` are exactly that path -- money spent and no judgement
+        obtained. Attaching it once, to whatever comes back, cannot miss a branch.
+        """
+        spend = CostTally()
+        decision = self._review_stage(
+            paths=paths,
+            stage=stage,
+            attempt_no=attempt_no,
+            stage_markdown=stage_markdown,
+            suggestions=suggestions,
+            spend=spend,
+        )
+        return replace(decision, call_cost=spend.total)
+
+    def _review_stage(
+        self,
+        *,
+        paths: RunPaths,
+        stage: StageSpec,
+        attempt_no: int,
+        stage_markdown: str,
+        suggestions: list[str],
+        spend: CostTally,
+    ) -> ReviewDecision:
         if self.fake_mode:
             return ReviewDecision(
                 choice="5",
@@ -302,6 +340,7 @@ class AutomatedReviewer:
             attempt_no=attempt_no,
             prompt=prompt,
             label="review",
+            spend=spend,
         )
 
         if exit_code != 0:
@@ -343,6 +382,7 @@ class AutomatedReviewer:
             attempt_no=attempt_no,
             raw_response=stdout_text,
             markdown=stage_markdown,
+            spend=spend,
         )
 
     def parse_with_retry(
@@ -355,6 +395,7 @@ class AutomatedReviewer:
         markdown: str = "",
         label: str = "review_verdict",
         on_unreadable: "Callable[[str], ReviewDecision] | None" = None,
+        spend: CostTally | None = None,
     ) -> ReviewDecision:
         """Read a verdict, re-ask once if it cannot be read, then fall back.
 
@@ -382,6 +423,7 @@ class AutomatedReviewer:
             attempt_no=attempt_no,
             prompt=self._build_verdict_only_prompt(stage=stage, previous=raw_response),
             label=label,
+            spend=spend,
         )
         if retry[0] == 0:
             retried = self._parse_decision(retry[1], markdown=markdown)
@@ -470,12 +512,22 @@ class AutomatedReviewer:
         attempt_no: int,
         prompt: str,
         label: str,
+        spend: "CostTally | None" = None,
     ) -> tuple[int, str, str]:
         """Run one reviewer-style prompt through this backend and return its raw output.
 
         Split out from :meth:`review_stage` so a deliberating panel can reuse the invocation,
         logging and transcript plumbing for a member's own prompt rather than reimplementing
         it, and so every panel member is recorded on the same path a solo reviewer is.
+
+        *spend* is a sink rather than a fourth return value, and the reason is the same
+        reuse. This method is reached by the approval gate, by the review panel's seats, by
+        the deliberation panel's voices and by the ideation panel's lenses, and only the
+        first of those is inside the boundary ``StageCostRow.review_invocations`` counts --
+        a panel's fan-out happens below it and the row deliberately does not claim it. A
+        widened return type would make all four restate a number one of them charges. The
+        cost is on the per-call record under ``operator_state/`` for every caller either
+        way, so nothing is lost by the three that pass nothing.
         """
         prompt_path = paths.prompt_cache_dir / f"{stage.slug}_{label}_attempt_{attempt_no:02d}.prompt.md"
         write_text(prompt_path, prompt)
@@ -527,6 +579,8 @@ class AutomatedReviewer:
         }
         record_path = paths.operator_state_dir / f"{stage.slug}.{label}_attempt_{attempt_no:02d}.json"
         write_text(record_path, json.dumps(record, indent=2, ensure_ascii=False))
+        if spend is not None:
+            spend.add(cost_from_stream_meta(stream_meta))
         return exit_code, stdout_text, stderr_text
 
     def parse_decision(self, raw_response: str, markdown: str = "") -> ReviewDecision:

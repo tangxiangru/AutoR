@@ -22,10 +22,11 @@ from __future__ import annotations
 
 import json
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from .approval_agent import extract_json_payload
+from .call_cost import CallCost, cost_from_stream_meta
 from .review_panel import PANEL_DIRNAME
 from .terminal_ui import TerminalUI
 from .utils import (
@@ -160,6 +161,11 @@ class ValidityReviewOutcome:
 
     completion: str
     findings: list[ValidityFinding]
+    #: What the adversarial pass cost, when it made a backend call at all. The unmeasured
+    #: report on every path that returns without one -- the stage that is not reviewed, the
+    #: findings carried over from a panel, fake-operator mode -- because those spent nothing
+    #: and "spent nothing" is not the same claim as "cost zero dollars".
+    call_cost: CallCost = field(default_factory=CallCost)
 
     @property
     def degraded(self) -> bool:
@@ -656,6 +662,11 @@ class ValidityReviewer:
             mode="validity_review",
             stdin_text=stdin_text,
         )
+        # Carried out on all three paths below, including the two that produced no
+        # findings. A red-team pass that crashed still bought the tokens it burned, and a
+        # cost recorded only when the call succeeded would under-report exactly the visits
+        # whose spend is worth reading.
+        call_cost = cost_from_stream_meta(_meta)
         if exit_code != 0:
             # A red-team pass that did not run is recorded as not having run.
             # Writing an empty finding list would read as "nothing wrong".
@@ -666,7 +677,7 @@ class ValidityReviewer:
                 note=f"the validity reviewer failed with exit code {exit_code} and raised nothing",
                 completion=CRASHED,
             )
-            return ValidityReviewOutcome(CRASHED, [])
+            return ValidityReviewOutcome(CRASHED, [], call_cost)
 
         payload = self._extract_json(stdout_text)
         if payload is None:
@@ -685,11 +696,11 @@ class ValidityReviewer:
                 ),
                 completion=UNREADABLE,
             )
-            return ValidityReviewOutcome(UNREADABLE, [])
+            return ValidityReviewOutcome(UNREADABLE, [], call_cost)
 
         findings = self._findings_from(payload)
         self._write_review(paths, stage, findings)
-        return ValidityReviewOutcome(COMPLETED, findings)
+        return ValidityReviewOutcome(COMPLETED, findings, call_cost)
 
     def _write_review(
         self,

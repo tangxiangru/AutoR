@@ -176,6 +176,7 @@ from .stage_cost import (
     append_stage_cost_row,
     bypassed_row,
     classify_refusal,
+    format_run_cost_report,
     format_stage_cost_summary,
     read_stage_cost_ledger,
 )
@@ -783,6 +784,10 @@ class ResearchManager:
                 )
                 save_graph_state(paths, state)
                 self._log_stage_cost_summary(paths)
+                # On the abort branch as well as the clean one. A run that was cancelled
+                # spent everything it spent and produced less for it, which is the run
+                # whose bill a reader most wants in front of them.
+                self._report_run_cost(paths)
                 self._print("Run aborted.")
                 return False
 
@@ -849,6 +854,12 @@ class ResearchManager:
         # window after that heading -- an entry inserted above it pushes the disclosure
         # out of the window and turns a passing banner into a missing one.
         self._log_stage_cost_summary(paths)
+        # Terminal only, and after the log entry rather than before it: `logs.txt` is
+        # position-sensitive for two other tests and this writes nothing to it. Beside
+        # that entry rather than at the bottom of this method, so it covers all three ways
+        # a walk ends here -- completed, halted and abandoned -- and not only the one that
+        # reaches the end. Same reason `_record_block_census` sits where it does.
+        self._report_run_cost(paths)
 
         # A run that concluded it cannot answer its question reached the end of the
         # graph legitimately, and it did not produce what it set out to produce.
@@ -2440,16 +2451,35 @@ class ResearchManager:
 
         Counted at the manager's own call sites rather than inferred from the transcript,
         and counted *before* the call rather than after, so a launch that then raises is
-        still on the row. The backend's own cost report never reaches here --
-        `OperatorResult` carries no usage block; see `src/stage_cost.py` for what would
-        have to change -- so this is the one figure about spend the harness can state
-        without guessing, and the row says exactly what it counts rather than implying a
-        bill.
+        still on the row. What the launch went on to cost is charged separately by
+        `_note_call_cost`, after it returns: a call that raised has a counter and no cost
+        report, and those are two different facts about it.
         """
         meter = self._stage_cost
         if meter is None or meter.stage.slug != stage.slug:
             return
         meter.note_operator_call()
+
+    def _note_call_cost(self, stage: StageSpec, cost: object) -> None:
+        """Charge one backend call's own cost report to the open meter.
+
+        Called with whatever the operator layer returned -- `OperatorResult.call_cost`,
+        `ReviewDecision.call_cost`, `ValidityReviewOutcome.call_cost` -- and never with a
+        number this file worked out. The stage check is the same one `_note_operator_call`
+        makes and is there for the same reason: `_collect_review_decision` is also reached
+        from intake and from the two bootstrap loops, which run outside any stage visit,
+        and a call made there must not be billed to whichever stage happens to be open.
+
+        Nothing is charged twice. There are five call sites over four dispatch paths --
+        the stage run, the summary repair (two of them, one per branch that triggers it),
+        the approval gate and the adversarial pass -- and each hands its own result here
+        once, immediately after the call it came from. A repair pass is a separate backend
+        launch with a separate report, not a second reading of the first.
+        """
+        meter = self._stage_cost
+        if meter is None or meter.stage.slug != stage.slug:
+            return
+        meter.note_call_cost(cost)
 
     def _note_review_call(self, stage: StageSpec) -> None:
         """One backend launch dispatched to judge the stage's work.
@@ -2476,12 +2506,47 @@ class ResearchManager:
         The ledger is the machine-readable copy and this is the human one. Written on the
         way out of a run whether it completed or was cancelled, because a cancelled run is
         the one whose spend is worth reading.
+
+        Attempts, wall clock and the failure census only. The tokens and the dollars go to
+        the terminal, once, in `_report_run_cost`, and to nowhere else: the run's output is
+        the paper, and a second file carrying the bill is a second thing that has to stay
+        true.
         """
         try:
             append_log_entry(
                 paths.logs,
                 "stage_cost_ledger",
                 format_stage_cost_summary(read_stage_cost_ledger(paths)),
+            )
+        except Exception:
+            pass
+
+    def _report_run_cost(self, paths: RunPaths) -> None:
+        """Print what the run cost, once, at the end, to the terminal and to nothing else.
+
+        The whole of "report tokens and dollars at the end of the run". Three things this
+        deliberately does not do, each of them asked for by name:
+
+        * It does not write a file. Not `logs.txt`, not `workspace/report/`, not the PDF —
+          the deliverable does not change. The machine-readable copy already exists as
+          `stage_cost_ledger.json`, so a second one would be a second thing to keep true.
+        * It does not decide anything. The numbers reach `self.ui` and stop;
+          `tests/test_cost_is_recorded_and_unread.py` walks the syntax of every module
+          under `src/` and fails if any of them reaches a condition.
+        * It does not report a bare token count. `format_run_cost_report` names the four
+          usage fields separately and spells out the addends of any sum, because
+          `input_tokens` alone is the uncached remainder and understates a measured run by
+          five orders of magnitude.
+
+        Best-effort, like every other closing report here: a run that produced good work is
+        not lost because the account of it could not be printed.
+        """
+        try:
+            rows = read_stage_cost_ledger(paths)
+            self.ui.panel(
+                "What this run cost",
+                format_run_cost_report(rows).splitlines(),
+                color=self.ui.FG_CYAN,
             )
         except Exception:
             pass
@@ -2693,6 +2758,7 @@ class ResearchManager:
                 attempt_no,
                 continue_session=continue_session,
             )
+            self._note_call_cost(stage, result.call_cost)
             if result.session_id:
                 sync_stage_session_id(paths, stage, result.session_id)
             append_log_entry(
@@ -2729,6 +2795,7 @@ class ResearchManager:
                     paths=paths,
                     attempt_no=attempt_no,
                 )
+                self._note_call_cost(stage, repair_result.call_cost)
                 append_log_entry(
                     paths.logs,
                     f"{stage.slug} attempt {attempt_no} repair_result",
@@ -2788,6 +2855,7 @@ class ResearchManager:
                     paths=paths,
                     attempt_no=attempt_no,
                 )
+                self._note_call_cost(stage, repair_result.call_cost)
                 append_log_entry(
                     paths.logs,
                     f"{stage.slug} attempt {attempt_no} repair_result",
@@ -3380,6 +3448,7 @@ class ResearchManager:
             stage_markdown=stage_markdown,
             suggestions=suggestions,
         )
+        self._note_call_cost(stage, decision.call_cost)
         # Before anything downstream reads the verdict. `_settle_obligations` branches on
         # `decision.choice == "5"` to record what this stage deferred, and the effort plan
         # counts a refusal as a contest -- a promotion patched in after the return would be
@@ -4635,7 +4704,7 @@ class ResearchManager:
         from .validity_review import CRASHED
 
         try:
-            return reviewer.review(
+            outcome = reviewer.review(
                 paths=paths,
                 stage=stage,
                 stage_markdown=stage_markdown,
@@ -4648,6 +4717,12 @@ class ResearchManager:
                 f"The adversarial validity review did not run (attempt {attempt_no}): {exc}",
             )
             return ValidityReviewOutcome(CRASHED, [])
+        # Charged on both attempts, and on the crashed one too: an adversarial pass that
+        # burned tokens and raised nothing still cost what it cost. `_note_call_cost`
+        # ignores it when no meter for this stage is open, which is the same guard every
+        # other charge in this file goes through.
+        self._note_call_cost(stage, outcome.call_cost)
+        return outcome
 
     def validity_disclosure(self) -> str:
         """The run's banner line when a stage was approved but never attacked.
