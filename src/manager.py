@@ -2581,7 +2581,25 @@ class ResearchManager:
                 )
                 if self._stage_cost is not None:
                     self._stage_cost.note_exhausted()
-                if ruling.ends_the_visit:
+                if stuck:
+                    # `is_stuck` first, and the supervisor second, where both would fire.
+                    # They agree on the count -- `STUCK_AFTER_IDENTICAL_FAILURES` and
+                    # `STOP_AFTER_IDENTICAL_FAILURES` are both three -- so on a repeated
+                    # *validator* refusal they land on the same attempt, and whichever is
+                    # asked first writes the message. `is_stuck` is the more specific of
+                    # the two: it names the validation errors that repeated. The
+                    # supervisor's own reason for existing beside it is that it covers what
+                    # `is_stuck` cannot see -- a reviewer refusing three times, a backend
+                    # not answering three times -- neither of which reaches
+                    # `last_validation_errors`. Letting the general rule pre-empt the
+                    # specific one trades a message naming the errors for one naming a rule.
+                    error = (
+                        f"{STUCK_AFTER_IDENTICAL_FAILURES} consecutive attempts failed in "
+                        f"exactly the same way, so another one cannot help. Attempts spent "
+                        f"on: {spent_on}. Repeated "
+                        f"validation errors: {'; '.join(last_validation_errors) or 'None recorded.'}"
+                    )
+                elif ruling.ends_the_visit:
                     # Named as the supervisor's, not folded into the exhaustion message:
                     # a stage the run chose to stop paying for and a stage that ran out of
                     # tries are different events, and only one of them has a rule behind
@@ -2589,13 +2607,6 @@ class ResearchManager:
                     error = (
                         f"The run supervisor ruled `{ruling.kind}` under `{ruling.rule}`: "
                         f"{ruling.because}. Attempts spent on: {spent_on}."
-                    )
-                elif stuck:
-                    error = (
-                        f"{STUCK_AFTER_IDENTICAL_FAILURES} consecutive attempts failed in "
-                        f"exactly the same way, so another one cannot help. Attempts spent "
-                        f"on: {spent_on}. Repeated "
-                        f"validation errors: {'; '.join(last_validation_errors) or 'None recorded.'}"
                     )
                 else:
                     error = (
@@ -2606,10 +2617,10 @@ class ResearchManager:
                 self.ui.show_status(
                     f"{stage.stage_title} "
                     + (
-                        f"was stopped by the run supervisor: {ruling.because}."
-                        if ruling.ends_the_visit
-                        else f"made no progress across {STUCK_AFTER_IDENTICAL_FAILURES} identical failures."
+                        f"made no progress across {STUCK_AFTER_IDENTICAL_FAILURES} identical failures."
                         if stuck
+                        else f"was stopped by the run supervisor: {ruling.because}."
+                        if ruling.ends_the_visit
                         else f"failed after {ceiling} attempts in this run."
                     ),
                     level="error",
@@ -2618,10 +2629,12 @@ class ResearchManager:
                     paths.logs,
                     f"{stage.slug} "
                     + (
-                        f"supervisor_{ruling.kind}"
-                        if ruling.ends_the_visit
-                        else "stage_stuck"
+                        # Same precedence as the message above, for the same reason: the
+                        # specific rule names its cause, the general one names itself.
+                        "stage_stuck"
                         if stuck
+                        else f"supervisor_{ruling.kind}"
+                        if ruling.ends_the_visit
                         else "max_attempts_exceeded"
                     ),
                     error,
