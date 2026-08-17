@@ -124,9 +124,17 @@ Rules:
 - `filename` is the bare filename, with its image extension, that the figure will be published
   under — no directory, no path. It is the join key between this plan and the published report,
   so two slots may not share one.
-- `supports` names the claim the figure settles: an id from the Stage 02 hypotheses, or
-  `exploratory:<slug>`. **Every figure must carry at least one claim no other figure carries.**
-  Two slots answering the same question is one slot spent twice.
+- `supports` names the claim the figure settles: an id from the Stage 02 hypotheses,
+  `reproduces:<slug>` for a result the source study published, or `exploratory:<slug>` for a
+  question the run did not preregister. **Every figure must carry at least one claim no other
+  figure carries.** Two slots answering the same question is one slot spent twice.
+- **A result the source published claims its slot before any hypothesis does.** Use
+  `reproduces:<slug>` and give it a low slot number. A reproduction panel is not exploratory —
+  it is the most committed claim in this plan — and it does not have to win a competition
+  against your own hypotheses to exist. One run reproduced a theory to 110 of 111 published
+  values, bound all eight of its slots to its own hypotheses, discharged the source's first
+  result as a headline number, and scored 18.7 where an agent that simply drew the paper's
+  figures scored 53.4.
 - `shows` is what a reader should see in it, naming both axes and their units.
 - `if_supported` and `if_refuted` are what the figure looks like each way. They may not be the
   same sentence: a figure that cannot say what refutation would look like is decoration, not
