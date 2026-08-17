@@ -175,6 +175,16 @@ class RunEnvironment:
     review_model: str = ""
     #: Resolved, not requested. ``run_config.json`` records ``"auto"``.
     web_search_level: str = ""
+    #: Requested, not resolved -- the companion to the field above, and here because the
+    #: level alone stopped being a discriminator. ``--web-search off`` announces itself at
+    #: ``level: info``, which is the right level for a deliberate choice and is also what
+    #: an ``auto`` that found a working backend emits, so an arm told not to browse and an
+    #: arm that browsed freely hash the same on the resolved level. That is precisely the
+    #: confound :attr:`web_search_level` was added to catch, arriving from the other
+    #: direction. Read off ``run_config.json``, which stores the mode and never the
+    #: backend, so a resumed arm reports what it was asked for rather than what today's
+    #: environment would answer.
+    web_search_mode: str = ""
     #: The judge reads ``INSTRUCTIONS.md`` as background. Both arms byte-identical.
     instructions_digest: str = ""
     #: ``git rev-parse HEAD`` in the benchmark checkout.

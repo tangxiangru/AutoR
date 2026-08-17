@@ -450,6 +450,12 @@ def harvest(
         "agent_model": config.get("model", ""),
         "review_model": config.get("review_model", ""),
         "web_search_level": search_level(stdout_path) if stdout_path else "",
+        # The request, next to the resolved level, because the level stopped separating
+        # the two things it was added to separate: `--web-search off` announces itself at
+        # `level: info` and so does an `auto` that found a working backend. Taken from
+        # `run_config.json` rather than from the command line the driver remembers, so a
+        # run relaunched by hand is described by what it recorded.
+        "web_search_mode": str(config.get("web_search") or ""),
         "instructions_digest": instructions_digest(workspace),
         "autor_stages_scored": stages,
         "settled_reasoning_dose": dose,
@@ -834,6 +840,7 @@ def evidence_for(plan: TrialPlan, state: Mapping[str, Any]) -> ArmEvidence | Non
         agent_model=str(state.get("agent_model") or ""),
         review_model=str(state.get("review_model") or ""),
         web_search_level=str(state.get("web_search_level") or ""),
+        web_search_mode=str(state.get("web_search_mode") or ""),
         instructions_digest=str(state.get("instructions_digest") or ""),
         bench_revision=str(first.get("bench_revision") or ""),
         # Whatever landed on disk, never what the plan asked for. Two arms averaged over

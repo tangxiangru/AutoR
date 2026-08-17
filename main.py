@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import Sequence
 
 from src.approval_agent import AutomatedReviewer
 from src.deliberation import DEFAULT_MAX_DELIBERATIONS
@@ -26,6 +27,7 @@ from src.terminal_ui import TerminalUI
 from src.cross_reviewer import resolve_cross_reviewer
 from src.web_search import (
     assess_search_readiness,
+    disallowed_tools_for,
     resolve_web_search_context,
     web_search_notice,
 )
@@ -306,7 +308,10 @@ def parse_args() -> argparse.Namespace:
             "API's Google Search grounding via tools/web_search.py, which is required on "
             "deployments where the built-in WebSearch tool is disabled (for example Claude Code "
             "on Vertex AI). 'native' leaves the backend's own search tool in charge. 'auto' "
-            "(default) uses Gemini when a Gemini API key is available and falls back to native."
+            "(default) uses Gemini when a Gemini API key is available and falls back to native. "
+            "'off' offers no search tool at all and denies WebSearch and WebFetch to the CLI, "
+            "for a protocol that says the run must not browse; Bash remains available, so "
+            "whether a run browsed is a question for its tool calls rather than for this flag."
         ),
     )
     parser.add_argument(
@@ -589,10 +594,14 @@ def create_operator(
     ui: TerminalUI,
     stage_timeout: int,
     web_search_mcp: bool = False,
+    disallowed_tools: Sequence[str] = (),
 ) -> OperatorProtocol:
     if operator_name == "codex":
         # Codex reaches search through the CLI script instead: it takes no --mcp-config
         # here, and its sandbox is the separate question documented in the CLI reference.
+        # `disallowed_tools` is a Claude CLI spelling and is not passed on: Codex's own
+        # search is a boolean this function's caller already resolves, and inventing a
+        # translation would be a second, untested claim about a second CLI.
         return CodexOperator(
             model=model,
             codex_sandbox=codex_sandbox,
@@ -606,6 +615,7 @@ def create_operator(
         ui=ui,
         stage_timeout=stage_timeout,
         web_search_mcp=web_search_mcp,
+        disallowed_tools=disallowed_tools,
     )
 
 
@@ -847,8 +857,17 @@ def resolve_search_context(ui: TerminalUI, *, mode: str, operator: str, codex_sa
     Called once per branch rather than once up front, because the answer depends on the
     operator and sandbox -- and on resume those come from run_config, which is not read
     until inside the branch.
+
+    `off` skips the readiness assessment rather than computing one and discarding it. The
+    assessment reads the environment and probes for an SDK to decide what to say about
+    credentials, and a run that has been told not to search has no question for it; the
+    only thing looking anyway could produce is a sentence about a key that was never
+    going to be used.
     """
-    readiness = assess_search_readiness(operator=operator, codex_sandbox=codex_sandbox)
+    readiness = (
+        None if mode == "off"
+        else assess_search_readiness(operator=operator, codex_sandbox=codex_sandbox)
+    )
     notice, level = web_search_notice(mode, readiness=readiness)
     ui.show_status(notice, level=level)
     if mode == "gemini" and readiness.hard_blocker:
@@ -863,8 +882,15 @@ def resolve_search_context(ui: TerminalUI, *, mode: str, operator: str, codex_sa
 
 
 def configure_effort(manager, args, *, backend_name: str, model: str, ui: TerminalUI, fake_mode: bool,
-                     stage_timeout: int, unattended: bool = False) -> None:
-    """Turn on effort tiering, and give routine stages a cheap gate to use."""
+                     stage_timeout: int, web_search_mode: str, unattended: bool = False) -> None:
+    """Turn on effort tiering, and give routine stages a cheap gate to use.
+
+    `web_search_mode` is required rather than defaulted because of what it decides: the
+    routine operator runs stages, so a mode it is not told about is a tier of the run
+    conducted under a different search protocol than the one the flag asked for. A
+    default here would let a third caller be added that silently hands the cheap tier
+    the browsing tools back.
+    """
     manager.rigor_level = getattr(args, "rigor", "")
     if not getattr(args, "effort_tiers", False):
         return
@@ -878,6 +904,14 @@ def configure_effort(manager, args, *, backend_name: str, model: str, ui: Termin
             ui=ui,
             codex_sandbox=getattr(args, "codex_sandbox", None) or DEFAULT_CODEX_SANDBOX,
             stage_timeout=stage_timeout,
+            # The same denial the primary operator gets. Without it `--web-search off`
+            # was a claim about whichever stages happened to route to the strong tier:
+            # every routine stage kept WebSearch and WebFetch, and nothing said so.
+            # `web_search_mcp` is deliberately still not passed -- the routine operator
+            # has never had the Gemini MCP tool, and giving it one would change what an
+            # existing `--web-search gemini --effort-tiers` run does, which is a
+            # separate question from whether `off` means off.
+            disallowed_tools=disallowed_tools_for(web_search_mode),
         )
         manager.concentration.routine_model = args.routine_model
     if isinstance(manager.reviewer, AutomatedReviewer):
@@ -1044,6 +1078,7 @@ def main() -> int:
             ui=ui,
             stage_timeout=args.stage_timeout,
             web_search_mcp=web_search_context is not None,
+            disallowed_tools=disallowed_tools_for(web_search_mode),
         )
         reviewer = None
         if approval_mode == "agent":
@@ -1093,7 +1128,7 @@ def main() -> int:
         configure_effort(
             manager, args, backend_name=review_operator, model=review_model, ui=ui,
             fake_mode=args.fake_operator, stage_timeout=args.stage_timeout,
-            unattended=unattended,
+            web_search_mode=web_search_mode, unattended=unattended,
         )
         completed = manager.resume_run(
             run_root,
@@ -1133,6 +1168,7 @@ def main() -> int:
         ui=ui,
         stage_timeout=args.stage_timeout,
         web_search_mcp=web_search_context is not None,
+        disallowed_tools=disallowed_tools_for(web_search_mode),
     )
     reviewer = None
     if approval_mode == "agent":
@@ -1183,7 +1219,7 @@ def main() -> int:
     configure_effort(
         manager, args, backend_name=review_operator, model=review_model, ui=ui,
         fake_mode=args.fake_operator, stage_timeout=args.stage_timeout,
-        unattended=unattended,
+        web_search_mode=web_search_mode, unattended=unattended,
     )
 
     goal = resolve_goal(args, unattended=unattended)

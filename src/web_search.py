@@ -690,6 +690,29 @@ def assess_search_readiness(
     )
 
 
+#: The notice for each mode that is decided before any credential is looked at, keyed by
+#: mode, and the source of truth for which modes those are.
+#:
+#: A mapping rather than a chain of early returns because there are two readers of the
+#: mode string and they had already drifted: each returned early for `native` alone and
+#: let every other value fall through to a readiness probe and the Gemini prompt block.
+#: A mode added to one reader only is a mode that gets the Gemini treatment from the
+#: other -- which for `off` would mean the search prompt section is injected under the
+#: flag whose whole purpose is to withhold it. :func:`resolve_web_search_context`
+#: takes its early exit from the keys of this mapping and :func:`web_search_notice`
+#: takes its message from the values, so one entry moves both.
+NOTICES_DECIDED_WITHOUT_A_PROBE: dict[str, tuple[str, str]] = {
+    "native": ("Web search: the backend's native tool.", "info"),
+    "off": (
+        "Web search: off. No search tool is offered to the operators and the browsing "
+        "tools are named to the CLI as denied. Bash is still available, so this narrows "
+        "the path to the network rather than closing it; whether a run browsed is a "
+        "question for its tool calls.",
+        "info",
+    ),
+}
+
+
 def resolve_web_search_context(
     mode: str,
     *,
@@ -703,8 +726,12 @@ def resolve_web_search_context(
     default path never advertises a tool that would fail on first use. An explicit
     `gemini` still injects — the caller is expected to have refused the run already if
     :attr:`SearchReadiness.hard_blocker` is set.
+
+    `off` returns None for a different reason than `native` does, and the difference is
+    the point: `native` keeps a search tool and declines to describe it, `off` is a run
+    that must not search at all. See :data:`NOTICES_DECIDED_WITHOUT_A_PROBE`.
     """
-    if mode == "native":
+    if mode in NOTICES_DECIDED_WITHOUT_A_PROBE:
         return None
     if readiness is None:
         readiness = assess_search_readiness(operator=operator, codex_sandbox=codex_sandbox)
@@ -727,9 +754,16 @@ def web_search_notice(
     work, and Stage 01 goes looking for literature with nothing to search with. Saying so at
     startup is the difference between a diagnosable run and one that quietly invents
     citations.
+
+    The modes in :data:`NOTICES_DECIDED_WITHOUT_A_PROBE` are answered before the probe
+    runs, because the probe is what makes the sentence worth printing: a run that is not
+    going to search has no stake in whether a Gemini key happens to be exported here, and
+    going to look for one anyway is how `off` would end up warning about credentials it
+    was never going to use.
     """
-    if mode == "native":
-        return ("Web search: the backend's native tool.", "info")
+    decided = NOTICES_DECIDED_WITHOUT_A_PROBE.get(mode)
+    if decided is not None:
+        return decided
 
     if readiness is None:
         readiness = assess_search_readiness(operator=operator, codex_sandbox=codex_sandbox)
@@ -753,6 +787,38 @@ def web_search_notice(
         "Stage 01 has no way to search at all. Pass --web-search native to silence this.",
         "warn",
     )
+
+
+#: The two built-in tools that reach the network on their own and need no shell.
+#: `Bash` is deliberately absent: the stages write files, run scripts and inspect the
+#: workspace through it, so denying it would not produce a no-browsing run, it would
+#: produce no run. See :func:`disallowed_tools_for` for what that leaves open.
+NO_BROWSING_DISALLOWED_TOOLS = ("WebSearch", "WebFetch")
+
+
+def disallowed_tools_for(mode: str) -> tuple[str, ...]:
+    """Tool names to deny the coding agent, for a resolved ``--web-search`` mode.
+
+    Empty for every mode but `off`. The three provider modes are a choice of *which*
+    search the agent uses, and denying the tools under them would contradict the flag.
+
+    The spelling was read off the installed binary rather than remembered: `claude
+    --version` reports 2.1.229 (Claude Code), and `claude --help` lists
+    ``--disallowedTools, --disallowed-tools <tools...>`` -- "Comma or space-separated
+    list of tool names to deny". Both spellings are the same option; the hyphenated one
+    is used because the rest of AutoR's command line is hyphenated. The value is passed
+    as one comma-joined argument because the option is variadic, and a second bare word
+    after it would be read as a second tool name rather than as the next thing AutoR
+    meant to say.
+
+    **This narrows the hole; it does not close it.** `Bash` stays, and `curl` lives
+    inside `Bash`, as does any script the agent writes and runs. Denying every path to
+    the network is not on offer here. So a claim that a run was conducted without
+    browsing is a post-hoc measurement of the tool calls it actually made -- the
+    transcript is the witness -- and this flag only removes the two tools the agent would
+    otherwise reach for first, which is worth doing and is not the same statement.
+    """
+    return NO_BROWSING_DISALLOWED_TOOLS if mode == "off" else ()
 
 
 def build_mcp_config(*, repo_root: Path | None = None) -> dict[str, object]:

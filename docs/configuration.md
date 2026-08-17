@@ -86,7 +86,7 @@ The precedence rules differ slightly per field:
 | `evolve_rounds` | recorded value | `2` for new runs. `0` measures without polishing. `--no-evolve` also forces it to `0`, because rounds steered by a score you are not computing mean nothing. |
 | `evolve_measure` | recorded value | `true` for new runs. `--evolve-rounds N` with `N > 0` turns it back on. |
 | `archive_steer` | recorded value | `false` for new runs. |
-| `web_search` | recorded value | The *mode* (`auto`/`gemini`/`native`) is stored, never the resolved backend: `auto` is a question about the current environment, and freezing today's answer would make a resumed run assert something about the deployment that may no longer be true. |
+| `web_search` | recorded value | The *mode* (`auto`/`gemini`/`native`/`off`) is stored, never the resolved backend: `auto` is a question about the current environment, and freezing today's answer would make a resumed run assert something about the deployment that may no longer be true. |
 | `min_report_figures` | recorded value | The Stage 07 figure floor, clamped into `[1, MAX_REPORT_FIGURES]` by `resolve_min_report_figures`. `1` for new runs; `rcb_agent.py` sets it to `BENCHMARK_MIN_REPORT_FIGURES` (3). No `main.py` flag sets it. |
 | `created_at` | preserved | Never rewritten. |
 
@@ -239,6 +239,23 @@ backend's native search otherwise, so it never advertises a tool that would
 fail on first use. Details in
 [ResearchClawBench → Web search](researchclawbench.md#web-search-on-deployments-where-websearch-is-disabled).
 
+### `--web-search off`
+
+The other three modes are a choice of *which* search the agent uses, and all
+three end with it holding one. `off` is the negation: no Gemini prompt section
+is injected, no credentials are looked for, and `WebSearch` and `WebFetch` are
+named to the Claude CLI as denied via `--disallowed-tools`. It exists for a
+benchmark whose published protocol is "without browsing", where `native` — the
+closest thing available before — says the opposite, and on a deployment where
+the built-in tool works it *is* browsing with no prompt block to show for it.
+
+**It narrows the path to the network; it does not close it.** `Bash` stays
+available, because the stages write files and run scripts through it, and
+`curl` lives inside `Bash`. So whether a run browsed is a question for its tool
+calls, answered after the fact from the transcript, and not something this flag
+can promise. Do not read `off` as a guarantee about what the agent could do —
+read it as the removal of the two tools it would otherwise reach for first.
+
 ---
 
 ## Diagram generation (optional)
@@ -372,6 +389,7 @@ authoritative list.
 | `DEFAULT_STAGE_GRAPH` | `utils.py` | `adaptive` | `--stage-graph` |
 | `DEFAULT_ROUTING_MODE` | `utils.py` | `auto` | `--routing` (the flag is not named after the field) |
 | `DEFAULT_WEB_SEARCH_MODE` | `utils.py` | `auto` | `--web-search` |
+| `NO_BROWSING_DISALLOWED_TOOLS` | `web_search.py` | `WebSearch`, `WebFetch` | `--web-search off` — the tool names handed to the Claude CLI's `--disallowed-tools`. `Bash` is deliberately not among them: denying it would not produce a no-browsing run, it would produce no run. |
 | `DEFAULT_EVOLVE_ROUNDS` | `utils.py` | 2 | `--evolve-rounds` (`DEFAULT_ROUNDS` in `evolution.py` is the same number) |
 | `DEFAULT_MAX_STEPS` | `stage_graph.py` | 20 | `--graph-max-steps` — stage executions in one walk, whatever the per-node budgets allow |
 | `DEFAULT_MAX_VISITS` | `stage_graph.py` | 3 | `--graph-max-visits` — entries into one stage; the fourth is a loop |

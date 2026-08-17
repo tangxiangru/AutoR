@@ -27,6 +27,7 @@ import sys
 import time
 import traceback
 from pathlib import Path
+from typing import Sequence
 
 REPO_ROOT = Path(__file__).resolve().parent
 if str(REPO_ROOT) not in sys.path:
@@ -67,6 +68,7 @@ from src.utils import (  # noqa: E402
     DEFAULT_OUTPUT_FORMAT,
     DEFAULT_VENUE,
     OUTPUT_FORMAT_CLI_CHOICES,
+    WEB_SEARCH_MODE_CHOICES,
     resolve_output_format,
     resolve_stage,
     resolve_venue_key,
@@ -74,6 +76,7 @@ from src.utils import (  # noqa: E402
 from src.cross_reviewer import resolve_cross_reviewer
 from src.web_search import (  # noqa: E402
     assess_search_readiness,
+    disallowed_tools_for,
     resolve_web_search_context,
     web_search_notice,
 )
@@ -320,10 +323,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--web-search",
-        choices=["auto", "gemini", "native"],
+        # Derived rather than restated. This list was written out by hand and had already
+        # stopped agreeing with the one `main.py` offers and `normalize_web_search_mode`
+        # stores, so a mode added to the constant reached one front end and not the other.
+        choices=list(WEB_SEARCH_MODE_CHOICES),
         default="auto",
         help="Search provider for the operators. 'gemini' is required where the built-in "
-             "WebSearch tool is disabled, such as Claude Code on Vertex AI.",
+             "WebSearch tool is disabled, such as Claude Code on Vertex AI. 'off' offers no "
+             "search tool and denies WebSearch and WebFetch to the CLI. Defaults to auto.",
     )
     parser.add_argument(
         "--no-synthesis",
@@ -360,6 +367,7 @@ def create_operator(
     web_search_mcp: bool = False,
     codex_command: str = "codex",
     codex_web_search: bool = False,
+    disallowed_tools: Sequence[str] = (),
 ):
     if backend == "codex":
         return CodexOperator(
@@ -380,6 +388,7 @@ def create_operator(
         ui=ui,
         stage_timeout=stage_timeout,
         web_search_mcp=web_search_mcp,
+        disallowed_tools=disallowed_tools,
     )
 
 
@@ -460,9 +469,15 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
         }
     )
 
-    readiness = assess_search_readiness(
-        operator=operator_backend,
-        codex_sandbox=args.codex_sandbox,
+    # Not assessed under `off`: the assessment exists to say what a run that is going to
+    # search can search with, and this one is not. Looking anyway would only produce a
+    # sentence about a credential nothing was going to use.
+    readiness = (
+        None if args.web_search == "off"
+        else assess_search_readiness(
+            operator=operator_backend,
+            codex_sandbox=args.codex_sandbox,
+        )
     )
     notice, level = web_search_notice(args.web_search, readiness=readiness)
     emit_event({"type": "progress", "stage": "web_search", "level": level, "message": notice})
@@ -486,6 +501,7 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
         web_search_mcp=web_search_context is not None,
         codex_command=args.codex_command,
         codex_web_search=args.web_search == "native",
+        disallowed_tools=disallowed_tools_for(args.web_search),
     )
     synthesizer = None if args.no_synthesis else ReportSynthesizer(operator)
 
@@ -635,6 +651,7 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
                 web_search_mcp=web_search_context is not None,
                 codex_command=args.codex_command,
                 codex_web_search=args.web_search == "native",
+                disallowed_tools=disallowed_tools_for(args.web_search),
             )
             manager.concentration.routine_model = args.routine_model
         # `unattended=True` like every other reviewer this file builds. Without it the

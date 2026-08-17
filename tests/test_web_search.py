@@ -18,7 +18,7 @@ from unittest.mock import patch
 
 import main as autor_main
 from src import web_search as web_search_module
-from src.utils import STAGES, build_prompt
+from src.utils import STAGES, WEB_SEARCH_MODE_CHOICES, build_prompt
 from src.web_search import (
     DEFAULT_SEARCH_MODEL,
     DEFAULT_VERTEX_LOCATION,
@@ -368,7 +368,13 @@ class WebSearchNoticeTest(unittest.TestCase):
         self.assertEqual(level, "info")
 
     def test_every_mode_yields_a_notice(self) -> None:
-        for mode in ("auto", "gemini", "native"):
+        """Derived from the constant, not restated.
+
+        The literal `("auto", "gemini", "native")` stood here while `off` was added to
+        `WEB_SEARCH_MODE_CHOICES`, and a mode the CLI accepts and this loop does not see
+        is a mode with no coverage at all.
+        """
+        for mode in WEB_SEARCH_MODE_CHOICES:
             for env in ({}, {"GEMINI_API_KEY": "k"}):
                 with patch.dict(os.environ, env, clear=True), self._no_key():
                     message, level = web_search_notice(mode)
@@ -377,17 +383,36 @@ class WebSearchNoticeTest(unittest.TestCase):
 
     def test_the_notice_agrees_with_what_is_injected(self) -> None:
         """A warn/error notice must mean no Gemini block reached the prompt, and vice versa."""
-        for mode in ("auto", "gemini", "native"):
+        for mode in WEB_SEARCH_MODE_CHOICES:
             for env in ({}, {"GEMINI_API_KEY": "k"}):
                 with patch.dict(os.environ, env, clear=True), self._no_key():
                     _message, level = web_search_notice(mode)
                     injected = resolve_web_search_context(mode) is not None
                 if mode == "gemini":
                     self.assertTrue(injected, mode)   # gemini always injects, even keyless
-                elif mode == "native":
+                elif mode in ("native", "off"):
                     self.assertFalse(injected, mode)
+                    # Neither is a failure to find a search tool, so neither may be
+                    # announced as one: the warn level is what an operator scans for.
+                    self.assertEqual(level, "info", mode)
                 else:
                     self.assertEqual(injected, level == "info", (mode, env))
+
+    def test_this_loop_would_notice_a_mode_that_injected_under_a_calm_notice(self) -> None:
+        """Control for the two tests above: they scan a real population and can fail.
+
+        Without it, `WEB_SEARCH_MODE_CHOICES` shrinking to nothing, or `off` quietly
+        gaining a Gemini block while still reporting `info`, would both read as green.
+        """
+        self.assertGreaterEqual(len(WEB_SEARCH_MODE_CHOICES), 4)
+        with patch.dict(os.environ, {}, clear=True), self._no_key():
+            with patch(
+                "src.web_search.NOTICES_DECIDED_WITHOUT_A_PROBE",
+                {"native": ("Web search: the backend's native tool.", "info")},
+            ):
+                # `off` is no longer answered before the probe, so it falls through to
+                # the Gemini path -- which is exactly the defect the mapping prevents.
+                self.assertIsNotNone(resolve_web_search_context("off"))
 
 
 class WebSearchModeTest(unittest.TestCase):
@@ -438,9 +463,12 @@ class WebSearchModeTest(unittest.TestCase):
                 self.assertIs(getattr(autor_main, name), canonical)
 
     def test_the_two_entry_points_agree_on_every_mode(self) -> None:
+        """Every mode the constant declares, not the three that were current when this
+        was written: a fourth added to the constant is exactly the case where the two
+        front ends can disagree, and a literal here would have skipped it."""
         import rcb_agent
 
-        for mode in ("auto", "gemini", "native"):
+        for mode in WEB_SEARCH_MODE_CHOICES:
             for env in ({"GEMINI_API_KEY": "k"}, {}):
                 with self.subTest(mode=mode, keyed=bool(env)):
                     with patch.dict(os.environ, env, clear=True), \
@@ -1418,7 +1446,7 @@ class WebSearchModePersistenceTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             paths = self._paths(tmp)
-            for mode in ("auto", "gemini", "native"):
+            for mode in WEB_SEARCH_MODE_CHOICES:
                 with self.subTest(mode=mode):
                     save_run_config(paths, {"web_search": mode})
                     self.assertEqual(load_run_config(paths)["web_search"], mode)
@@ -1481,7 +1509,7 @@ class NormalizeWebSearchModeTest(unittest.TestCase):
     def test_known_modes_survive(self) -> None:
         from src.utils import normalize_web_search_mode
 
-        for mode in ("auto", "gemini", "native"):
+        for mode in WEB_SEARCH_MODE_CHOICES:
             self.assertEqual(normalize_web_search_mode(mode), mode)
 
     def test_case_and_padding_are_tolerated(self) -> None:

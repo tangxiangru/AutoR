@@ -98,7 +98,7 @@ its own docstring, not everything it touches.
 
 | Area | Test modules |
 | --- | --- |
-| Workflow end to end | `test_manager_smoke.py`, `test_manager_workflow.py`, `test_cli_smoke.py`, `test_fake_pipeline_end_to_end.py`, `test_graph_walk.py`, `test_auto_skip_preserves_a_valid_draft.py`, `test_unattended.py` |
+| Workflow end to end | `test_manager_smoke.py`, `test_manager_workflow.py`, `test_cli_smoke.py`, `test_fake_pipeline_end_to_end.py`, `test_graph_walk.py`, `test_auto_skip_preserves_a_valid_draft.py`, `test_unattended.py`, `test_manager_start_stage.py` |
 | Graph, routing, rounds | `test_stage_graph.py`, `test_router.py`, `test_graph_cost.py`, `test_research_rounds.py` |
 | Policy dials | `test_rigor.py`, `test_effort.py` |
 | Stage contract and stage summaries | `test_utils_contracts.py`, `test_stage_handoff.py`, `test_decision_ledger.py`, `test_revision_delta.py`, `test_listed_file_patterns.py`, `test_path_reference_heuristic.py`, `test_prompt_gate_correspondence.py` |
@@ -109,7 +109,7 @@ its own docstring, not everything it touches.
 | Review and approval | `test_review_panel.py`, `test_panel_unreachable.py`, `test_panel_inherits_the_ledger.py`, `test_cross_reviewer.py`, `test_review_policy.py`, `test_obligations.py`, `test_stage_comments.py`, `test_deliberation.py`, `test_crux_repeat.py`, `test_verdict_extraction.py`, `test_reviewer_unreadable_verdict.py` |
 | Archive and self-measurement | `test_archive.py`, `test_archive_evidence.py`, `test_archive_exploration.py`, `test_archive_exploration_wiring.py`, `test_decisions.py`, `test_trials.py`, `test_scorecard.py` |
 | Operators, recovery, backend health | `test_operator_recovery.py`, `test_operator_codex.py`, `test_bounded_recovery.py`, `test_backend_health.py` |
-| Web search | `test_web_search.py`, `test_mcp_web_search.py` |
+| Web search | `test_web_search.py`, `test_web_search_off.py`, `test_mcp_web_search.py` |
 | Report output and the benchmark adapter | `test_markdown_report.py`, `test_report_figure_floor.py`, `test_rcb_adapter.py`, `test_rcb_report_source.py`, `test_rcb_scoring.py`, `test_score_rcb_run.py` (which also holds the repository-wide secret scan), `test_score_rcb_run_wiring.py` |
 | Intake and bootstrap | `test_intake.py`, `test_bootstrap.py`, `test_project_bootstrap.py` |
 | Packaging and diagrams | `test_foundry_paper_package.py`, `test_release_package.py`, `test_diagram_gen.py` |

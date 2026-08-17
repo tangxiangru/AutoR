@@ -89,7 +89,7 @@ AutoR 负责的是更上层的 research loop，而不是重新发明一个新的
 | `--evolve` / `--no-evolve` | 每份合格草稿都打分并保留最好的一版，默认已开 |
 | `--archive PATH` / `--archive-report` | 跨 run 记录走过哪些边、收益如何；默认只记录不干预 |
 | `--trial ID --capability X --arm on` / `--trial-report` | 成对 A/B 试验及其统计报告；三个参数必须一起给 |
-| `--web-search {auto,gemini,native}` | 执行器怎么搜网页；`gemini` 用于内置搜索被禁用的部署 |
+| `--web-search {auto,gemini,native,off}` | 执行器怎么搜网页；`gemini` 用于内置搜索被禁用的部署；`off` 不提供任何搜索工具，并向 CLI 声明拒绝 `WebSearch` 和 `WebFetch` |
 | `--cross-review {auto,gemini,off}` | 换一个模型家族复核批准。**注意：`--fake-operator` 下会被拒绝装载，且这个选择不会随 `--resume-run` 保留** |
 
 这张表是提醒，不是参考手册。每个参数的准确语义、默认值、恢复 run 时是否保留，都在 [cli-reference.md](cli-reference.md) 里。
