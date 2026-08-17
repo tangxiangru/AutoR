@@ -43,6 +43,7 @@ from src.approval_agent import (
     AutomatedReviewer,
     ReviewDecision,
 )
+from src.cross_reviewer import CrossVerdict
 from src.evolution import EvolutionConfig
 from src.manager import ResearchManager
 from src.operator import ClaudeOperator
@@ -322,15 +323,33 @@ class TheRowIsCompleteTests(unittest.TestCase):
         )
         self.assertEqual(row.polish_rounds, 1)
 
-    def test_a_polish_round_is_not_a_dominant_failure(self) -> None:
+    def test_a_polish_round_is_not_a_failure_anywhere_on_the_row(self) -> None:
         # A visit that spent its wall clock getting better must not read as one that
-        # spent it thrashing, and `dominant_failure` is what a supervisor reads first.
+        # spent it thrashing. Five improvement rounds and one objection is one failure,
+        # not two -- and `repeated_failure` would otherwise be true of a visit in which
+        # nothing failed twice.
         meter = _meter()
         for attempt in range(1, 6):
             meter.note_polish_round(attempt)
         meter.note_failure(6, REVIEWER_REFUSED, "one objection")
         row = meter.close()
         self.assertEqual(row.dominant_failure, REVIEWER_REFUSED)
+        self.assertEqual(row.distinct_failures, 1)
+        self.assertEqual(row.max_repeat, 1)
+        self.assertEqual(row.max_consecutive_repeat, 1)
+        self.assertFalse(row.repeated_failure)
+        self.assertEqual([group["kind"] for group in row.failures], [REVIEWER_REFUSED])
+        self.assertEqual(row.polish_rounds, 5)
+
+    def test_a_visit_that_only_polished_recorded_no_failure(self) -> None:
+        meter = _meter()
+        for attempt in range(1, 4):
+            meter.note_polish_round(attempt)
+        row = meter.close()
+        self.assertEqual(row.failures, [])
+        self.assertEqual(row.distinct_failures, 0)
+        self.assertIsNone(row.dominant_failure)
+        self.assertEqual(row.failure_census, {POLISH_ROUND: 3})
 
     def test_an_attempt_nobody_classified_is_counted_rather_than_dropped(self) -> None:
         # The failure mode this module removes, one level up: a path that consumes budget
@@ -554,6 +573,23 @@ class _StubReviewer:
         self.calls += 1
         index = min(self.calls - 1, len(self._decisions) - 1)
         return self._decisions[index]
+
+
+class _StubCrossReviewer:
+    """Enough of ``GeminiCrossReviewer`` for ``_apply_cross_review``."""
+
+    def __init__(self, reason: str, *, unavailable: bool = False) -> None:
+        self._verdict = CrossVerdict(
+            agrees=unavailable,
+            reason=reason,
+            model="stub-cross-model",
+            unavailable=unavailable,
+        )
+        self.calls = 0
+
+    def audit(self, **_kwargs: object) -> CrossVerdict:
+        self.calls += 1
+        return self._verdict
 
 
 class ManagerWritesTheLedgerTests(unittest.TestCase):
@@ -994,6 +1030,103 @@ class ManagerWritesTheLedgerTests(unittest.TestCase):
         self.assertEqual(row["failure_census"], {CRUX_RAISED: 1})
         self.assertEqual(row["attempts"], 2)
         self.assertEqual(row["attempts_with_a_recorded_cause"], 1)
+
+    def test_a_missing_draft_charges_the_repair_pass_it_triggers(self) -> None:
+        """The other repair site, and the one a stage that produced nothing goes through.
+
+        Both repair passes are backend launches the manager dispatched, and a row that
+        counted only one of them would understate the cheapest way for a stage to get
+        expensive: attempts that produced no draft at all.
+        """
+        stage = STAGE_01
+        self._valid_draft(stage)
+        missing = self.paths.stage_tmp_file(stage)
+        # The operator claims a file it did not write, which is what the repair path is
+        # for. The repair then hands back the draft that does exist.
+        self.operator.run_stage = MagicMock(
+            return_value=MagicMock(
+                success=False,
+                exit_code=1,
+                session_id="session-1",
+                stage_file_path=self.paths.stages_dir / "never_written.md",
+                stdout="",
+                stderr="",
+            )
+        )
+        self.operator.repair_stage_summary = MagicMock(
+            return_value=MagicMock(
+                success=True,
+                exit_code=0,
+                session_id="session-1",
+                stage_file_path=missing,
+                stdout="",
+                stderr="",
+            )
+        )
+        self.manager.reviewer = _StubReviewer([ReviewDecision(choice="5", decision_token="approve")])
+        self.assertTrue(self.manager._run_stage(self.paths, stage))
+        row = read_stage_cost_ledger(self.paths)[0]
+        self.assertEqual(row["attempts"], 1)
+        self.assertEqual(row["operator_invocations"], 2)
+        self.operator.repair_stage_summary.assert_called_once()
+
+    def test_a_human_refusing_at_the_gate_is_charged_to_the_human(self) -> None:
+        """An attended run with no automated reviewer still spends its budget.
+
+        Filed under its own kind rather than ``reviewer_refused``: attributing an
+        operator's decision to a reviewer that was not running would put a model's
+        judgement in the record where a person's belongs.
+        """
+        stage = STAGE_01
+        self._stub_operator(self._valid_draft(stage))
+        self.manager.reviewer = None
+        self.manager.max_stage_attempts = 2
+        # "1" is "use suggestion 1": a refusal that needs no typed feedback, so the loop
+        # runs to exhaustion without reaching for a terminal that is not there.
+        self.manager._ask_choice = MagicMock(return_value="1")
+        self.manager._run_stage(self.paths, stage)
+        row = read_stage_cost_ledger(self.paths)[0]
+        self.assertEqual(row["failure_census"], {HUMAN_REFUSED: 2})
+        self.assertEqual(row["review_invocations"], 0, "no reviewer ran")
+        self.assertTrue(row["exhausted"])
+
+    def test_a_cross_model_veto_is_charged_to_its_own_cause(self) -> None:
+        """The other half of the measured hole, and the half a null check does not cover.
+
+        On the trial two of the six silent exhaustions were reached this way: the primary
+        reviewer approved, a different model family overturned it, the stage was sent back
+        as choice "4", and the record said "None recorded". The veto arrives at
+        ``_collect_review_decision`` as a replacement tuple with no ``ReviewDecision``
+        attached, so it is the one refusal whose kind cannot be read off a verdict -- and
+        filing it as an ordinary reviewer refusal would say the stage fell short when what
+        happened is that two reviewers disagreed.
+        """
+        stage = STAGE_01
+        self._stub_operator(self._valid_draft(stage))
+        self.manager.reviewer = _StubReviewer([ReviewDecision(choice="5", decision_token="approve")])
+        self.manager.cross_reviewer = _StubCrossReviewer(
+            "The decision rule named in H2 cannot be falsified as written."
+        )
+        self.manager.max_stage_attempts = 2
+        self.manager._run_stage(self.paths, stage)
+        row = read_stage_cost_ledger(self.paths)[0]
+        self.assertEqual(row["failure_census"], {CROSS_REVIEW_VETOED: 2})
+        self.assertNotIn(REVIEWER_REFUSED, row["failure_census"])
+        self.assertIn("cannot be falsified", row["failures"][0]["example"])
+        # The audit is a backend launch too, and one the approval gate did not make.
+        self.assertEqual(row["review_invocations"], 4)
+
+    def test_an_unavailable_cross_reviewer_is_not_a_refusal(self) -> None:
+        """Control for the test above. An audit that did not happen is not a veto, and
+        charging it would put a refusal nobody made in the census."""
+        stage = STAGE_01
+        self._stub_operator(self._valid_draft(stage))
+        self.manager.reviewer = _StubReviewer([ReviewDecision(choice="5", decision_token="approve")])
+        self.manager.cross_reviewer = _StubCrossReviewer("no backend", unavailable=True)
+        self.assertTrue(self.manager._run_stage(self.paths, stage))
+        row = read_stage_cost_ledger(self.paths)[0]
+        self.assertEqual(row["failure_census"], {})
+        self.assertEqual(row["outcome"], OUTCOME_APPROVED)
 
     def test_the_run_writes_the_ledger_into_its_own_log(self) -> None:
         stage = STAGE_01
