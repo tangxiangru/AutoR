@@ -2,25 +2,38 @@
 
 A run's binding budget is spent inside :meth:`ResearchManager._run_stage`, and until this
 module existed the run recorded neither half of the transaction. Two measured holes, both
-from the first live paired trial (``/rmeng_data/robtang/rcb-trial-graph``, four runs):
+from the first live paired trial (``/rmeng_data/robtang/rcb-trial-graph``).
 
-**The cause was not recorded.** Across the four runs the attempt loop hit its ceiling
-eleven times — ten ``max_attempts_exceeded`` log entries and one ``stage_stuck`` — and six
-of the eleven wrote ``Last validation errors: None recorded.`` Counted as *log entries*
-(``grep -c '^=== .* max_attempts_exceeded ===$'`` gave 4, 1, 4, 1 and the ``stage_stuck``
-heading 1, 0, 0, 0). The sentence itself occurs more often than that, because the message
-is stored as the stage's ``last_error`` in ``run_manifest.json`` and comes back into the
-log every time a later stage reads that file: counting raw occurrences of
-``Exceeded 8 attempts in the current stage run`` gives nineteen across the four runs,
-twelve of them ending ``None recorded.`` Either denominator says the same thing — the
-majority of exhaustions named no cause — and the entry count is the one that means "times
-a stage ran out of attempts". The reason is structural rather than incidental:
-``last_validation_errors`` is assigned at exactly one place in
+The population, pinned
+----------------------
+The trial directory held four runs when this was written and a fifth number would be
+wrong tomorrow, so every count below is over the **three whose ``run_manifest.json``
+says they finished** — ``Astronomy_000_20260814_175426`` (``cancelled``),
+``Astronomy_000_20260815_074118`` (``completed``) and
+``Chemistry_000_20260816_011751`` (``cancelled``). ``Chemistry_000_20260816_173127`` was
+still ``running`` and is left out of all of them: a log that is still being appended to
+is not a denominator. Nothing here needs the fourth run, and quoting it would put a
+number in a docstring that a reader re-deriving it next week would not get back.
+
+**The cause was not recorded.** Across those three runs the attempt loop hit its ceiling
+ten times — nine ``max_attempts_exceeded`` log entries and one ``stage_stuck`` — and five
+of the ten wrote ``Last validation errors: None recorded.`` Counted as *log entries*
+(``grep -ac '^=== .* max_attempts_exceeded ===$'`` gave 4, 1, 4 and the ``stage_stuck``
+heading 1, 0, 0). The ``-a`` is not decoration: the 08-14 log holds seven NUL bytes, GNU
+grep therefore treats the whole file as binary, and plain ``grep -c`` prints nothing and
+exits 1 on exactly the run that contributes the most. The sentence itself occurs more
+often than the entries do, because the message is stored as the stage's ``last_error`` in
+``run_manifest.json`` and comes back into the log every time a later stage reads that
+file: counting raw occurrences of ``Exceeded 8 attempts in the current stage run`` gives
+eighteen, eleven of them carrying ``None recorded.`` Either denominator says the same
+thing — half or more of the exhaustions named no cause — and the entry count is the one
+that means "times a stage ran out of attempts". The reason is structural rather than
+incidental: ``last_validation_errors`` is assigned at exactly one place in
 ``src/manager.py``, the branch where a draft failed validation, was repaired, failed
 again, was normalised locally and failed a third time. Every *other* way an attempt is
 consumed — an automated reviewer asking for changes, a cross-model reviewer vetoing an
 approval, a backend that crashed or answered unreadably, a crux the agent stopped to
-ask — leaves that list empty, so the exhaustion message says nothing. In all six of the
+ask — leaves that list empty, so the exhaustion message says nothing. In all five of the
 silent exhaustions the decision immediately before was a reviewer refusal or a
 cross-model veto; in none of them was it a validation failure. A reviewer refusing eight
 times, a validator refusing eight times and a backend not answering eight times were
@@ -76,9 +89,12 @@ No token count and no dollar figure, and the reason is worth stating precisely r
 than as "we cannot know". The backend *does* publish one: it emits a
 ``{"type": "result"}`` event carrying ``total_cost_usd`` and a ``usage`` block, and
 ``ClaudeOperator._run_streaming_command`` writes every stream line to ``logs_raw.jsonl``
-under the run root, so the money figure is on disk today — the four trial runs'
-``logs_raw.jsonl`` hold 82, 99, 100 and 38 ``result`` events and every one of the 319
-carries both keys. What does not exist is a path from there to the manager.
+under the run root, so the money figure is on disk today — the three finished trial runs
+named above hold 82, 99 and 100 ``result`` events and every one of the 281 carries both
+keys. (The fourth run is excluded here for the reason it is excluded everywhere else in
+this docstring, and it is the reason this sentence quotes three numbers rather than four:
+its ``logs_raw.jsonl`` grew while it was being counted.) What does not exist is a path
+from the money figure to the manager.
 ``_run_streaming_command``
 summarises the stream into ``stream_meta`` — ``raw_line_count``, ``non_json_line_count``,
 ``malformed_json_count``, ``observed_session_id``, and ``timed_out`` on the timeout path —
@@ -122,7 +138,7 @@ REVIEWER_REFUSED = "reviewer_refused"
 
 #: A reviewer from a different model family overturned an approval the primary gave.
 #: Separate from :data:`REVIEWER_REFUSED` because it is a *disagreement between two
-#: reviewers*, not a stage falling short, and two of the six silent exhaustions measured
+#: reviewers*, not a stage falling short, and two of the five silent exhaustions measured
 #: on the trial were exactly this: ``choice: 5`` from the primary, then ``cross_review``
 #: coming back ``agrees: False``.
 CROSS_REVIEW_VETOED = "cross_review_vetoed"
@@ -295,13 +311,25 @@ class StageCostRow:
     stage_number: int
     #: 1 for the first time this run entered this stage, 2 for the visit a backward edge
     #: produced, and so on. Assigned by :func:`append_stage_cost_row` from what is already
-    #: in the ledger, so it survives a resume.
+    #: in the ledger, so it survives a resume — :meth:`StageCostMeter.close` cannot know
+    #: it and does not try, and there is deliberately no second way to set it.
     visit: int
     started_at: str
     wall_seconds: float
-    #: Attempts charged against ``--max-attempts`` in this visit. Not the run-wide attempt
-    #: number the manifest carries: a second visit starts this at zero.
+    #: Iterations of the attempt loop in this visit — every trip through it, whatever the
+    #: trip was for. Not the run-wide attempt number the manifest carries: a second visit
+    #: starts this at zero.
+    #:
+    #: **This is not the ``--max-attempts`` spend.** That ceiling is tested against
+    #: ``loop_attempts - (polish_rounds - entry_polish_rounds) + 1`` in
+    #: ``ResearchManager._run_stage_attempts``, so an improvement round is a loop iteration
+    #: that costs the budget nothing, and the spend this visit made against the ceiling is
+    #: :attr:`attempts` **minus** :attr:`polish_rounds`. Both numbers are on the row rather
+    #: than one derived number, because "how long did this visit go on for" and "how much
+    #: of the failure budget did it burn" are different questions and a visit that spent
+    #: its wall clock getting better answers them differently.
     attempts: int
+    #: Improvement rounds taken in this visit, each of them one of :attr:`attempts`.
     polish_rounds: int
     #: Backend launches the manager dispatched to do the stage's work — the stage run
     #: itself and the summary-repair passes.
@@ -312,10 +340,17 @@ class StageCostRow:
     auto_skipped: bool
     outcome: str
     exhausted: bool
-    #: How many of :attr:`attempts` and :attr:`polish_rounds` produced a census entry. A
-    #: gap between this and ``attempts + polish_rounds`` is a path that consumes budget
-    #: and records nothing — the shape this module was written to remove, kept visible so
-    #: a new one announces itself.
+    #: How many of :attr:`attempts` produced a census entry. The denominator is
+    #: :attr:`attempts` alone and not ``attempts + polish_rounds``: a polish round *is* a
+    #: loop iteration, so adding the two would count it twice and make every polished
+    #: visit look like it had lost an attempt.
+    #:
+    #: A gap is a path that consumed a loop iteration and recorded nothing — the shape
+    #: this module was written to remove, kept visible so a new one announces itself. One
+    #: gap is expected and is not that shape: the iteration that *settled* the stage did
+    #: not fail, so an approved visit reads ``attempts_with_a_recorded_cause ==
+    #: attempts - 1``. A visit that exhausted its budget has no such iteration and should
+    #: read equal.
     attempts_with_a_recorded_cause: int
     failure_census: dict[str, int]
     distinct_failures: int
@@ -524,7 +559,15 @@ class StageCostMeter:
         )
         return "; ".join(parts) + f" ({shape})"
 
-    def close(self, *, visit: int = 1) -> StageCostRow:
+    def close(self) -> StageCostRow:
+        """The row for this visit, with :attr:`StageCostRow.visit` left at its placeholder.
+
+        The meter cannot count visits: it is opened per visit and never sees the ledger.
+        :func:`append_stage_cost_row` overwrites the field from what is already on disk, so
+        a ``visit=`` argument here would be a second way to set a number the writer
+        ignores — which is worse than no way at all, because a caller could pass one and
+        watch it disappear.
+        """
         census = self.census()
         groups = self.failure_groups()
         counts = [int(group["count"]) for group in groups]
@@ -534,7 +577,7 @@ class StageCostMeter:
         return StageCostRow(
             stage=self.stage.slug,
             stage_number=self.stage.number,
-            visit=visit,
+            visit=1,
             started_at=self.started_at,
             wall_seconds=round(max(self._clock() - self._start, 0.0), 3),
             attempts=self.attempts,

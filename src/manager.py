@@ -2402,7 +2402,8 @@ class ResearchManager:
                 # What the attempts were spent on, from the meter rather than from
                 # `last_validation_errors`. That list is assigned at exactly one place --
                 # the branch where validation, repair and local normalisation all failed
-                # -- so on the four runs of the first live paired trial six of the eleven
+                # -- so on the three finished runs of the first live paired trial (see
+                # `src/stage_cost.py` for which three and why) five of the ten
                 # exhaustions printed "None recorded" while the record of what actually
                 # happened -- a `reviewer_choice` entry reading `choice: 4`, or a
                 # `cross_review` reading `agrees: False` -- sat two or three log entries
@@ -3224,7 +3225,7 @@ class ResearchManager:
         if cross is not None:
             # An approval the primary gave and a second model family took back. Filed as
             # its own cause: it is a disagreement between two reviewers rather than a
-            # stage falling short, and on the trial two of the six exhaustions that
+            # stage falling short, and on the trial two of the five exhaustions that
             # recorded nothing were reached this way.
             self._note_stage_failure(
                 stage,
