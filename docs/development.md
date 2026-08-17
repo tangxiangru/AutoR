@@ -566,8 +566,32 @@ nobody is told about. Field skills are exempt: the discipline filter narrows the
 to two per run, and that is a small enough field of candidates for pull-based
 routing to work.
 
-To add one: create `src/skills/<name>/SKILL.md` with matching frontmatter, and
-name it in a rendered stage prompt.
+**A skill can also be scoped to a shape of task.** `applies_when` is a
+case-insensitive regex in the frontmatter, matched against the run's research brief
+plus its data manifest (`src/run_skills.py::routing_text`); `applies_unless` vetoes.
+A skill carrying either is installed only for runs whose brief matches, and must also
+carry `stages:` — the `task_shaped_skills` channel announces it in exactly those
+stages' prompts, which is the only way to name a skill most runs will not have.
+`validate_skill_pack` refuses a scoped skill with no stages, an unparseable regex, or
+a stage slug that is not a stage.
+
+Measure the predicate before it lands. It is a claim about a kind of research problem
+and it fails silently in both directions — a regex matching thirty of forty briefs is
+an unconditional skill with extra steps, and one matching none is a fourteenth skill
+nobody will ever be offered:
+
+```
+python3 tools/skill_selectivity.py --from-runs /path/to/run/workspaces
+python3 tools/skill_selectivity.py --briefs <dir> --expect <skill>:<task>,<task>
+```
+
+Prefer `--from-runs`: it reads each run's own `user_input.txt`, which is the file the
+installer reads. The first version of that tool narrowed with `research_brief` alone
+and reported a predicate selecting eight tasks the installer would have selected none
+of, because `research_brief` drops the data manifest and the predicate keyed on it.
+
+To add one: create `src/skills/<name>/SKILL.md` with matching frontmatter, and either
+name it in a rendered stage prompt or give it `applies_when` plus `stages`.
 `validate_skill_pack` is what defines "well-formed", and
 `tests/test_run_skills.py` runs it over the shipped pack and then checks the
 install lands where the CLI looks — so a malformed skill fails the suite rather

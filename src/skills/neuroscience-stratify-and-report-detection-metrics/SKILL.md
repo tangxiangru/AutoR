@@ -1,6 +1,6 @@
 ---
 name: neuroscience-stratify-and-report-detection-metrics
-description: Use when the research task is in neuroscience — neural recording, decoding and brain-model comparison — at study design, analysis or writing. Report per-group and per-class detection metrics, and sweep the modality's own degradations
+description: Use at analysis when a detection or classification result is about to be reported as one accuracy over a pooled population. Covers per-group and per-class precision, recall and confusion matrices at a stated threshold, and sweeping the degradations the recording modality actually suffers.
 ---
 
 # Report per-group and per-class detection metrics, and sweep the modality's own degradations

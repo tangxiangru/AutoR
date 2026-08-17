@@ -1,6 +1,6 @@
 ---
 name: physics-discriminate-model-families-and-defend-the-fit
-description: Use when the research task is in physics — condensed matter, many-body theory, simulation and physical modelling — at study design, analysis or writing. Physics: exclude a named model, and treat the fit protocol as part of the result
+description: Use at analysis when a fit is about to be reported as the answer without a rival model being excluded. Covers naming the competing model families, showing which the data rules out, and treating the fit protocol — range, weighting, priors — as part of the result rather than as a setting.
 ---
 
 # Physics: exclude a named model, and treat the fit protocol as part of the result

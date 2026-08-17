@@ -1,6 +1,6 @@
 ---
 name: life-benchmark-against-the-incumbent
-description: Use when the research task is in life — structural biology, protein/ligand modelling, sequence and assay work — at study design, analysis or writing. A life-science method result is a head-to-head, a cost table, and an orthogonal truth set
+description: Use at study design when a life-science method result is about to be reported on its own numbers. Covers the head-to-head against the incumbent tool, the cost table that goes with it, and finding an orthogonal truth set the method was not fitted to.
 ---
 
 # A life-science method result is a head-to-head, a cost table, and an orthogonal truth set

@@ -1,6 +1,8 @@
 ---
 name: a-value-you-did-not-measure-still-has-a-source
-description: Use at Stage 06 and Stage 07 when a deliverable the task named cannot be produced by this run at all — a wet-lab measurement, a proprietary benchmark, hardware you do not have. Covers the difference between fabricating a number and citing one, where the cited value belongs, and why omitting the section is the worst of the three options.
+description: Use at Stage 06 and Stage 07 when a deliverable the task named cannot be produced by this run at all — a wet-lab measurement, a synthesised material, a proprietary benchmark, hardware you do not have. Covers the difference between fabricating a number and citing one, where the cited value belongs, and why omitting the section is the worst of the three options.
+applies_when: \b(synthesi[sz]\w*|wet[-\s]?lab|in\s+vivo|in\s+vitro|experimentally|experimental (?:validation|verification|measurement|characteri[sz]ation))\b
+stages: 03_study_design, 06_analysis, 07_writing
 ---
 
 # Not measuring something is not the same as having nothing to say about it

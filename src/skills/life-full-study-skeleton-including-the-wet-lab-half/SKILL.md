@@ -1,6 +1,6 @@
 ---
 name: life-full-study-skeleton-including-the-wet-lab-half
-description: Use when the research task is in life — structural biology, protein/ligand modelling, sequence and assay work — at study design, analysis or writing. Fill every slot of the life-science results skeleton, including the parts you cannot compute
+description: Use at study design and again when laying out the results section, to check every slot of a life-science study is filled. Covers the skeleton a paper of this kind carries, and what to put in the slots this run cannot compute rather than leaving them out.
 ---
 
 # Fill every slot of the life-science results skeleton, including the parts you cannot compute

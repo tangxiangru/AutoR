@@ -39,9 +39,8 @@ in each `where` once the section exists.
   is still reportable, and reporting it beats leaving the section empty. Give the value, name whose
   it is, style it in any figure as an external reference rather than as one of your series, and never
   count it as validation of your own pipeline. Then state what this run *does* establish about it and
-  the distance between the two. Read the `a-value-you-did-not-measure-still-has-a-source` skill; the
-  labelling is what separates a citation from a fabrication, and getting it right is worth a section
-  that would otherwise score as absent.
+  the distance between the two. The labelling is what separates a citation from a fabrication, and
+  getting it right is worth a section that would otherwise score as absent.
 - **Where the run's strongest result is not what the task asked for, both go in, in that order.** The
   task's answers take the title, the abstract and the opening of Results, and they get the figures;
   the run's other findings follow them. A report whose abstract is about the run rather than about
@@ -218,8 +217,8 @@ shows the same thing. They were chosen at Stage 03; this phase produces them.
 **Read the `the-canonical-figure` skill before you draw.** A diagnostic plot of your own pipeline
 and the source study's result plot are different objects, and only one of them is being compared to
 anything. **Read the `result-table` skill** before you build the results table, and
-**read `the-unit-of-analysis`** before you pool anything into a single number: a criterion
-written about per-stratum behaviour is not answered by an average over the strata.
+before you pool anything into a single number, check that a criterion
+written about per-stratum behaviour is not being answered by an average over the strata.
 
 5. **Publish the planned figures in slot order, at most {{MAX_REPORT_FIGURES}} and preferably far
    fewer — the first {{JUDGE_VISIBLE_FIGURES}} are what a reviewer sees.** Every slot you

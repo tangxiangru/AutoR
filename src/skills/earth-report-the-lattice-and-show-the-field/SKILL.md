@@ -1,6 +1,6 @@
 ---
 name: earth-report-the-lattice-and-show-the-field
-description: Use when the research task is in earth — weather, climate, hydrology and geoscience data analysis — at study design, analysis or writing. Earth: report the stratified lattice, and show the field it came from
+description: Use at analysis and figure planning when a geospatial or gridded result is about to be reported only as regional aggregates. Covers reporting the stratified lattice, showing the field the strata came from, and which map a study of this kind is expected to publish.
 ---
 
 # Earth: report the stratified lattice, and show the field it came from

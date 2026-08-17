@@ -1,6 +1,6 @@
 ---
 name: energy-counterfactual-pair-and-hierarchy-closure
-description: Use when the research task is in energy — batteries, electrochemistry, energy-system modelling and identification — at study design, analysis or writing. Counterfactual pair, nested closure, native resolution: the accounting an energy study is graded on
+description: Use at analysis when an energy-system result rests on an aggregation, a scenario or a saving. Covers the counterfactual pair a saving has to be quoted against, checking that a hierarchy sums, and reporting at the data's native temporal resolution.
 ---
 
 # Counterfactual pair, nested closure, native resolution: the accounting an energy study is graded on

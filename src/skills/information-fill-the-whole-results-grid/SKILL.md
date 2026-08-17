@@ -1,6 +1,6 @@
 ---
 name: information-fill-the-whole-results-grid
-description: Use when the research task is in information — machine learning, retrieval, multimodal and agent evaluation — at study design, analysis or writing. Reproduce the whole (variant x backbone x dataset x metric) grid, reduced-N where you must
+description: Use at study design and again at writing when the source reports a grid — variants crossed with backbones, datasets or metrics — and you are about to fill part of it. Covers reproducing the whole grid at reduced N where you must, and why a labelled reduced-N cell beats an empty one.
 ---
 
 # Reproduce the whole (variant x backbone x dataset x metric) grid, reduced-N where you must

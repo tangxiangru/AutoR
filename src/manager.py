@@ -101,7 +101,7 @@ from .report_plan import (
     recorded_report_plan_stamp,
     stamp_report_plan,
 )
-from .run_skills import install_run_skills
+from .run_skills import SkillPackEntry, install_run_skills, read_skill_pack
 from .skill_evolution import install_learned_skill
 from .manifest import (
     ensure_run_manifest,
@@ -271,6 +271,10 @@ class ResearchManager:
         #: Research field of this run, when the caller knows it. Narrows the field-specific
         #: half of the skill pack; None installs all of it.
         self.skill_discipline: str | None = None
+        #: The pack entries this run was actually offered, kept so a stage prompt can
+        #: name the ones a predicate selected for this brief. Empty until
+        #: `_install_skills` has run.
+        self._installed_skills: list[SkillPackEntry] = []
         self.output_stream = output_stream
         self.ui = ui or TerminalUI(output_stream=output_stream)
         self.approval_mode = "agent" if reviewer is not None else "manual"
@@ -1329,8 +1333,12 @@ class ResearchManager:
         run_root = create_run_root(self.runs_dir)
         paths = build_run_paths(run_root)
         ensure_run_layout(paths)
-        self._install_skills(paths)
+        # The goal is written before the skills are installed, not after: the shape
+        # filter in `install_run_skills` reads `paths.user_input` for the research
+        # brief, and installing first would offer every task-scoped skill nothing to
+        # match against. On the resume path above, the file is already there.
         write_text(paths.user_input, user_goal)
+        self._install_skills(paths)
 
         # Ingest any pre-provided resources into workspace
         intake_summary: str | None = None
@@ -4347,6 +4355,16 @@ class ResearchManager:
             installed = install_run_skills(
                 paths, self.skills_dir, discipline=self.skill_discipline
             )
+            # Kept, not discarded. Discarding it is why `format_skills_for_prompt`
+            # had no caller and sat under a named exemption in
+            # `test_declared_symbols_are_wired`: the one thing that knows which
+            # skills this run was offered threw the answer away. The task-scoped
+            # ones are the ones a stage has to be told about, because they were
+            # chosen for this brief and nothing else in the prompt says so.
+            chosen = set(installed)
+            self._installed_skills = [
+                entry for entry in read_skill_pack(self.skills_dir) if entry.name in chosen
+            ]
             # The third layer: what earlier runs in this field wrote down for whoever came
             # next. Installed after the fixed pack so a field with no history costs nothing,
             # and best-effort like the rest -- guidance a run cannot read is guidance it does

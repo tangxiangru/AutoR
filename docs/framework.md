@@ -443,7 +443,7 @@ write up an abandoned round is a correctness property rather than a routing pref
 The control loop, per step:
 
 1. **Compose the prompt.** `render_inbound(ChannelContext(...), CHANNELS)` builds the stage's inbound
-   context from the nineteen typed channels in [`information_flow.py`](../src/information_flow.py).
+   context from the twenty typed channels in [`information_flow.py`](../src/information_flow.py).
    Each channel declares `produced_by`, a `consumed_by` set of real stage slugs, and a written
    `rationale`; a test fails any channel that withholds itself from a stage without saying why.
 2. **Execute.** The prompt is written verbatim to `prompt_cache/` and handed to the coding agent CLI
@@ -554,7 +554,7 @@ An explicit `--flag`/`--no-flag` always beats the level. The validity chain is n
 | [`stage_graph.py`](../src/stage_graph.py) | Nodes, edges, guards, visit budgets, and the two topologies. |
 | [`router.py`](../src/router.py) | The agent's pick among admissible moves, and the refusal of an off-menu or unjustified one. |
 | [`research_rounds.py`](../src/research_rounds.py) | Stages 03–06 as a repeatable round with a recorded closing decision. |
-| [`information_flow.py`](../src/information_flow.py) | Nineteen typed context channels with declared readers and written rationales. |
+| [`information_flow.py`](../src/information_flow.py) | Twenty typed context channels with declared readers and written rationales. |
 
 ### Gates — what a stage must produce to be accepted
 
@@ -612,7 +612,7 @@ An explicit `--flag`/`--no-flag` always beats the level. The validity chain is n
 | [`web_search.py`](../src/web_search.py) · [`mcp_web_search.py`](../src/mcp_web_search.py) | Gemini-backed search, readiness assessment, and a stdlib JSON-RPC MCP stdio server exposing it as a tool. |
 | [`backend_health.py`](../src/backend_health.py) | Telling "the model was unreachable" apart from "the research failed". |
 | [`prompt_fragments.py`](../src/prompt_fragments.py) | Shared prompt blocks generated from the validators' own constants, so a limit cannot drift between the gate and the instruction. |
-| [`run_skills.py`](../src/run_skills.py) · [`skills/`](../src/skills) | Forty-two craft skills installed into the run's working directory: twenty-two general, plus the two of twenty field skills belonging to the run's discipline. Pulled on demand, and named imperatively by the stage whose decision each one covers. |
+| [`run_skills.py`](../src/run_skills.py) · [`skills/`](../src/skills) | Forty-four craft skills, of which a run receives the ones two filters admit: the field filter on the name prefix, and an `applies_when` predicate over the run's own brief. Pulled on demand; named imperatively by the stage whose decision each covers, or announced per run by the `task_shaped_skills` channel. |
 
 ### Output and adapters
 
@@ -1204,7 +1204,7 @@ What a reader can take from this system, in descending order of how transferable
    explained rather than hidden, revisit-reason deduplication, and a learning component that is
    structurally forbidden from weakening the guards it learns around.
 
-5. **A typed information-flow layer for agent prompts.** Nineteen typed channels, each naming its producer,
+5. **A typed information-flow layer for agent prompts.** Twenty typed channels, each naming its producer,
    its consumers by stage slug, and a written rationale for every narrowing — with a test that fails
    a channel that withholds itself without an argument. It makes "what did this stage actually see?"
    a diffable topology instead of a reconstruction from `if` statements.

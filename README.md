@@ -94,7 +94,7 @@ resumable, with redo and rollback.
 ### The one thing the docs will not claim
 
 Approved stage summaries are the only *free-text* cross-stage memory. Every other cross-stage edge is
-a typed artifact with a declared reader: **nineteen typed channels** in
+a typed artifact with a declared reader: **twenty typed channels** in
 [`information_flow.py`](src/information_flow.py) each name the exact stage slugs that consume them,
 and the nine channels produced inside the walk name their producing stage as well. `obligations.json` and
 `review_policy.json` cross stages without touching a summary at all — both only behind an agent
@@ -125,7 +125,7 @@ naming them.
 | Conditional terminal edges | `TERMINAL_EDGES` | 1 |
 | Edges in the default (`adaptive`) graph | `StageGraph.adaptive()` | 22 |
 | Edges in `--stage-graph linear` | `StageGraph.linear()` | 9 |
-| Typed information channels | `CHANNELS`, [src/information_flow.py](src/information_flow.py) | 19 |
+| Typed information channels | `CHANNELS`, [src/information_flow.py](src/information_flow.py) | 20 |
 | `validate_*` functions the stage gate calls | `validate_stage_artifacts`, [src/utils.py](src/utils.py) | 17 |
 | Required stage-summary headings | `REQUIRED_STAGE_HEADINGS` | 7 |
 | Rubric criteria (weighted, backend-free) | `CRITERIA`, [src/rubric.py](src/rubric.py) | 9 |
@@ -611,7 +611,7 @@ these four are the ones whose reason is not readable off the key:
 topology can be printed and diffed rather than reconstructed from a pile of `if` statements.
 `_record_inbound_channels` writes the delivered channel keys per stage into the run log.
 
-Honest scope: nineteen blocks are typed. Six more — `obligations_context`, `intake_context_text`,
+Honest scope: twenty blocks are typed. Six more — `obligations_context`, `intake_context_text`,
 `web_search_context`, `approved_memory`, `handoff_context`, and the `# What the Task Asks For` block
 that `build_prompt` composes inline from
 [`format_deliverables_for_prompt`](src/deliverables.py) — are still delivered by `build_prompt`
@@ -627,14 +627,30 @@ Alongside the prompt, AutoR installs an agent skill pack from [src/skills/](src/
 `runs/<run_id>/.claude/skills/` — the operator's working directory — so the agent can *pull*
 long-form craft guidance when it needs it. A skill costs nothing in the prompts that do not use it.
 
-Forty-two skills ship today: twenty-two general ones and twenty field-specific ones, of which the
-installer copies only the two belonging to the run's own discipline — a materials run does not
-benefit from being offered advice about observational astronomy, it just has one more description to
-read past. Pull-based is not the same as discoverable: measured over a 40-task ResearchClawBench arm,
-the pack drew **78 `Skill` calls in 789 hours of agent time**, 31 of them the one skill a stage
-prompt names imperatively. So every general skill is now named at the stage whose decision it
-covers, and `tests/test_a_skill_is_named_where_it_is_needed.py` refuses a general skill that no
-prompt this configuration renders points at.
+Forty-four skills ship today: twenty-four general ones and twenty field-specific ones. **A run is
+not offered all of them.** Two filters narrow the pack, and a skill has to survive both:
+
+1. **Field.** A skill named `<field>-...` is installed only for a run in that field, so twenty
+   become two. A materials run does not benefit from being offered advice about observational
+   astronomy, it just has one more description to read past.
+2. **Shape.** A skill may carry an `applies_when` regex, matched against this run's own research
+   brief and data manifest. Four skills are scoped this way today; measured over the forty
+   ResearchClawBench briefs they select 3, 4, 6 and 8 tasks each, twenty-five tasks receive none of
+   them, and no task receives more than three. `tools/skill_selectivity.py` prints the selection set
+   for a corpus and `--expect` turns it into an assertion, because a predicate is a claim about a
+   kind of research problem and it should be checkable.
+
+The predicate reads the brief, never the task's identifier: a table of benchmark ids would select
+the same tasks today and generalise to nothing.
+
+Pull-based is not the same as discoverable. Measured over a 40-task arm, the pack drew **78 `Skill`
+calls in 789 hours of agent time**, 31 of them the one skill a stage prompt named imperatively —
+and stage 05 launched none in any of the forty runs. So every general skill is now named at the
+stage whose decision it covers, a task-scoped one is announced by the `task_shaped_skills` channel
+for the runs that were selected for it, and
+`tests/test_a_skill_is_named_where_it_is_needed.py` refuses a skill that nothing announces —
+in either direction, since a prompt naming a skill most runs will not have is the same defect
+reversed.
 
 <details>
 <summary><strong>Claude CLI invocation</strong></summary>
@@ -749,7 +765,7 @@ Full file-by-file reference: **[docs/run-artifacts.md](docs/run-artifacts.md)**.
 ```mermaid
 flowchart LR
     P[rigor.py · effort.py<br/>policy: what machinery runs] --> M
-    C[information_flow.py<br/>19 typed channels] --> M
+    C[information_flow.py<br/>20 typed channels] --> M
     M[manager.py<br/>walks the stage graph] --> W[walk<br/>stage_graph · router]
     M --> G[gates<br/>utils · preregistration · experimental_protocol<br/>report_plan · deliverables · validity_review]
     M --> I[improvement<br/>rubric · evolution · pareto]
@@ -780,7 +796,7 @@ flowchart LR
 | [src/emissions.py](src/emissions.py) | Acts that leave the run, withheld until the stage that asked for them is approved |
 | [src/approval_agent.py](src/approval_agent.py) | The solo approval gate, its six-choice vocabulary and its unreadable-verdict fallback |
 | [src/preregistration.py](src/preregistration.py) | Freeze, amend, adjudicate, trace |
-| [src/information_flow.py](src/information_flow.py) | Nineteen typed information channels, each with declared readers and a written rationale |
+| [src/information_flow.py](src/information_flow.py) | Twenty typed information channels, each with declared readers and a written rationale |
 | [src/router.py](src/router.py) | The agent's choice among admissible moves; an off-menu choice is refused and logged |
 | [src/validity_review.py](src/validity_review.py) | The adversarial pass after Stages 05 and 06, and the response gate that follows it |
 | [src/research_rounds.py](src/research_rounds.py) | Stages 03-06 as a repeatable round, bounded by `--max-rounds` |
