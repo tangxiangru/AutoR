@@ -381,3 +381,96 @@ class TheGoalSurvivesARetryTest(unittest.TestCase):
             block = prompt.split("# Continuation Discipline", 1)[1].split("\n# ", 1)[0]
             numbers = [int(m.group(1)) for m in re.finditer(r"^(\d+)\. ", block, re.M)]
             self.assertEqual(numbers, list(range(1, len(numbers) + 1)))
+
+
+class TheNarrowestTaskGetsTheBiggestPromptTest(unittest.TestCase):
+    """The repair prompt inlined the whole attempt it was repairing.
+
+    Measured over 2,166 archived repair prompts: median 354 KB against the attempt
+    prompt's 156 KB -- 1.84x its own attempt at the median, 6.55x at p90, and a third of
+    all repairs over 500 KB where 0.14% of attempt prompts are. Two blocks are all of it,
+    the whole original prompt and the whole stdout; the objects the task actually rewrites
+    are 17 KB and 10 bytes at the median.
+
+    And nothing measurable is lost by clipping them. Repair success over 2,157 recorded
+    outcomes is flat across two orders of magnitude of prompt size -- 98.1% below 150 KB,
+    100% at 150-300 KB, 98.6/98.2/98.9% above -- so the 645 repairs that already got a
+    small prompt are the control group.
+    """
+
+    def _repair_prompt(self, *, prompt: str, stdout: str, stderr: str = "boom") -> str:
+        import io
+        from unittest.mock import patch
+
+        from src.operator import ClaudeOperator
+        from src.utils import (
+            STAGES, OperatorResult, build_run_paths, ensure_run_layout, write_text,
+        )
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        paths = build_run_paths(Path(tmp.name) / "run")
+        ensure_run_layout(paths)
+        write_text(paths.user_input, "goal")
+        stage = STAGES[0]
+        write_text(paths.stage_tmp_file(stage), "# draft\n")
+        operator = ClaudeOperator(fake_mode=False, output_stream=io.StringIO())
+        seen = {}
+
+        def fake_stream(*args, **kwargs):
+            command = kwargs["command"]
+            seen["text"] = Path(command[command.index("-p") + 1].lstrip("@")).read_text()
+            return (0, "ok", "", None,
+                    {"raw_line_count": 1, "non_json_line_count": 0, "malformed_json_count": 0})
+
+        result = OperatorResult(
+            success=False, exit_code=1, stdout=stdout, stderr=stderr,
+            stage_file_path=paths.stage_tmp_file(stage), session_id="s",
+        )
+        with patch("src.operator.shutil.which", return_value="/usr/bin/claude"), patch.object(
+            operator, "_run_streaming_command", side_effect=fake_stream
+        ):
+            operator.repair_stage_summary(stage, prompt, result, paths, attempt_no=1)
+        return seen["text"]
+
+    def test_a_huge_original_prompt_is_clipped_from_the_end(self) -> None:
+        """The head is what a rewrite needs: `# Stage Instructions` is the first section."""
+        from src.operator import REPAIR_PROMPT_EXCERPT_CHARS
+
+        text = self._repair_prompt(
+            prompt="# Stage Instructions\nHEAD" + ("p" * REPAIR_PROMPT_EXCERPT_CHARS) + "TAILMARKER",
+            stdout="short",
+        )
+        self.assertIn("# Stage Instructions", text)
+        self.assertNotIn("TAILMARKER", text)
+        self.assertIn("dropped from the end", text)
+
+    def test_a_huge_stdout_is_clipped_from_the_start(self) -> None:
+        """What matters is what the attempt ended up doing -- the same reason
+        `_write_attempt_state` records `stdout_text[-2000:]`."""
+        from src.operator import REPAIR_STDOUT_EXCERPT_CHARS
+
+        text = self._repair_prompt(
+            prompt="p",
+            stdout="STARTMARKER" + ("s" * REPAIR_STDOUT_EXCERPT_CHARS) + "ENDMARKER",
+        )
+        self.assertIn("ENDMARKER", text)
+        self.assertNotIn("STARTMARKER", text)
+        self.assertIn("dropped from the start", text)
+
+    def test_what_the_task_rewrites_is_not_clipped(self) -> None:
+        """The control on the trade. The draft is the object of the task and it is small:
+        17 KB at the median, 65 KB at p99."""
+        text = self._repair_prompt(prompt="p", stdout="s")
+        self.assertIn("# draft", text)
+
+    def test_a_small_attempt_is_passed_through_whole(self) -> None:
+        """The second control: the clip only moves what would have been enormous."""
+        text = self._repair_prompt(prompt="tiny prompt", stdout="tiny stdout")
+        self.assertIn("tiny prompt", text)
+        self.assertIn("tiny stdout", text)
+        self.assertNotIn("dropped", text)
+
+    def test_an_empty_stream_says_so_rather_than_going_blank(self) -> None:
+        text = self._repair_prompt(prompt="p", stdout="", stderr="")
+        self.assertIn("(empty)", text)
