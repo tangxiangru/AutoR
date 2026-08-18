@@ -1169,6 +1169,11 @@ class ResearchManager:
             offered=decision.offered,
             blocked=decision.blocked,
             refusal=decision.refusal,
+            # Carried rather than recomputed. The manager is the only party that knows a
+            # redirect was asked for, and the visit is the only record `routing_summary`
+            # can count it off; dropping it here would leave the count permanently zero
+            # with every other gate on it still green.
+            preempted_by=decision.preempted_by,
         )
         if decision.agent_directed or decision.refusal:
             self.ui.show_status(format_decision(decision), level="info")

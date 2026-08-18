@@ -97,6 +97,24 @@ ROUTING_MODES = ("off", "auto", "agent")
 SkipBudget = Callable[[], tuple[int, int | None]]
 
 
+#: The run supervisor required this move, so no ask happened at this node.
+SUPERVISOR_PREEMPTION = "supervisor"
+
+#: Parties other than the agent that can end a routing decision before the agent is
+#: asked. Declared as a closed vocabulary in the shape ``BLOCK_KINDS`` and
+#: ``INTERVENTIONS`` already have, and refused at construction, because the reason to
+#: count pre-emptions at all is that a new one must not be able to arrive unnamed.
+#:
+#: One entry, and the one that is *not* here is deliberate. A closed research round also
+#: returns a decision ahead of the ask — the ``declared`` branch below — and it is not a
+#: pre-emption: the party that reasoned about the results is the same party the ask would
+#: have gone to, which is why that branch records ``agent_directed=True``. Counting it
+#: here would put the run's own reasoning into a counter built to notice the run's
+#: reasoning being displaced. The supervisor is a different party with a different claim:
+#: it has reasoned about the *spend*.
+PREEMPTIONS: tuple[str, ...] = (SUPERVISOR_PREEMPTION,)
+
+
 @dataclass(frozen=True)
 class RoutingDecision:
     target: str
@@ -115,6 +133,30 @@ class RoutingDecision:
     #: all record the same thing: what was actually on offer.
     offered: tuple[str, ...] = ()
     blocked: dict[str, str] = field(default_factory=dict)
+    #: Which party ended this decision before the agent was asked, from
+    #: :data:`PREEMPTIONS`. Empty when the agent was asked, when it was asked and refused,
+    #: and when nothing was on offer to ask about.
+    #:
+    #: A field rather than something inferred, because nothing already on the record can
+    #: tell the cases apart: ``agent_directed=False`` covers a supervisor redirect, a
+    #: refused answer, a linear node and ``--routing-mode off`` alike. The count exists so
+    #: that loosening :data:`~src.supervisor.UNSETTLED_VISITS_BEFORE_A_REDIRECT` moves a
+    #: number rather than quietly draining the capability the graph is for.
+    preempted_by: str = ""
+
+    def __post_init__(self) -> None:
+        """A pre-emption outside the declared vocabulary is refused at construction.
+
+        The shape ``Move.__post_init__`` uses for ``BLOCK_KINDS`` and
+        ``Intervention.__post_init__`` for ``INTERVENTIONS``, for the same reason: a
+        vocabulary enforced only by every call site spelling the constant right is not a
+        vocabulary, and this one is counted rather than merely displayed.
+        """
+        if self.preempted_by and self.preempted_by not in PREEMPTIONS:
+            raise ValueError(
+                f"{self.preempted_by!r} is not a routing pre-emption; the vocabulary is "
+                f"{', '.join(PREEMPTIONS)}."
+            )
 
     @property
     def finished(self) -> bool:
@@ -290,6 +332,11 @@ class StageRouter:
             return RoutingDecision(
                 target, chosen.edge.kind, reason, default_target, agent_directed=False,
                 offered=offered, blocked=blocked_kinds,
+                # The ask did not happen at this node, and the record says so as a number
+                # rather than as an absence. `_refuse` above deliberately does not set it:
+                # a redirect the guards shut is a refusal the supervisor did not get, and
+                # counting it would credit the mechanism with a choice it never took.
+                preempted_by=SUPERVISOR_PREEMPTION,
             )
 
         # `auto` means "ask where the answer can differ". `len(live) > 1` was the wrong
@@ -845,6 +892,18 @@ def routing_summary(paths: RunPaths) -> dict[str, Any]:
     jump. A bypass that *did* record a choice set contributes both, because those
     guard evaluations happened even though the move out was the operator's, and
     :attr:`BlockCensus.bypassed` counts it separately so neither reading is forced.
+
+    **`preempted` is the count beside `agent_directed`.** The supervisor's `redirect`
+    returns a routing decision before the agent is asked, which may well be right and
+    has to be countable: every other mechanism that constrains a run is separately
+    gated, and the capability they can jointly remove — the run choosing its own next
+    move, backward included — was gated by nobody. One number, on a record that
+    already exists, so that loosening
+    :data:`~src.supervisor.UNSETTLED_VISITS_BEFORE_A_REDIRECT` shows up as a figure
+    moving rather than as a capability draining away. It is not a view: nothing here
+    renders it for a person, and it goes where the other run-level routing figures go
+    — :attr:`src.archive.RunRecord.preempted`, beside `agent_directed` and `bypassed`,
+    which is what makes it comparable across runs rather than a fact about one.
     """
     payload = _load_json(paths.evolution_dir / "stage_graph.json")
     if not isinstance(payload, dict):
@@ -859,6 +918,7 @@ def routing_summary(paths: RunPaths) -> dict[str, Any]:
     revisits = 0
     bypassed = 0
     refused = 0
+    preempted = 0
     for visit in payload.get("path", []):
         if not isinstance(visit, dict):
             continue
@@ -897,12 +957,19 @@ def routing_summary(paths: RunPaths) -> dict[str, Any]:
         edges[f"{source}->{target}"] = edges.get(f"{source}->{target}", 0) + 1
         if visit.get("agent_directed"):
             agent_directed += 1
+        # The count that says how often the graph's choice was taken away, beside the
+        # count that says how often it was made. Read off the field rather than derived:
+        # every derivation available here pools a pre-emption with a linear node, a
+        # refused answer and `--routing-mode off`.
+        if visit.get("preempted_by"):
+            preempted += 1
     return {
         "edges": edges,
         "decisions": decisions,
         "census": census.to_dict(),
         "steps": len(payload.get("path", [])),
         "agent_directed": agent_directed,
+        "preempted": preempted,
         "revisits": revisits,
         "bypassed": bypassed,
         "refused": refused,

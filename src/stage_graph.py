@@ -579,6 +579,16 @@ class Visit:
     #: "somebody answered and it did not survive" — and in the archived corpus 23 of
     #: the 27 visits where anything was on offer were the second kind.
     refusal: str = ""
+    #: Which party ended the routing decision before the agent was asked, from
+    #: :data:`src.router.PREEMPTIONS`. Empty when nobody did.
+    #:
+    #: Distinct from every other field here, and that is why it exists. ``bypassed``
+    #: means no guard was evaluated at all; ``refusal`` means the agent answered and the
+    #: answer was lost; ``agent_directed=False`` covers those two plus a linear node and
+    #: ``--routing-mode off``. A supervisor redirect is none of them: the guards ran, the
+    #: menu was built, and a mechanism named the move instead of the party that had just
+    #: done the work.
+    preempted_by: str = ""
     #: The research round this visit closed, if it closed one. Zero otherwise.
     #: What makes the abandonment guard a statement about this traversal rather than
     #: about the run's whole history.
@@ -612,6 +622,7 @@ class Visit:
             "blocked": dict(self.blocked),
             "bypassed": self.bypassed,
             "refusal": self.refusal,
+            "preempted_by": self.preempted_by,
             "closed_round": self.closed_round,
         }
 
@@ -637,6 +648,10 @@ class Visit:
             },
             bypassed=bool(payload.get("bypassed")),
             refusal=str(payload.get("refusal") or ""),
+            # Absent reads as "nobody pre-empted it", which is what a walk recorded
+            # before the field existed says: reading a missing key the other way would
+            # invent a count for every archived run.
+            preempted_by=str(payload.get("preempted_by") or ""),
             closed_round=int(payload.get("closed_round") or 0),
         )
 
@@ -1563,6 +1578,7 @@ def leave(
     blocked: Mapping[str, str] | None = None,
     bypassed: bool = False,
     refusal: str = "",
+    preempted_by: str = "",
 ) -> None:
     if not state.path:
         return
@@ -1578,6 +1594,7 @@ def leave(
     visit.blocked = dict(blocked or {})
     visit.bypassed = bypassed
     visit.refusal = refusal
+    visit.preempted_by = preempted_by
     save_graph_state(paths, state)
 
 
