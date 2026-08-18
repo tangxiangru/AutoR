@@ -72,7 +72,7 @@
       "pins": 13
     },
     "Neuroscience_003": {
-      "pins": 10
+      "pins": 13
     },
     "Physics_000": {
       "pins": 5,
@@ -375,7 +375,10 @@
     "reproduce-then-extend",
     "run-the-conditions-the-source-ran",
     "cover-what-the-task-named",
-    "draw-the-source-figure-panel-for-panel"
+    "draw-the-source-figure-panel-for-panel",
+    "neuroscience-noise-ladder-not-a-null-band",
+    "neuroscience-embedding-carries-the-label-and-the-score",
+    "neuroscience-a-benchmark-rerun-owes-a-ranking"
   ],
   "Physics_000": [
     "a-supplied-parameter-file-is-a-list-of-questions",
