@@ -10,7 +10,7 @@ Two campaigns, both on 2026-08-18. Nothing in this file is a re-derivation of th
 ## Contents
 
 [Provenance](#provenance) · [Environment](#environment) · [Campaign 1](#campaign-1--five-tasks-one-gpu-node) ·
-[Campaign 2](#campaign-2--nineteen-tasks-a-slurm-array) · [Per-task record](#per-task-record-campaign-2) ·
+[Campaign 2](#campaign-2--nineteen-tasks-a-slurm-array) · [Per task](#per-task-campaign-2) ·
 [What went wrong while it ran](#what-went-wrong-while-it-ran) · [Integrity audit](#integrity-audit) ·
 [What this record cannot tell you](#what-this-record-cannot-tell-you)
 
@@ -102,7 +102,7 @@ Excluding APPS: bare 0.860, AutoR 0.787.
 4 h cap; none finished the walk. **bare hit the cap 0 times**, median 3h13m, range
 0h31m–3h41m.
 
-## Per-task record, campaign 2
+## Per task, campaign 2
 
 `s01` is how many times Stage 01 was attempted. `NS` is the benchmark's normalized score
 after `fillna(0).clip(lower=0)` — so an arm with no valid submission reads 0.000 and its
