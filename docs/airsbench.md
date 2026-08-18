@@ -182,8 +182,8 @@ budgets, 28 of 40 AutoR runs hit theirs, and the headline
 [−5.67 became unquotable](../README.md#the-re-run-and-the-control-that-matters-more).
 It also refuses to be read as significant below six paired tasks, and says so in the output.
 
-**Two environment facts that would otherwise silently break the comparison**, both handled
-in one function each so the arms cannot drift:
+**Three environment facts that would otherwise silently break the comparison**, each
+handled in one function so the arms cannot drift:
 
 - `--web-search off` removes only the CLI's *built-in* `WebSearch` and `WebFetch`. AutoR
   does not pass `--strict-mcp-config`, deliberately, so an MCP server configured on the
@@ -194,6 +194,13 @@ in one function each so the arms cannot drift:
 - The Claude CLI kills a stream that has been silent for ~300 s, and for a research agent
   silence is thinking, so the default removes the hard tasks rather than the slow ones.
   `arm_environment` raises `CLAUDE_STREAM_IDLE_TIMEOUT_MS` for both arms.
+- `subprocess.run(timeout=...)` kills the direct child and nothing below it, and every
+  command an arm launches is a CLI that launches more processes. Under that call the arm
+  exports and scores `submission.csv` while the agent it believes it stopped is still
+  writing it — a race that corrupts a result rather than losing one. `run_until` gives the
+  child its own process group and signals the group, `SIGTERM` then `SIGKILL`, and returns
+  a `None` exit code because an exit code from a process we killed says nothing about the
+  run.
 
 **The cheating audit.** AIRS-Bench's own agents run in a container with no network, so
 "the agent did not fetch the held-out labels" is enforced for them by the environment. Here

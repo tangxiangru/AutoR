@@ -914,5 +914,65 @@ class AgainstTheRealCheckoutTest(unittest.TestCase):
                     self.assertNotIn(repr(task.sota_score).rstrip("0").rstrip("."), brief)
 
 
+
+class WallClockKillsTheTreeTest(unittest.TestCase):
+    """A run stopped at its wall clock must not still be writing its own submission.
+
+    ``subprocess.run(timeout=...)`` kills the direct child and leaves its descendants
+    running. Every command an arm launches is an agent CLI that launches more processes, so
+    under that call the arm exports and scores ``submission.csv`` while the agent it thinks
+    it stopped is still writing it -- a race that corrupts a result rather than losing one.
+    """
+
+    def setUp(self) -> None:
+        self.arm = _load_tool("airs_arm")
+
+    def test_a_grandchild_does_not_outlive_the_wall_clock(self) -> None:
+        import subprocess as sp
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            marker = root / "grandchild.pid"
+            grandchild = root / "grandchild.py"
+            grandchild.write_text(
+                "import os, sys, time\n"
+                "open(sys.argv[1], 'w').write(str(os.getpid()))\n"
+                "time.sleep(300)\n",
+                encoding="utf-8",
+            )
+            child = root / "child.py"
+            child.write_text(
+                "import subprocess, sys, time\n"
+                f"subprocess.Popen([sys.executable, {str(grandchild)!r}, {str(marker)!r}])\n"
+                "time.sleep(300)\n",
+                encoding="utf-8",
+            )
+            with (root / "log.txt").open("w", encoding="utf-8") as handle:
+                exit_code, hit = self.arm.run_until(
+                    [sys.executable, str(child)], cwd=root, log=handle, timeout=5
+                )
+            self.assertTrue(hit)
+            self.assertIsNone(exit_code, "an exit code from a process we killed says nothing")
+            # Asserted, not guarded on: a grandchild that never started would make the
+            # check below pass without testing anything, and the first version of this
+            # test did exactly that.
+            self.assertTrue(marker.exists(), "the grandchild never ran, so nothing was tested")
+            pid = int(marker.read_text(encoding="utf-8").strip())
+        alive = sp.run(["ps", "-p", str(pid)], capture_output=True, text=True).returncode == 0
+        if alive:  # pragma: no cover - only on a regression, and it must not leak a process
+            os.kill(pid, 9)
+        self.assertFalse(alive, f"grandchild {pid} outlived the wall clock")
+
+    def test_a_process_that_finishes_reports_its_own_exit_code(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with (root / "log.txt").open("w", encoding="utf-8") as handle:
+                exit_code, hit = self.arm.run_until(
+                    [sys.executable, "-c", "raise SystemExit(3)"], cwd=root, log=handle, timeout=60
+                )
+        self.assertFalse(hit)
+        self.assertEqual(exit_code, 3)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -32,6 +32,7 @@ import argparse
 import concurrent.futures
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -66,6 +67,11 @@ ARMS = ("autor", "bare")
 #: hard questions rather than the slow ones. The knob is milliseconds and clamps at
 #: 1,800,000; the ``BYTE_``-prefixed variant is a different thing and changes nothing here.
 STREAM_IDLE_TIMEOUT_MS = "1800000"
+
+#: Seconds between ``SIGTERM`` and ``SIGKILL`` for a run that overran its wall clock. Long
+#: enough for a CLI to flush its stream and close its log, short enough that an arm of forty
+#: tasks does not spend an hour dying.
+KILL_GRACE_SECONDS = 20
 
 
 #: Routes to the held-out labels that exist on an un-containerised machine, counted in every
@@ -212,6 +218,47 @@ def audit_patterns(args: argparse.Namespace) -> list[str]:
     return list(dict.fromkeys([*paths, *DEFAULT_AUDIT_PATTERNS, *args.audit_pattern]))
 
 
+def run_until(
+    command: list[str], *, cwd: Path, log, timeout: int
+) -> tuple[int | None, bool]:
+    """Run *command* under a wall clock, and take its whole process tree with it.
+
+    ``subprocess.run(timeout=...)`` kills the direct child and nothing below it. Every
+    command here launches an agent CLI which launches more processes, so a timeout under
+    that call leaves the agent running: it keeps spending, it keeps holding a GPU, and --
+    the part that corrupts a result rather than merely wasting one -- it keeps writing
+    ``submission.csv`` while the arm is exporting and scoring the file it just stopped
+    producing. The arm's own timeout would race the agent it thinks it killed.
+
+    So the child gets its own process group and the group is signalled: ``SIGTERM``, a
+    grace period, then ``SIGKILL``. Returns ``(exit code, hit the wall clock)``, with the
+    exit code ``None`` when the wall clock is what ended it -- an exit code from a process
+    we killed says nothing about the run.
+    """
+    process = subprocess.Popen(  # noqa: S603 - composed by the caller, not user text
+        command, cwd=str(cwd), stdout=log, stderr=subprocess.STDOUT, text=True,
+        env=arm_environment(), start_new_session=True,
+    )
+    try:
+        return process.wait(timeout=timeout), False
+    except subprocess.TimeoutExpired:
+        _signal_group(process, signal.SIGTERM)
+        try:
+            process.wait(timeout=KILL_GRACE_SECONDS)
+        except subprocess.TimeoutExpired:
+            _signal_group(process, signal.SIGKILL)
+            process.wait()
+        return None, True
+
+
+def _signal_group(process: subprocess.Popen, sig: int) -> None:
+    """Signal the child's whole group, tolerating a group that has already gone."""
+    try:
+        os.killpg(os.getpgid(process.pid), sig)
+    except (ProcessLookupError, PermissionError):
+        process.send_signal(sig)
+
+
 def run_one(task: AirsTask, args: argparse.Namespace) -> RunRecord:
     workspace = Path(args.root).expanduser().resolve() / args.arm / task.name
     workspace.mkdir(parents=True, exist_ok=True)
@@ -244,19 +291,9 @@ def run_one(task: AirsTask, args: argparse.Namespace) -> RunRecord:
     print(f"[{args.arm}] {task.name}: start", flush=True)
     try:
         with log_path.open("w", encoding="utf-8") as log:
-            completed = subprocess.run(  # noqa: S603 - composed above, not user text
-                command,
-                cwd=str(workspace),
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                text=True,
-                timeout=args.wall_clock,
-                env=arm_environment(),
+            record.exit_code, record.hit_wall_clock = run_until(
+                command, cwd=workspace, log=log, timeout=args.wall_clock
             )
-        record.exit_code = completed.returncode
-    except subprocess.TimeoutExpired:
-        record.hit_wall_clock = True
-        record.exit_code = None
     except Exception as exc:  # noqa: BLE001 - one task failing must not end the arm
         record.error = f"{type(exc).__name__}: {exc}"
     record.duration_seconds = round(time.monotonic() - started, 1)
