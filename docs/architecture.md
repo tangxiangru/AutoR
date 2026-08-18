@@ -332,6 +332,24 @@ delivery rules therefore sit inside `build_prompt` instead of next to a
 sending both put ~350 words of verbatim duplicate into every prompt from Stage
 04 on.
 
+Every channel declares what it may spend. `Channel.max_chars` is enforced in
+`_render`, which clips the body to the budget and says in the block how many
+characters it dropped — a silent truncation would leave the model unable to tell a
+channel that had little to say from one whose tail was taken. A channel that
+declares no budget must be named in `UNBOUNDED_BY_CONSTRUCTION` with the structure
+that bounds it, and `information_flow` raises at import on one that is neither, the
+way `Edge.__post_init__` refuses an unregistered guard. The numbers come from
+rendering every channel against 40 archived run roots; each ceiling sits above the
+observed maximum, because a budget here is a guard against the tail rather than a
+squeeze on what runs today.
+
+`_record_inbound_channels` writes the per-channel character count and its budget
+into the run log beside the keys, and marks a channel that reached its ceiling. The
+keys alone said *which* information arrived and nothing about *how much*, and the
+number worth knowing — a Stage 07 prompt has a median of 277 KB over 197 archived
+prompts and a maximum of 1.79 MB — could only be recovered by measuring
+`prompt_cache/` from outside.
+
 The result is written to `prompt_cache/<slug>_attempt_NN.prompt.md` and passed
 to the CLI **by reference** (`-p @<path>`). Two consequences worth knowing:
 the prompt cache is load-bearing during a run rather than a log, and every

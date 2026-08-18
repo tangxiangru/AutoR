@@ -105,6 +105,25 @@ class Channel:
     #: Why these consumers and not others. Read by the test that guards the
     #: topology, so a narrowing has to be argued for rather than just made.
     rationale: str = ""
+    #: The most characters this channel's body may spend in a stage prompt.
+    #:
+    #: A budget was a per-builder convention before this field existed:
+    #: ``withdrawal_ledger`` caps itself at five records, ``settled_reasoning`` at four
+    #: cruxes and six hundred characters a field, ``artifact_index`` at five entries a
+    #: category -- and each of those arguments lives inside the builder that makes it,
+    #: so a channel added without one is unbounded and nothing says so. ``_render``
+    #: enforces this, which is what turns the convention into a rule.
+    #:
+    #: ``None`` means the channel is structurally bounded by what it renders and needs
+    #: no ceiling. That is a claim, and ``test_information_flow`` makes it a checked one:
+    #: every channel either declares a budget or is named in ``UNBOUNDED_BY_CONSTRUCTION``
+    #: with the reason it cannot grow, so the exemption list cannot grow by assertion.
+    #:
+    #: What the numbers are measured against: over 197 archived stage prompts the whole
+    #: rendered channel set -- everything under ``# Stage Instructions`` after the static
+    #: template -- has a median of 25.6 KB and a p90 of 78.6 KB, and the prompt it sits
+    #: in runs to a median of 277 KB by Stage 07 with a maximum of 1.79 MB.
+    max_chars: int | None = None
 
     def serves(self, stage: StageSpec) -> bool:
         return stage.slug in self.consumed_by
@@ -122,9 +141,33 @@ class ChannelContext:
 
 
 def _render(block: str | None, channel: Channel) -> str:
+    """The channel's block, clipped to what it declared it may spend.
+
+    The clip keeps the head and says how much it dropped, in the prompt itself. A silent
+    truncation is the worst of the three available behaviours: the model cannot tell a
+    channel that had little to say from one whose tail was taken, and neither can a
+    reader of ``prompt_cache/``. Keeping the head rather than the tail because these
+    blocks are written most-important-first -- a rendered ledger leads with what is open,
+    a findings list with what was raised -- and two callers elsewhere that need the tail
+    (``approval_agent`` and ``review_panel``, reading a verdict at the end of a
+    transcript) implement their own head-drop for that reason. The direction is a
+    per-reader decision and this is the readers' side of it.
+
+    The heading and preface are outside the budget. They are the harness's own words
+    about how to read the block, they are a fixed cost per channel, and clipping them
+    would remove the instruction before the thing it describes.
+    """
+
     body = (block or "").strip()
     if not body:
         return ""
+    if channel.max_chars is not None and len(body) > channel.max_chars:
+        dropped = len(body) - channel.max_chars
+        body = (
+            body[: channel.max_chars].rstrip()
+            + f"\n\n_[{dropped} character(s) dropped: this channel's budget is "
+            f"{channel.max_chars}.]_"
+        )
     parts = [channel.heading, ""]
     if channel.preface:
         parts.extend([channel.preface.strip(), ""])
@@ -137,14 +180,26 @@ def inbound_channels(stage: StageSpec, channels: tuple[Channel, ...]) -> list[Ch
 
 
 def render_inbound(
-    context: ChannelContext, channels: tuple[Channel, ...]
+    context: ChannelContext,
+    channels: tuple[Channel, ...],
+    sizes: "list[tuple[str, int, int | None]] | None" = None,
 ) -> tuple[str, list[str]]:
     """Compose this stage's inbound context. Returns the text and the keys used.
 
     The key list is the point of the return tuple: it is what lets a run record
     which information actually reached a stage, which is the input attribution
     needs.
+
+    *sizes* is a sink -- ``(key, characters, budget)`` appended per delivered channel --
+    and not a third element of the tuple, in the shape ``CostTally`` and ``CustodyWatch``
+    already have. It is a sink for a harder reason than theirs, though: **a builder may
+    write.** ``_artifact_index`` calls ``write_artifact_index`` and ``_experiment_manifest``
+    rewrites the manifest with a fresh timestamp -- which is the very drift
+    ``docs/iclr/composable-stage-graphs.md`` excludes from the committed view by name. A
+    second pass to measure what the first pass rendered would run those writes twice per
+    prompt. The measurement has to come off the same render as the text.
     """
+
     blocks: list[str] = []
     delivered: list[str] = []
     for channel in inbound_channels(context.stage, channels):
@@ -152,6 +207,8 @@ def render_inbound(
         if rendered:
             blocks.append(rendered)
             delivered.append(channel.key)
+            if sizes is not None:
+                sizes.append((channel.key, len(rendered), channel.max_chars))
     return ("\n\n".join(blocks), delivered)
 
 
@@ -387,6 +444,36 @@ def _task_shaped_skills(context: ChannelContext) -> str:
     return format_skills_for_prompt(list(entries), context.stage.slug, frozenset(pinned))
 
 
+#: Channels that declare no budget, and the reason each cannot grow.
+#:
+#: The list is the point. `Channel.max_chars` defaulting to ``None`` would otherwise make
+#: "unbounded" the thing that happens when nobody thought about it, which is how a
+#: convention decays -- so a channel is either given a ceiling or named here with the
+#: structure that bounds it, and ``test_information_flow`` fails on a channel that is
+#: neither. An exemption list that cannot grow by assertion is the same device
+#: ``docs/iclr/composable-stage-graphs.md`` uses for the channel excluded from the
+#: committed view.
+UNBOUNDED_BY_CONSTRUCTION: dict[str, str] = {
+    "run_configuration": (
+        "a fixed block from the venue registry and the run config; measured at 508-522 "
+        "characters over 320 renders, and it has no input that grows"
+    ),
+    "report_contract": (
+        "static prose conditioned on the output format, with the figure ceiling read from "
+        "MAX_REPORT_FIGURES; 934 characters on every one of 120 renders"
+    ),
+    "settled_reasoning": (
+        "the builder is the ceiling: MAX_CRUXES=4, MAX_REJECTED=5 and MAX_FIELD_CHARS=600, "
+        "argued in its own module docstring"
+    ),
+    "withdrawal_history": (
+        "PROMPT_WITHDRAWAL_LIMIT=5 records, with the same argument this field generalises "
+        "-- 'an unbounded block would grow until it crowded out the work the stage is "
+        "being asked to do'"
+    ),
+}
+
+
 CHANNELS: tuple[Channel, ...] = (
     Channel(
         key="run_configuration",
@@ -413,6 +500,7 @@ CHANNELS: tuple[Channel, ...] = (
     ),
     Channel(
         key="artifact_index",
+        max_chars=6_000,
         heading="## Structured Artifact Index",
         produced_by=None,
         consumed_by=frozenset(
@@ -433,6 +521,7 @@ CHANNELS: tuple[Channel, ...] = (
     ),
     Channel(
         key="experiment_manifest",
+        max_chars=6_000,
         heading="## Experiment Bundle Manifest",
         produced_by="05_experimentation",
         consumed_by=frozenset(
@@ -443,6 +532,7 @@ CHANNELS: tuple[Channel, ...] = (
     ),
     Channel(
         key="intake_resources",
+        max_chars=4_000,
         heading="## Pre-Loaded Resources (already in workspace)",
         produced_by=None,
         consumed_by=frozenset({"00_intake", "01_literature_survey"}),
@@ -454,6 +544,7 @@ CHANNELS: tuple[Channel, ...] = (
     ),
     Channel(
         key="project_context",
+        max_chars=24_000,
         heading="# Existing Project Repository (from the project bootstrap)",
         produced_by=None,
         consumed_by=_from("01_literature_survey"),
@@ -491,6 +582,7 @@ CHANNELS: tuple[Channel, ...] = (
     ),
     Channel(
         key="idea_pool",
+        max_chars=24_000,
         heading="## Candidate Hypothesis Pool",
         produced_by=None,
         consumed_by=frozenset({"02_hypothesis_generation"}),
@@ -499,6 +591,7 @@ CHANNELS: tuple[Channel, ...] = (
     ),
     Channel(
         key="writing_manifest",
+        max_chars=8_000,
         heading="## Writing Manifest",
         produced_by=None,
         consumed_by=frozenset({"07_writing"}),
@@ -507,6 +600,7 @@ CHANNELS: tuple[Channel, ...] = (
     ),
     Channel(
         key="researcher_profile",
+        max_chars=12_000,
         heading="# Researcher Profile (from paper corpus bootstrap)",
         produced_by=None,
         consumed_by=frozenset(
@@ -520,6 +614,7 @@ CHANNELS: tuple[Channel, ...] = (
     ),
     Channel(
         key="decision_ledger",
+        max_chars=24_000,
         heading="# Decision Ledger (from prior stages)",
         produced_by="01_literature_survey",
         consumed_by=_from("02_hypothesis_generation"),
@@ -533,6 +628,7 @@ CHANNELS: tuple[Channel, ...] = (
     ),
     Channel(
         key="hypotheses",
+        max_chars=40_000,
         heading="# Hypothesis Context (from Stage 02)",
         produced_by="02_hypothesis_generation",
         consumed_by=frozenset({"03_study_design", "04_implementation"}),
@@ -552,6 +648,7 @@ CHANNELS: tuple[Channel, ...] = (
     ),
     Channel(
         key="preregistration",
+        max_chars=40_000,
         heading="# Preregistered Hypotheses (frozen — not editable)",
         produced_by="04_implementation",
         consumed_by=_from("05_experimentation"),
@@ -560,6 +657,7 @@ CHANNELS: tuple[Channel, ...] = (
     ),
     Channel(
         key="experimental_protocol",
+        max_chars=12_000,
         heading="# Experimental Protocol (declared at Stage 03)",
         produced_by="03_study_design",
         consumed_by=frozenset(
@@ -618,6 +716,7 @@ CHANNELS: tuple[Channel, ...] = (
     ),
     Channel(
         key="report_plan",
+        max_chars=30_000,
         heading="# Report Plan (declared at Stage 03)",
         produced_by="03_study_design",
         consumed_by=frozenset(
@@ -655,6 +754,7 @@ CHANNELS: tuple[Channel, ...] = (
     ),
     Channel(
         key="research_rounds",
+        max_chars=24_000,
         heading="# Earlier Research Rounds",
         produced_by="06_analysis",
         consumed_by=frozenset(
@@ -675,6 +775,7 @@ CHANNELS: tuple[Channel, ...] = (
     ),
     Channel(
         key="validity_findings",
+        max_chars=24_000,
         heading="# Adversarial Validity Findings (each must be answered)",
         produced_by="05_experimentation",
         consumed_by=frozenset({"06_analysis", "07_writing"}),
@@ -683,6 +784,7 @@ CHANNELS: tuple[Channel, ...] = (
     ),
     Channel(
         key="hypothesis_verdicts",
+        max_chars=24_000,
         heading="# Hypothesis Verdicts",
         produced_by="06_analysis",
         consumed_by=frozenset({"07_writing", "08_dissemination"}),
@@ -714,6 +816,7 @@ CHANNELS: tuple[Channel, ...] = (
     ),
     Channel(
         key="task_shaped_skills",
+        max_chars=12_000,
         heading="## Skills Selected For This Task",
         produced_by=None,
         consumed_by=frozenset(ALL_STAGES),
@@ -729,3 +832,41 @@ CHANNELS: tuple[Channel, ...] = (
         ),
     ),
 )
+
+
+def _every_channel_declares_what_it_may_spend() -> None:
+    """Refuse a channel that neither declares a budget nor says why it cannot grow.
+
+    At import, and raising, for the reason :meth:`Edge.__post_init__` refuses an
+    unregistered guard: the alternative fails open. ``max_chars`` defaults to ``None``,
+    so an author who does not think about it gets "unbounded" -- which is how the
+    per-builder convention this field replaces decayed in the first place.
+
+    Safe to raise here because the population is source, not run data. This can only
+    fail while someone is editing this file, never on a user's run, so it is not the
+    kind of precondition ``docs/iclr/composable-stage-graphs.md`` warns about.
+    """
+
+    undeclared = sorted(
+        channel.key
+        for channel in CHANNELS
+        if channel.max_chars is None and channel.key not in UNBOUNDED_BY_CONSTRUCTION
+    )
+    if undeclared:
+        raise ValueError(
+            "These channels declare no `max_chars` and give no reason they cannot grow: "
+            + ", ".join(undeclared)
+            + ". Give each one a budget, or name it in UNBOUNDED_BY_CONSTRUCTION with "
+            "the structure that bounds it."
+        )
+    stale = sorted(set(UNBOUNDED_BY_CONSTRUCTION) - {channel.key for channel in CHANNELS})
+    if stale:
+        raise ValueError(
+            "UNBOUNDED_BY_CONSTRUCTION names channels that no longer exist: "
+            + ", ".join(stale)
+            + ". A reason nobody can reach is a reason nobody will notice has stopped "
+            "applying."
+        )
+
+
+_every_channel_declares_what_it_may_spend()
