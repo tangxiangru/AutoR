@@ -326,6 +326,7 @@ def autor_pids(*, markers: Sequence[str]) -> frozenset[int]:
 AGENT_SCRIPT_NAMES: dict[str, tuple[str, ...]] = {
     "rcb_agent.py": (),
     "fs_agent.py": (),
+    "fire_agent.py": (),
     "main.py": ("--goal",),
 }
 

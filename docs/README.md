@@ -13,6 +13,7 @@ detail behind it.
 | Look up a command-line flag | [CLI Reference](cli-reference.md) |
 | Run AutoR unattended, or benchmark it on ResearchClawBench | [ResearchClawBench](researchclawbench.md) |
 | Answer and score a written science exam question | [FrontierScience-Research](frontierscience.md) |
+| Rediscover a published finding by running experiments, under a one-hour clock | [FIRE-Bench](firebench.md) |
 | Understand what a run leaves on disk | [Run Artifacts](run-artifacts.md) |
 | Know exactly what a stage must produce to be accepted | [Stage Contract](stage-contract.md) |
 | Choose how much optional machinery a run uses | [Rigor](rigor.md) |

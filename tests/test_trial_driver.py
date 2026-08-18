@@ -478,17 +478,26 @@ class AgentScriptNamesTests(unittest.TestCase):
                 argv = ["python3", f"/home/u/AutoR/{script}", *required, "--model", "opus"]
                 self.assertTrue(trial_driver.is_backed_run(argv))
 
-    def test_the_constant_names_both_agents_and_the_goal_entry_point(self) -> None:
-        """What "both benchmarks" means, pinned. Two front ends and ``main.py``.
+    def test_the_constant_names_every_agent_and_the_goal_entry_point(self) -> None:
+        """What "every benchmark" means, pinned. Three front ends and ``main.py``.
 
         This is the population guard: recognition is by construction once a key is in the
         table, so the only thing left to check is which keys are in it. A name added
         without an argument fails here, and here is the only place it fails.
+
+        It went from two front ends to three when ``fire_agent.py`` landed, and that is
+        the whole reason this test is worth its line count: a driver whose census cannot
+        see the third front end reads a live FIRE-Bench run as "nobody is spending the
+        quota" and launches beside it.
         """
         self.assertEqual(
             sorted(trial_driver.AGENT_SCRIPT_NAMES),
-            ["fs_agent.py", "main.py", "rcb_agent.py"],
+            ["fire_agent.py", "fs_agent.py", "main.py", "rcb_agent.py"],
         )
+
+    def test_a_firebench_run_is_a_run(self) -> None:
+        argv = ["python3", "/home/u/AutoR/fire_agent.py", "--task", "cot_in_planning", "--model", "opus"]
+        self.assertTrue(trial_driver.is_backed_run(argv))
 
     def test_a_frontierscience_run_is_a_run(self) -> None:
         argv = ["python3", "/home/u/AutoR/fs_agent.py", "--workspace", "/w", "--model", "opus"]
