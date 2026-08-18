@@ -1037,9 +1037,18 @@ Original stderr:
                     "priority_fixes": ["Replace this placeholder with a real report review."],
                 },
             )
-            # A coverage record the real gate accepts, saying plainly that it is fake.
-            # It quotes the task statement verbatim rather than inventing a requirement,
+        if stage.number >= 7:
+            # A coverage record the real gate accepts, saying plainly that it is fake. It
+            # quotes the task statement verbatim rather than inventing a requirement,
             # because that is exactly the rule a real run is held to.
+            #
+            # Outside the markdown branch, like the gate that reads it. Both had the same
+            # coupling and for the same reason -- the record arrived while markdown was
+            # the only format anyone ran -- so a latex run wrote no coverage record and
+            # was never asked for one. Moving only the gate turned the latex end-to-end
+            # pipeline red at Stage 07, which is `test_no_stage_needed_a_retry` doing the
+            # job its comment claims: noticing an artifact gate fake mode was never
+            # taught to satisfy.
             from .deliverables import COVERAGE_FILENAME, demanding_sentences
 
             _statement = task_statement(read_text(paths.user_input))
@@ -1058,7 +1067,6 @@ Original stderr:
             ]
             _write_json(paths.artifacts_dir / COVERAGE_FILENAME, {"deliverables": _entries})
 
-        if stage.number >= 7:
             venue = selected_venue_key(paths)
             _write(
                 paths.writing_dir / "main.tex",

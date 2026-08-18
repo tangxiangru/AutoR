@@ -100,6 +100,19 @@ class WritingPipelineTests(unittest.TestCase):
             paths.artifacts_dir / "self_review.json",
             json.dumps({"overall_score": 8.0, "final_verdict": "ready", "rounds": 1}),
         )
+        # The deliverables contract is a Stage 07 gate in both formats now, not only in
+        # markdown -- whether the run answered the question it was given is not a
+        # question about how the answer was typeset. The fixture states what a valid
+        # latex Stage 07 looks like, so it has to carry one.
+        from src.deliverables import COVERAGE_FILENAME
+
+        write_text(
+            paths.artifacts_dir / COVERAGE_FILENAME,
+            json.dumps({"deliverables": [
+                {"task_quote": "Test writing pipeline", "addressed": False,
+                 "reason": "the fixture builds a manuscript shape, not research"},
+            ]}),
+        )
         generate_layout_review(paths)
 
     def test_stage07_validation_passes_with_expected_outputs(self) -> None:

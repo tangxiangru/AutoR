@@ -330,8 +330,23 @@ the plan still covers every demanding sentence. The stage that discovers a deman
 meet at design time can still route backwards; the one that discovers it at Stage 07 cannot
 afford to.
 
-*Class: a check placed at the wrong end of the run. Effort: small for the branch, medium for
-the channel.*
+**The first move landed**; the second has not. `validate_deliverables_coverage` now runs
+at `stage.number >= 7` whatever the output format, and its locator half reads the run's
+actual deliverable — `report.md`, or the `.tex` sources under `workspace/writing/` — so
+it no longer degrades to a skip with no counter when there is no markdown report.
+
+Blast radius, measured before landing: **335 archived run configs, every one of them
+`markdown`**. So no archived run changes verdict, which is the honest figure and cuts
+both ways — the gap never cost an observed run, and the fix has never been exercised by
+one either. It is a correctness change about coupling, not a bug with a measured price.
+
+What is still terminal is the *timing*: the check runs once, at Stage 07, and the second
+move above — an earlier writer for the coverage artifact and a reviewer axis over it — is
+what would let a run discover at design time that it is not going to answer half the
+brief.
+
+*Class: a check placed at the wrong end of the run. Effort: small for the branch (done),
+medium for the channel.*
 
 ### 4.6 Carried refusal evidence — the machine-read half only
 

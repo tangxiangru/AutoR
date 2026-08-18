@@ -965,8 +965,8 @@ of the rows are directory-level counts, and the rest check named files.
   `build_log.txt` and `layout_review.json` in latex mode;
   `citation_verification.json` and `self_review.json` in both. Do not read that
   as the whole set — further per-file gates hang off the same Stage 07 branches
-  (`claim_provenance.json` in both formats, `deliverables_coverage.json` in
-  markdown), and the `stage.number >= 7` branches of `validate_stage_artifacts`
+  (`claim_provenance.json` and `deliverables_coverage.json` in both formats), and
+  the `stage.number >= 7` branches of `validate_stage_artifacts`
   are where the current list lives. Freshness is narrower still: at Stage 07
   itself the files named in that branch's `stage7_required_files`, plus the PDF
   and the section sources in latex mode, must be newer than the stage's start

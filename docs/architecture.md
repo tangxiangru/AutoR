@@ -40,7 +40,8 @@ correctly — and then runs the validity-chain validators that ask whether a
 `validate_validity_response` and `validate_round_decision`, plus the three
 report-plan validators (`validate_report_plan`, `validate_report_plan_sources`,
 `validate_report_plan_coverage`) and the task-deliverables gate
-(`validate_deliverables_coverage`). Counting the two Stage 07 format branches,
+(`validate_deliverables_coverage`, which is the one Stage 07 gate outside both
+format branches). Counting the two Stage 07 format branches,
 eighteen `validate_*` functions are reachable from it; the full table, with the
 condition each one refuses on, is in the
 [README](../README.md#the-stage-contract-and-what-gets-validated). The code
@@ -166,7 +167,7 @@ touching a verdict — see **[framework.md](framework.md)**.
 | [`src/hypothesis_manifest.py`](../src/hypothesis_manifest.py) | Parses Stage 02's typed `T*`/`H*`/`C*` identifiers into `hypothesis_manifest.json` — the input the `has_hypotheses` guard reads. |
 | [`src/writing_manifest.py`](../src/writing_manifest.py) | Stage 07 support: writing manifest, figure/result scanning, layout review generation and validation. |
 | [`src/report_plan.py`](../src/report_plan.py) | The report contract. `PlannedFigure`, `HeadlineNumber`, `TaskOutput`, `ReportPlan`. The run commits at Stage 03 to which figures the report will carry and which claim each supports; `stamp_report_plan` writes `declared_at` and a digest to `runs/<id>/report_plan_stamp.json` — outside `workspace/`, so the agent cannot backdate its own declaration. Three validators hang off it: shape at Stage 03, every `source_artifact` resolving to a non-empty file at 06, and every non-dropped slot published *and* referenced at 07 in markdown mode. |
-| [`src/deliverables.py`](../src/deliverables.py) | The task-deliverables contract — the only gate that asks whether the run answered *what it was asked*. `demanding_sentences()` parses the user's own task statement for a fixed list of demand verbs; `validate_deliverables_coverage` requires every `task_quote` to be a verbatim span of `user_input.txt`, every addressed entry to name a `where` that appears in `report.md`, and every demanding sentence to be covered by content-word overlap. `format_deliverables_for_prompt` injects a `# What the Task Asks For` block into every stage prompt. |
+| [`src/deliverables.py`](../src/deliverables.py) | The task-deliverables contract — the only gate that asks whether the run answered *what it was asked*. `demanding_sentences()` parses the user's own task statement for a fixed list of demand verbs; `validate_deliverables_coverage` requires every `task_quote` to be a verbatim span of `user_input.txt`, every addressed entry to name a `where` that appears in the run's deliverable — `report.md`, or the `.tex` sources under `workspace/writing/` when the run targets latex, and every demanding sentence to be covered by content-word overlap. `format_deliverables_for_prompt` injects a `# What the Task Asks For` block into every stage prompt. |
 
 ### Improvement
 
