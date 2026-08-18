@@ -169,6 +169,7 @@ from .stage_cost import (
     HUMAN_REFUSED,
     OUTCOME_ABORTED,
     OUTCOME_APPROVED,
+    OUTCOME_PROMOTED_OVER_REFUSAL,
     OUTCOME_AUTO_SKIPPED,
     OUTCOME_HUMAN_SKIPPED,
     OUTCOME_RAISED,
@@ -369,6 +370,14 @@ class ResearchManager:
         self.solo_reviewer: AutomatedReviewer | None = None
         self._crux_resolutions: list[Any] = []
         self._pending_comments: list[Any] = []
+        #: Why the last verdict was a promotion over a live refusal, or empty.
+        #:
+        #: A side channel for the same reason `_pending_comments` is one: the reviewer
+        #: path returns `(choice, feedback)` and the approval branch is several frames
+        #: away. Set where the rewrite happens and read where the approval is recorded,
+        #: so the manifest and the cost ledger can say on whose authority the stage was
+        #: promoted rather than filing it as an ordinary approval.
+        self._promoted_over_refusal: str = ""
         self._open_comments: list[Any] = []
         self._commented_draft: str = ""
         self._comment_round_attempt: int = 0
@@ -3194,12 +3203,18 @@ class ResearchManager:
                         f"final: {final_stage_path}"
                     ),
                 )
-                append_approved_stage_summary(paths.memory, stage, stage_markdown)
+                append_approved_stage_summary(
+                    paths.memory,
+                    stage,
+                    stage_markdown,
+                    promoted_over_refusal=self._promoted_over_refusal,
+                )
                 mark_stage_approved_manifest(
                     paths,
                     stage,
                     attempt_no - polish_rounds,
                     self._stage_file_paths(stage_markdown),
+                    promoted_over_refusal=self._promoted_over_refusal,
                 )
                 if self.effort_plan.enabled:
                     self._settle_effort(
@@ -3307,7 +3322,11 @@ class ResearchManager:
                     ),
                 )
                 self.ui.show_status(f"Approved {stage.stage_title}.", level="success")
-                self._note_stage_outcome(stage, OUTCOME_APPROVED)
+                self._note_stage_outcome(
+                    stage,
+                    OUTCOME_PROMOTED_OVER_REFUSAL if self._promoted_over_refusal else OUTCOME_APPROVED,
+                    self._promoted_over_refusal,
+                )
                 return True
 
             if choice == "6":
@@ -3535,6 +3554,11 @@ class ResearchManager:
         # `decision.choice == "5"` to record what this stage deferred, and the effort plan
         # counts a refusal as a contest -- a promotion patched in after the return would be
         # invisible to both, and the run would carry an approval nobody accounted for.
+        # Cleared first, and on every path. A verdict that was not overruled must not
+        # inherit the last one's authority -- the field is read several frames later, at
+        # the approval branch, and a stale value there would file an ordinary approval as
+        # an override.
+        self._promoted_over_refusal = ""
         overruled = self._sendback_is_out_of_budget(paths=paths, stage=stage, choice=decision.choice)
         if overruled is not None:
             append_log_entry(
@@ -3549,6 +3573,7 @@ class ResearchManager:
                 f"{stage.stage_title}: {overruled}; promoting.", level="info"
             )
             decision = replace(decision, choice="5", comments=[], feedback="")
+            self._promoted_over_refusal = overruled
         elif decision.choice in REVISION_CHOICES:
             write_sendback_count(paths, stage, read_sendback_count(paths, stage) + 1)
 

@@ -13,6 +13,11 @@ from src.intake import load_intake_context
 from src.evolution import EvolutionConfig
 from src.manager import ResearchManager
 from src.manifest import load_run_manifest
+from src.stage_cost import (
+    OUTCOME_APPROVED,
+    OUTCOME_PROMOTED_OVER_REFUSAL,
+    read_stage_cost_ledger,
+)
 from src.rubric import RUBRIC_VERSION, CriterionScore, StageScore
 from src.project_bootstrap import StageAssessment
 from src.utils import (
@@ -952,6 +957,58 @@ class ManagerSmokeTests(unittest.TestCase):
             self.assertEqual(reviewer.calls, MAX_AUTOMATED_SENDBACKS + 1)
             self.assertEqual(read_sendback_count(paths, STAGE_01), MAX_AUTOMATED_SENDBACKS)
             self.assertIn("sendback_refused", read_text(paths.logs))
+
+    def test_the_override_is_recorded_where_a_reader_will_meet_it(self) -> None:
+        """An overruled refusal used to be indistinguishable from an approval.
+
+        The rewrite to choice "5" happens before anything downstream reads the verdict --
+        deliberately, so the effort plan and `_settle_obligations` see one decision -- and
+        the manifest, the cost ledger and the memory entry the next stage reads then all
+        recorded a plain approval. The only trace was one line in `logs.txt`.
+
+        Measured over 200 archived runs: 78 contain at least one of these, 1270 events
+        against 2802 recorded `choice: 5` lines. It is roughly 45% of the approvals in the
+        record, not a corner. (Both counts are per decision and the denominator includes
+        the intake and bootstrap reviewers, so read the share as an order of magnitude.)
+        """
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            reviewer = ScriptedReviewer(self._refusals(20))
+            manager, paths = self._reviewer_manager(tmp_dir, reviewer)
+            self.assertTrue(manager._run_stage(paths, STAGE_01))
+
+            entry = next(
+                item for item in load_run_manifest(paths.run_manifest).stages
+                if item.slug == STAGE_01.slug
+            )
+            self.assertTrue(entry.approved, "the stage is still promoted")
+            self.assertTrue(entry.promoted_over_refusal, "and the manifest says on whose authority")
+
+            rows = read_stage_cost_ledger(paths)
+            outcomes = [row.get("outcome") for row in rows if row.get("stage") == STAGE_01.slug]
+            self.assertIn(OUTCOME_PROMOTED_OVER_REFUSAL, outcomes)
+            self.assertNotIn(OUTCOME_APPROVED, outcomes)
+
+            memory = read_text(paths.memory)
+            self.assertIn("Promoted over a reviewer that asked for a change", memory)
+
+    def test_an_ordinary_approval_is_recorded_exactly_as_before(self) -> None:
+        """The control. A record that marks every promotion is a record that marks none."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            reviewer = ScriptedReviewer([ReviewDecision(choice="5", decision_token="approve")])
+            manager, paths = self._reviewer_manager(tmp_dir, reviewer)
+            self.assertTrue(manager._run_stage(paths, STAGE_01))
+
+            entry = next(
+                item for item in load_run_manifest(paths.run_manifest).stages
+                if item.slug == STAGE_01.slug
+            )
+            self.assertEqual(entry.promoted_over_refusal, "")
+            outcomes = [
+                row.get("outcome") for row in read_stage_cost_ledger(paths)
+                if row.get("stage") == STAGE_01.slug
+            ]
+            self.assertIn(OUTCOME_APPROVED, outcomes)
+            self.assertNotIn("Promoted over a reviewer", read_text(paths.memory))
 
     def test_running_out_of_send_backs_promotes_rather_than_skips(self) -> None:
         """`MAX_STAGE_ATTEMPTS` ends a stage by auto-skipping it, and its own comment
