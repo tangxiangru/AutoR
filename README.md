@@ -46,7 +46,7 @@ overview and the operating manual.
 [Review](#review-five-kinds-of-critic) · [The stage contract](#the-stage-contract-and-what-gets-validated) ·
 [Execution model](#execution-model) · [Run layout](#run-layout) · [Architecture](#architecture) ·
 [Benchmarks](#benchmarks) ([ResearchClawBench](#researchclawbench) ·
-[FrontierScience](#frontierscience-research)) ·
+[FrontierScience](#frontierscience-research) · [FIRE-Bench](#fire-bench)) ·
 [Documentation](#documentation) · [Limits](#limits) · [License](#license)
 
 ## What AutoR is
@@ -192,6 +192,8 @@ modules**, with no third-party dependency.
 | Score a finished benchmark run with the reference judge | `python tools/score_rcb_run.py --workspace <WORKSPACE> --bench <BENCH>` |
 | Answer one FrontierScience question, with AutoR or with one direct call | `python fs_agent.py --task fs:043 --profile ideate` · `--profile direct` |
 | Grade a FrontierScience answer against its rubric | `python tools/score_fs_run.py --task fs:043 --answer answer.md --out score.json` |
+| Rediscover a published finding on FIRE-Bench, under its own one-hour clock | `python fire_agent.py --bench-root ~/FIRE-Bench --task cot_in_planning --profile pipeline` · `--profile direct` |
+| Score a FIRE-Bench conclusion with the benchmark's own claim-level judge | `python tools/score_fire_run.py --bench-root ~/FIRE-Bench --log-file <log.log> --task cot_in_planning --draws 3` |
 
 Every flag, its default, and what is preserved on resume:
 **[docs/cli-reference.md](docs/cli-reference.md)**. Stage identifiers accept `03`, `3` or
@@ -870,13 +872,16 @@ is in **[docs/framework.md](docs/framework.md)**.
 
 ## Benchmarks
 
-AutoR is wired to two, and they measure different halves of it.
+AutoR is wired to three, and they measure different halves of it.
 [ResearchClawBench](#researchclawbench) hands the agent a workspace of raw data and reference
 papers and scores the report and figures it produces against the published paper — a test of
 conducting research. [FrontierScience-Research](#frontierscience-research) hands it one written
 examination question and grades the text of the answer against a ten-point rubric — no data, no
 reference paper, no figure, no reference answer, and a test of what the system knows and can
-derive. A change that moves one need not move the other.
+derive. [FIRE-Bench](#fire-bench) hands it a research question from a published empirical study,
+expects it to design and run its own experiments, and scores the two-sentence conclusion it
+writes against the authors' own — claim by claim, under a wall clock the harness enforces. A
+change that moves one need not move the other.
 
 ### ResearchClawBench
 
