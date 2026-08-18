@@ -117,17 +117,35 @@ scores no images at all. And the deadline: four stages in 3600 s is already tigh
 analysis Stage 06 would have done is one synthesis call here, which costs a call instead
 of a stage, a reviewer and a figure.
 
-### Why the walk starts at Stage 02, and browsing is off by default
+### Why the walk starts at Stage 02, and what browsing both arms get
 
-Every FIRE-Bench task is the rediscovery of a published finding whose paper is on the
-open web with its conclusion in the abstract. Stage 01 is a literature survey. A run that
-does a literature survey on this benchmark is running a search for the answer key, and
-the number it produces is not a measurement of research ability. `--web-search off` is
-the default for the same reason, and `_meta.json` records the denial per seat so the
-claim is checkable rather than asserted. Note the limit of that claim: the denied-tool
-list covers `WebSearch` and `WebFetch`, and `curl` lives inside `Bash`, so "did not
-browse" is something the transcript witness can testify to afterwards, not something the
-flag guarantees.
+Every FIRE-Bench task is the rediscovery of a published finding whose paper is on the open
+web with its conclusion in the abstract. Stage 01 is a literature survey, so on this
+benchmark a literature survey is a search for the answer key. The walk starts above it.
+
+Browsing itself is **on**, and identical across arms. The published baselines had it —
+Claude Code ships `WebSearch`, and a run that denies it is not the run the leaderboard
+describes. What a paired comparison needs is not that the arms cannot search but that they
+search with the *same thing*, or a difference in what they could look up lands in the score
+as if it were a difference in how they reason. So:
+
+| | |
+| --- | --- |
+| search tool | `mcp__autor-search__web_search`, AutoR's Gemini server |
+| backend | `gemini-3.7-flash` on Vertex AI, location `global`, Google Search grounding |
+| denied in every arm | `WebSearch`, `WebFetch` (Claude Code's built-ins) |
+| `--strict-mcp-config` | always |
+
+`--strict-mcp-config` is not decoration. Without it the CLI also loads whatever MCP servers
+the operator's *user* has configured in `~/.claude.json`, and that is outside everything
+`--web-search` controls: the flag chooses AutoR's own search server and names the two
+built-in tools, both of which are things AutoR supplies or knows by name. On a first real
+trial a user-level server called `ai4ai-web-search` was reached nine times across two cells
+of a run whose metadata recorded browsing as denied.
+
+`--web-search off` remains available and denies the lot. `Bash` — with `curl` inside it — is
+under none of this, so what a run actually looked up is a question for its transcript, not
+for its flags.
 
 ---
 

@@ -614,9 +614,9 @@ class DedupeByUrlTest(unittest.TestCase):
 
 class BackendJsonTest(unittest.TestCase):
     def test_json_output_records_which_backend_answered(self) -> None:
-        payload = WebSearchResponse("q", "gemini-3.6-flash", "a", "vertex", []).to_dict()
+        payload = WebSearchResponse("q", "gemini-3.7-flash", "a", "vertex", []).to_dict()
         self.assertEqual(payload["backend"], "vertex")
-        self.assertEqual(payload["model"], "gemini-3.6-flash")
+        self.assertEqual(payload["model"], "gemini-3.7-flash")
 
     def test_markdown_names_vertex_as_the_provider(self) -> None:
         body = format_response_markdown(WebSearchResponse("q", "m", "a", "vertex", []))

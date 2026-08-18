@@ -40,22 +40,26 @@ ResearchClawBench run of this same pipeline took 27,005 s. The analysis Stage 06
 have done is one synthesis call here, which costs a call instead of a stage, a reviewer
 and a figure.
 
-**Why the walk starts at Stage 02, and browsing is denied by default.** Every FIRE-Bench
+**Why the walk starts at Stage 02, and what browsing both arms get.** Every FIRE-Bench
 task is the rediscovery of a published finding whose paper is on the open web with its
-conclusion in the abstract. Stage 01 is a literature survey. A run that does a literature
-survey on this benchmark is running a search for the answer key, and the number it
-produces is not a measurement of research ability. ``--web-search off`` is the default
-here for the same reason, and ``_meta.json`` records the denial per seat so the claim is
-checkable rather than asserted.
+conclusion in the abstract. Stage 01 is a literature survey, so on this benchmark a
+literature survey is a search for the answer key -- which is why the walk starts above it
+even though browsing itself is on.
 
-Denial takes **two** levers, because they close different sets. ``--web-search off``
-declines to seat AutoR's own Gemini-backed search server and names ``WebSearch`` and
-``WebFetch`` to the CLI as denied -- tools AutoR supplies or knows by name. Anything the
-operator's user has configured in ``~/.claude.json`` is outside that by design, and on a
-first real trial one such server was called nine times across two cells. So this front
-end also passes ``--strict-mcp-config`` whenever browsing is off, which confines the agent
-to the run's own servers. Neither lever subsumes the other, and ``Bash`` -- with ``curl``
-inside it -- is under neither, so "did not browse" remains a question for the transcript.
+Browsing is on because the published baselines had it: Claude Code ships `WebSearch`, and
+a run that denies it is not the run the leaderboard describes. What matters for a paired
+comparison is not whether the arms can search but whether they search with the *same
+thing*. So this front end defaults to ``--web-search gemini`` -- AutoR's Vertex-backed
+``gemini-3.7-flash`` server, exposed as ``mcp__autor-search__web_search`` -- denies Claude
+Code's built-in ``WebSearch`` and ``WebFetch`` under every mode, and passes
+``--strict-mcp-config`` always. The stock arm is given the identical server by
+``agents/claude/run.py``. Without the strict flag the CLI also loads whatever the
+operator's user has configured in ``~/.claude.json``, which on the box this was built for
+silently added a second, different search tool to one arm and not the other.
+
+``--web-search off`` remains available and denies the lot; ``_meta.json`` records the
+denied set per seat. ``Bash`` -- with ``curl`` inside it -- is under none of this, so
+"what did it look up" is a question for the transcript rather than for the flags.
 
 **What the exit code means.** Not "the pipeline said it finished". Six clauses over the
 same dictionary that is written to ``_meta.json`` -- :data:`src.firebench.FIRE_EXIT_CLAUSES`
@@ -139,7 +143,17 @@ from src.utils import (  # noqa: E402
     resolve_output_format,
     write_text,
 )
-from src.web_search import disallowed_tools_for  # noqa: E402
+from src.web_search import (  # noqa: E402
+    MCP_TOOL_NAME as SEARCH_TOOL_NAME,
+    assess_search_readiness,
+    disallowed_tools_for,
+    resolve_web_search_context,
+    web_search_notice,
+)
+
+#: Claude Code's own browsing tools. Denied under every mode by this front end -- see
+#: where `disallowed_tools` is built -- so that both arms reach the web through one tool.
+BUILTIN_BROWSING_TOOLS = ("WebSearch", "WebFetch")
 
 #: The harness's own limit, from ``FIRE-Bench/run_agent.py``:
 #: ``subprocess.run(cmd, env=env, timeout=3600)``. It is the default here rather than a
@@ -233,10 +247,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
                              "the whole budget on one stage and leaves no conclusion.")
     parser.add_argument("--max-operator-calls-per-stage", type=int, default=4)
     parser.add_argument("--max-auto-skips", type=int, default=1)
-    parser.add_argument("--web-search", default="off",
+    parser.add_argument("--web-search", default="gemini",
                         choices=["auto", "gemini", "native", "off"],
-                        help="Default off: the answer to every task in this benchmark is in the "
-                             "abstract of a paper on the open web.")
+                        help="Default `gemini`: AutoR's Vertex-backed Gemini search server, which "
+                             "is the *same* tool the stock arm is given, so the two arms differ by "
+                             "the pipeline and not by what they can look up. `off` denies browsing "
+                             "entirely -- defensible on a benchmark whose every answer is in a "
+                             "paper's abstract, but it is not what the published baselines ran, so "
+                             "it is not the default.")
     parser.add_argument("--cross-review", default="off", choices=["auto", "gemini", "off"],
                         help="Default off. A second model family in the loop is a second thing "
                              "changing between the arms.")
@@ -268,6 +286,7 @@ def create_operator(
     stage_timeout: int,
     disallowed_tools: Sequence[str],
     strict_mcp: bool = False,
+    web_search_mcp: bool = False,
 ) -> Any:
     if backend == "codex":
         return CodexOperator(
@@ -283,7 +302,7 @@ def create_operator(
         fake_mode=fake_mode,
         ui=ui,
         stage_timeout=stage_timeout,
-        web_search_mcp=False,
+        web_search_mcp=web_search_mcp,
         disallowed_tools=disallowed_tools,
         # Only this run's servers -- a *second* lever, not a fix to the first.
         # `--web-search off` declines to seat AutoR's Gemini search server and denies the
@@ -357,7 +376,7 @@ def build_manager(
     # over, which is the shape of leak that gets recorded as "denied".
     inner = getattr(reviewer, "operator", None)
     if inner is not None and hasattr(inner, "strict_mcp"):
-        inner.strict_mcp = args.web_search == "off"
+        inner.strict_mcp = True
     return ResearchManager(
         project_root=REPO_ROOT,
         runs_dir=fire_runs_dir_for(workspace),
@@ -372,7 +391,7 @@ def build_manager(
         max_rounds=1,
         max_stage_attempts=args.max_attempts,
         max_operator_calls_per_stage=args.max_operator_calls_per_stage,
-        web_search_context=None,
+        web_search_context=web_search_context,
         web_search_mode=args.web_search,
         # The sandbox, not the run tree. Three gates resolve "Files Produced" against
         # this; without it a run that correctly wrote its results into the sandbox is
@@ -545,7 +564,29 @@ def run(args: argparse.Namespace) -> FireRunResult:
         }
     )
 
-    disallowed_tools = tuple(disallowed_tools_for(args.web_search))
+    readiness = (
+        None if args.web_search == "off"
+        else assess_search_readiness(operator=operator_backend, codex_sandbox=args.codex_sandbox)
+    )
+    notice, level = web_search_notice(args.web_search, readiness=readiness)
+    emit_event({"type": "progress", "stage": "web_search", "level": level, "message": notice})
+    ui_notice = notice
+    web_search_context = (
+        None if args.web_search == "off"
+        else resolve_web_search_context(args.web_search, readiness=readiness)
+    )
+    # Deny the two built-in browsing tools under *every* mode, not only `off`.
+    #
+    # `disallowed_tools_for` returns nothing for the provider modes, and it is right for
+    # an ordinary run: the flag chooses which search the agent uses, and denying the
+    # built-ins as well would contradict it. Here the point is the opposite -- the two
+    # arms have to reach the web through the *same* tool or a difference between them is
+    # a difference in what they could look up. The stock arm cannot be given Claude
+    # Code's built-in `WebSearch`, because AutoR's arms are given a Gemini one; so both
+    # are denied the built-ins and both are handed `mcp__autor-search__web_search`.
+    disallowed_tools = tuple(
+        dict.fromkeys(tuple(disallowed_tools_for(args.web_search)) + BUILTIN_BROWSING_TOOLS)
+    )
     pipeline = args.profile == "pipeline"
     stage_slugs = _stages_between(args.first_stage, args.final_stage) if pipeline else []
     # The direct arm is one call, so it gets the whole budget minus the reserve. The
@@ -562,7 +603,11 @@ def run(args: argparse.Namespace) -> FireRunResult:
         ui=ui,
         stage_timeout=int(deadline.remaining_before_reserve) if not pipeline else stage_timeout,
         disallowed_tools=disallowed_tools,
-        strict_mcp=args.web_search == "off",
+        # Always, not only when browsing is off. `--strict-mcp-config` is what makes the
+        # tool surface *this run's*, so that the arms are comparable and a server the
+        # operator's user happens to have configured cannot join either of them.
+        strict_mcp=True,
+        web_search_mcp=web_search_context is not None,
     )
 
     watcher = ConclusionWatcher(workspace=workspace, log_file=log_file)

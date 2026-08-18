@@ -330,7 +330,7 @@ AutoR reads very few environment variables of its own.
 | --- | --- | --- |
 | `GOOGLE_API_KEY` | `src/web_search.py` | Gemini key for all three Gemini paths: `--research-diagram`, `--web-search gemini`, and `--cross-review`. `resolve_gemini_api_key` is the single resolver; `src/diagram_gen.py` delegates to it so the features cannot drift apart. |
 | `GEMINI_API_KEY` | `src/web_search.py` | Same, checked second. |
-| `AUTOR_WEB_SEARCH_MODEL` | `src/web_search.py` | Model for Gemini-backed web search. Defaults to `gemini-2.5-flash` on the Gemini API and `gemini-3.6-flash` on Vertex AI. |
+| `AUTOR_WEB_SEARCH_MODEL` | `src/web_search.py` | Model for Gemini-backed web search. Defaults to `gemini-2.5-flash` on the Gemini API and `gemini-3.7-flash` on Vertex AI. |
 | `GEMINI_MODEL` | `src/web_search.py` | Same, checked second. |
 | `AUTOR_WEB_SEARCH_BACKEND` | `src/web_search.py` | Force `vertex` or `api_key` instead of auto-detecting. |
 | `AUTOR_VERTEX_PROJECT` | `src/web_search.py` | Vertex AI project for web search. Falls back to `GOOGLE_CLOUD_PROJECT`, then `ANTHROPIC_VERTEX_PROJECT_ID`. |

@@ -149,6 +149,10 @@ def launch(plan: dict, cell: dict) -> dict:
     else:
         command = [sys.executable, str(Path(plan["bench_root"]) / "agents" / arm["agent"] / "run.py")]
         env.update({"AGENT_ID": cell["arm"], "TASK_ID": cell["task"], "LLM_MODEL": plan["model"]})
+        # So the stock arm can build the same search-server config the AutoR arms use.
+        # Without it the two arms reach the web through different tools, and the
+        # difference lands in the score as if it were a difference in reasoning.
+        env.setdefault("AUTOR_ROOT", str(autor_root(plan)))
         cwd = plan["bench_root"]
 
     started = time.time()
