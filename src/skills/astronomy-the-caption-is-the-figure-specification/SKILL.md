@@ -29,28 +29,36 @@ when the rendering is unobtainable the caption is what you have, and a caption-d
 specification beats a specification you invented.
 
 **The reference model is the clause that goes wrong most often, and it is invisible
-afterwards.** A residual against the source's declared fiducial and a residual against
-your own best fit produce panels that look alike and place the data differently against
-the models: in one, the baseline curve carries structure and the points scatter about it;
-in the other the baseline is identically zero by construction and every point is offset.
-If the caption names a reference — a fiducial cosmology, a control condition, a baseline
-run — that is the reference, and it does not change because Stage 05 found a better one.
-Wanting your own baseline is legitimate: it is a second curve, or a second panel,
-labelled, beside the one the caption specifies.
+afterwards.** A residual against the reference the caption declares and a residual
+against your own best fit make panels that look alike and are not the same figure. Take
+the reference from one of the models you are comparing and that model stops being a
+curve: it is the flat line at zero by construction, a reader cannot see where it sits
+against the points, and a three-curve comparison quietly becomes a two-curve one. Take it
+from the external reference the caption names and every model, yours included, stays a
+drawn series that can be read against the data. If the caption names a reference — a
+fiducial cosmology, a control condition, a baseline run — that is the reference, and it
+does not change because a later stage found a better-fitting one. Wanting your own
+baseline is legitimate: it is a second curve, or a second panel, labelled, beside the one
+the caption specifies.
 
 **Carry the colour key and the panel order unchanged.** A reader compares two figures by
 superposition. Same model, same colour, same row: that is the whole mechanism, and
 permuting the panels or reassigning the colours costs it entirely, at no benefit. The
-model your residual is taken against keeps its name and its legend entry — demoting it to
-an unlabelled grey dashed line at zero removes from the figure the very model the reader
-was asked to judge.
+model your residual is taken against keeps its name and its legend entry **in every panel
+it appears in**: a reference drawn as a bare line at zero, named in the first panel and
+anonymous in the rest, is an unexplained rule to a reader looking at the second.
 
-**Take the units from the numbers.** A digitised block whose entries read `-0.020` is an
-absolute difference; a block in magnitudes is in magnitudes. Rescaling an axis to per cent
-because your own analysis is more comfortable there means the value the source's caption
-and prose state cannot be read off your panel. And plot every measurement with its
-uncertainty, in every panel: "the model lies within the errors" is the sentence these
-panels exist to support, and points without error bars cannot support it.
+**Decide what each supplied block is a difference _in_ before you choose its axis.** A
+column of small numbers beside a curve is one of three things — a fraction of the
+reference, a percentage of it, or a difference in the quantity's own unit — and the
+block's own header usually says which, in the same words the caption uses. The magnitude
+is the cross-check, because a fractional deviation and a per-cent one differ by a factor
+of a hundred; get it backwards and your curves and your points land two orders apart,
+which is obvious in the panel and invisible in the code. Whichever it is, a reader has to
+be able to find the caption's own quoted values on your axis. And plot every measurement
+with its uncertainty, in every panel: "the model lies within the errors" is the sentence
+these panels exist to support, points drawn without error bars cannot support it, and a
+caption that calls them *points with error bars* has already specified them.
 
 **Before you save the figure, read the caption back clause by clause against the panel**,
 and write your own caption in the source's words for the panels and quantities. Then
@@ -65,17 +73,33 @@ task and is where the largest single loss sits: the AutoR run scored **32.3 out 
 against **48.0** for a bare agent, on a task it lost overall by 15.8 to 27.9.
 
 The source's caption for that figure was on the run's own disk. It fetched the paper to
-`.autor/*/workspace/literature/target_paper_2503.24343_fulltext.txt`, which states the
-panel order — distance modulus on top, isotropic distance scale in the middle, distance
-ratio at the bottom — the colour key, that the supernova points have their weighted mean
-set to zero, and that all three model curves are drawn "compared to the DESI 'fiducial'
-model". The run's Stage 01 record even quotes that clause, writing that it relies on "the
-figure caption naming the DESI fiducial as its reference". The figure it shipped is
-titled "Distance residuals against the CMB+DESI ΛCDM best fit", carries the three panels
-in the order isotropic distance scale, distance ratio, distance modulus, rescales two of
-the three y-axes to per cent where the supplied block writes them as absolute differences
-of order 0.02, draws its baseline as an unlabelled grey dashed line at zero, gives the
-twenty-two supernova points no error bars, and stamps internal hypothesis codes across
-its panel titles. The bare agent's figure labels the same axis "vs DESI fiducial",
-carries the caption's panel order, and assigns the caption's own three colours to the
-three models in its `code/figures.py`.
+`.autor/*/workspace/literature/target_paper_2503.24343_fulltext.txt`, whose Figure 6
+caption states the panel order — distance modulus on top, isotropic distance scale in the
+middle, distance ratio at the bottom — the three model colours, that the supernova points
+are "points with error bars" with their weighted mean set to zero, and that all three
+curves are drawn "compared to the DESI 'fiducial' ΛCDM model". The run's Stage 01 record
+quotes that last clause, writing that it relies on "the figure caption naming the DESI
+fiducial as its reference".
+
+The figure it shipped is titled "Distance residuals against the CMB+DESI ΛCDM best fit",
+and substituting its own best fit for the caption's fiducial costs it the ΛCDM curve
+outright: in each of the three panels ΛCDM is an `axhline(0, ...)`, so the model the
+paper's argument is about is not a drawn series at all and only two of the caption's
+three curves appear. It also permutes the panels to isotropic distance scale, distance
+ratio, distance modulus; draws the twenty-two supernova points with `plot` rather than
+`errorbar`, so they carry no uncertainties; moves the seven supplied digitised points off
+the figure onto a separate validation panel; and writes its own hypothesis codes into one
+panel title and two in-panel text boxes.
+
+The bare agent's middle and bottom panels divide by the DESI fiducial — its
+`model_comparison.py` builds them as `c.DV_over_rd(z) / dv_f - 1.0` against the cosmology
+its own comment calls "the reference curve of Fig. 6" — so its ΛCDM stays a drawn purple
+curve, about a per cent below the baseline at low redshift rather than being the
+baseline. Its panels are in the caption's order and its colour dictionary gives ΛCDM, EDE
+and w₀wₐ the purple, green and black the caption names. Its top panel does take residuals
+against its own ΛCDM, so it did not get the reference clause right everywhere.
+
+Two things were checked and are **not** what separated the arms, which is why neither is
+in the craft above: both arms plot the same two panels in per cent, and both draw a grey
+zero line. The reference model, the panel order, the missing error bars and the exiled
+supplied points are the differences that remain.

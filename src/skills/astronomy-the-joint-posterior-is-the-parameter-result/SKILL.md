@@ -18,11 +18,13 @@ marginals on it — and it is the first thing a reader in this field looks for.
 `the-canonical-figure` gives the general rule; this is the version with the decisions in
 it.
 
-**The parameter list is the source's, not your sampler's.** Take the axes from the
-columns the source tabulates for every model, in the source's order and under the
-source's symbols, then add each model's own extra parameters. Two consequences follow and
-both get made backwards by default. A parameter your own likelihood never constrains
-stays on the grid, carrying the published constraint alone — see
+**The parameter list is the source's, not your sampler's.** Take the axes from the rows
+the source tabulates *for every model in the comparison*, in the source's order and under
+the source's symbols. A parameter only one model carries cannot be a shared axis — it
+belongs in its own panel or a second figure — and where the source's caption says which
+subset it drew, that subset is the grid. Two consequences follow and both get made
+backwards by default. A parameter your own likelihood never constrains stays on the grid,
+carrying the published constraint alone — see
 `astronomy-sample-the-published-table-into-chains` for where its samples come from — and
 a parameter of your own parameterisation that the source does not tabulate stays off it,
 because a reader has nothing to check it against. A grid whose axes are the intersection
@@ -53,29 +55,39 @@ one, and bind it to the source's result rather than to a claim id.
 the source's terms: which model sits higher in the expansion rate and by how much, which
 in the clustering amplitude, which is lower in the matter density, and whether the two
 remedies push in opposite senses. The contours are the evidence; the direction sentence
-is the result, and it belongs in the paragraph that introduces the figure rather than
-forty thousand characters later.
+is the result, and it belongs in the paragraph that introduces the figure rather than in
+a later section a reader working through a long report may never reach.
 
 ## Why this is here
 
 Measured on Astronomy_001 of ResearchClawBench, rescored with gpt-5.1 over three draws.
-The image criterion asking for the reproduced triangle plot carries 0.4 of the task. The
-AutoR run scored **6.7 out of 100** on it against **11.7** for a bare agent — the judge's
-words are that the report "does not include a triangle plot of 2D posteriors ... instead
-it shows separate 1D error-bar panels", which is exactly what it shipped:
-`fig2_parameter_constraints.png`, five one-dimensional error-bar panels over matter
-density, expansion rate, clustering amplitude, physical matter density and spectral
-index. Of those five, physical matter density is the run's own sampler parameter and is
-not a row of the supplied table; the table's optical depth and log primordial amplitude,
-both shipped with a 1-sigma error for all three models, get no panel. The run reported
-the direction result correctly in prose and in that figure's sub-labels and still lost
-the criterion.
+The image criterion asking for the reproduced triangle plot carries 0.4 of the task, and
+**neither arm drew one**. The AutoR run scored **6.7 out of 100** on it and a bare agent
+**16.0**, but that 16.0 is one draw of 48 beside two of 0, and the 48 describes contours
+that are not in the bare agent's report either — it opens "The AI's triangle plot clearly
+shows", while the string `triangle` occurs zero times in that report's 20,101 characters
+and neither `getdist` nor `corner plot` matches any file in that workspace. So this skill
+is not written from an arm that got it right. It is written because the criterion is
+worth 0.4 of the task, AutoR left 93 of its 100 points on it, and the object it asks for
+is a short call once chains exist.
 
-Two skills that would have caught it were installed and one of them was read. The whole
-run made three `Skill` calls: `citation-discipline` at Stage 01, then
-`astronomy-figure-is-the-unit-of-result` and `the-canonical-figure` — whose text names
-the corner plot as the expected exhibit for Bayesian parameter inference — at Stage 06,
-the stage that *draws* the slate, after Stage 03 had fixed it and stamped it with a
-digest. `draw-the-source-figure-panel-for-panel` was never opened. The general rule was
-present, arrived at the wrong stage, and lost to a plan whose every slot was already
-bound to one of the run's own preregistered hypotheses.
+What AutoR shipped instead is `fig2_parameter_constraints.png`: five one-dimensional
+error-bar panels over matter density, expansion rate, clustering amplitude, physical
+matter density and spectral index. The judge's stated reason is that the report "does not
+include a triangle plot of 2D posteriors ... instead it shows separate 1D error-bar
+panels". Of those five axes the physical matter density is a parameter of the run's own
+sampler and not one the supplied block tabulates, while the block's optical depth and log
+primordial amplitude — each given with a 1-sigma error for all three models — get no axis
+at all. The run had the direction result right: it is in the prose, and its own caption
+for that figure points at the shift printed under each panel — "the published shift of
+each model against ΛCDM: opposite in sign in Ω_m, H₀, σ₈ and n_s". Holding the result and
+not the exhibit is what this criterion charges for.
+
+The general form of the advice was in the pack and was read. The whole run made three
+`Skill` calls — `citation-discipline` at Stage 01, then
+`astronomy-figure-is-the-unit-of-result` and `the-canonical-figure` inside Stage 06 — and
+`the-canonical-figure` names the corner plot as the expected exhibit for Bayesian
+parameter inference. Its own front matter offers it at study design too, but the run
+opened it at the stage that *draws* the slate rather than the one that fixes it: Stage 03
+had already stamped the figure plan with a digest, and every slot in it was bound to one
+of the run's own preregistered hypotheses.

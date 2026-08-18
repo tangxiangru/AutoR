@@ -15,13 +15,13 @@ your own likelihood exists. It costs a page of code, it introduces no assumption
 not already make when you quote the table, and it is the only form in which the source's
 constraint can be drawn on the same axes as anything else.
 
-Draw a large ensemble per model — tens of thousands of points; twenty thousand is the
-conventional order and is enough for smooth contours — from the multivariate normal the
-table specifies: independent Gaussians unless the source publishes correlation
-coefficients or releases a covariance, in which case use them. Sample **every row the
-table carries for that model**, not the subset your own analysis will touch, and add the
-model-specific rows (an extra energy component's amplitude and epoch, a dark-energy
-equation-of-state pair) alongside the shared ones.
+Draw a large ensemble per model — enough points that the 95% contour comes out smooth
+rather than ragged, which puts you in the tens of thousands, and twenty thousand is a
+common choice — from the multivariate normal the table specifies: independent Gaussians
+unless the source publishes correlation coefficients or releases a covariance, in which
+case use them. Sample **every row the table carries for that model**, not the subset your
+own analysis will touch, and add the model-specific rows (an extra energy component's
+amplitude and epoch, a dark-energy equation-of-state pair) alongside the shared ones.
 
 Write it out in the layout the field's posterior tooling reads, not into a private NumPy
 array. For cosmology that is GetDist's chain layout, which the other packages also
@@ -61,21 +61,24 @@ Measured on Astronomy_001 of ResearchClawBench, rescored with gpt-5.1 over three
 The task ships one 2,010-byte file whose parameter block gives seven parameters shared by
 all three models — matter density, Hubble constant, sigma-8, spectral index, baryon
 density, log primordial amplitude and optical depth — each as a mean with a 1-sigma
-error, plus the model-specific rows. The source study's own reproduction sampled exactly
-that block and plotted it. The criterion for that step carries 0.2 of the task and asks
-for simulated chains at the table's means and errors, twenty thousand points per model,
-in a GetDist-compatible form; the AutoR run scored **1.0 out of 100** on it against
-**11.7** for a bare agent, and both judgements say the same thing — the step is absent,
-replaced by each run's own sampler over its own parameter set.
+error, plus the model-specific rows. The criterion for that step carries 0.2 of the task
+and asks for simulated chains at the table's means and errors, twenty thousand points per
+model, in a GetDist-compatible form; the AutoR run scored **1.0 out of 100** on it
+against **11.7** for a bare agent, and both judgements say the same thing — the step is
+absent, replaced in each case by that run's own sampler over its own parameter set.
 
-The strings `triangle`, `corner plot` and `getdist` appear zero times in that run's
-`code/`, `outputs/`, `report/` and stage records, while the source paper's full text,
-which the run itself fetched to
+What the block was for is settled by the figure the next criterion grades against: a 7×7
+corner plot whose axes are exactly those seven rows in exactly the file's order, three
+models overlaid, and whose contours are axis-aligned ellipses — the signature of
+independent Gaussians drawn from a table of means and sigmas, and nothing else. Neither
+arm built it. The strings `triangle`, `corner plot` and `getdist` match no file under the
+AutoR run's `code/`, `outputs/`, `report/` or stage records, while the source paper's
+full text, which the run itself fetched to
 `.autor/*/workspace/literature/target_paper_2503.24343_fulltext.txt`, carries the
-sentence "we use GetDist to display the posteriors". The run's Stage 01 had already
-written down the enabling assumption in as many words — that it would treat the published
+sentence "we use GetDist ... to display the posteriors". Its Stage 01 had already written
+down the enabling assumption in as many words — that it would treat the published
 marginals as Gaussian — and spent it only on converting parameter shifts into sigmas. Its
 parameter figure is a row of five one-dimensional error bars, one of them an internal
-sampler parameter the published table does not tabulate, while the tabulated optical
-depth and log amplitude get no axis at all and the word `tau` appears zero times in its
-57,594-character report.
+sampler parameter the published block does not carry, while the tabulated optical depth
+and log amplitude get no axis at all. The phrase "optical depth" does not occur in the
+57,594-character report, and every τ in it is the sampler's autocorrelation time.

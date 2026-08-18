@@ -643,10 +643,10 @@ them.** Two filters narrow the pack, and a skill has to survive both:
    become two. A materials run does not benefit from being offered advice about observational
    astronomy, it just has one more description to read past.
 2. **Shape.** A skill may carry an `applies_when` regex, matched against this run's own research
-   brief and data manifest. Four skills are scoped this way today; measured over the forty
-   ResearchClawBench briefs they select 3, 4, 6 and 8 tasks each, twenty-five tasks receive none of
-   them, and no task receives more than three. `tools/skill_selectivity.py` prints the selection set
-   for a corpus and `--expect` turns it into an assertion, because a predicate is a claim about a
+   brief and data manifest. Seven skills are scoped this way today; measured over the forty
+   ResearchClawBench briefs they select 1, 1, 1, 2, 3, 5 and 7 tasks each, twenty-six tasks receive
+   none of them, and no task receives more than three. `tools/skill_selectivity.py` prints the
+   selection set for a corpus and `--expect` turns it into an assertion, because a predicate is a claim about a
    kind of research problem and it should be checkable.
 
 The predicate reads the brief, never the task's identifier: a table of benchmark ids would select
@@ -657,10 +657,12 @@ the same tasks today and generalise to nothing.
    that are installed for it whatever the two filters say. A pin is not an inference about a kind of
    task — it is a record that this exact identifier already ran, already scored, and lost criteria
    whose subject is those skills, so it is the one routing input that cannot be derived from the
-   task statement and does not generalise past the name it carries. Fifteen ResearchClawBench tasks
-   are pinned today, twenty-four pins between them, at most three per task; four of the twenty-four
-   are skills the two filters would have withheld, in each case a field skill whose content
-   applies outside its own field. **A run that matches an entry writes `skill_pins` into its `run_config.json` and a
+   task statement and does not generalise past the name it carries. Twenty-six ResearchClawBench
+   tasks are pinned today, 246 pins between them, between three and the table's maximum of fifteen
+   per task; 25 of the 246 are skills the two filters would have withheld — 20 a field skill whose
+   content applies outside its own field, 5 a predicate that did not match. A pin is announced only
+   at the stages its `SKILL.md` names, which is what makes a table this size affordable.
+   **A run that matches an entry writes `skill_pins` into its `run_config.json` and a
    `skills pinned_by_task_id` line into its log**, because a pinned arm and an unpinned arm are two
    configurations and a score from one is not a score from the other.
 

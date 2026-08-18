@@ -8,6 +8,15 @@
     "Astronomy_000": {
       "pins": 13
     },
+    "Astronomy_001": {
+      "pins": 3,
+      "autor": 15.8,
+      "control": 27.93,
+      "net": -12.13,
+      "recoverable": 12.13,
+      "headroom": 84.2,
+      "note": "Every one of the three checklist items lost, so `recoverable` is the whole gap and no incumbent has an item that moved. The three pins are this task's three new skills, ranked by weighted loss: caption-is-the-figure-specification (item 2, w 0.4, 32.3 vs 48.0, -6.27 weighted), joint-posterior (item 1, w 0.4, 6.7 vs 16.0, -3.73), sample-the-published-table-into-chains (item 0, w 0.2, 1.0 vs 11.7, -2.13). The two names this table pinned here before #264 rebuilt it are not restored: `the-canonical-figure` was opened by the measured run of its own accord at Stage 06 and the item still scored 6.7, and `draw-the-source-figure-panel-for-panel` did not exist at 1069e77, the commit that run was launched from. Its instruction is also to read each panel's series off the rendered figure, and this task's target paper is not in the workspace -- the caption skill is written for exactly that gap and cites it."
+    },
     "Astronomy_003": {
       "pins": 12
     },
@@ -95,6 +104,11 @@
     "publish-what-the-run-already-computed",
     "the-canonical-figure",
     "the-supplied-item-is-the-graded-unit"
+  ],
+  "Astronomy_001": [
+    "astronomy-the-caption-is-the-figure-specification",
+    "astronomy-the-joint-posterior-is-the-parameter-result",
+    "astronomy-sample-the-published-table-into-chains"
   ],
   "Astronomy_003": [
     "the-supplied-arm-owns-figure-one",
