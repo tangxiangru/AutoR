@@ -1168,14 +1168,17 @@ Three caveats travel with those numbers, all in the docs. **APPS is excluded fro
 aggregate**: its normalized score has a denominator eleven times smaller than a typical
 task's, so the two arms' Pass@5 of 0.783 and 0.947 normalize to 7.37 and 14.15 and would
 carry the mean by themselves — the mean over tasks is not a robust statistic on this
-benchmark, which is why the median is beside it. **These are not leaderboard numbers**: the
+benchmark, which is why the median is beside it. Those Pass@5 figures were checked against a
+measured floor before being used: `pass` for all 5,000 problems scores 0.0008 and a program
+that does not compile scores 0.0000, so the metric discriminates.
+**These are not leaderboard numbers**: the
 published table is twenty tasks at ten to twenty seeds, and its agents run in a container
 with no network, while an agent with a shell here can `snapshot_download` a model and run
 inference — seven of the bare arm's nineteen runs did. And one seed per arm is one seed.
 The arms are comparable with each other: same machine, same access, same brief, same cap,
 and **zero tool-call audit hits for the held-out labels across all 38 runs**.
 
-The adapter, the arm harness, the four defects running it surfaced in the benchmark itself,
+The adapter, the arm harness, the five defects running it surfaced in the benchmark itself,
 and the one it surfaced in this adapter are in [docs/airsbench.md](docs/airsbench.md).
 
 ## Documentation
