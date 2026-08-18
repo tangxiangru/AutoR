@@ -250,7 +250,17 @@ declares a `List` feature type that `datasets` 3 has never heard of. Neither ver
 all sixteen. `tools/airs_setup.py` therefore tries both interpreters per dataset and both
 read the same saved Arrow directory afterwards.
 
-**3. One task cannot be staged at all.** `Monash-University/monash_tsf`'s `rideshare`
+**3. One task's evaluator cannot run on the Python the repository requires.**
+`CodeGenerationAPPSPassAt5`'s `evaluate.py` imports `pyext`, which the task itself lists in
+`evaluate_container_python_requirements`. `pyext` calls `inspect.getargspec` and does not
+build on 3.11 or later, while `airs-bench`'s own `pyproject.toml` declares
+`requires-python = ">=3.12"`. On 3.10 it installs — and then the evaluator's
+`multiprocessing` pool dies on `RuntimeError: os.fork is unsafe while filelock is changing
+descriptor ownership`, which needs `filelock<3.19` as well. A 3.10 interpreter with
+`filelock==3.18` scores the task in about six minutes; nothing that satisfies the
+repository's own `requires-python` scores it at all.
+
+**4. One task cannot be staged at all.** `Monash-University/monash_tsf`'s `rideshare`
 config raises `DatasetGenerationError` under `datasets` 3 (its loading script) and is
 unavailable under `datasets` 4 (there is no script), so
 `TimeSeriesForecastingRideshareMAE` has no data by any route available here. Nineteen of
