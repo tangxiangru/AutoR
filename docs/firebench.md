@@ -21,6 +21,9 @@ contract, conclusion export, log publisher, metadata — pure), `fire_agent.py`
 driven repeatedly), and `templates/firebench_agent_run.py` (the file you drop into a
 FIRE-Bench checkout to register AutoR as an agent).
 
+Every run made against it, including the two whose numbers were withdrawn and why, is
+in [firebench-trial-log.md](firebench-trial-log.md).
+
 ---
 
 ## What this benchmark punishes that the others reward
