@@ -83,6 +83,6 @@ the top of its generation figure with no verdict labels, kept the guidance sweep
 and the scoring in the panels below it, and scored **48, 75 and 0** across the
 three draws of the same criterion, mean **41.0**. Neither run produced the
 specific image the criterion names. The run that lost also published ten figures
-to the plain agent's five, and the grader was shown five from each: what
-separated them was not how much was drawn but whether any of it showed the system
-succeeding.
+to the plain agent's five, and the benchmark shows a grader up to fifteen, so every
+figure of both runs reached it: what separated them was not how much was drawn, nor
+how much was looked at, but whether any of it showed the system succeeding.

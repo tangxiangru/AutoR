@@ -131,5 +131,5 @@ So all sixty images it generated came from a public benchmark prompt list and
 none from the paper, at a measured median of 67 s each: the four showcase
 prompts would have cost about four and a half minutes against that grid's
 sixty-seven. It published ten figures to the plain agent's five, and the grader
-was shown five from each — twice as many drawn bought no extra look, and the one
-that was missing was the source's own.
+shows a grader up to fifteen, so both sets arrived whole — twice as many drawn was
+not the difference, and the one that was missing was the source's own.
