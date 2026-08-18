@@ -121,6 +121,10 @@ detail behind it.
   [round-loop-and-stage-graph.md](iclr/round-loop-and-stage-graph.md) reads
   AMAP-ML's LongHorizon-Harness against it and records what the stage graph
   should take from a round loop, and what it should not.
+  [what-the-comparison-changed.md](iclr/what-the-comparison-changed.md) is the
+  implementation record behind that reading: what landed, what was refused and by
+  what, every figure with the command that reproduces it, and the four places a
+  measurement said the wrong thing.
 
 ### Project notices
 
