@@ -210,17 +210,23 @@ COUNTED_NOUNS: tuple[tuple[str, int], ...] = (
     ("general ones", _skills_without_a_field()),
     ("field-specific ones", _skill_pack_size() - _skills_without_a_field()),
     # The same defect one paragraph further down, found by a reviewer who re-ran the tool
-    # the sentence cites. The README described four `applies_when` predicates selecting
-    # "3, 4, 6 and 8 tasks each", with twenty-five tasks receiving none. Four was right;
-    # the set sizes were 2, 3, 5 and 7 and twenty-seven tasks received none, so the only
-    # number in that sentence that had not rotted was the one no corpus is needed to
-    # re-derive. Only the count is re-derivable inside this repo, because the
-    # selection sets need a corpus of briefs that does not ship here; the sentence names
-    # the command for those and this row holds the one a symbol can hold.
+    # the sentence cites. The README described four `applies_when` predicates that select
+    # "3, 4, 6 and 8 tasks each", with "twenty-five tasks receive none of them, and no task
+    # receives more than three". Re-run over the same forty briefs the four predicates
+    # selected 2, 3, 5 and 7, twenty-seven tasks received none, and the maximum was two:
+    # four claims, and the only survivor was the one that needs no corpus. So the README
+    # now states that one and names the command for the rest, and this row is the symbol
+    # under it. The selection sets themselves cannot be a row here at any price -- they are
+    # a property of a brief corpus that does not ship in this repo, and a number no test
+    # can reach is a number that rots on the next merge.
     ("skills are scoped this way today", _task_scoped_skills()),
     # And the pin table's own size, which the README described at the shape it had two
-    # merges earlier. The per-task cap is asserted against `MAX_PINS_PER_TASK` in
-    # `test_run_skills.py`; this is the row for how many tasks carry any pin at all.
+    # merges earlier -- "Fifteen ResearchClawBench tasks are pinned today, twenty-four pins
+    # between them, at most three per task" -- against a table that by then held twenty-five
+    # tasks, 243 pins and a `MAX_PINS_PER_TASK` of fifteen. Only the task count is a row
+    # here. The per-task cap is asserted against `MAX_PINS_PER_TASK` in `test_run_skills.py`,
+    # and the total is deliberately not claimed in prose at all: every branch that pins a
+    # skill moves it, so the sentence would be stale before the branch that wrote it landed.
     ("ResearchClawBench tasks are pinned today", _pinned_tasks()),
 )
 

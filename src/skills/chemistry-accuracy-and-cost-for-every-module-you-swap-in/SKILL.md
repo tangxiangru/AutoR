@@ -71,13 +71,19 @@ in a space the claim quantifies over.
 
 ## Then say why the winner wins
 
-Finish with the mechanism, in one or two sentences supported by something you
-measured: a bounded basis stays finite where an unbounded one overflows on
-features spanning orders of magnitude; a periodic basis becomes non-injective once
-pre-activations leave its period; one family conditions better under the optimiser
-you used. A table of ratios with no sentence about the mechanism leaves an
-expressivity criterion half answered, because that criterion is about *why* the
-substitution helps, and the numbers alone do not say.
+Finish with the mechanism, in one or two sentences that a number in your own
+results supports. Three shapes it takes: a *range* argument — one family stays
+bounded on inputs spanning orders of magnitude where another does not; a *domain*
+argument — a basis stops being faithful once its input leaves the interval it was
+fitted over; a *conditioning* argument — one family trains stably under the
+optimiser you used where another stalls. Which of those is true here is a
+measurement rather than a pick from a list, so print the quantity the argument is
+about — the pre-activation range, the gradient norms, the loss curves — and let it
+decide, including when it decides against the module the source is selling. A table
+of ratios with no sentence about the mechanism leaves an expressivity criterion half
+answered, because that criterion is about *why* the substitution helps and the
+numbers alone do not say; an unmeasured mechanism sentence is worse than none,
+because it reads as an explanation and is a guess.
 
 ## Why this is here
 

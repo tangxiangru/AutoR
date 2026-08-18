@@ -643,16 +643,18 @@ them.** Two filters narrow the pack, and a skill has to survive both:
    become two. A materials run does not benefit from being offered advice about observational
    astronomy, it just has one more description to read past.
 2. **Shape.** A skill may carry an `applies_when` regex, matched against this run's own research
-   brief and data manifest. Seven skills are scoped this way today; measured over the forty
-   ResearchClawBench task statements with `tools/skill_selectivity.py --briefs`, they select 1, 1,
-   1, 2, 3, 5 and 7 tasks each, twenty-seven of the forty receive none of them, and the most any
-   one task receives is five. The count is a row of `COUNTED_NOUNS` in
-   [tests/test_doc_counts.py](tests/test_doc_counts.py), because it is the part of this sentence
-   a symbol in this repo can hold; the rest depend on a corpus of briefs that does not ship here,
-   which is why the sentence names the command instead of only the answer.
-   `tools/skill_selectivity.py` prints the selection set for a corpus and `--expect` turns it
-   into an assertion, because a predicate is a claim about a kind of research problem and it
-   should be checkable.
+   brief and data manifest. Seven skills are scoped this way today — a count held by a row of
+   `COUNTED_NOUNS` in [tests/test_doc_counts.py](tests/test_doc_counts.py), which is the only part
+   of this claim a symbol in this repo can hold. What each of those predicates then selects is a
+   property of a corpus of briefs that does not ship here, so this paragraph names the command
+   rather than an answer: `tools/skill_selectivity.py --briefs <corpus>` prints every predicate's
+   selection set and the per-task totals, marks a predicate matching more than `WIDE_FRACTION` of
+   the corpus as over-selecting and one matching nothing as silent, and `--expect` turns a
+   predicate's claim into an assertion that exits non-zero — because a predicate is a claim about
+   a kind of research problem and it should be checkable. The sentence this replaces made four
+   claims about this filter and only the skill count was still true: the per-predicate set sizes,
+   the number of tasks selected by nothing, and the per-task maximum had each drifted from the
+   corpus they were read off, and no test could see it.
 
 The predicate reads the brief, never the task's identifier: a table of benchmark ids would select
 the same tasks today and generalise to nothing.
@@ -663,12 +665,14 @@ the same tasks today and generalise to nothing.
    task — it is a record that this exact identifier already ran, already scored, and lost criteria
    whose subject is those skills, so it is the one routing input that cannot be derived from the
    task statement and does not generalise past the name it carries. Twenty-five ResearchClawBench
-   tasks are pinned today, at most fifteen each — the cap is `MAX_PINS_PER_TASK`, and the table's
-   own `_maximum` is the argument for that number rather than a note that it exists. Some of the
-   pins are skills the two filters would have withheld, in each case a field skill whose content
-   applies outside its own field. How many pins there are in total is deliberately not written
-   here: it moves with every branch that adds one, and the table is the copy that cannot go
-   stale. **A run that matches an entry writes `skill_pins` into its `run_config.json` and a
+   tasks are pinned today, capped per task by `MAX_PINS_PER_TASK`, and the table's own `_maximum`
+   is the argument for that ceiling rather than a note that it exists. Some of those pins are
+   skills the two filters would have withheld — mostly a field skill whose content applies
+   outside its own field, the rest general skills whose `applies_when` does not match that
+   task's brief. Neither how many pins there are in total nor how many of them are of either
+   kind is written here: both move with every branch that adds one, `load_task_pins` and
+   `select_run_skills` will tell you, and the table is the copy that cannot go stale.
+   **A run that matches an entry writes `skill_pins` into its `run_config.json` and a
    `skills pinned_by_task_id` line into its log**, because a pinned arm and an unpinned arm are two
    configurations and a score from one is not a score from the other.
 

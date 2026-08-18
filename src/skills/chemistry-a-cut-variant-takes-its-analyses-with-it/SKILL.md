@@ -73,13 +73,13 @@ interpretability names the attention one; the run under study scored 38.0 on it
 against 55.0 for bare Claude Code on the identical brief, and 27.3 against 30.0 on
 the benchmark-table criterion that names both backbones.
 
-Its artifacts: `outputs/campaign/` holds 63 files and `outputs/results/` eleven,
-and the attention variant has a result in none of them. What it does have is a
-`gat` hyper-parameter block in each of the three per-dataset `__meta.json` files —
-planned, never run — and one profile,
-`outputs/notes/convergence_and_gat_probe.json`, 560,180 parameters and 3.332 s per
-training epoch, taken and then used to justify the cut. The saliency analysis that answers the interpretability criterion was
-therefore computed from the convolutional variant, against a published map drawn
-from the attention one, and the report says in its limitations that the attention
-variant's entry in the legend of the main results figure is empty. That figure was
-one of the five put in front of the judge.
+Its artifacts: `outputs/campaign/` holds 63 files and `outputs/results/` eleven, and
+the attention variant has a result in none of them. What it does have is a `gat`
+hyper-parameter block in each of the three per-dataset `__meta.json` files — planned,
+never run — and one profile, `outputs/notes/convergence_and_gat_probe.json`, 560,180
+parameters and 3.332 s per training epoch, taken and then used to justify the cut.
+The saliency analysis answering a criterion whose subject is the attention variant
+was therefore computed from the convolutional one, against a published figure whose
+caption names the attention variant, and the report says in its limitations that the
+attention variant's entry in the legend of the main results figure is empty. That
+figure was one of the five put in front of the judge.
