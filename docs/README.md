@@ -12,6 +12,7 @@ detail behind it.
 | Install AutoR and run your first project end to end | [English Guide](tutorial_en.md) · [中文教程](tutorial_zh.md) |
 | Look up a command-line flag | [CLI Reference](cli-reference.md) |
 | Run AutoR unattended, or benchmark it on ResearchClawBench | [ResearchClawBench](researchclawbench.md) |
+| See what every full benchmark run scored, and which predictions it broke | [RCB Experiment Log](rcb-experiment-log.md) |
 | Answer and score a written science exam question | [FrontierScience-Research](frontierscience.md) |
 | Rediscover a published finding by running experiments, under a one-hour clock | [FIRE-Bench](firebench.md) |
 | Understand what a run leaves on disk | [Run Artifacts](run-artifacts.md) |
@@ -66,6 +67,10 @@ detail behind it.
   [ResearchClawBench](https://github.com/InternScience/ResearchClawBench)
   adapter and its output contract, and the Gemini-backed web search used where
   the coding agent's own `WebSearch` tool is disabled.
+- **[rcb-experiment-log.md](rcb-experiment-log.md)** — every full 40-task run of
+  AutoR on ResearchClawBench under one fixed judge and image window: the score, the
+  prediction the run was launched to test, and where the prediction was wrong. Four of
+  five entries contradict something their own PR predicted.
 - **[researchclawbench-landscape.md](researchclawbench-landscape.md)** — how the
   other agents on the ResearchClawBench leaderboard score, which of their
   published numbers reproduce from the public data, and the same-model baseline
