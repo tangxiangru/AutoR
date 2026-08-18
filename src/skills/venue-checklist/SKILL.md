@@ -1,6 +1,7 @@
 ---
 name: venue-checklist
 description: Use when the target venue's submission requirements matter — checking a draft against NeurIPS, ICML or ICLR expectations, deciding which required sections (checklist, broader impact, reproducibility, LLM disclosure) the paper needs, or running the Stage 08 submission-readiness review.
+stages: 03_study_design, 07_writing
 ---
 
 # Venue checklists: NeurIPS, ICML, ICLR

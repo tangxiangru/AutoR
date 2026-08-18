@@ -95,8 +95,22 @@ class BenchmarkGoalTest(unittest.TestCase):
                 self.assertIn(question, goal_excerpt(goal, budget), f"lost at {budget} chars")
 
     def test_the_fenced_task_round_trips_out_of_the_goal(self) -> None:
+        """The fence carries the research task, not the whole instruction sheet.
+
+        This used to assert the sheet round-tripped whole, which is what handed the
+        coverage gate `## Role` as a deliverable. Over the 40 shipped tasks that was
+        58% of every run's requirement list.
+        """
         with tempfile.TemporaryDirectory() as tmp:
             task = "## Role\n\nAnalyst.\n\n## Research Task\n\nFit the exclusion curve."
+            goal = build_benchmark_goal(Path(tmp).resolve(), task)
+            self.assertEqual(extract_fenced_task(goal), "Fit the exclusion curve.")
+            # The agent still reads the part that is not fenced.
+            self.assertIn("Analyst.", goal)
+
+    def test_a_sheet_with_no_research_task_heading_round_trips_whole(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            task = "Fit the exclusion curve and report the bound."
             goal = build_benchmark_goal(Path(tmp).resolve(), task)
             self.assertEqual(extract_fenced_task(goal), task)
 

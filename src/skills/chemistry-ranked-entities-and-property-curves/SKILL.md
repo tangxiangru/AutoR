@@ -1,6 +1,7 @@
 ---
 name: chemistry-ranked-entities-and-property-curves
 description: Use at analysis and figure planning when the computation ranks entities — molecules, poses, fragments, atoms — or sweeps a property along a coordinate. Covers printing the named ranked list and the property-versus-coordinate curve, the two artifacts most often computed here and least often reported.
+stages: 03_study_design, 05_experimentation, 06_analysis
 ---
 
 # Print the named-entity ranked list and the property-versus-coordinate curve -- chemistry's two most-computed, least-reported artifacts

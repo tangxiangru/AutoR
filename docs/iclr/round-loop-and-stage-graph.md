@@ -143,6 +143,29 @@ Deny the write tools as well, but the deny-list is not the mechanism — the cen
 own restore is advertised and never happens, and the demotion is the entire enforcement;
 that is the part that works.
 
+**Landed**, as `src/review_custody.py`, with two corrections the design did not survive
+contact with.
+
+*The census is over content, not modification time.* Replayed over 138 archived reviewer
+episodes (`tools/review_custody_replay.py`, population pinned by name), an mtime census
+fires on **138 of 138** with no exclusion list and **4 of 138** with one — and all four
+are the same behaviour: the reviewer re-running the doer's producer scripts in place to
+check they reproduce. Both of the two approvals among them say so in their own recorded
+reason. A gate that fires hardest on the most rigorous reviewer is the wrong gate, so a
+file whose digest is unchanged is recorded as `touched` and never charged.
+
+*The demotion is armed by a flag and off by default.* `--review-custody` defaults to
+`record`. The replay bounds the blast radius from above and cannot bound it from below:
+an archive keeps one modification time per file, so how many of those four a content
+census would also have caught is not answerable from disk. That is what the ledger is
+for.
+
+What it still cannot see is worth stating, because the reading that produced this
+mechanism also produced the counterexample: in the same 138 episodes there are three
+tool-level writes, and two of them go to a `~/.claude/projects/.../memory/` directory
+far outside any run root. The census claims *"the reviewer changed nothing it was
+judging"*, not *"the reviewer changed nothing"*.
+
 *Class: design gap, and the largest here. Effort: medium.*
 
 ### 4.2 A promotion should carry the authority that granted it
@@ -229,6 +252,24 @@ obligation src/stage_graph.py` returns nothing; obligations reach prompts, and `
 increments a counter with no ceiling and no reader that can refuse. An obligation that can
 be deferred indefinitely with no reader is a debt with no creditor.
 
+**Landed, as the sentence rather than the status.** `_complete_run` now calls
+`_completion_sentence`, which reads two harness-written records the close had never
+consulted — the manifest's own `skipped` flag and the obligation ledger — and says what
+it finds. A run with neither says exactly what it said before, so a clean run's closing
+line is unchanged; the sentence only moves where it would have been false.
+
+That also gives the obligation ledger its first reader that can act on it. `note_deferrals`
+incremented a counter with no ceiling and nothing downstream ever asked what was still
+open; now the run cannot close claiming everything was approved while a debt a reviewer
+attached is outstanding.
+
+**The fourth `run_status` value was considered and refused.** The walk did complete; what
+was false was the prose. A new status would have to be taught to six places in
+`src/frontend/static/app.js` that test `=== "completed"` for settledness, plus
+`humanStatus` and a CSS class — a wide change across a surface this suite does not cover,
+for a defect entirely in a sentence. The RCB adapter is unaffected either way: its
+`status` is derived from whether the report is substantive, not from the manifest.
+
 *Class: a record that overstates. Effort: small.*
 
 ### 4.4 A channel with no declared budget
@@ -307,8 +348,23 @@ the plan still covers every demanding sentence. The stage that discovers a deman
 meet at design time can still route backwards; the one that discovers it at Stage 07 cannot
 afford to.
 
-*Class: a check placed at the wrong end of the run. Effort: small for the branch, medium for
-the channel.*
+**The first move landed**; the second has not. `validate_deliverables_coverage` now runs
+at `stage.number >= 7` whatever the output format, and its locator half reads the run's
+actual deliverable — `report.md`, or the `.tex` sources under `workspace/writing/` — so
+it no longer degrades to a skip with no counter when there is no markdown report.
+
+Blast radius, measured before landing: **335 archived run configs, every one of them
+`markdown`**. So no archived run changes verdict, which is the honest figure and cuts
+both ways — the gap never cost an observed run, and the fix has never been exercised by
+one either. It is a correctness change about coupling, not a bug with a measured price.
+
+What is still terminal is the *timing*: the check runs once, at Stage 07, and the second
+move above — an earlier writer for the coverage artifact and a reviewer axis over it — is
+what would let a run discover at design time that it is not going to answer half the
+brief.
+
+*Class: a check placed at the wrong end of the run. Effort: small for the branch (done),
+medium for the channel.*
 
 ### 4.6 Carried refusal evidence — the machine-read half only
 
@@ -338,6 +394,29 @@ What survives is machine-read, not prompt-read:
 figure to `describe_budget_for_prompt`. Do not add a `prior_refusals` doer channel. Note
 also that `Visit.refusal` already exists with a different meaning — why the router's answer
 was not used — so the new field needs a different name.
+
+**Landed as the router's fact, and refused as the supervisor's rule.**
+
+`src.router.unfinished_business` now names what a node has already charged across its
+closed visits and whether that spend went against one wall or many — `prior_digests` in
+`src.stage_cost`, beside the ledger it reads. That is the closed rows' first reader
+outside their own tests.
+
+Feeding those digests to `RunSupervisor`'s repeat rule, which is what this section
+originally proposed, was implemented and then **reverted**: it ends a revisit at its first
+repeated attempt, and two tests already in the tree are this repository's decision the
+other way — `test_a_second_visit_to_an_exhausted_stage_still_buys_attempts` and
+`test_a_revisit_gets_the_whole_ceiling_and_not_one_attempt`, whose docstring says in as
+many words that one attempt is a revisit that cannot work. Both went red on the
+concatenation. `TheRepeatRuleDeliberatelyStopsAtTheVisitBoundaryTests` is the note that
+stops the idea coming back.
+
+Blast radius of the version that was reverted, replayed over
+`tools/supervisor_threshold_replay.py`'s `MEASURED_RUNS` before the two tests spoke: 0 of
+22 visits change verdict, because only two of twenty stages in that population were
+visited more than once and neither repeated a digest. Worth recording as a caution: the
+replay said the change was free, and the suite said it was wrong. A population that
+contains no instance of the case cannot price it.
 
 *Class: a ledger nobody reads. Effort: small.*
 
@@ -376,6 +455,11 @@ continuation file, and inline a bounded goal plus a memory subset rather than a 
 not adopt the general framing of "add a *what this stage has established* block": most of it
 duplicates the handoff context and the channel set already in the prompt, and this repository
 has already paid for sending memory and handoff together.
+
+**(1) and (2) are fixed** (#256). The parity test that came with the first is the general
+form: the two builders take five of the same optional content parameters, each gets a
+sentinel, and both prompts must carry all five — a parameter one builder accepts and
+drops is the same defect under another name. (3) stands.
 
 *Class: two live defects plus one false premise. Effort: small.*
 

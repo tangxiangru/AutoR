@@ -1,6 +1,7 @@
 ---
 name: run-the-requested-analysis
 description: Use when the supplied data looks synthetic, degraded, incomplete or wrong, and whenever you are tempted to reframe the study around what you found about the inputs, the harness or the evaluation. Covers what to do with a real data problem without losing the study.
+stages: 01_literature_survey, 03_study_design, 05_experimentation
 ---
 
 # A problem with the inputs is a finding to add, not a study to replace

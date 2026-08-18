@@ -126,27 +126,67 @@ class BenchmarkResult:
     pipeline_completed: bool
     export: ExportResult
     auto_skipped_stages: list[str] = field(default_factory=list)
+    #: The exception that ended the stage walk, as ``"TypeName: message"``, or ``""`` when
+    #: the walk finished on its own terms. This is the field that separates a run which
+    #: degraded from one which stopped, and they are not the same outcome however similar
+    #: the directory looks afterwards.
+    aborted_with: str = ""
+
+    @property
+    def aborted(self) -> bool:
+        return bool(self.aborted_with)
+
+    @property
+    def status(self) -> str:
+        """What `_meta.json` should say. Three outcomes, not two.
+
+        ``completed`` -- the walk finished and the report is substantive.
+        ``aborted``   -- an exception ended the walk. A report may still exist, because
+                         the adapter exports whatever the run produced before it died;
+                         that report is a salvage, not a result.
+        ``failed``    -- the walk finished but produced no substantive report.
+        """
+        if self.aborted:
+            return "aborted"
+        return "completed" if self._report_is_substantive() else "failed"
+
+    def _report_is_substantive(self) -> bool:
+        path = self.export.report_path
+        if not path.exists():
+            return False
+        return len(read_text(path).strip()) >= MIN_REPORT_CHARS
 
     @property
     def exit_code(self) -> int:
-        """0 when a real report reached the harness.
+        """0 when a real report reached the harness *and* the run got there on its own.
 
-        The pipeline completing is not the bar: ResearchClawBench scores the report, so a
-        run that auto-skipped a stage but still produced a substantive report is a success,
-        and a "completed" run with an empty report is not.
+        An auto-skipped stage is not disqualifying: ResearchClawBench scores the report,
+        and a run that lost a stage to its recovery path and still produced a substantive
+        report is a degraded success. That was this property's whole argument, and it
+        holds -- for a walk that finished.
 
-        That second half was the docstring's claim and not the code's: this tested
-        ``.exists()``, and a 197-byte "No completed stage output was produced" stub exists.
-        Eight of forty benchmark runs therefore reported ``exit_code: 0, status:
-        completed`` while shipping nothing, and the batch log, the run metadata and the
-        harness all agreed the runs had succeeded. Nothing surfaced it until the scoring
-        pass, thirteen hours later. Hold the file to ``MIN_REPORT_CHARS``, the same floor
-        every source inside :func:`export_run` is already held to.
+        It does not hold for a walk that was ended by an exception, and the difference was
+        invisible here. On the `full40_pins` arm, Life_002 died at Stage 03 of 7 on a
+        `UnicodeDecodeError` raised while assembling a prompt. Four stages were never
+        attempted. The adapter caught it at the top, synthesised a report from the partial
+        state, and this property returned 0 because a 40 KB file existed -- so
+        `_meta.json` said `completed`, the batch runner logged `DONE ... completed`, the
+        scorer scored it 22.6, and that number entered a 40-task arm mean indistinguishable
+        from the runs that finished. It took reading `_agent_output.jsonl` by hand to find
+        `"pipeline_completed": false` next to `"report_source": "synthesized"`.
+
+        So: a substantive report is still necessary and is no longer sufficient.
+
+        The report floor has its own history. This once tested ``.exists()``, and a
+        197-byte "No completed stage output was produced" stub exists. Eight of forty
+        benchmark runs therefore reported ``exit_code: 0, status: completed`` while
+        shipping nothing, and the batch log, the run metadata and the harness all agreed
+        the runs had succeeded; nothing surfaced it until the scoring pass thirteen hours
+        later. Hold the file to ``MIN_REPORT_CHARS``, the same floor every source inside
+        :func:`export_run` is already held to. The abort case above is the same defect one
+        level up, found the same way and costing the same thirteen hours.
         """
-        path = self.export.report_path
-        if not path.exists():
-            return 1
-        return 0 if len(read_text(path).strip()) >= MIN_REPORT_CHARS else 1
+        return 0 if self.status == "completed" else 1
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +270,53 @@ def infer_task_id(workspace: Path) -> str | None:
 def ensure_workspace_layout(workspace: Path) -> None:
     for name in RCB_WORKSPACE_DIRS:
         (workspace / name).mkdir(parents=True, exist_ok=True)
+
+
+#: The heading ResearchClawBench's own template puts above the research question.
+#: Everything under it is the task; everything outside it is how to operate the harness.
+_TASK_HEADING = re.compile(r"^##\s+Research Task\s*$", re.M)
+_NEXT_HEADING = re.compile(r"^##\s+\S", re.M)
+
+
+def fence_research_task(instructions: str) -> str:
+    """Put the task fence around the research question, not the whole instruction sheet.
+
+    :func:`src.utils.task_statement` reads what is inside the fence, and every
+    deliverable the coverage gate holds a run to comes from there. Fencing the whole
+    ``INSTRUCTIONS.md`` therefore hands the gate the *harness's operating instructions*
+    as research deliverables. Measured over the 40 shipped tasks,
+    ``demanding_sentences`` returns **337 demands on the full sheet and 142 on the
+    research task alone — 58% of what every run was held to was boilerplate** — and the
+    same five phantoms appear in all forty:
+
+        Read & Understand -- Study the related work and data to build domain context.
+        Code & Execute -- Implement the analysis, generate figures, and iterate ...
+        Analyze & Report -- Interpret the results and produce a publication-quality ...
+        Your primary goal is to complete the research task and produce a ... report.md
+        Figures are mandatory -- generate plots and save to report/images/ ...
+
+    3.5 demands per task after narrowing is the right order of magnitude too: the
+    shipped checklists carry three to five criteria each.
+
+    The agent still reads the whole sheet — only the *fence* moves, so the extractors
+    see the question while the prompt keeps the workspace rules. When the heading is
+    absent, which is any goal a human typed, the whole thing is fenced exactly as
+    before: narrowing a goal that is already only a question would delete it.
+    """
+    text = instructions.strip()
+    match = _TASK_HEADING.search(text)
+    if match is None:
+        return f"{TASK_BEGIN_MARKER}\n{text}\n{TASK_END_MARKER}"
+    start = match.end()
+    nxt = _NEXT_HEADING.search(text, start)
+    end = nxt.start() if nxt else len(text)
+    task = text[start:end].strip()
+    if not task:
+        return f"{TASK_BEGIN_MARKER}\n{text}\n{TASK_END_MARKER}"
+    head = text[: match.start()].rstrip()
+    tail = text[end:].lstrip()
+    parts = [head, match.group(0), f"{TASK_BEGIN_MARKER}\n{task}\n{TASK_END_MARKER}", tail]
+    return "\n\n".join(part for part in parts if part).strip()
 
 
 def build_benchmark_goal(
@@ -351,7 +438,7 @@ def build_benchmark_goal(
                 "Make the best judgement you can from the data and keep going."
             ),
             "## Research Task",
-            f"{TASK_BEGIN_MARKER}\n{instructions.strip()}\n{TASK_END_MARKER}",
+            fence_research_task(instructions),
             "## Benchmark Workspace Contract",
             (
                 f"The benchmark workspace is `{resolved}`. It is separate from the AutoR run tree "

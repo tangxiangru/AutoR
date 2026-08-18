@@ -1,6 +1,7 @@
 ---
 name: physics-discriminate-model-families-and-defend-the-fit
 description: Use at analysis when a fit is about to be reported as the answer without a rival model being excluded. Covers naming the competing model families, showing which the data rules out, and treating the fit protocol — range, weighting, priors — as part of the result rather than as a setting.
+stages: 03_study_design, 06_analysis, 07_writing
 ---
 
 # Physics: exclude a named model, and treat the fit protocol as part of the result

@@ -1,6 +1,7 @@
 ---
 name: math-equal-effort-baselines-and-knob-sweeps
 description: Use at study design when the source names competing algorithms and they are about to become a related-work paragraph instead of arms. Covers running every named baseline at equal tuning effort, and sweeping the parameter you claim credit for.
+stages: 03_study_design, 04_implementation, 05_experimentation
 ---
 
 # Run every named baseline as a real arm at equal effort, and sweep the knob you claim credit for

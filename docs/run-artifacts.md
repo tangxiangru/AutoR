@@ -30,6 +30,8 @@ runs/<run_id>/
 ├── preregistration_stamp.json  # AutoR's copy of the frozen hypothesis set
 ├── validity_review_stamp.json  # AutoR's copy of what each adversarial pass raised
 ├── stage_cost_ledger.json      # what each stage visit spent, and why each attempt failed
+├── supervisor_ledger.jsonl     # one line per run-supervisor ruling
+├── review_custody.jsonl        # one line per reviewer episode: what the run root did while it ran
 ├── logs.txt                    # human-readable workflow log
 ├── logs_raw.jsonl              # raw backend stream-json events
 ├── prompt_cache/               # the exact prompt sent for every attempt
@@ -58,13 +60,29 @@ The directory shape is created by `ensure_run_layout` and the paths are
 defined once, in `build_run_paths` ([`src/utils.py`](../src/utils.py)). If you
 need a path in code, take it from `RunPaths` rather than joining strings.
 
-Six files sit at the run root rather than under `workspace/` on purpose:
+Eight files sit at the run root rather than under `workspace/` on purpose:
 `obligations.json`, `review_policy.json`, `report_plan_stamp.json`,
-`preregistration_stamp.json`, `validity_review_stamp.json` and
-`stage_cost_ledger.json` are records *about* the run rather than part of its
-answer, and every stage prompt directs the agent at `workspace/` paths. Same
-reason `evolution/` is out here — and, like `evolution/`, it also keeps them out
-of a benchmark export that packages the workspace.
+`preregistration_stamp.json`, `validity_review_stamp.json`,
+`stage_cost_ledger.json`, `supervisor_ledger.jsonl` and `review_custody.jsonl`
+are records *about* the run rather than part of its answer, and every stage
+prompt directs the agent at `workspace/` paths. Same reason `evolution/` is out
+here — and, like `evolution/`, it also keeps them out of a benchmark export that
+packages the workspace.
+
+The last two are also out here because of *who* they are about. A supervisor
+ruling and a reviewer custody line are records of the harness watching an agent,
+and an agent that could edit them could edit the record of being caught.
+
+`review_custody.jsonl` holds one JSON object per reviewer subprocess — the solo
+gate, its verdict-only re-ask, every panel seat, the chair, and the adversarial
+validity pass — written whether or not anything moved, because only-on-breach
+would make "the census never ran" and "the census found nothing" the same
+record. Each line carries `stage`, `label`, `mutated`, the `added` / `changed` /
+`deleted` / `type_changed` path lists, `touched` (rewritten to the same bytes —
+a reviewer re-deriving an artifact, which is not a breach), `entries`, `took_ms`
+and `scan_errors`. Written by `record_episode`
+([`src/review_custody.py`](../src/review_custody.py)); see
+[`--review-custody`](cli-reference.md#reviewer-custody).
 
 ---
 
@@ -190,7 +208,12 @@ what rollback rewrites. Written by [`src/manifest.py`](../src/manifest.py).
 }
 ```
 
-**`run_status`** — one of `pending`, `running`, `human_review`, `completed`,
+**`run_status`** — unchanged when a walk reaches the terminal with gaps: the walk did
+complete, and what a skipped stage or an open obligation changes is the `run_complete`
+log entry and the closing line, which `ResearchManager._completion_sentence` derives from
+the manifest's `skipped` flags and the obligation ledger rather than asserting. A clean
+run still reads *"All stages approved."*; a run that auto-skipped its writing stage now
+names it instead. One of `pending`, `running`, `human_review`, `completed`,
 `failed`, `cancelled`, `halted`, `abandoned`.
 
 The last two are the ones worth knowing about, because both are stops that are
@@ -947,8 +970,8 @@ of the rows are directory-level counts, and the rest check named files.
   `build_log.txt` and `layout_review.json` in latex mode;
   `citation_verification.json` and `self_review.json` in both. Do not read that
   as the whole set — further per-file gates hang off the same Stage 07 branches
-  (`claim_provenance.json` in both formats, `deliverables_coverage.json` in
-  markdown), and the `stage.number >= 7` branches of `validate_stage_artifacts`
+  (`claim_provenance.json` and `deliverables_coverage.json` in both formats), and
+  the `stage.number >= 7` branches of `validate_stage_artifacts`
   are where the current list lives. Freshness is narrower still: at Stage 07
   itself the files named in that branch's `stage7_required_files`, plus the PDF
   and the section sources in latex mode, must be newer than the stage's start

@@ -1,6 +1,7 @@
 ---
 name: draw-the-source-figure-panel-for-panel
 description: Use at study design when planning figures for a reproduction, replication or validation task, and again before the report is written. Covers deriving each panel's series list and axis ranges from the source's rendered figure, giving every source result a panel before your own hypotheses claim the slots, and printing the source's named constants as labelled values.
+stages: 01_literature_survey, 03_study_design, 06_analysis
 ---
 
 # Every result the source drew, you draw

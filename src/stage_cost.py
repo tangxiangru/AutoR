@@ -100,9 +100,10 @@ one wrong, and both are wrong in a direction that looks plausible.
 
 **Which calls it covers.** The ones this row already counts and no others:
 :attr:`StageCostRow.operator_invocations`, :attr:`StageCostRow.review_invocations` and the
-adversarial validity pass, all dispatched by the manager inside the visit. Three other
-places in ``src/`` reach the backend — the router's two, and the benchmark front end's —
-and none of them is inside a stage visit, so none of them can be charged to one.
+adversarial validity pass, all dispatched by the manager inside the visit. Four other
+places in ``src/`` reach the backend — the router's two, and one for each of the two
+benchmark front ends — and none of them is inside a stage visit, so none of them can be
+charged to one.
 ``tests/test_cost_is_recorded_and_unread.py`` derives that population from the syntax and
 fails when a new dispatch site joins the tree unclassified, and
 :func:`format_run_cost_report` prints the boundary beside the total rather than leaving a
@@ -707,6 +708,37 @@ def stage_cost_ledger_path(paths: RunPaths) -> Path:
     return paths.stage_cost_ledger
 
 
+def prior_digests(rows: Sequence[Mapping[str, Any]], stage_slug: str) -> list[str]:
+    """What earlier visits to *stage_slug* were spent on, oldest first.
+
+    :meth:`StageCostMeter.attempt_digests` answers this for the visit in progress and
+    stops at its own boundary, so nothing in the tree could say that a stage had already
+    been fought over, with the same objection, before the walk came back to it. The rows
+    have carried the answer since this module existed and had no reader outside the
+    tests.
+
+    Not for the supervisor's repeat rule. Feeding it these ends a revisit at its first
+    repeated attempt, and this repository has already decided the other way --
+    ``test_a_revisit_gets_the_whole_ceiling_and_not_one_attempt`` says in as many words
+    that one attempt is a revisit that cannot work. The reader is
+    :func:`src.router.unfinished_business`, which puts the fact in front of the party
+    choosing the next move instead of spending the visit on it.
+
+    The rows come off :func:`read_stage_cost_ledger`, which is written in the ``finally``
+    of a stage visit, so the open visit is never in here.
+    """
+
+    found: list[str] = []
+    for row in rows:
+        if str(row.get("stage") or "") != stage_slug:
+            continue
+        entries = row.get("attempt_digests")
+        if isinstance(entries, Sequence) and not isinstance(entries, (str, bytes)):
+            found.extend([str(e.get("digest") or "") for e in entries
+                         if isinstance(e, Mapping) and e.get("digest")])
+    return found
+
+
 def read_stage_cost_ledger(paths: RunPaths) -> list[dict[str, Any]]:
     """The rows written so far, oldest first. ``[]`` when there is nothing readable.
 
@@ -724,6 +756,35 @@ def read_stage_cost_ledger(paths: RunPaths) -> list[dict[str, Any]]:
     if not isinstance(rows, list):
         return []
     return [row for row in rows if isinstance(row, dict)]
+
+
+def operator_calls_spent(paths: RunPaths, stage_slug: str) -> int:
+    """Operator calls this stage has cost across every visit the ledger has closed.
+
+    The open visit is not in here -- the meter holds that, and only the manager has it.
+    A caller enforcing a ceiling has to add ``meter.operator_invocations`` itself; see
+    :meth:`src.manager.ResearchManager._operator_calls_spent`, which is the one caller.
+
+    Summing rather than taking the last row is the whole point. Every existing per-stage
+    budget in AutoR resets when the stage is re-entered -- a graph revisit, a rollback, a
+    resume -- so ``--max-attempts 8`` was in force through a 40-run batch whose worst
+    stage still reached 28 operator calls, because it reached them across four visits of
+    seven. A ceiling that resets is a ceiling on visits, not on spend.
+
+    Rows whose ``operator_invocations`` is missing or not an integer contribute nothing
+    rather than raising: a ledger written by an older version of this module must not be
+    able to stop a run, and under-counting an old row spends the budget more slowly,
+    which is the safe direction for a stop that promotes work rather than discarding it.
+    """
+    total = 0
+    for row in read_stage_cost_ledger(paths):
+        if row.get("stage") != stage_slug:
+            continue
+        value = row.get("operator_invocations")
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            continue
+        total += value
+    return total
 
 
 def append_stage_cost_row(paths: RunPaths, row: StageCostRow) -> bool:

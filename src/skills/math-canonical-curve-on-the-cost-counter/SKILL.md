@@ -1,6 +1,7 @@
 ---
 name: math-canonical-curve-on-the-cost-counter
 description: Use at figure planning when a convergence or performance curve is about to be drawn against wall-clock, or folded into a composite panel. Covers the field's plain two-curve figure, plotting against the algorithm's own cost counter, and why it comes before any richer diagnostic.
+stages: 03_study_design, 05_experimentation, 06_analysis
 ---
 
 # Draw the field's plain two-curve figure against the algorithm's own cost counter, before any richer diagnostic

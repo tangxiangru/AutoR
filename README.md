@@ -45,7 +45,9 @@ overview and the operating manual.
 [The rigor dial](#the-rigor-dial) · [Self-improvement rounds](#self-improvement-rounds) ·
 [Review](#review-five-kinds-of-critic) · [The stage contract](#the-stage-contract-and-what-gets-validated) ·
 [Execution model](#execution-model) · [Run layout](#run-layout) · [Architecture](#architecture) ·
-[Benchmarks](#benchmarks) · [Documentation](#documentation) · [Limits](#limits) · [License](#license)
+[Benchmarks](#benchmarks) ([ResearchClawBench](#researchclawbench) ·
+[FrontierScience](#frontierscience-research) · [FIRE-Bench](#fire-bench)) ·
+[Documentation](#documentation) · [Limits](#limits) · [License](#license)
 
 ## What AutoR is
 
@@ -130,10 +132,10 @@ naming them.
 | Required stage-summary headings | `REQUIRED_STAGE_HEADINGS` | 7 |
 | Rubric criteria (weighted, backend-free) | `CRITERIA`, [src/rubric.py](src/rubric.py) | 10 |
 | Flags on `main.py` / `rcb_agent.py` | `parse_args` | 61 / 37 |
-| Python modules / lines / tests | the tree | 179 / 82 k / 2561 |
+| Python modules / lines / tests | the tree | 226 / 114 k / 3501 |
 
-`python -m unittest discover -s tests -p "test_*.py"` runs **2561 tests** across 111 test
-modules, with no third-party dependency.
+`python -m unittest discover -s tests -p "test_*.py"` runs **3501 tests in ~290 s across 134 test
+modules**, with no third-party dependency.
 
 ## Quick start
 
@@ -188,6 +190,10 @@ modules, with no third-party dependency.
 | Read the paired-trial analysis and exit | `python main.py --trial-report` |
 | Benchmark AutoR on ResearchClawBench | `python rcb_agent.py --workspace <WORKSPACE>` |
 | Score a finished benchmark run with the reference judge | `python tools/score_rcb_run.py --workspace <WORKSPACE> --bench <BENCH>` |
+| Answer one FrontierScience question, with AutoR or with one direct call | `python fs_agent.py --task fs:043 --profile ideate` · `--profile direct` |
+| Grade a FrontierScience answer against its rubric | `python tools/score_fs_run.py --task fs:043 --answer answer.md --out score.json` |
+| Rediscover a published finding on FIRE-Bench, under its own one-hour clock | `python fire_agent.py --bench-root ~/FIRE-Bench --task cot_in_planning --profile pipeline` · `--profile direct` |
+| Score a FIRE-Bench conclusion with the benchmark's own claim-level judge | `python tools/score_fire_run.py --bench-root ~/FIRE-Bench --log-file <log.log> --task cot_in_planning --draws 3` |
 
 Every flag, its default, and what is preserved on resume:
 **[docs/cli-reference.md](docs/cli-reference.md)**. Stage identifiers accept `03`, `3` or
@@ -631,16 +637,18 @@ Alongside the prompt, AutoR installs an agent skill pack from [src/skills/](src/
 `runs/<run_id>/.claude/skills/` — the operator's working directory — so the agent can *pull*
 long-form craft guidance when it needs it. A skill costs nothing in the prompts that do not use it.
 
-Forty-five skills ship today: twenty-five general ones and twenty field-specific ones. **A run is
-not offered all of them.** Two filters narrow the pack, and a skill has to survive both:
+161 skills ship today: 72 general ones and 89 field-specific ones. Forty of them were written in one pass against the twelve tasks that trailed a bare-Claude-Code control under a single judge — three or four per task, each selected by a phrase in that task's brief and in no other of the forty, and every one of the forty pinned. Most of them were written against a scored arm's per-criterion losses on the
+twenty-five ResearchClawBench tasks that lost, at least three per task. **A run is not offered all of
+them.** Two filters narrow the pack, and a skill has to survive both:
 
 1. **Field.** A skill named `<field>-...` is installed only for a run in that field, so twenty
    become two. A materials run does not benefit from being offered advice about observational
    astronomy, it just has one more description to read past.
 2. **Shape.** A skill may carry an `applies_when` regex, matched against this run's own research
-   brief and data manifest. Four skills are scoped this way today; measured over the forty
-   ResearchClawBench briefs they select 3, 4, 6 and 8 tasks each, twenty-five tasks receive none of
-   them, and no task receives more than three. `tools/skill_selectivity.py` prints the selection set
+   brief and data manifest. Forty-four skills are scoped this way today; measured over the forty
+   ResearchClawBench briefs they select between 1 and 7 tasks each — forty of the
+   forty-four select exactly one — eighteen tasks receive none of them, and no task receives
+   more than six. `tools/skill_selectivity.py` prints the selection set
    for a corpus and `--expect` turns it into an assertion, because a predicate is a claim about a
    kind of research problem and it should be checkable.
 
@@ -652,8 +660,8 @@ the same tasks today and generalise to nothing.
    that are installed for it whatever the two filters say. A pin is not an inference about a kind of
    task — it is a record that this exact identifier already ran, already scored, and lost criteria
    whose subject is those skills, so it is the one routing input that cannot be derived from the
-   task statement and does not generalise past the name it carries. Fifteen ResearchClawBench tasks
-   are pinned today, twenty-four pins between them, at most three per task; four of the twenty-four
+   task statement and does not generalise past the name it carries. Twenty-seven ResearchClawBench tasks
+   are pinned today, 280 pins between them, at most fifteen on any one task; twenty of the 280
    are skills the two filters would have withheld, in each case a field skill whose content
    applies outside its own field. **A run that matches an entry writes `skill_pins` into its `run_config.json` and a
    `skills pinned_by_task_id` line into its log**, because a pinned arm and an unpinned arm are two
@@ -865,6 +873,19 @@ is in **[docs/framework.md](docs/framework.md)**.
 
 ## Benchmarks
 
+AutoR is wired to three, and they measure different halves of it.
+[ResearchClawBench](#researchclawbench) hands the agent a workspace of raw data and reference
+papers and scores the report and figures it produces against the published paper — a test of
+conducting research. [FrontierScience-Research](#frontierscience-research) hands it one written
+examination question and grades the text of the answer against a ten-point rubric — no data, no
+reference paper, no figure, no reference answer, and a test of what the system knows and can
+derive. [FIRE-Bench](#fire-bench) hands it a research question from a published empirical study,
+expects it to design and run its own experiments, and scores the two-sentence conclusion it
+writes against the authors' own — claim by claim, under a wall clock the harness enforces. A
+change that moves one need not move the other.
+
+### ResearchClawBench
+
 `python rcb_agent.py --workspace <WORKSPACE>` runs AutoR against a
 [ResearchClawBench](https://github.com/InternScience/ResearchClawBench) workspace with no human in
 the loop and exports the benchmark's deliverables (`report/report.md`, `report/images/`, `code/`,
@@ -952,6 +973,147 @@ what the reported systems actually score and which of their numbers reproduce, s
 output contract and the export rules, see
 [docs/researchclawbench.md](docs/researchclawbench.md).
 
+### FrontierScience-Research
+
+`python fs_agent.py --task fs:043 --profile ideate` answers one of the sixty questions of
+[FrontierScience-Research](https://arxiv.org/abs/2601.21165) with AutoR entered at Stage 02 and
+stopped there; `--profile direct` answers the same question with one call to the same model and
+is the paired control. `tools/score_fs_run.py` grades an answer against the task's own rubric
+with the paper's verbatim judge prompt. The dataset is pinned by digest rather than committed,
+and is never downloaded automatically.
+
+**The reference point, measured here.** A bare `claude-opus-4-5` answering directly, no tools,
+one draw per task, all sixty tasks, graded by **gpt-5.1** at high reasoning effort:
+
+| | value |
+|:---|---:|
+| mean rubric points | **4.291 / 10** |
+| across-task sd | 2.795 |
+| pass@≥7 | **13 / 60 = 21.7%** (binomial se 5.3 pp) |
+| chemistry / biology / physics means | 5.044 / 4.801 / 3.028 |
+
+The paper reports Claude Opus 4.5 at 17.5% over the same sixty tasks at thirty trials each,
+under a **GPT-5** judge that returns 404 on the endpoint available here — and reports the same
+chemistry-then-biology-then-physics ordering. Landing inside one standard error of that figure
+and reproducing its ordering is **corroboration of the scoring path, not comparability of the
+instruments**; judge choice is worth more than the difference being discussed, so no number
+here may be placed beside the paper's table.
+
+**What AutoR costs here.** A three-task calibration — both arms, real operator, `opus`
+answering and reviewing — puts the `ideate` arm at 33 to 77 minutes a task, median 72, at 9 to
+20 backend calls and 154k to 335k output tokens. Sixty tasks by two arms is about a day at a
+concurrency of six, which makes a full paired campaign affordable.
+
+**No difference is published from it.** The pipeline arm refused on one of three tasks against
+the plan's 20% ceiling — a run that approved no stage and was refused by two clauses rather than
+being handed a synthesized answer. Refusals are not random across arms, so the survivors are
+biased in the direction that flatters the arm that refused, and the report says so instead of
+averaging them.
+
+The two pairs are worth stating as two observations: `fs:010` **2.500 against 9.375**, `fs:043`
+4.000 against 4.000. The pipeline arm did not win a task — it lost one by twenty times the
+judge's sampling noise and drew the other, at 7.4× and 5.6× the wall clock. Two pairs is two
+pairs, but it points the same way as ResearchClawBench, where AutoR also lands below the bare
+CLI it can be configured to run on top of.
+
+The first pass of that calibration lost two of three single-call runs to the Claude CLI's own
+300 s stream idle timeout, firing while the model was still thinking. `CLAUDE_STREAM_IDLE_TIMEOUT_MS`
+is the knob — not the `BYTE_`-prefixed one, which changed nothing — and 1,800,000 is the ceiling
+it clamps to. Raise both before any campaign: the failure exits cleanly, leaves a file behind,
+and fires on thinking time, so what it removes is the hard questions.
+
+The full table, why each arm refused, the ten admission clauses and the judge's measured noise
+are in [docs/frontierscience.md](docs/frontierscience.md).
+
+### FIRE-Bench
+
+`python fire_agent.py --bench-root ~/FIRE-Bench --task cot_in_planning --profile pipeline`
+runs one [FIRE-Bench](https://github.com/maitrix-org/FIRE-Bench) task: a research question
+from a published empirical study, a sandbox, no reference paper, and **3600 seconds of wall
+clock that the harness enforces with a kill**. What is scored is the two-sentence conclusion
+the agent writes, decomposed into atomic claims and matched against the authors' own.
+`--profile direct` is the paired control — the same goal, model, denied tools, sandbox and
+deadline, in one agentic call instead of a stage walk.
+
+**Measured here, six tasks, one run each, `opus` executing and reviewing, every arm on the
+benchmark's own 3600 s clock. Each cell is the median judge draw of three — one draw, so
+its three numbers are consistent with each other; arms are the mean ± sd across tasks,
+which is the shape [FIRE-Bench's own Table 3](https://github.com/maitrix-org/FIRE-Bench)
+reports:**
+
+| task | AutoR pipeline | | | AutoR direct | | | stock Claude Code | | |
+|:---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| | P | R | F1 | P | R | F1 | P | R | F1 |
+| `cot_in_planning` | 62.5 | 100.0 | **76.9** | 60.0 | 66.7 | 63.2 | — | — | *no conclusion* |
+| `premise_order_effects` | 0.0 | 0.0 | 0.0 | 80.0 | 80.0 | **80.0** | — | — | *no conclusion* |
+| `prompt_formatting_sensitivity` | 50.0 | 33.3 | 40.0 | 75.0 | 66.7 | **70.6** | — | — | *no conclusion* |
+| `lifebench_length_following` | 0.0 | 0.0 | 0.0 | 46.2 | 40.0 | **42.9** | — | — | *no conclusion* |
+| `persona_reasoning_biases` | 0.0 | 0.0 | 0.0 | 28.6 | 50.0 | **36.4** | 11.1 | 50.0 | 18.2 |
+| `mcq_selection_bias` | 30.0 | 50.0 | 37.5 | 75.0 | 66.7 | **70.6** | 25.0 | 83.3 | 38.5 |
+
+| arm | scoreable | Prec. | Recall | F1 | median wall clock |
+|:---|---:|---:|---:|---:|---:|
+| AutoR pipeline | 6 / 6 | 23.8 ± 28.0 | 30.6 ± 40.0 | 25.7 ± 31.5 | 52 min |
+| AutoR direct | 6 / 6 | **60.8 ± 20.1** | **61.7 ± 14.3** | **60.6 ± 17.2** | **11 min** |
+| stock Claude Code | **2 / 6** | 18.1 ± 9.8 | 66.7 ± 23.5 | 28.4 ± 14.4 | 61 min, killed |
+| *stock, counting an unscoreable run as 0* | 6 / 6 | 6.0 ± 10.3 | 22.2 ± 36.0 | 9.4 ± 16.0 | |
+
+The stock arm's two rows are both reported because neither is obviously the right one and
+the choice moves its F1 from 28.4 to 9.4. Which is comparable to a published table depends
+on how that table handled a run that produced nothing, and FIRE-Bench's paper does not say.
+
+**How much of this is the judge.** These six logs were scored twice, with nothing changing
+but the judge's sampling. The arm means moved by 4 to 5 F1 points — pipeline 30.2 → 25.7,
+direct 55.9 → 60.6, stock 22.9 → 28.4 — and one *task* moved by 13.7 (`cot_in_planning`,
+pipeline arm, 100.0 → 76.9). The ordering of the arms did not move. Treat the ordering as
+the result and the individual numbers as one draw of a noisy instrument; on a single
+unchanged log the measured range is 43 F1 points.
+
+**Three things this says, in decreasing order of how much the sample supports them.**
+
+**1. The clock is the benchmark's main filter, and telling the agent about it is what gets
+past it.** Four of six stock Claude Code runs produced *nothing scoreable*: given the raw
+`instruction.txt`, which asks for a full report and says nothing about a deadline, they were
+still building figures and prose when the harness killed them at 61 minutes. Both AutoR arms
+were scoreable 6 times out of 6. The difference is not the pipeline — the direct arm has none
+— it is a goal contract that states the wall clock, states that the conclusion is the only
+artifact read, and says to write it early and rewrite it, plus a watcher that republishes the
+scored line every time the file on disk improves.
+
+**2. Under this clock, the pipeline loses to one call of the same model on the same
+contract.** Direct wins 5 of 6 tasks, median **+34.8 F1**, and it wins on precision and
+recall alike rather than by trading one for the other. Every pipeline run hit the reserve
+boundary at 52 minutes having approved one to three of its four stages; the direct arm
+finished in a median of 11. This is the same direction as
+[ResearchClawBench](#researchclawbench) and [FrontierScience](#frontierscience-research), and
+it is the third benchmark to say it.
+
+**3. Three of the pipeline's four low scores are honest nulls, not empty runs — and the
+metric cannot tell the difference.** On `premise_order_effects` the pipeline ran 112 problems
+across nine orderings on two models, 694 billed calls per arm, with a corrupted-premise
+control at 0.15 accuracy confirming the task was real, and concluded that premise order did
+*not* move accuracy. That is correct about what it measured: its strong model scored 1.000 in
+every ordering — at ceiling — and it said so. It scored **0.0**, because the reference
+conclusion says premise order matters. The direct arm, on the same task in a fifth of the
+time, ran a pilot, saw the ceiling, generated a harder pool with chains up to sixteen steps,
+found the effect at sign-test p = 0.0001, and scored **80.0 / 80.0 / 80.0**. The lesson is about
+*iteration*, not about honesty: what the pipeline lacked was a second pass at its own
+instance difficulty, and its budget went to preregistration, a reproduction table and a gate
+ledger instead.
+
+**What this is not.** Six of thirty-five tasks, one run per cell, and a judge whose measured
+range on a single unchanged log is 43 F1 points. It is not comparable to FIRE-Bench's
+published table (best row: Claude Code with Sonnet-4 at 46.7 ± 23.4 F1): different executing
+model, and — decisively — **none of the models the tasks name is served on this deployment**,
+so every arm substituted from the same catalogue and every arm is answering a slightly
+different question from the one the papers answered. That substitution is also the likeliest
+reason for finding 2's ceilings: these papers' effects were measured on gpt-3.5 and
+Llama-2-era models.
+
+The adapter, the deadline design, the six exit clauses, the judge's noise and the six holes
+in the benchmark's own harness that had to be routed around are in
+[docs/firebench.md](docs/firebench.md).
+
 ## Documentation
 
 The [docs/](docs/) directory is the reference documentation. This README is the overview; everything
@@ -977,6 +1139,7 @@ below is the detail behind it.
 | [Studio Guide & API](docs/studio.md) | The browser workspace and its complete HTTP API. |
 | [ResearchClawBench](docs/researchclawbench.md) | Running with no human in the loop: unattended execution, the benchmark adapter and its output contract, and Gemini-backed web search. |
 | [ResearchClawBench Landscape](docs/researchclawbench-landscape.md) | How EvoScientist, ARIS Codex and MIRA actually score on the benchmark, which reported numbers reproduce, and the baseline any result must be quoted against. |
+| [FrontierScience-Research](docs/frontierscience.md) | The second benchmark: sixty written science questions graded against a rubric by a judge model. The two profiles, the prompt contract, the judge's measured noise, the paired trial, and the two numbers that are not measured. |
 | [Architecture](docs/architecture.md) | Layers, the module map, the stage walk, prompt assembly by typed channel, recovery, extension points. |
 | [Development](docs/development.md) | Dev setup, tests, CI, conventions, and recipes for adding a stage, venue, or backend. |
 | [Troubleshooting](docs/troubleshooting.md) | Symptom-to-fix for the errors AutoR actually raises. |

@@ -11,6 +11,7 @@ from src.rigor import DEFAULT_LEVEL, LEVELS, describe as describe_rigor
 from src.rigor import help_text as rigor_help_text
 from src.rigor import feature_flags, resolve as resolve_rigor
 from src.effort import EffortPlan
+from src.review_custody import CUSTODY_MODES, DEFAULT_CUSTODY_MODE
 from src.review_panel import (
     DEFAULT_PANEL,
     ReviewPanel,
@@ -162,6 +163,18 @@ def parse_args() -> argparse.Namespace:
              "--approval-mode agent.",
     )
     parser.add_argument(
+        "--review-custody",
+        choices=CUSTODY_MODES,
+        default=DEFAULT_CUSTODY_MODE,
+        help="What to do about a reviewer that writes to the run root while judging it. "
+             "`record` (the default) takes a content census of the run root around every "
+             "reviewer subprocess and writes review_custody.jsonl, one line per episode. "
+             "`demote` additionally turns that episode's approval into a send-back; a "
+             "refusal and an abort are never touched. `off` takes no census. It defaults "
+             "to `record` because the demotion's blast radius is bounded above by an "
+             "archive replay (tools/review_custody_replay.py) and not measured below it.",
+    )
+    parser.add_argument(
         "--panel-roles",
         nargs="+",
         metavar="ROLE",
@@ -274,6 +287,16 @@ def parse_args() -> argparse.Namespace:
              "stage and writes a report standing on nothing. Each retry re-runs the stage "
              "with the previous attempt's validation errors attached. "
              "Omit it for no limit; pass an integer to cap.",
+    )
+    parser.add_argument(
+        "--max-operator-calls-per-stage",
+        type=int,
+        default=6,
+        help="Operator calls one stage may cost across every visit -- first attempt, "
+             "reviewer-directed retries, polish rounds and repairs alike -- before the run "
+             "settles for what it has. Unlike --max-attempts this does not reset when the "
+             "stage is re-entered, and exhausting it promotes the stage rather than skipping "
+             "it. Defaults to 6.",
     )
     parser.add_argument(
         "--review-operator",
@@ -634,6 +657,7 @@ def create_reviewer(
     use_panel: bool = False,
     persona_text: str = "",
     deliberation_rounds: int = 2,
+    custody_mode: str = DEFAULT_CUSTODY_MODE,
 ):
     """Build the approval gate: one reviewer, or a panel that deliberates first.
 
@@ -650,6 +674,7 @@ def create_reviewer(
             persona_text=persona_text,
             deliberation_rounds=deliberation_rounds,
             unattended=unattended,
+            custody_mode=custody_mode,
         )
     return AutomatedReviewer(
         backend_name,
@@ -658,6 +683,7 @@ def create_reviewer(
         ui=ui,
         stage_timeout=stage_timeout,
         unattended=unattended,
+        custody_mode=custody_mode,
     )
 
 
@@ -1096,6 +1122,7 @@ def main() -> int:
                 panel_models=args.panel_models,
                 persona_text=persona_text,
                 deliberation_rounds=args.panel_rounds,
+                custody_mode=args.review_custody,
             )
         manager = ResearchManager(
             project_root=repo_root,
@@ -1110,6 +1137,7 @@ def main() -> int:
             max_auto_skips=args.max_auto_skips,
             max_rounds=args.max_rounds,
             max_stage_attempts=args.max_attempts,
+            max_operator_calls_per_stage=args.max_operator_calls_per_stage,
             web_search_context=web_search_context,
             stage_graph=graph,
             routing_mode=walk["routing_mode"],
@@ -1120,6 +1148,7 @@ def main() -> int:
             archive=archive if walk["archive_steer"] else None,
             web_search_mode=web_search_mode,
             cross_reviewer=create_cross_reviewer(args, ui=ui),
+            custody_mode=args.review_custody,
         )
         manager.ideation_panel = create_ideation_panel(
             args, backend_name=review_operator, model=review_model, ui=ui
@@ -1186,6 +1215,7 @@ def main() -> int:
             panel_models=args.panel_models,
             persona_text=persona_text,
             deliberation_rounds=args.panel_rounds,
+            custody_mode=args.review_custody,
         )
     manager = ResearchManager(
         project_root=repo_root,
@@ -1200,6 +1230,7 @@ def main() -> int:
         max_auto_skips=args.max_auto_skips,
         max_rounds=args.max_rounds,
         max_stage_attempts=args.max_attempts,
+        max_operator_calls_per_stage=args.max_operator_calls_per_stage,
         web_search_context=web_search_context,
         stage_graph=graph,
         routing_mode=walk["routing_mode"],
@@ -1210,6 +1241,7 @@ def main() -> int:
         archive=archive if walk["archive_steer"] else None,
         web_search_mode=web_search_mode,
         cross_reviewer=create_cross_reviewer(args, ui=ui),
+        custody_mode=args.review_custody,
     )
 
     manager.ideation_panel = create_ideation_panel(

@@ -66,6 +66,7 @@ from src.rigor import resolve as resolve_rigor  # noqa: E402
 from src.utils import (  # noqa: E402
     BENCHMARK_MIN_REPORT_FIGURES,
     DEFAULT_OUTPUT_FORMAT,
+    MAX_STAGE_ATTEMPTS,
     DEFAULT_VENUE,
     OUTPUT_FORMAT_CLI_CHOICES,
     WEB_SEARCH_MODE_CHOICES,
@@ -86,9 +87,16 @@ from src.web_search import (  # noqa: E402
 #: puts a timeout on the agent subprocess — so a stage is only ever cut short by this value.
 #: Clipping it buys nothing back except a thinner report.
 DEFAULT_STAGE_TIMEOUT = 14400
-#: More retries than the interactive default: every retry re-runs the stage with its
-#: validation errors attached, and an exhausted stage is auto-skipped, which costs real score.
-DEFAULT_MAX_ATTEMPTS = 8
+#: No limit, matching ``main.py``. The comment this replaces argued that eight is "more
+#: retries than the interactive default" — and it was, until the interactive default became
+#: *none*. The benchmark path kept the old ceiling, so the change that removed the budget
+#: landed on the entry point nobody benchmarks and missed the one that produces every score.
+#:
+#: What that cost is measured. Of the six tasks where AutoR lost most heavily to bare Claude
+#: Code, **all six auto-skipped two or three stages** after "bounded retries were exhausted",
+#: and Stage 03 was skipped in five of the six. An exhausted stage is not a slow stage; it is
+#: a stage that never happened, and the report is then written standing on nothing.
+DEFAULT_MAX_ATTEMPTS = MAX_STAGE_ATTEMPTS
 #: The benchmark scores report/report.md, which Stage 07 writes. Everything after it is
 #: wall-clock spent on artifacts the judge never opens.
 DEFAULT_FINAL_STAGE = "07_writing"
@@ -295,8 +303,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=DEFAULT_MAX_ATTEMPTS,
         help="Attempts allowed per stage before it is auto-skipped. Each retry re-runs the "
-             f"stage with the previous attempt's validation errors attached. Defaults to "
-             f"{DEFAULT_MAX_ATTEMPTS}.",
+             "stage with the previous attempt's validation errors attached. **Omitted, the "
+             "default, means no limit**, the same as main.py: exhausting the budget does not "
+             "stop the run, it skips the stage and writes a report standing on nothing.",
+    )
+    parser.add_argument(
+        "--max-operator-calls-per-stage",
+        type=int,
+        default=6,
+        help="Operator calls one stage may cost across every visit -- first attempt, "
+             "reviewer-directed retries, polish rounds and repairs alike -- before the run "
+             "settles for what it has. Unlike --max-attempts this does not reset when the "
+             "stage is re-entered, and exhausting it promotes the stage rather than skipping "
+             "it. Defaults to 6.",
     )
     parser.add_argument(
         "--max-auto-skips",
@@ -584,6 +603,7 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
         unattended=True,
         max_auto_skips=args.max_auto_skips,
         max_stage_attempts=args.max_attempts,
+        max_operator_calls_per_stage=args.max_operator_calls_per_stage,
         web_search_context=web_search_context,
         web_search_mode=args.web_search,
         # Stages are told to keep code/, outputs/ and report/images/ up to date in the
@@ -677,6 +697,7 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
     manager.skill_task_id = _task_id or None
 
     pipeline_completed = False
+    aborted_with = ""
     try:
         pipeline_completed = manager.run(
             goal,
@@ -686,7 +707,11 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
             resources=collect_reference_resources(workspace) or None,
             final_stage=resolve_stage(args.final_stage),
         )
-    except Exception:  # noqa: BLE001 - a crashed pipeline must still export what it produced
+    except Exception as exc:  # noqa: BLE001 - a crashed pipeline must still export what it produced
+        # Exporting the salvage is right. Reporting the salvage as a finished run is not,
+        # and that is what happened until this line existed: the exception was recorded in
+        # `_agent_output.jsonl` and nowhere a downstream reader looks.
+        aborted_with = f"{type(exc).__name__}: {exc}"[:500]
         emit_event({"type": "error", "where": "pipeline", "traceback": traceback.format_exc()})
 
     paths = build_run_paths_for_workspace(workspace)
@@ -710,23 +735,33 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
         auto_skipped_stages=manager.auto_skipped_stages,
         synthesize=synthesizer,
     )
-    write_run_meta(
-        workspace,
-        task_id=infer_task_id(workspace),
-        run_id=paths.run_root.name,
-        # The harness scores the report, so a report is what "completed" means here.
-        status="completed" if export.report_path.exists() else "failed",
-        duration_seconds=round(time.monotonic() - started_at),
-        model=model,
-        extra={"report_source": export.report_source, "pipeline_completed": pipeline_completed},
-    )
-    return BenchmarkResult(
+    result = BenchmarkResult(
         workspace=workspace,
         run_root=paths.run_root,
         pipeline_completed=pipeline_completed,
         export=export,
         auto_skipped_stages=list(manager.auto_skipped_stages),
+        aborted_with=aborted_with,
     )
+    # Written once, after the result exists, because the result is the only thing that
+    # knows whether the walk finished -- and `status` is the field every downstream
+    # reader gates on. `run_arm.py` skips a task whose meta says `completed`, and
+    # `score_arm.py` scores one; both were being handed `completed` for a run that had
+    # stopped at Stage 03 of 7.
+    write_run_meta(
+        workspace,
+        task_id=infer_task_id(workspace),
+        run_id=paths.run_root.name,
+        status=result.status,
+        duration_seconds=round(time.monotonic() - started_at),
+        model=model,
+        extra={
+            "report_source": export.report_source,
+            "pipeline_completed": pipeline_completed,
+            "aborted_with": aborted_with,
+        },
+    )
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -741,7 +776,7 @@ def main(argv: list[str] | None = None) -> int:
     emit_event(
         {
             "type": "result",
-            "status": "completed" if result.exit_code == 0 else "failed",
+            "status": result.status,
             "pipeline_completed": result.pipeline_completed,
             "auto_skipped_stages": result.auto_skipped_stages,
             "run_root": str(result.run_root),

@@ -1,6 +1,7 @@
 ---
 name: cover-what-the-task-named
 description: Use at study design and again before writing, to check that every deliverable the task statement names has been produced. Covers how to enumerate what was asked for, why partial coverage scores worse than it feels, and what to do when a named deliverable is out of reach.
+stages: 03_study_design, 07_writing
 ---
 
 # The task named its outputs. Produce all of them.

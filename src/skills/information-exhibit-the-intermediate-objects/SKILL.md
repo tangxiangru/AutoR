@@ -1,6 +1,7 @@
 ---
 name: information-exhibit-the-intermediate-objects
 description: Use at analysis and writing when a multi-stage pipeline is about to be reported by its end-to-end metric alone. Covers exhibiting each stage's intermediate object, and re-running the source's own demonstrations on the source's own inputs rather than on yours.
+stages: 05_experimentation, 06_analysis, 07_writing
 ---
 
 # Show every stage's intermediate object and re-run the demos on the original's own inputs

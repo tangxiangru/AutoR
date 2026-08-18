@@ -5,12 +5,13 @@ import re
 import uuid
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 from .call_cost import CallCost, CostTally, cost_from_stream_meta
 from .deliverables import COVERAGE_FILENAME
 from .operator import ClaudeOperator
 from .obligations import format_for_review_prompt, load_ledger
+from .review_custody import CUSTODY_MODES, DEFAULT_CUSTODY_MODE, CustodyWatch, demote
 from .review_policy import format_policy_for_prompt, load_policy
 from .operator_codex import CodexOperator
 from .stage_comments import parse_comments
@@ -259,6 +260,8 @@ class AutomatedReviewer:
         stage_timeout: int = 14400,
         unattended: bool = False,
         codex_command: str = "codex",
+        disallowed_tools: Sequence[str] = (),
+        custody_mode: str = DEFAULT_CUSTODY_MODE,
     ) -> None:
         # Unattended runs cannot ask a human what the reviewer meant, and aborting a
         # multi-hour run because a verdict was unreadable throws away work the reviewer
@@ -269,15 +272,35 @@ class AutomatedReviewer:
             # `codex_command` for the same reason the execution operator takes one: the
             # binary is where a different backend is selected, and a reviewer left on the
             # default would silently be a different model from the stages it is judging.
+            # `disallowed_tools` is *not* forwarded, because `CodexOperator` has no such
+            # parameter; `self.disallowed_tools` below therefore reads back empty for a
+            # codex reviewer, which is what was applied rather than what was asked for.
             self._operator = CodexOperator(model=model, fake_mode=fake_mode, ui=ui,
                                            stage_timeout=stage_timeout, command=codex_command)
         else:
             normalized_backend = "claude"
-            self._operator = ClaudeOperator(model=model, fake_mode=fake_mode, ui=ui, stage_timeout=stage_timeout)
+            self._operator = ClaudeOperator(
+                model=model,
+                fake_mode=fake_mode,
+                ui=ui,
+                stage_timeout=stage_timeout,
+                disallowed_tools=disallowed_tools,
+            )
+        # Read back off the operator rather than stored from the argument. A reviewer is
+        # a model seat, a protocol that denies a tool has to reach every seat or it is not
+        # the protocol, and the only honest record of a denial is the one the thing that
+        # would make the call is actually carrying. Empty by default, which is every
+        # existing caller: withholding a tool a stage contract assumes is available fails
+        # the stage rather than the tool.
+        self.disallowed_tools = tuple(getattr(self._operator, "disallowed_tools", ()))
         self.backend_name = normalized_backend
         self.model = model
         self.fake_mode = fake_mode
         self.ui = ui or TerminalUI()
+        #: Whether this reviewer's episodes are censused, and whether a breach demotes.
+        #: See :mod:`src.review_custody`; ``record`` by default, because the demotion's
+        #: blast radius is bounded above by an archive replay and not below it.
+        self.custody_mode = custody_mode if custody_mode in CUSTODY_MODES else DEFAULT_CUSTODY_MODE
 
     def review_stage(
         self,
@@ -299,6 +322,7 @@ class AutomatedReviewer:
         obtained. Attaching it once, to whatever comes back, cannot miss a branch.
         """
         spend = CostTally()
+        watch = CustodyWatch(paths, mode=self.custody_mode)
         decision = self._review_stage(
             paths=paths,
             stage=stage,
@@ -306,8 +330,16 @@ class AutomatedReviewer:
             stage_markdown=stage_markdown,
             suggestions=suggestions,
             spend=spend,
+            watch=watch,
         )
-        return replace(decision, call_cost=spend.total)
+        decision = replace(decision, call_cost=spend.total)
+        # The rollup rather than the last call's breach: one review is two subprocesses
+        # here and up to twelve on the panel path, and a call that wrote changed the tree
+        # the later ones read. Which call it was stays legible -- every subprocess wrote
+        # its own line to `review_custody.jsonl`.
+        if watch.arms_a_demotion:
+            return demote(decision, watch.rollup())
+        return decision
 
     def _review_stage(
         self,
@@ -318,6 +350,7 @@ class AutomatedReviewer:
         stage_markdown: str,
         suggestions: list[str],
         spend: CostTally,
+        watch: "CustodyWatch | None" = None,
     ) -> ReviewDecision:
         if self.fake_mode:
             return ReviewDecision(
@@ -341,6 +374,7 @@ class AutomatedReviewer:
             prompt=prompt,
             label="review",
             spend=spend,
+            watch=watch,
         )
 
         if exit_code != 0:
@@ -396,6 +430,7 @@ class AutomatedReviewer:
         label: str = "review_verdict",
         on_unreadable: "Callable[[str], ReviewDecision] | None" = None,
         spend: CostTally | None = None,
+        watch: "CustodyWatch | None" = None,
     ) -> ReviewDecision:
         """Read a verdict, re-ask once if it cannot be read, then fall back.
 
@@ -424,6 +459,7 @@ class AutomatedReviewer:
             prompt=self._build_verdict_only_prompt(stage=stage, previous=raw_response),
             label=label,
             spend=spend,
+            watch=watch,
         )
         if retry[0] == 0:
             retried = self._parse_decision(retry[1], markdown=markdown)
@@ -513,6 +549,7 @@ class AutomatedReviewer:
         prompt: str,
         label: str,
         spend: "CostTally | None" = None,
+        watch: "CustodyWatch | None" = None,
     ) -> tuple[int, str, str]:
         """Run one reviewer-style prompt through this backend and return its raw output.
 
@@ -554,6 +591,8 @@ class AutomatedReviewer:
                 }
             },
         )
+        if watch is not None:
+            watch.open()
         exit_code, stdout_text, stderr_text, observed_session_id, stream_meta = self._operator._run_streaming_command(  # noqa: SLF001
             command=command,
             cwd=invocation_cwd,
@@ -563,6 +602,8 @@ class AutomatedReviewer:
             mode=label,
             stdin_text=stdin_text,
         )
+        if watch is not None:
+            watch.close(stage_slug=stage.slug, label=label)
 
         record = {
             "backend": self.backend_name,

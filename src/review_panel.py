@@ -65,6 +65,7 @@ from .approval_agent import (
     AutomatedReviewer,
     ReviewDecision,
 )
+from .review_custody import DEFAULT_CUSTODY_MODE, CustodyWatch, demote
 from .obligations import format_for_review_prompt, load_ledger
 from .review_policy import format_policy_for_prompt, load_policy
 from .terminal_ui import TerminalUI
@@ -639,6 +640,7 @@ class ReviewPanel:
         persona_text: str = "",
         deliberation_rounds: int = 2,
         unattended: bool = False,
+        custody_mode: str = DEFAULT_CUSTODY_MODE,
     ) -> None:
         if not roles:
             raise ValueError("A review panel needs at least one role.")
@@ -655,6 +657,7 @@ class ReviewPanel:
         # in unattended mode. The gate was holding reviewers configured for a human
         # who was not there.
         self.unattended = unattended
+        self.custody_mode = custody_mode
         self._members: dict[str, AutomatedReviewer] = {
             role.key: AutomatedReviewer(
                 role.backend or backend_name,
@@ -663,6 +666,7 @@ class ReviewPanel:
                 ui=self.ui,
                 stage_timeout=stage_timeout,
                 unattended=unattended,
+                custody_mode=custody_mode,
             )
             for role in roles
         }
@@ -692,6 +696,12 @@ class ReviewPanel:
             stage_slug=stage.slug, attempt_no=attempt_no, chair_key=self.chair.key
         )
         self._calls = 0
+        # One watch for the whole room, not one per seat. The seats read the same tree,
+        # so a seat that re-ran a producer changed the artifact the other four then
+        # judged, and the unit a verdict can honestly be demoted on is the deliberation.
+        # Each subprocess still writes its own `review_custody.jsonl` line, so which seat
+        # acted stays answerable.
+        watch = CustodyWatch(paths, mode=self._members[self.chair.key].custody_mode)
 
         verdicts = self._round(
             paths=paths,
@@ -701,6 +711,7 @@ class ReviewPanel:
             suggestions=suggestions,
             previous=None,
             round_no=1,
+            watch=watch,
         )
         deliberation.rounds.append(verdicts)
 
@@ -717,6 +728,7 @@ class ReviewPanel:
                 suggestions=suggestions,
                 previous=verdicts,
                 round_no=round_no,
+                watch=watch,
             )
             deliberation.rounds.append(verdicts)
 
@@ -727,6 +739,7 @@ class ReviewPanel:
             stage_markdown=stage_markdown,
             suggestions=suggestions,
             deliberation=deliberation,
+            watch=watch,
         )
         deliberation.decision = decision
 
@@ -740,6 +753,11 @@ class ReviewPanel:
         # the chair. A unanimous room never calls the chair at all, so a fix written into
         # `_build_chair_prompt` and the chair's arm would reach the rarer half of the runs.
         decision = self._attach_ledger_positions(deliberation, decision)
+        # Last, and after both of those: the demotion has to be able to clear a
+        # `discharged` list the ledger step just attached, and `_enforce_blocking_objections`
+        # is a refusal already -- `demote` leaves it exactly as it found it.
+        if watch.arms_a_demotion:
+            decision = demote(decision, watch.rollup())
         deliberation.decision = decision
         self._record(paths, deliberation)
         self._render(deliberation)
@@ -757,6 +775,7 @@ class ReviewPanel:
         suggestions: list[str],
         previous: list[PanelVerdict] | None,
         round_no: int,
+        watch: "CustodyWatch | None" = None,
     ) -> list[PanelVerdict]:
         verdicts: list[PanelVerdict] = []
         for role in self.roles:
@@ -781,6 +800,7 @@ class ReviewPanel:
                 attempt_no=attempt_no,
                 prompt=prompt,
                 label=f"panel_{role.key}_r{round_no}",
+                watch=watch,
             )
             self._calls += 1
             verdicts.append(
@@ -923,6 +943,7 @@ class ReviewPanel:
         stage_markdown: str,
         suggestions: list[str],
         deliberation: PanelDeliberation,
+        watch: "CustodyWatch | None" = None,
     ) -> ReviewDecision:
         verdicts = deliberation.final_round
         if self._is_unanimous(verdicts) and verdicts and verdicts[0].approves:
@@ -950,6 +971,7 @@ class ReviewPanel:
                 deliberation=deliberation,
             ),
             label="panel_chair",
+            watch=watch,
         )
         if exit_code != 0:
             return self._decision_from_dissent(
@@ -965,6 +987,7 @@ class ReviewPanel:
         # one bad answer cannot veto.
         decision = chair.parse_with_retry(
             paths=paths,
+            watch=watch,
             stage=stage,
             attempt_no=attempt_no,
             raw_response=stdout_text,

@@ -317,9 +317,17 @@ def _self_description(bench: Path, workspace: Path, result: dict, scorer) -> Non
     """Three keys that make the output stand on its own.
 
     ``images_shown`` because 60.6% of the benchmark's weight is image criteria and
-    every one of them is shown the *same* first five of one list that sweeps
-    ``outputs/`` before ``report/`` — and ``IMAGE_EXTENSIONS`` is a ``set``, so which
-    five those are changes between interpreters. Nothing anywhere recorded them.
+    every one of them is shown the same prefix of one list that sweeps ``outputs/``
+    before ``report/`` — and ``IMAGE_EXTENSIONS`` is a ``set``, so which images those
+    are changes between interpreters. Nothing anywhere recorded them.
+
+    **The five here is this file's own record, not the grader's window.** The benchmark
+    sends ``generated_images[:15]`` (``RCB/evaluation/score.py``), so a run with ten
+    figures has all ten looked at. Two skills written off this field had already
+    concluded that "the grader was shown five from each" and that drawing twice as many
+    bought no extra look; both were wrong, and the truth strengthens the point they were
+    making — the figures arrived and still did not answer the criterion. Recording a
+    prefix is fine; describing it as the window is what caused that.
     ``checklist_items_expected`` because an item count is only a fact next to what it
     was supposed to be. ``bench_revision`` because item identity is a property of the
     benchmark checkout and the output records only ``task_id``.

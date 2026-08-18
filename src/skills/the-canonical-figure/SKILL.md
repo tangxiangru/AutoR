@@ -1,6 +1,7 @@
 ---
 name: the-canonical-figure
 description: Use when planning figures, at study design and again before writing. Covers the figures a paper in this field is expected to contain, why an original figure does not substitute for a standard one, and how to decide what to draw first.
+stages: 03_study_design, 04_implementation, 06_analysis
 ---
 
 # Draw the field's standard figure before your own

@@ -1,6 +1,7 @@
 ---
 name: life-full-study-skeleton-including-the-wet-lab-half
 description: Use at study design and again when laying out the results section, to check every slot of a life-science study is filled. Covers the skeleton a paper of this kind carries, and what to put in the slots this run cannot compute rather than leaving them out.
+stages: 03_study_design, 06_analysis, 07_writing
 ---
 
 # Fill every slot of the life-science results skeleton, including the parts you cannot compute

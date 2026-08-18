@@ -17,6 +17,7 @@ from .bootstrap import (
 from .approval_agent import AutomatedReviewer, ReviewDecision
 from .cross_reviewer import GeminiCrossReviewer
 from .obligations import (
+    OPEN as OBLIGATION_OPEN,
     discharge_obligations,
     format_for_stage_prompt,
     ledger_summary,
@@ -75,8 +76,10 @@ from .experiment_manifest import write_experiment_manifest
 from .hypothesis_manifest import write_hypothesis_manifest
 from .information_flow import CHANNELS, ChannelContext, render_inbound
 from .prompt_fragments import compose_stage_template
+from .review_custody import CUSTODY_MODES, DEFAULT_CUSTODY_MODE
 from .validity_review import (
     RESTORE_WITNESS_HEADING,
+    TAMPERED as VALIDITY_TAMPERED,
     ValidityReviewer,
     ValidityReviewOutcome,
     restore_validity_review,
@@ -173,6 +176,7 @@ from .stage_cost import (
     OUTCOME_ROUTED_TO_DELIVERABLE,
     VALIDATORS_REFUSED,
     StageCostMeter,
+    operator_calls_spent,
     append_stage_cost_row,
     bypassed_row,
     classify_refusal,
@@ -225,6 +229,7 @@ from .utils import (
     FIXED_STAGE_OPTIONS,
     INTAKE_STAGE,
     MAX_AUTOMATED_SENDBACKS,
+    MAX_OPERATOR_CALLS_PER_STAGE,
     MAX_STAGE_ATTEMPTS,
     REVISION_CHOICES,
     STUCK_AFTER_IDENTICAL_FAILURES,
@@ -291,6 +296,8 @@ class ResearchManager:
         max_auto_skips: int = 3,
         max_rounds: int = 1,
         max_stage_attempts: int | None = MAX_STAGE_ATTEMPTS,
+        max_operator_calls_per_stage: int | None = MAX_OPERATOR_CALLS_PER_STAGE,
+        max_automated_sendbacks: int = MAX_AUTOMATED_SENDBACKS,
         web_search_context: str | None = None,
         min_report_figures: int | None = None,
         web_search_mode: str | None = None,
@@ -303,7 +310,13 @@ class ResearchManager:
         archive_steer: bool = False,
         archive: "Any | None" = None,
         cross_reviewer: GeminiCrossReviewer | None = None,
+        custody_mode: str = DEFAULT_CUSTODY_MODE,
     ) -> None:
+        #: Whether a reviewer episode is censused, and whether a breach demotes its
+        #: verdict. Held here as well as on the reviewer because the adversarial validity
+        #: pass is built per stage from ``self.operator`` and has no reviewer to read it
+        #: off. See :mod:`src.review_custody`.
+        self.custody_mode = custody_mode if custody_mode in CUSTODY_MODES else DEFAULT_CUSTODY_MODE
         self.project_root = project_root
         self.runs_dir = runs_dir
         self.operator = operator
@@ -387,6 +400,11 @@ class ResearchManager:
         # previous attempt's validation errors attached. The ceiling exists to bound a runaway
         # loop, not to save money, so callers with time to spend should raise it.
         self.max_stage_attempts = max_stage_attempts
+        self.max_operator_calls_per_stage = max_operator_calls_per_stage
+        # Injectable for the same reason the ceiling is: two bounds that cannot be
+        # varied independently cannot be tested independently, and a test that sets
+        # them to the same number passes with either one deleted.
+        self.max_automated_sendbacks = max_automated_sendbacks
         self.auto_skipped_stages: list[str] = []
         #: Which stages the adversarial pass never actually judged, and how it ended:
         #: stage slug -> `crashed` or `unreadable`. Kept on the harness rather than read
@@ -923,10 +941,27 @@ class ResearchManager:
             )
             return True
 
+        # Derived, not asserted. "All stages approved." was written on every walk that
+        # reached the terminal, and `settled` is `approved or skipped` -- so a run whose
+        # writing stage exhausted its attempts and was auto-skipped closed by saying every
+        # stage had been approved. Roughly two in five archived runs contain an auto-skip,
+        # so this was not a rare wrong sentence.
+        #
+        # The gaps come from records the harness already keeps and the agent cannot write:
+        # the manifest's own `skipped` flag, and the obligation ledger, which until now had
+        # no reader that could act on it at all -- `note_deferrals` incremented a counter
+        # with no ceiling and nothing downstream ever asked what was still open.
+        #
+        # `run_status` deliberately stays `completed`. The walk did complete; what was
+        # false was the sentence. A fourth status value would have to be taught to six
+        # places in `src/frontend/static/app.js` that test `=== "completed"` for
+        # settledness, plus `humanStatus` and its CSS class, none of which this suite
+        # covers -- a wide untested change for a defect that is entirely in the prose.
+        closing = self._completion_sentence(paths)
         append_log_entry(
             paths.logs,
             "run_complete",
-            "All stages approved." + (f"\nRoute: {route}" if route else ""),
+            closing + (f"\nRoute: {route}" if route else ""),
         )
         update_manifest_run_status(
             paths,
@@ -938,12 +973,43 @@ class ResearchManager:
         if route and self.stage_graph.name != "linear":
             self.ui.show_status(f"Route taken: {route}", level="info")
         self._report_optional_machinery(paths)
-        # The disclosure rides on this line rather than beside it, because "All stages
-        # approved" is the sentence it qualifies.
+        # The disclosure rides on this line rather than beside it, because the completion
+        # sentence is what it qualifies.
         self._print(
-            "All stages approved. Run complete." + (f"\n{disclosure}" if disclosure else "")
+            f"{closing} Run complete." + (f"\n{disclosure}" if disclosure else "")
         )
         return True
+
+    def _completion_sentence(self, paths: RunPaths) -> str:
+        """What the run may honestly say about itself at the terminal.
+
+        Two records, both harness-written, both already on disk, neither previously read
+        at the close: which stages were promoted without being accepted, and which debts a
+        reviewer attached and nobody discharged. A run with neither says exactly what it
+        said before, so a clean run's closing line is unchanged and the tests that pin it
+        keep passing -- which is the point. The sentence only moves when it would have
+        been false.
+        """
+
+        skipped = [entry.slug for entry in ensure_run_manifest(paths).stages if entry.skipped]
+        open_debts = [
+            obligation.obligation_id
+            for obligation in load_ledger(paths).obligations
+            if obligation.status == OBLIGATION_OPEN
+        ]
+        if not skipped and not open_debts:
+            return "All stages approved."
+
+        parts = []
+        if skipped:
+            parts.append(
+                f"{len(skipped)} stage(s) promoted without being accepted: " + ", ".join(skipped)
+            )
+        if open_debts:
+            parts.append(
+                f"{len(open_debts)} obligation(s) still open: " + ", ".join(sorted(open_debts))
+            )
+        return "The walk reached the end with gaps. " + "; ".join(parts) + "."
 
     def _record_block_census(self, paths: RunPaths, state: "GraphState | None") -> None:
         """Write down which edges this walk was offered and what shut the rest.
@@ -3004,7 +3070,23 @@ class ResearchManager:
                 )
                 # Measuring happened above regardless; the *rounds* are what a
                 # routine tier withholds.
-                if self._evolution_polishes(stage) and self.evolution.should_continue(paths, stage):
+                out_of_calls = self._stage_is_out_of_operator_calls(paths, stage)
+                if out_of_calls is not None and self._evolution_polishes(stage):
+                    # A pure stop, with nothing to promote: declining the round drops
+                    # through to the review below, which settles the stage the ordinary
+                    # way. Logged because a budget that binds silently reads, in the
+                    # ledger, exactly like a stage that had nothing left to improve.
+                    append_log_entry(
+                        paths.logs,
+                        f"{stage.slug} attempt {attempt_no} polish_out_of_budget",
+                        f"{out_of_calls}. The improvement round it would have bought was "
+                        f"not started.",
+                    )
+                if (
+                    out_of_calls is None
+                    and self._evolution_polishes(stage)
+                    and self.evolution.should_continue(paths, stage)
+                ):
                     directive = self.evolution.next_directive(paths, stage)
                     if directive:
                         self.evolution.begin_round(paths, stage)
@@ -3543,6 +3625,34 @@ class ResearchManager:
         self._pending_comments = list(decision.comments or [])
         return decision.choice, decision.feedback or None
 
+    def _operator_calls_spent(self, paths: RunPaths, stage: StageSpec) -> int:
+        """What this stage has cost in operator calls, closed visits plus the open one.
+
+        The ledger holds the visits that ended; the meter holds the one in progress, and
+        it is the meter that has just been incremented by the call being paid for. Reading
+        only the ledger would let a single visit run forever, and reading only the meter
+        would reset the budget on every re-entry -- which is the defect
+        :data:`MAX_OPERATOR_CALLS_PER_STAGE` exists to close.
+        """
+        spent = operator_calls_spent(paths, stage.slug)
+        meter = self._stage_cost
+        if meter is not None and meter.stage.slug == stage.slug:
+            spent += meter.operator_invocations
+        return spent
+
+    def _stage_is_out_of_operator_calls(self, paths: RunPaths, stage: StageSpec) -> str | None:
+        """Why this stage may not buy another round, or None while it still can."""
+        ceiling = self.max_operator_calls_per_stage
+        if ceiling is None:
+            return None
+        spent = self._operator_calls_spent(paths, stage)
+        if spent < ceiling:
+            return None
+        return (
+            f"this stage has cost {spent} operator call(s) across every visit, which is "
+            f"its ceiling of {ceiling}"
+        )
+
     def _sendback_is_out_of_budget(
         self, *, paths: RunPaths, stage: StageSpec, choice: str
     ) -> str | None:
@@ -3576,11 +3686,19 @@ class ResearchManager:
         """
         if self.reviewer is None or choice not in REVISION_CHOICES:
             return None
+        # The trunk before the tributaries. This stop is not about who asked or what the
+        # rubric says -- the stage has spent its money, and the only thing another round
+        # can do is spend more of it. Refusing here rather than closer to the call is what
+        # lets the promotion go through the ordinary approval block: validated draft,
+        # obligations settled, cross-review still holding its veto.
+        exhausted = self._stage_is_out_of_operator_calls(paths, stage)
+        if exhausted is not None:
+            return exhausted
         spent = read_sendback_count(paths, stage)
-        if spent >= MAX_AUTOMATED_SENDBACKS:
+        if spent >= self.max_automated_sendbacks:
             return (
                 f"the automated reviewer has already sent this stage back "
-                f"{spent} time(s), which is its budget of {MAX_AUTOMATED_SENDBACKS}"
+                f"{spent} time(s), which is its budget of {self.max_automated_sendbacks}"
             )
         if spent >= 1 and self.evolution is not None and self._evolution_measures(stage):
             champion = self.evolution.state(paths, stage).champion
@@ -4632,9 +4750,13 @@ class ResearchManager:
         self.ui.show_status(
             f"Adversarial validity review of {stage.stage_title}...", level="info"
         )
-        reviewer = ValidityReviewer(self.operator, ui=self.ui)
+        reviewer = ValidityReviewer(self.operator, ui=self.ui, custody_mode=self.custody_mode)
         outcome = self._attempt_validity_review(paths, stage, stage_markdown, reviewer, attempt_no=1)
-        if outcome.degraded:
+        # `and not tampered`: the re-ask exists for "a single 429 or a truncated stream",
+        # and a tamper is neither. A second call would hand a reviewer that already used
+        # one write window a second one, and there is nothing about a tamper that a
+        # retry repairs.
+        if outcome.degraded and outcome.completion != VALIDITY_TAMPERED:
             # Exactly once. A second failure is evidence about the backend, not about
             # this prompt, and a third call would buy the same empty list at the same
             # price. What the re-ask does buy back is the routine case: a single 429 or

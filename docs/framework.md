@@ -602,6 +602,8 @@ An explicit `--flag`/`--no-flag` always beats the level. The validity chain is n
 | [`archive.py`](../src/archive.py) | Cross-run routes and edge payoffs keyed on a comparability basis; variant proposal, exploration and conservative promotion. |
 | [`decisions.py`](../src/decisions.py) | "Was offered this edge and declined" — the control arm the payoffs are computed against. |
 | [`trials.py`](../src/trials.py) | Paired A/B trials over archived runs. |
+| [`fs_trial.py`](../src/fs_trial.py) | The FrontierScience paired trial, where an arm is an answer producer rather than a commit: ten admission clauses that each refuse a *pair*, an environment digest observed off the artifacts, the byte-identical-row fold, and a refusal rate above which no difference is published. |
+| [`trial_driver.py`](../src/trial_driver.py) | The benchmark-agnostic half of both trial drivers: the lock and its three-condition liveness test, the `/proc` census that separates running an agent from mentioning one, atomic state writes, and a process-group kill. |
 | [`inference.py`](../src/inference.py) | Exact permutation tests and attainable-p floors; derives the archive's `min_observations` from the family size rather than asserting it. |
 
 ### Execution — the agent, and everything around it
@@ -620,6 +622,8 @@ An explicit `--flag`/`--no-flag` always beats the level. The validity chain is n
 | --- | --- |
 | [`platform/foundry.py`](../src/platform/foundry.py) | The LaTeX paper package and the Stage 08 release bundle. |
 | [`rcb.py`](../src/rcb.py) · [`rcb_agent.py`](../rcb_agent.py) | The ResearchClawBench adapter: workspace layout, goal construction, report selection, figure publication, export. |
+| [`frontierscience.py`](../src/frontierscience.py) · [`fs_agent.py`](../fs_agent.py) | The FrontierScience-Research adapter: the pinned dataset and its strict rubric grammar, the three-block prompt contract with the fenced question first, the `direct` and `ideate` profiles, the four ranked answer sources, and an exit code computed from the metadata rather than claimed beside it. |
+| [`fs_scoring.py`](../src/fs_scoring.py) | The paper's judge prompt verbatim, the verdict grammar, and the rules that decide whether a draw is a measurement at all. A failed draw is refused, never recorded as a zero. |
 | [`studio_service.py`](../src/studio_service.py) · [`backend/`](../src/backend) · [`frontend/`](../src/frontend) | The local browser workspace over the same run directories. |
 | [`terminal_ui.py`](../src/terminal_ui.py) | The terminal-first interaction layer. |
 
@@ -1069,9 +1073,13 @@ them — the ratchet polishes every stage towards 1.000 and 71% of routing decis
 against a stage reporting exactly that, with the rubric's "where the points are" list empty. The
 grounds were on disk and unread: 30% of hypotheses came back `inconclusive` or `not_tested` and 84%
 of runs held at least one, and the prompt's own worked example of a good reason is "H2 is
-inconclusive because only one seed was run". `unfinished_business` now puts the unsettled verdicts
-and the open obligations in front of the router, and a saturated total is labelled as the ceiling it
-is rather than left to read as a verdict on the research. Whether that moves the departure rate is
+inconclusive because only one seed was run". `unfinished_business` now puts the unsettled verdicts,
+the open obligations and **what this node has already charged** in front of the router, and a
+saturated total is labelled as the ceiling it is rather than left to read as a verdict on the
+research. The last of those is the cost ledger's first reader outside its own tests: the router was
+shown `Visits to <node>: N of M` and the backward moves already taken, and neither says what those
+visits were *spent on* — a node that refused eleven attempts against one wall is a different
+proposition from one that refused eleven against eleven different objections. Whether that moves the departure rate is
 unmeasured — it changes what the router is shown, not what it is told to choose, and a prompt that
 instructed it to depart more often would be obeyed on the runs that had nothing to go back for.
 

@@ -846,6 +846,15 @@ class RunSupervisor:
         deliverable_number: int,
         per_stage_ceiling: int | None,
     ) -> Intervention:
+        # The open visit only, deliberately. Concatenating the closed rows' digests here
+        # was tried and is refused: it ends a revisit at its first repeated attempt, and
+        # `test_a_revisit_gets_the_whole_ceiling_and_not_one_attempt` and
+        # `test_a_second_visit_to_an_exhausted_stage_still_buys_attempts` are this
+        # repository's decision that a revisit is entitled to its own attempts even when
+        # it meets the objection that ended the last one. "One attempt is a revisit that
+        # cannot work." What the closed rows are read for instead is
+        # `src.router.unfinished_business`, which puts the repeat in front of the router
+        # as a fact rather than spending the visit on it.
         digests = countable_digests(meter.attempt_digests()) if meter is not None else []
         live_charged = max(meter.attempts - meter.polish_rounds, 0) if meter is not None else 0
         ceiling = self.attempt_ceiling(stage_slug, per_stage_ceiling)

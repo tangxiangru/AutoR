@@ -1,6 +1,7 @@
 ---
 name: paper-writing
 description: Use when drafting, structuring or revising the manuscript or report in Stage 07 (Writing) — shaping the contribution into one story, writing the abstract and introduction, fixing prose that reads generic or templated, ordering sentences for clarity, or deciding what Figure 1 should show.
+stages: 07_writing
 ---
 
 # Paper writing
