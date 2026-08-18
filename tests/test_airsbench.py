@@ -1251,5 +1251,90 @@ class ReportFormattingTest(unittest.TestCase):
         self.assertEqual(values, {"x": 0.5, "y": None})
 
 
+class SkillDisciplineTest(unittest.TestCase):
+    """`None` does not mean "no field skills". It means "do not filter by field".
+
+    An AIRS-Bench task is in none of AutoR's eleven skill disciplines, and the first version
+    of the adapter expressed that by setting `skill_discipline = None`. `select_run_skills`
+    reads a falsy discipline as "skip the field filter", so the run was offered **124**
+    skills where a ResearchClawBench run is offered 16 -- every field skill in the pack,
+    burying the ones written for this benchmark under eighty-nine written for other fields.
+    Caught by a pre-flight run, not by a test, which is why there is now a test.
+    """
+
+    def setUp(self) -> None:
+        from src.run_skills import DISCIPLINE_PREFIXES, discipline_of, select_run_skills
+
+        self.prefixes = DISCIPLINE_PREFIXES
+        self.discipline_of = discipline_of
+        self.select = select_run_skills
+        from src.run_skills import read_skill_pack
+
+        self.pack = read_skill_pack(REPO_ROOT / "src" / "skills")
+
+    def _airs_discipline(self, category: str) -> str:
+        """What `airs_agent.run` computes. Mirrored rather than imported: importing the
+        agent pulls in the whole manager, and the value is one expression."""
+        return category.casefold().replace(" ", "-")
+
+    def test_a_real_airs_category_is_truthy_and_matches_no_discipline(self) -> None:
+        for category in ("Text Extraction and Matching", "Time Series", "Code"):
+            with self.subTest(category=category):
+                value = self._airs_discipline(category)
+                self.assertTrue(value, "a falsy discipline disables the field filter")
+                self.assertNotIn(value, self.prefixes)
+
+    def test_that_discipline_excludes_every_field_skill(self) -> None:
+        offered = self.select(
+            self.pack,
+            discipline=self._airs_discipline("Text Extraction and Matching"),
+            brief="Your predictions will be scored against the label column of the test set.",
+        )
+        leaked = sorted(e.name for e in offered if self.discipline_of(e.name))
+        self.assertEqual(leaked, [], f"field skills reached an AIRS run: {leaked}")
+
+    def test_none_would_not_have(self) -> None:
+        """The bug, pinned. Without this the fix reads as a stylistic preference."""
+        offered = self.select(
+            self.pack,
+            discipline=None,
+            brief="Your predictions will be scored against the label column of the test set.",
+        )
+        self.assertTrue(
+            [e.name for e in offered if self.discipline_of(e.name)],
+            "if this is empty the field filter no longer needs a truthy discipline and "
+            "the comment in airs_agent.py should be retired",
+        )
+
+    def test_the_seven_airs_skills_survive_that_filter(self) -> None:
+        offered = {
+            e.name for e in self.select(
+                self.pack,
+                discipline=self._airs_discipline("Text Extraction and Matching"),
+                brief="Your predictions will be scored against the label column of the test set.",
+            )
+        }
+        for name in (
+            "a-scoreable-file-in-the-first-hour",
+            "the-row-count-comes-from-the-split-not-the-brief",
+            "assume-this-stage-is-the-last-one-you-get",
+            "the-submission-is-the-only-artifact-that-scores",
+            "your-survey-already-named-the-method-that-hits-the-number",
+            "a-model-you-can-audit-is-not-a-model-that-scores",
+            "the-audit-trail-is-not-the-deliverable-here",
+        ):
+            with self.subTest(skill=name):
+                self.assertIn(name, offered)
+
+    def test_a_brief_from_another_benchmark_gets_none_of_them(self) -> None:
+        offered = {
+            e.name for e in self.select(
+                self.pack, discipline="astronomy",
+                brief="Reproduce the exclusion curve for axion-photon coupling from the survey data.",
+            )
+        }
+        self.assertNotIn("the-submission-is-the-only-artifact-that-scores", offered)
+
+
 if __name__ == "__main__":
     unittest.main()
