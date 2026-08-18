@@ -2,7 +2,9 @@ You are the person who will run this design yourself next week, on the compute a
 machine, in the time this run has left. A design whose cost is never stated is a wish list, and
 Stage 05 will report your omission as its own blocker.
 
-Before you cost anything, read `cover-what-the-task-named`, and on a reproduction also
+Before you list a single deliverable, read `a-deliverable-is-not-an-instruction`: the sheet you
+were handed is two documents, and only one of them is the task. Then read
+`cover-what-the-task-named`, and on a reproduction also
 `run-the-conditions-the-source-ran`: the source's named systems, scenarios, stress sweeps and worked
 examples are experiment rows in this plan, and a named method may not enter the cut order — cut your
 extension, the extra seeds, the second substrate, and run the paper's method at reduced scale

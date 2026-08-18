@@ -272,6 +272,53 @@ def ensure_workspace_layout(workspace: Path) -> None:
         (workspace / name).mkdir(parents=True, exist_ok=True)
 
 
+#: The heading ResearchClawBench's own template puts above the research question.
+#: Everything under it is the task; everything outside it is how to operate the harness.
+_TASK_HEADING = re.compile(r"^##\s+Research Task\s*$", re.M)
+_NEXT_HEADING = re.compile(r"^##\s+\S", re.M)
+
+
+def fence_research_task(instructions: str) -> str:
+    """Put the task fence around the research question, not the whole instruction sheet.
+
+    :func:`src.utils.task_statement` reads what is inside the fence, and every
+    deliverable the coverage gate holds a run to comes from there. Fencing the whole
+    ``INSTRUCTIONS.md`` therefore hands the gate the *harness's operating instructions*
+    as research deliverables. Measured over the 40 shipped tasks,
+    ``demanding_sentences`` returns **337 demands on the full sheet and 142 on the
+    research task alone — 58% of what every run was held to was boilerplate** — and the
+    same five phantoms appear in all forty:
+
+        Read & Understand -- Study the related work and data to build domain context.
+        Code & Execute -- Implement the analysis, generate figures, and iterate ...
+        Analyze & Report -- Interpret the results and produce a publication-quality ...
+        Your primary goal is to complete the research task and produce a ... report.md
+        Figures are mandatory -- generate plots and save to report/images/ ...
+
+    3.5 demands per task after narrowing is the right order of magnitude too: the
+    shipped checklists carry three to five criteria each.
+
+    The agent still reads the whole sheet — only the *fence* moves, so the extractors
+    see the question while the prompt keeps the workspace rules. When the heading is
+    absent, which is any goal a human typed, the whole thing is fenced exactly as
+    before: narrowing a goal that is already only a question would delete it.
+    """
+    text = instructions.strip()
+    match = _TASK_HEADING.search(text)
+    if match is None:
+        return f"{TASK_BEGIN_MARKER}\n{text}\n{TASK_END_MARKER}"
+    start = match.end()
+    nxt = _NEXT_HEADING.search(text, start)
+    end = nxt.start() if nxt else len(text)
+    task = text[start:end].strip()
+    if not task:
+        return f"{TASK_BEGIN_MARKER}\n{text}\n{TASK_END_MARKER}"
+    head = text[: match.start()].rstrip()
+    tail = text[end:].lstrip()
+    parts = [head, match.group(0), f"{TASK_BEGIN_MARKER}\n{task}\n{TASK_END_MARKER}", tail]
+    return "\n\n".join(part for part in parts if part).strip()
+
+
 def build_benchmark_goal(
     workspace: Path,
     instructions: str,
@@ -391,7 +438,7 @@ def build_benchmark_goal(
                 "Make the best judgement you can from the data and keep going."
             ),
             "## Research Task",
-            f"{TASK_BEGIN_MARKER}\n{instructions.strip()}\n{TASK_END_MARKER}",
+            fence_research_task(instructions),
             "## Benchmark Workspace Contract",
             (
                 f"The benchmark workspace is `{resolved}`. It is separate from the AutoR run tree "
