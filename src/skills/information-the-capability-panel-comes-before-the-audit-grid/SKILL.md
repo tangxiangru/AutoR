@@ -50,9 +50,11 @@ soften the failure — it is that a failure rate and a capability demonstration 
 two findings, and collapsing them into one figure loses the one that is harder to
 recover.
 
-Then say in prose what the failures *are*. "Eight of nine position failures read
-`found 0 < 1`: one named object is absent, so the relation was never testable" is
-a result. A grid of red stamps is not.
+Then say in prose what the failures *are*, by reading the scorer's own reasons
+rather than its verdicts. "Almost every failure in the spatial category is one
+named object missing entirely, so the relation was never testable and that
+category's rate is measuring detection rather than composition" is a result. A
+grid of red stamps is not.
 
 ## Boundary
 
@@ -61,13 +63,26 @@ kind — the learning curve, the posterior corner, the residual panel. This is
 about figures whose content is the system's own generated artifacts, where the
 choice is between exhibiting and scoring, and where both are owed.
 
+`information-run-the-prompt-printed-inside-the-figure` is about obtaining the
+source's demonstration inputs and running them. This is about the layout the
+resulting artifacts get, and it applies even when the demonstration inputs could
+not be recovered and every sample you have is your own.
+
 ## Why this is here
 
 Measured on a unified understanding-and-generation reproduction. The run's only
-figure of generated images was an eighteen-tile GenEval montage; nine of the
-eighteen carry a red `detector: FAIL` caption, and its header line records
-"60 scored, overall 0.4167". Its image criterion scored **0.0**. A plain agent on
-the same task shipped eight photographic samples across the top of its generation
-figure with no verdict labels, kept its scoring to the panels below, and scored
-**41.0** on the same criterion — neither run having produced the specific image
-the criterion names.
+figure of generated images was an eighteen-tile montage — six categories across,
+three deep, chosen in index order rather than on the verdict, which was the right
+choice — and nine of the eighteen carry a red `detector: FAIL` caption under a
+title line reading "60 scored, overall 0.4167". The published rate it is measured
+against, 0.61, is recorded in the run's own scoring artifact and appears nowhere
+on the figure. Its image criterion scored **0.0**, on all three draws.
+
+A plain agent on the same task put eight of its own samples in a clean row across
+the top of its generation figure with no verdict labels, kept the guidance sweep
+and the scoring in the panels below it, and scored **48, 75 and 0** across the
+three draws of the same criterion, mean **41.0**. Neither run produced the
+specific image the criterion names. The run that lost also published ten figures
+to the plain agent's five, and the grader was shown five from each: what
+separated them was not how much was drawn but whether any of it showed the system
+succeeding.

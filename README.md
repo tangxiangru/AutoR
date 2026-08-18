@@ -657,10 +657,11 @@ the same tasks today and generalise to nothing.
    that are installed for it whatever the two filters say. A pin is not an inference about a kind of
    task — it is a record that this exact identifier already ran, already scored, and lost criteria
    whose subject is those skills, so it is the one routing input that cannot be derived from the
-   task statement and does not generalise past the name it carries. Fifteen ResearchClawBench tasks
-   are pinned today, twenty-four pins between them, at most three per task; four of the twenty-four
-   are skills the two filters would have withheld, in each case a field skill whose content
-   applies outside its own field. **A run that matches an entry writes `skill_pins` into its `run_config.json` and a
+   task statement and does not generalise past the name it carries. Twenty-five ResearchClawBench
+   tasks are pinned today, 246 pins between them, three per task at the fewest and fifteen at the
+   most; 25 of the 246 are skills the two filters would have withheld — twenty field skills whose
+   content applies outside their own field, and five unprefixed ones whose `applies_when` does not
+   fire on that brief. **A run that matches an entry writes `skill_pins` into its `run_config.json` and a
    `skills pinned_by_task_id` line into its log**, because a pinned arm and an unpinned arm are two
    configurations and a score from one is not a score from the other.
 

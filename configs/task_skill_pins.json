@@ -39,7 +39,7 @@
       "pins": 11
     },
     "Information_000": {
-      "pins": 9
+      "pins": 12
     },
     "Information_001": {
       "pins": 7
@@ -218,6 +218,9 @@
   ],
   "Information_000": [
     "extract-the-pdf-text-layer-then-read-every-figure",
+    "information-run-the-prompt-printed-inside-the-figure",
+    "information-the-capability-panel-comes-before-the-audit-grid",
+    "information-paste-the-output-not-the-pass-rate",
     "the-headline-entry-is-the-canonical-outcome",
     "price-the-missing-object-before-you-deepen-an-arm",
     "astronomy-figure-is-the-unit-of-result",
