@@ -66,6 +66,7 @@ from src.rigor import resolve as resolve_rigor  # noqa: E402
 from src.utils import (  # noqa: E402
     BENCHMARK_MIN_REPORT_FIGURES,
     DEFAULT_OUTPUT_FORMAT,
+    MAX_STAGE_ATTEMPTS,
     DEFAULT_VENUE,
     OUTPUT_FORMAT_CLI_CHOICES,
     WEB_SEARCH_MODE_CHOICES,
@@ -86,9 +87,16 @@ from src.web_search import (  # noqa: E402
 #: puts a timeout on the agent subprocess — so a stage is only ever cut short by this value.
 #: Clipping it buys nothing back except a thinner report.
 DEFAULT_STAGE_TIMEOUT = 14400
-#: More retries than the interactive default: every retry re-runs the stage with its
-#: validation errors attached, and an exhausted stage is auto-skipped, which costs real score.
-DEFAULT_MAX_ATTEMPTS = 8
+#: No limit, matching ``main.py``. The comment this replaces argued that eight is "more
+#: retries than the interactive default" — and it was, until the interactive default became
+#: *none*. The benchmark path kept the old ceiling, so the change that removed the budget
+#: landed on the entry point nobody benchmarks and missed the one that produces every score.
+#:
+#: What that cost is measured. Of the six tasks where AutoR lost most heavily to bare Claude
+#: Code, **all six auto-skipped two or three stages** after "bounded retries were exhausted",
+#: and Stage 03 was skipped in five of the six. An exhausted stage is not a slow stage; it is
+#: a stage that never happened, and the report is then written standing on nothing.
+DEFAULT_MAX_ATTEMPTS = MAX_STAGE_ATTEMPTS
 #: The benchmark scores report/report.md, which Stage 07 writes. Everything after it is
 #: wall-clock spent on artifacts the judge never opens.
 DEFAULT_FINAL_STAGE = "07_writing"
@@ -295,8 +303,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=DEFAULT_MAX_ATTEMPTS,
         help="Attempts allowed per stage before it is auto-skipped. Each retry re-runs the "
-             f"stage with the previous attempt's validation errors attached. Defaults to "
-             f"{DEFAULT_MAX_ATTEMPTS}.",
+             "stage with the previous attempt's validation errors attached. **Omitted, the "
+             "default, means no limit**, the same as main.py: exhausting the budget does not "
+             "stop the run, it skips the stage and writes a report standing on nothing.",
     )
     parser.add_argument(
         "--max-operator-calls-per-stage",
