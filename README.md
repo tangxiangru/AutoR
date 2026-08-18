@@ -997,48 +997,39 @@ is the paired control. `tools/score_fs_run.py` grades an answer against the task
 with the paper's verbatim judge prompt. The dataset is pinned by digest rather than committed,
 and is never downloaded automatically.
 
-**The reference point, measured here.** A bare `claude-opus-4-5` answering directly, no tools,
-one draw per task, all sixty tasks, graded by **gpt-5.1** at high reasoning effort:
+**Where AutoR lands, on all sixty tasks.** Both arms `claude-opus-5[1m]`, identical task
+instruction, browsing denied and witnessed, judged by **gpt-5.1** at one draw per task. Accuracy
+is the benchmark's own metric — the share of tasks scoring at least 7 of 10 rubric points — with
+a refused run scored zero, which is the only framing with no survivorship in it:
 
-| | value |
-|:---|---:|
-| mean rubric points | **4.291 / 10** |
-| across-task sd | 2.795 |
-| pass@≥7 | **13 / 60 = 21.7%** (binomial se 5.3 pp) |
-| chemistry / biology / physics means | 5.044 / 4.801 / 3.028 |
+| arm | overall | physics | chemistry | biology |
+|:---|---:|---:|---:|---:|
+| `direct-opus` — one Claude CLI call | **51.7%** | **30.0%** | 60.0% | **65.0%** |
+| **AutoR** `ideate` — the pipeline | **50.0%** | **15.0%** | **80.0%** | 55.0% |
 
-The paper reports Claude Opus 4.5 at 17.5% over the same sixty tasks at thirty trials each,
-under a **GPT-5** judge that returns 404 on the endpoint available here — and reports the same
-chemistry-then-biology-then-physics ordering. Landing inside one standard error of that figure
-and reproducing its ordering is **corroboration of the scoring path, not comparability of the
-instruments**; judge choice is worth more than the difference being discussed, so no number
-here may be placed beside the paper's table.
+The totals are nearly equal and they hide two large effects in opposite directions: **the pipeline
+gains twenty points of chemistry and loses half of physics.** Over the forty-three tasks where both
+arms produced an answer the paired mean difference is **+0.085 ± 0.233** rubric points — seventeen
+wins, seventeen losses, nine ties, median exactly zero — bought with **4.5× the output tokens and
+5.3× the wall clock**, for an answer a quarter shorter.
 
-**What AutoR costs here.** A three-task calibration — both arms, real operator, `opus`
-answering and reviewing — puts the `ideate` arm at 33 to 77 minutes a task, median 72, at 9 to
-20 backend calls and 154k to 335k output tokens. Sixty tasks by two arms is about a day at a
-concurrency of six, which makes a full paired campaign affordable.
+It also **refused outright on fourteen of sixty tasks**, thirteen because Stage 02 never passed its
+own reviewer, against four for the control that were all the front end's answer timeout rather than
+the benchmark. That is above the plan's 20% publication ceiling, so the trial's own report declines
+to print a difference at all — and the refusal rate, not the difference, is the largest thing this
+benchmark currently says about the pipeline.
 
-**No difference is published from it.** The pipeline arm refused on one of three tasks against
-the plan's 20% ceiling — a run that approved no stage and was refused by two clauses rather than
-being handed a synthesized answer. Refusals are not random across arms, so the survivors are
-biased in the direction that flatters the arm that refused, and the report says so instead of
-averaging them.
+**Not comparable to the paper's table.** The paper grades with GPT-5 over thirty draws; that
+deployment returns 404 here. The anchor that makes the water level readable is a different arm: a
+bare `claude-opus-4-5` through the API scores 21.7% under this judge where the paper puts it at
+**17.5%** under its own — agreement inside one standard error, which is what says the jump to 51.7%
+is the model and the substrate rather than a lenient judge.
 
-The two pairs are worth stating as two observations: `fs:010` **2.500 against 9.375**, `fs:043`
-4.000 against 4.000. The pipeline arm did not win a task — it lost one by twenty times the
-judge's sampling noise and drew the other, at 7.4× and 5.6× the wall clock. Two pairs is two
-pairs, but it points the same way as ResearchClawBench, where AutoR also lands below the bare
-CLI it can be configured to run on top of.
-
-The first pass of that calibration lost two of three single-call runs to the Claude CLI's own
-300 s stream idle timeout, firing while the model was still thinking. `CLAUDE_STREAM_IDLE_TIMEOUT_MS`
-is the knob — not the `BYTE_`-prefixed one, which changed nothing — and 1,800,000 is the ceiling
-it clamps to. Raise both before any campaign: the failure exits cleanly, leaves a file behind,
-and fires on thinking time, so what it removes is the hard questions.
-
-The full table, why each arm refused, the ten admission clauses and the judge's measured noise
-are in [docs/frontierscience.md](docs/frontierscience.md).
+The full record — the three framings and why they disagree about the sign, the per-task movements,
+both kinds of refusal, and the three-task calibration this overturns — is in
+[docs/frontierscience-results.md](docs/frontierscience-results.md); the adapter, the prompt
+contract and the ten admission clauses are in
+[docs/frontierscience.md](docs/frontierscience.md).
 
 ### FIRE-Bench
 
@@ -1220,6 +1211,7 @@ below is the detail behind it.
 | [AIRS-Bench Run Log](docs/airsbench-run-log.md) | The experimental record behind those numbers: provenance, the exact commands, every task's value and wall clock, the six things that went wrong while it ran, and the integrity audit. |
 | [AIRS-Bench](docs/airsbench.md) | The fourth benchmark: twenty ML research tasks scored by a deterministic metric over `submission.csv`. The adapter, the arm harness, three defects running it surfaced in the benchmark itself, and what AutoR scores. |
 | [FrontierScience-Research](docs/frontierscience.md) | The second benchmark: sixty written science questions graded against a rubric by a judge model. The two profiles, the prompt contract, the judge's measured noise, the paired trial, and the two numbers that are not measured. |
+| [FrontierScience Results](docs/frontierscience-results.md) | The sixty-task paired trial: the pipeline against one bare model call, accuracy by subject, what it cost, both kinds of refusal, and the calibration it overturns. |
 | [Architecture](docs/architecture.md) | Layers, the module map, the stage walk, prompt assembly by typed channel, recovery, extension points. |
 | [Development](docs/development.md) | Dev setup, tests, CI, conventions, and recipes for adding a stage, venue, or backend. |
 | [Troubleshooting](docs/troubleshooting.md) | Symptom-to-fix for the errors AutoR actually raises. |
