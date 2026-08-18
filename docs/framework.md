@@ -1099,7 +1099,12 @@ nobody chose.
 
 **The experiment this document owes.** Same model, same judge, same 40 tasks, `--stage-graph
 adaptive` against `--stage-graph linear`, paired, with enough seeds to say something. The control arm
-is one flag and has still never been passed. The ordering was repair, re-measure, then ablate; the
+is one flag and has still never been passed — and until now it *could not* be, on the path the
+benchmark runs. `main.py` has offered `--stage-graph` since the topology existed; `rcb_agent.py` never
+did, and built its `ResearchManager` without the argument, so every benchmark run took the default.
+All 398 archived benchmark run configs read `adaptive`, and not one of them chose it. The flag is on
+`rcb_agent.py` now, which makes the sentence above a statement about an experiment nobody has run
+rather than one nobody could. The ordering was repair, re-measure, then ablate; the
 first two are done (§6.8) and the third is not. Until that ablation lands, the correct summary of
 this document is:
 

@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 import rcb_agent
+from src.utils import DEFAULT_STAGE_GRAPH
 from src.rcb import (
     MIN_REPORT_CHARS,
     infer_task_id,
@@ -655,6 +656,59 @@ class ManagerArtifactDirWiringTest(unittest.TestCase):
         self.assertEqual(manager.artifact_dirs["figures"], [ws / "report" / "images"])
         # The read-only benchmark input must never appear.
         self.assertNotIn(ws / "data", manager.artifact_dirs["data"])
+
+
+class TheControlArmHasAFlagNowTest(unittest.TestCase):
+    """`docs/framework.md` §6.7 owes an ablation and calls it "one flag".
+
+    The flag existed on `main.py` and not here, so the benchmark entry point could only
+    ever run the default. All 398 archived benchmark run configs read `adaptive`, and none
+    of them chose it -- which is why "the control arm has still never been passed" was true
+    and could not have been otherwise.
+    """
+
+    def test_the_default_is_still_adaptive(self) -> None:
+        """The control on the change: adding the flag must not move the default arm."""
+        self.assertEqual(rcb_agent.parse_args([]).stage_graph, DEFAULT_STAGE_GRAPH)
+        self.assertEqual(DEFAULT_STAGE_GRAPH, "adaptive")
+
+    def test_linear_is_selectable(self) -> None:
+        self.assertEqual(
+            rcb_agent.parse_args(["--stage-graph", "linear"]).stage_graph, "linear"
+        )
+
+    def test_an_unknown_topology_is_refused_rather_than_defaulted(self) -> None:
+        with self.assertRaises(SystemExit):
+            rcb_agent.parse_args(["--stage-graph", "spiral"])
+
+    def test_the_manager_is_given_the_topology_the_flag_names(self) -> None:
+        """Through the manager, because a flag argparse accepts and nothing reads is the
+        shape `tests/test_cli_flags_are_read.py` exists for."""
+        from src.manager import ResearchManager
+        from src.stage_graph import StageGraph
+
+        for name in ("linear", "adaptive"):
+            with self.subTest(name):
+                manager = ResearchManager(
+                    project_root=Path(__file__).resolve().parent.parent,
+                    runs_dir=Path("/tmp/runs"),
+                    operator=type("Op", (), {"model": "m", "backend_name": "claude"})(),
+                    stage_graph=StageGraph.named(name),
+                )
+                self.assertEqual(manager.stage_graph.name, name)
+
+    def test_the_two_topologies_are_not_the_same_object(self) -> None:
+        """The control on the control: if `named` returned one graph the arm would be a
+        label on an identical run, which is the confound this experiment exists to avoid."""
+        from src.stage_graph import StageGraph
+
+        linear = StageGraph.named("linear")
+        adaptive = StageGraph.named("adaptive")
+        self.assertNotEqual(len(linear.edges), len(adaptive.edges))
+        self.assertEqual(
+            [edge for edge in linear.edges if edge.kind == "revisit"], [],
+            "a linear topology with a backward edge is not a linear topology",
+        )
 
 
 class ExportOnlyMetadataTest(unittest.TestCase):
