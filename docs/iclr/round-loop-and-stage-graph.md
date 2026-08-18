@@ -203,6 +203,24 @@ override is **wrong**, because the overridden stage was read by a reviewer that 
 criterion; calling its artifacts unreviewed conflates it with a stage nobody looked at.
 That is a third state, not the second one.
 
+**Landed.** The override now reaches three readers instead of one log line: the manifest
+entry carries `promoted_over_refusal`, the cost ledger records a `promoted_over_refusal`
+outcome instead of `approved`, and `render_approved_stage_entry` puts a line above the
+memory block so the *next stage's prompt* reads the work as something the gate let through
+rather than something a reviewer accepted.
+
+It is not the corner case the section implied. Measured over 200 archived runs before
+landing: **78 contain at least one override, 1270 events against 2802 recorded `choice: 5`
+lines** — roughly 45% of what the record called an approval. (Both counts are per decision
+and the denominator includes the intake and bootstrap reviewers, so read the share as an
+order of magnitude rather than a rate.)
+
+The wider `promotion_basis` vocabulary the section sketched is still refused, for the
+reason the verification pass gave: the skip paths already record their authority through
+`skip_kind` and the nine-value outcome ledger, and an overridden refusal is a *third*
+state rather than a synonym for "unreviewed" — the reviewer did read it and scored every
+mechanical criterion.
+
 *Class: record fidelity. Effort: small-to-medium.*
 
 ### 4.3 The terminal label is re-derived; ours is asserted
@@ -251,6 +269,24 @@ While there: the obligation ledger is read by no deterministic decider at all. `
 obligation src/stage_graph.py` returns nothing; obligations reach prompts, and `note_deferrals`
 increments a counter with no ceiling and no reader that can refuse. An obligation that can
 be deferred indefinitely with no reader is a debt with no creditor.
+
+**Landed, as the sentence rather than the status.** `_complete_run` now calls
+`_completion_sentence`, which reads two harness-written records the close had never
+consulted — the manifest's own `skipped` flag and the obligation ledger — and says what
+it finds. A run with neither says exactly what it said before, so a clean run's closing
+line is unchanged; the sentence only moves where it would have been false.
+
+That also gives the obligation ledger its first reader that can act on it. `note_deferrals`
+incremented a counter with no ceiling and nothing downstream ever asked what was still
+open; now the run cannot close claiming everything was approved while a debt a reviewer
+attached is outstanding.
+
+**The fourth `run_status` value was considered and refused.** The walk did complete; what
+was false was the prose. A new status would have to be taught to six places in
+`src/frontend/static/app.js` that test `=== "completed"` for settledness, plus
+`humanStatus` and a CSS class — a wide change across a surface this suite does not cover,
+for a defect entirely in a sentence. The RCB adapter is unaffected either way: its
+`status` is derived from whether the report is substantive, not from the manifest.
 
 *Class: a record that overstates. Effort: small.*
 
@@ -376,6 +412,29 @@ What survives is machine-read, not prompt-read:
 figure to `describe_budget_for_prompt`. Do not add a `prior_refusals` doer channel. Note
 also that `Visit.refusal` already exists with a different meaning — why the router's answer
 was not used — so the new field needs a different name.
+
+**Landed as the router's fact, and refused as the supervisor's rule.**
+
+`src.router.unfinished_business` now names what a node has already charged across its
+closed visits and whether that spend went against one wall or many — `prior_digests` in
+`src.stage_cost`, beside the ledger it reads. That is the closed rows' first reader
+outside their own tests.
+
+Feeding those digests to `RunSupervisor`'s repeat rule, which is what this section
+originally proposed, was implemented and then **reverted**: it ends a revisit at its first
+repeated attempt, and two tests already in the tree are this repository's decision the
+other way — `test_a_second_visit_to_an_exhausted_stage_still_buys_attempts` and
+`test_a_revisit_gets_the_whole_ceiling_and_not_one_attempt`, whose docstring says in as
+many words that one attempt is a revisit that cannot work. Both went red on the
+concatenation. `TheRepeatRuleDeliberatelyStopsAtTheVisitBoundaryTests` is the note that
+stops the idea coming back.
+
+Blast radius of the version that was reverted, replayed over
+`tools/supervisor_threshold_replay.py`'s `MEASURED_RUNS` before the two tests spoke: 0 of
+22 visits change verdict, because only two of twenty stages in that population were
+visited more than once and neither repeated a digest. Worth recording as a caution: the
+replay said the change was free, and the suite said it was wrong. A population that
+contains no instance of the case cannot price it.
 
 *Class: a ledger nobody reads. Effort: small.*
 

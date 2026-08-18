@@ -33,7 +33,7 @@ from urllib.parse import urlsplit
 DEFAULT_SEARCH_MODEL = "gemini-2.5-flash"
 
 #: Vertex AI serves a different model catalogue than the Gemini Developer API.
-DEFAULT_VERTEX_SEARCH_MODEL = "gemini-3.6-flash"
+DEFAULT_VERTEX_SEARCH_MODEL = "gemini-3.7-flash"
 DEFAULT_VERTEX_LOCATION = "global"
 
 DEFAULT_MAX_RESULTS = 10

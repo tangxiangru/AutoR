@@ -208,7 +208,12 @@ what rollback rewrites. Written by [`src/manifest.py`](../src/manifest.py).
 }
 ```
 
-**`run_status`** — one of `pending`, `running`, `human_review`, `completed`,
+**`run_status`** — unchanged when a walk reaches the terminal with gaps: the walk did
+complete, and what a skipped stage or an open obligation changes is the `run_complete`
+log entry and the closing line, which `ResearchManager._completion_sentence` derives from
+the manifest's `skipped` flags and the obligation ledger rather than asserting. A clean
+run still reads *"All stages approved."*; a run that auto-skipped its writing stage now
+names it instead. One of `pending`, `running`, `human_review`, `completed`,
 `failed`, `cancelled`, `halted`, `abandoned`.
 
 The last two are the ones worth knowing about, because both are stops that are
@@ -231,6 +236,7 @@ asked for, and it completes.
 | --- | --- |
 | `approved` | You (or the reviewer agent) accepted this stage's work. |
 | `skipped` | The stage was promoted without its work being done. `skip_kind` is `human` (you ran `/skip`, or chose to skip after retries ran out) or `auto` (an unattended run exhausted the retry budget with nobody in the loop). `skip_reason` says which. A skipped stage is **never** `approved`. |
+| `promoted_over_refusal` | Why the stage was promoted when a reviewer had just asked for a change, or empty for an ordinary approval. When the send-back budget is spent, `_collect_review_decision` rewrites a live refusal to choice `5`; `approved` alone could not tell that apart from a reviewer accepting the work, and over 200 archived runs 78 contain at least one — 1270 events against 2802 recorded approvals. The same fact reaches the cost ledger as the `promoted_over_refusal` outcome and the next stage's prompt as a line above the memory entry. |
 | `settled` | Derived: `approved or skipped`. This is the resume cursor — the run moves past a settled stage. Read this, not `approved`, when you want "is AutoR done with this stage". Read `approved` when you want "was this work actually accepted". |
 | `dirty` | The stage has an unpromoted draft. |
 | `stale` | An earlier stage was rolled back, so this stage's conclusions may no longer hold. `invalidated_reason` and `invalidated_by_stage` say why. |
@@ -684,7 +690,7 @@ out, including the way out where the visit raised.
 | `attempts` | Iterations of the attempt loop. **Not the `--max-attempts` spend** — a polish round is an iteration the ceiling does not charge for, so the spend is `attempts - polish_rounds`. |
 | `polish_rounds` | Improvement rounds, each of them one of `attempts`. |
 | `operator_invocations` · `review_invocations` | Backend launches the manager itself dispatched, to do the work and to judge it. A reviewer's internal verdict re-ask and a panel's fan-out to its seats happen below that boundary and are deliberately not counted. |
-| `outcome` | One of `OUTCOMES`: `approved`, `auto_skipped`, `human_skipped`, `routed_to_deliverable`, `rolled_back`, `aborted`, `bypassed`, `raised`, `unknown`. `unknown` is kept rather than defaulted to `approved`, so a new exit path shows up as an unnamed one instead of as a success. |
+| `outcome` | One of `OUTCOMES`: `approved`, `promoted_over_refusal`, `human_skipped`, `routed_to_deliverable`, `rolled_back`, `aborted`, `bypassed`, `raised`, `unknown`. `unknown` is kept rather than defaulted to `approved`, so a new exit path shows up as an unnamed one instead of as a success. `promoted_over_refusal` is a stage the send-back budget promoted over a reviewer that had just asked for a change — it used to be recorded as `approved`, and over 200 archived runs 78 contain at least one, 1270 events against 2802 recorded approvals. |
 | `auto_skipped` | Whether this visit spent a slot from the run's `--max-auto-skips` pool. Set by the skip and never cleared by the route that refines it into `routed_to_deliverable`, because the slot was still spent. |
 | `attempts_with_a_recorded_cause` | How many of `attempts` produced a census entry. A visit that settled reads one below `attempts` — the iteration that settled it did not fail; a wider gap is a path that consumed budget and recorded nothing. |
 | `failure_census` | Counts per kind, in `FAILURE_KINDS` order. |

@@ -135,7 +135,12 @@ REPO = Path(__file__).resolve().parent.parent
 #: ``fs_agent.py`` is the decision :data:`_FS_SCORER_ONLY` said would have to be made when
 #: the FrontierScience front end landed: it is a product entry point, a way this repository
 #: is actually started, and not an instrument reading the library from outside.
-ENTRY_POINTS = ("main.py", "studio.py", "rcb_agent.py", "fs_agent.py", "airs_agent.py")
+#: ``fire_agent.py`` is here on the same argument one benchmark later: it is the only
+#: thing that reaches ``src/firebench.py``, and leaving it out would make every symbol in
+#: that module read as dead while the front end that calls them ships beside it.
+#: ``airs_agent.py`` is here for the same reason and ``src/airsbench.py``.
+ENTRY_POINTS = ("main.py", "studio.py", "rcb_agent.py", "fs_agent.py", "fire_agent.py",
+                "airs_agent.py")
 
 _FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
 

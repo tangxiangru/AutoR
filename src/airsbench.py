@@ -1,9 +1,10 @@
 """AIRS-Bench adapter: run AutoR as an unattended AIRS-Bench agent.
 
-`AIRS-Bench <https://github.com/facebookresearch/airs-bench>`_ is the third benchmark
-AutoR is wired to, and it measures a different thing from the other two. ResearchClawBench
-scores a *report* with a model judge; FrontierScience scores an *answer* with a rubric.
-AIRS-Bench scores a *file of predictions* with ``scipy``. There is no judge, no rubric and
+`AIRS-Bench <https://github.com/facebookresearch/airs-bench>`_ is the fourth benchmark
+AutoR is wired to, and it measures a different thing from the other three. ResearchClawBench
+scores a *report* with a model judge, FrontierScience scores an *answer* with a rubric, and
+FIRE-Bench scores a *conclusion* claim by claim -- all three through a model reading what the
+run wrote. AIRS-Bench scores a *file of predictions* with ``scipy``. There is no judge, no rubric and
 no prose anywhere in the loop: twenty tasks, each a ``<problem, dataset, metric>`` triplet
 with a SOTA value from a published paper, and the whole of a run's score is what
 ``submission.csv`` gets on the held-out split.

@@ -53,7 +53,7 @@ from pathlib import Path
 
 from src.information_flow import ALL_STAGES, CHANNELS
 from src.rubric import CRITERIA
-from src.run_skills import discipline_of, read_skill_pack
+from src.run_skills import discipline_of, load_task_pins, read_skill_pack
 from src.stage_graph import (
     _ADVANCE_GUARDS,
     BLOCK_KINDS,
@@ -178,6 +178,15 @@ def _skills_without_a_field() -> int:
     )
 
 
+def _task_scoped_skills() -> int:
+    """Skills the shape filter routes rather than installing everywhere."""
+    return sum(1 for entry in read_skill_pack(REPO / "src" / "skills") if entry.task_scoped)
+
+
+def _pinned_tasks() -> int:
+    return len(load_task_pins(REPO / "configs" / "task_skill_pins.json"))
+
+
 COUNTED_NOUNS: tuple[tuple[str, int], ...] = (
     ("typed channels", len(CHANNELS)),
     ("typed information channels", len(CHANNELS)),
@@ -200,6 +209,25 @@ COUNTED_NOUNS: tuple[tuple[str, int], ...] = (
     ("skills ship today", _skill_pack_size()),
     ("general ones", _skills_without_a_field()),
     ("field-specific ones", _skill_pack_size() - _skills_without_a_field()),
+    # The same defect one paragraph further down, found by a reviewer who re-ran the tool
+    # the sentence cites. The README described four `applies_when` predicates that select
+    # "3, 4, 6 and 8 tasks each", with "twenty-five tasks receive none of them, and no task
+    # receives more than three". Re-run over the same forty briefs the four predicates
+    # selected 2, 3, 5 and 7, twenty-seven tasks received none, and the maximum was two:
+    # four claims, and the only survivor was the one that needs no corpus. So the README
+    # now states that one and names the command for the rest, and this row is the symbol
+    # under it. The selection sets themselves cannot be a row here at any price -- they are
+    # a property of a brief corpus that does not ship in this repo, and a number no test
+    # can reach is a number that rots on the next merge.
+    ("skills are scoped this way today", _task_scoped_skills()),
+    # And the pin table's own size, which the README described at the shape it had two
+    # merges earlier -- "Fifteen ResearchClawBench tasks are pinned today, twenty-four pins
+    # between them, at most three per task" -- against a table that by then held twenty-five
+    # tasks, 243 pins and a `MAX_PINS_PER_TASK` of fifteen. Only the task count is a row
+    # here. The per-task cap is asserted against `MAX_PINS_PER_TASK` in `test_run_skills.py`,
+    # and the total is deliberately not claimed in prose at all: every branch that pins a
+    # skill moves it, so the sentence would be stale before the branch that wrote it landed.
+    ("ResearchClawBench tasks are pinned today", _pinned_tasks()),
 )
 
 #: Three documents state the channel count and ``docs/framework.md`` states it

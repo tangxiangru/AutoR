@@ -46,7 +46,7 @@ the file, and each one removes a rule this module is supposed to hold. Run it ag
 
 It prints one line per mutation naming the tests that died, and exits non-zero if any
 survives, so "0 survivors" is re-derivable rather than asserted. Measured on this tree:
-82 tried, 82 killed. That number is ``len(MUTATIONS)`` and
+83 tried, 83 killed. That number is ``len(MUTATIONS)`` and
 :meth:`TheSweepIsRunnableTests.test_the_docstring_says_how_many_mutations_there_are`
 fails if this sentence and the tuple stop agreeing -- they already did once, at 47 here
 against 48 in the commit message that shipped the sweep.
@@ -1899,7 +1899,14 @@ MUTATIONS: tuple[tuple[str, str, str, str], ...] = (
      "                if self._stage_cost is not None:\n"
      "                    self._stage_cost.note_exhausted()\n", ""),
     ("the approval outcome is not recorded", MANAGER,
-     "                self._note_stage_outcome(stage, OUTCOME_APPROVED)\n", ""),
+     "                self._note_stage_outcome(\n"
+     "                    stage,\n"
+     "                    OUTCOME_PROMOTED_OVER_REFUSAL if self._promoted_over_refusal else OUTCOME_APPROVED,\n"
+     "                    self._promoted_over_refusal,\n"
+     "                )\n", ""),
+    ("an override is filed as an ordinary approval", MANAGER,
+     "OUTCOME_PROMOTED_OVER_REFUSAL if self._promoted_over_refusal else OUTCOME_APPROVED",
+     "OUTCOME_APPROVED"),
     ("the polish round is not counted", MANAGER,
      "                        if self._stage_cost is not None:\n"
      "                            self._stage_cost.note_polish_round(attempt_no)\n", ""),

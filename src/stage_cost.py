@@ -228,6 +228,13 @@ DEGRADED_FAILURE_KINDS: tuple[str, ...] = (
 # ---------------------------------------------------------------------------
 
 OUTCOME_APPROVED = "approved"
+#: Promoted because the send-back budget was spent, over a reviewer that asked for a
+#: change. `approved` is what this used to record, and the two are not the same event:
+#: one is a reviewer accepting the work and the other is the harness overruling one that
+#: did not. Measured over 200 archived runs, 78 of them contain at least one -- 1270
+#: events against 2802 recorded approvals, so about 45% of what the record called an
+#: approval was this.
+OUTCOME_PROMOTED_OVER_REFUSAL = "promoted_over_refusal"
 OUTCOME_AUTO_SKIPPED = "auto_skipped"
 OUTCOME_HUMAN_SKIPPED = "human_skipped"
 OUTCOME_ROUTED_TO_DELIVERABLE = "routed_to_deliverable"
@@ -249,6 +256,7 @@ OUTCOME_UNKNOWN = "unknown"
 
 OUTCOMES: tuple[str, ...] = (
     OUTCOME_APPROVED,
+    OUTCOME_PROMOTED_OVER_REFUSAL,
     OUTCOME_AUTO_SKIPPED,
     OUTCOME_HUMAN_SKIPPED,
     OUTCOME_ROUTED_TO_DELIVERABLE,
@@ -706,6 +714,37 @@ def bypassed_row(stage: StageSpec, *, note: str) -> StageCostRow:
 def stage_cost_ledger_path(paths: RunPaths) -> Path:
     """Where the ledger lives. Outside ``workspace/``; see this module's header."""
     return paths.stage_cost_ledger
+
+
+def prior_digests(rows: Sequence[Mapping[str, Any]], stage_slug: str) -> list[str]:
+    """What earlier visits to *stage_slug* were spent on, oldest first.
+
+    :meth:`StageCostMeter.attempt_digests` answers this for the visit in progress and
+    stops at its own boundary, so nothing in the tree could say that a stage had already
+    been fought over, with the same objection, before the walk came back to it. The rows
+    have carried the answer since this module existed and had no reader outside the
+    tests.
+
+    Not for the supervisor's repeat rule. Feeding it these ends a revisit at its first
+    repeated attempt, and this repository has already decided the other way --
+    ``test_a_revisit_gets_the_whole_ceiling_and_not_one_attempt`` says in as many words
+    that one attempt is a revisit that cannot work. The reader is
+    :func:`src.router.unfinished_business`, which puts the fact in front of the party
+    choosing the next move instead of spending the visit on it.
+
+    The rows come off :func:`read_stage_cost_ledger`, which is written in the ``finally``
+    of a stage visit, so the open visit is never in here.
+    """
+
+    found: list[str] = []
+    for row in rows:
+        if str(row.get("stage") or "") != stage_slug:
+            continue
+        entries = row.get("attempt_digests")
+        if isinstance(entries, Sequence) and not isinstance(entries, (str, bytes)):
+            found.extend([str(e.get("digest") or "") for e in entries
+                         if isinstance(e, Mapping) and e.get("digest")])
+    return found
 
 
 def read_stage_cost_ledger(paths: RunPaths) -> list[dict[str, Any]]:

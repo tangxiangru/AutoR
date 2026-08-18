@@ -120,8 +120,10 @@ is exactly 50/50). Every number in this section is re-derivable from
 the `type: image` entries per task for the criterion counts. They move when the task set
 does, and they were last measured on 2026-08-10 against the 40 shipped tasks.
 
-The judge is **not** shown five images chosen for the item. `evaluation/score.py` collects
-one set per *workspace* and hands the first five of that same set to every image criterion:
+The judge is **not** shown images chosen for the item. `evaluation/score.py` collects
+one set per *workspace* and hands the first *N* of that same set to every image criterion.
+**`N` was five until upstream `bfffc48` (2026-08-14) raised it to fifteen**, which is why
+`MAX_REPORT_FIGURES` is 15 and no longer 5:
 
 ```python
 generated_images = _find_generated_images(workspace)               # once, per workspace
@@ -130,7 +132,7 @@ for search_dir in [workspace / "outputs", workspace / "report"]:   # outputs fir
     for ext in IMAGE_EXTENSIONS:
         images.extend(search_dir.rglob(f"*{ext}"))                 # filesystem order
 ...
-for img in generated_images[:5]:                                   # per item, the same five
+for img in generated_images[:15]:                                  # per item, the same set
 ```
 
 Four consequences drive the export, and the plan the run writes at Stage 03:
@@ -330,7 +332,7 @@ python3 tools/web_search.py "diffusion model scaling laws" --json --max-results 
 | Auth | Application Default Credentials | API key |
 | Project | `AUTOR_VERTEX_PROJECT`, `GOOGLE_CLOUD_PROJECT`, or `ANTHROPIC_VERTEX_PROJECT_ID` | — |
 | Location | `AUTOR_VERTEX_LOCATION`, `GOOGLE_CLOUD_LOCATION`, default `global` | — |
-| Default model | `gemini-3.6-flash` | `gemini-2.5-flash` |
+| Default model | `gemini-3.7-flash` | `gemini-2.5-flash` |
 
 An explicit API key wins over Vertex, because setting one is deliberate whereas the Vertex
 project is often inherited from the host's Claude Code configuration. Force the choice with
@@ -393,7 +395,7 @@ that every citation must come from a URL the tool actually returned. `auto` degr
 native rather than advertising a tool that would fail on first use.
 
 The search model defaults per backend — `gemini-2.5-flash` on the Developer API,
-`gemini-3.6-flash` on Vertex, as in the table above — and `resolve_search_model` lets an
+`gemini-3.7-flash` on Vertex, as in the table above — and `resolve_search_model` lets an
 explicit `--model` win over `AUTOR_WEB_SEARCH_MODEL` or `GEMINI_MODEL`, which in turn win over
 both defaults.
 
@@ -1001,11 +1003,27 @@ A clause that has stopped firing because an internal artifact was renamed looks 
 like a clause never violated, and the gate does not fail loudly when that happens — it
 stops refusing.
 
-### What no clause can bound: which five images
+### What no clause can bound: which images
 
 `no_images_under_outputs` bounds where the judge's images come from. It cannot bound how
-many there were: the scorer shows the first five of one `rglob` list against *every*
-image criterion, and image criteria are 60.6% of the benchmark's weight. Four figures all
+many there were: the scorer shows the first `MAX_REPORT_FIGURES` of one `rglob` list
+against *every* image criterion, and image criteria are 60.6% of the benchmark's weight.
+
+**A local scorer that clips lower than upstream is not a stricter measurement, it is a
+different one, and it is not neutral between arms.** Ours held `MAX_IMAGES = 5` after
+upstream moved to fifteen. Re-scoring the identical workspaces with the two caps, changing
+nothing else:
+
+| | cap 5 | cap 15 |
+|:---|---:|---:|
+| bare Claude Code (7 figures median) | 29.19 | 28.67 |
+| AutoR (10 figures median) | 24.26 | **27.97** |
+| paired difference | **-4.94** | **-0.70** |
+| AutoR wins - losses | 12-25 | 22-16 |
+
+The clip cost the arm that produced more figures roughly four times what it cost the arm
+that produced fewer, because it hid half of one and a quarter of the other. A four-point
+deficit that three sister arms did not reproduce was the instrument. Four figures all
 shown and twelve figures of which an arbitrary five were shown are different evidence,
 and the score file was already recording which images went in — the trial simply threw
 it away, so two arms shown different figures produced an identical `env_digest` and the

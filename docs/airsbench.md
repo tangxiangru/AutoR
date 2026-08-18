@@ -1,9 +1,9 @@
 # AIRS-Bench
 
 [AIRS-Bench](https://github.com/facebookresearch/airs-bench) ([arXiv:2602.06855](https://arxiv.org/abs/2602.06855))
-is the third benchmark AutoR is wired to, and the first one whose score no model produces.
-ResearchClawBench judges a report; FrontierScience grades an answer against a rubric.
-AIRS-Bench runs `scipy` over a CSV.
+is the fourth benchmark AutoR is wired to, and the first one whose score no model produces.
+ResearchClawBench judges a report, FrontierScience grades an answer against a rubric, and
+FIRE-Bench grades a conclusion claim by claim. AIRS-Bench runs `scipy` over a CSV.
 
 Twenty tasks, each a `<problem, dataset, metric>` triplet with a SOTA value taken from a
 published paper. The agent is given a prepared dataset and asked for `submission.csv`; the
@@ -11,7 +11,7 @@ benchmark's own `evaluate.py` scores it against held-out labels the agent never 
 is no judge, no rubric, no prose, and no partial credit — a submission with the wrong number
 of rows is refused outright.
 
-That makes it a useful third instrument here for one specific reason. The other two
+That makes it a useful fourth instrument here for one specific reason. The other three
 benchmarks measure AutoR through a model's reading of what AutoR wrote, and a
 [judge choice is worth more than most of the effects being discussed](researchclawbench.md).
 This one has no reading step at all: the same submission scores the same number every time.
