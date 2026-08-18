@@ -110,10 +110,57 @@ class RunRecord:
     #: pattern -> occurrences in this run's stream log. Empty means the log was unreadable,
     #: which is not the same as clean and is reported as ``audit_log_missing``.
     audit: dict[str, int] = field(default_factory=dict)
+    #: The same patterns, counted only inside the agent's own tool inputs. A non-zero entry
+    #: here is the agent reaching for something; a non-zero entry in ``audit`` alone is
+    #: usually the path appearing in output the agent read.
+    audit_tool_use: dict[str, int] = field(default_factory=dict)
     audit_log_missing: bool = False
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
+
+
+#: Tool calls whose input names a path or a URL. A mention of a private path anywhere in a
+#: stream log is usually incidental -- ``ps`` prints the arm runner's own command line,
+#: which carries ``--raw-dir``, and every agent that looks for its stale jobs sees it. A
+#: mention inside one of *these* is the agent reaching for it.
+PATH_BEARING_TOOLS = ("Bash", "Read", "Write", "Edit", "Glob", "Grep", "NotebookEdit")
+
+
+def audit_tool_calls(log_path: Path, patterns: list[str]) -> dict[str, int]:
+    """Count patterns inside the agent's own tool inputs, not anywhere in the stream.
+
+    This is the half of the audit that distinguishes *saw* from *used*. Measured on the
+    first arm run: two tasks' logs mentioned the private raw-data directory four times each
+    and the tool-call scan found zero, because every mention came from ``ps`` output the
+    agent had asked for while hunting its own stale jobs. Counting text alone would have
+    made a clean run look like a compromised one -- and, worse, made the *next* compromised
+    one indistinguishable from ordinary noise.
+    """
+    counts = {pattern: 0 for pattern in patterns if pattern}
+    try:
+        raw = log_path.read_bytes().decode("utf-8", errors="replace")
+    except OSError:
+        return counts
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        message = event.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        for block in content or []:
+            if not isinstance(block, dict) or block.get("type") != "tool_use":
+                continue
+            if block.get("name") not in PATH_BEARING_TOOLS:
+                continue
+            blob = json.dumps(block.get("input") or {})
+            for pattern in counts:
+                counts[pattern] += blob.count(pattern)
+    return counts
 
 
 def audit_stream(log_path: Path, patterns: list[str]) -> tuple[dict[str, int], bool]:
@@ -298,6 +345,7 @@ def run_one(task: AirsTask, args: argparse.Namespace) -> RunRecord:
         record.error = f"{type(exc).__name__}: {exc}"
     record.duration_seconds = round(time.monotonic() - started, 1)
     record.audit, record.audit_log_missing = audit_stream(log_path, audit_patterns(args))
+    record.audit_tool_use = audit_tool_calls(log_path, audit_patterns(args))
 
     # Export before scoring, and for both arms: the bare arm writes straight to the
     # contract path, the AutoR arm may have left the submission in its run tree.
@@ -343,6 +391,12 @@ def arm_manifest(args: argparse.Namespace, records: list[RunRecord]) -> dict[str
     return {
         "arm": args.arm,
         "model": args.model,
+        # Recorded even when it is a default, because it is not the same default: the
+        # execution model comes from --model and the reviewer's comes from the backend
+        # (`sonnet` for claude), so an arm run with `--model opus` and nothing else is
+        # opus executing and sonnet reviewing. That is a configuration, and a score from
+        # it is not a score from opus reviewing.
+        "review_model": args.review_model or "(backend default: sonnet for claude)",
         "cli": args.cli,
         "repo": str(Path(args.repo).expanduser().resolve()),
         "code_version": code_version(),
@@ -360,6 +414,10 @@ def arm_manifest(args: argparse.Namespace, records: list[RunRecord]) -> dict[str
             pattern: sum(r.audit.get(pattern, 0) for r in records)
             for pattern in audit_patterns(args)
         },
+        "audit_tool_use_totals": {
+            pattern: sum(r.audit_tool_use.get(pattern, 0) for r in records)
+            for pattern in audit_patterns(args)
+        },
         "audit_logs_missing": sum(1 for r in records if r.audit_log_missing),
         "valid_submissions": sum(1 for r in records if r.submission_valid),
         "hit_wall_clock": sum(1 for r in records if r.hit_wall_clock),
@@ -374,6 +432,11 @@ def arm_manifest(args: argparse.Namespace, records: list[RunRecord]) -> dict[str
 #: difference in any of them makes the comparison a comparison of configurations.
 COMPARABLE_FIELDS = ("model", "cli", "wall_clock_cap", "web_search", "denied_tools",
                      "task_python", "tasks", "repo")
+
+#: Not in :data:`COMPARABLE_FIELDS` on purpose. The bare arm has no reviewer at all, so the
+#: AutoR arm's reviewer model can never match it and requiring it to would make every
+#: comparison read as incomparable. It is in the manifest so a reader can see it.
+NONCOMPARABLE_RECORDED_FIELDS = ("review_model", "stage_timeout", "final_stage", "rigor")
 
 
 def compare(left: dict, right: dict) -> str:
@@ -402,13 +465,29 @@ def compare(left: dict, right: dict) -> str:
         lines.append(f"{'paired mean difference':32}{delta:>+14.4f}  ({right['arm']} - {left['arm']})")
     lines.append(f"{'valid submissions':32}{left['valid_submissions']:>14}{right['valid_submissions']:>14}")
     lines.append(f"{'hit wall clock':32}{left['hit_wall_clock']:>14}{right['hit_wall_clock']:>14}")
-    flagged = sorted(
+    reached = sorted(
+        {p for side in (left, right)
+         for p, n in (side.get("audit_tool_use_totals") or {}).items() if n}
+    )
+    mentioned = sorted(
         {p for side in (left, right) for p, n in (side.get("audit_totals") or {}).items() if n}
     )
-    if flagged:
+    if reached:
         lines.append("")
-        lines.append("Audit hits (read the surrounding log line before concluding anything): "
-                     + ", ".join(flagged))
+        lines.append("Named inside a tool call — the agent reached for these: " + ", ".join(reached))
+    if [p for p in mentioned if p not in reached]:
+        lines.append("")
+        lines.append("Mentioned in the stream but in no tool call (usually `ps` output): "
+                     + ", ".join(p for p in mentioned if p not in reached))
+    recorded = [
+        f"{field}: {left.get(field)!r} vs {right.get(field)!r}"
+        for field in NONCOMPARABLE_RECORDED_FIELDS
+        if left.get(field) != right.get(field)
+    ]
+    if recorded:
+        lines.append("")
+        lines.append("Differs by construction, not a defect (the bare arm has no stage graph "
+                     "and no reviewer): " + "; ".join(recorded))
     if mismatched:
         lines.append("")
         lines.append("THESE ARMS ARE NOT COMPARABLE. The manifests disagree on: "

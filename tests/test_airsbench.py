@@ -787,6 +787,54 @@ class ArmRunnerTest(unittest.TestCase):
         self.assertFalse(missing)
         self.assertEqual(counts, {"hf_hub_download": 1, "nothing": 0})
 
+    def test_a_path_the_agent_only_saw_is_not_a_path_the_agent_used(self) -> None:
+        """The half of the audit that separates ``ps`` output from a reach.
+
+        Measured on the first arm run: two tasks' stream logs named the private raw-data
+        directory four times each and no tool call named it once — every mention came from
+        ``ps`` output the agent had asked for while looking for its own stale jobs. A
+        text-only audit would have called a clean run compromised, and after a few of those
+        it would make a real one indistinguishable from noise.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "stream.jsonl"
+            log.write_text(
+                json.dumps({"type": "user", "message": {"content": [
+                    {"type": "tool_result", "content": "3633179 python arm.py --raw-dir /vault/raw"}]}})
+                + "\n"
+                + json.dumps({"type": "assistant", "message": {"content": [
+                    {"type": "tool_use", "name": "Bash", "input": {"command": "ls /workspace/data"}}]}})
+                + "\n",
+                encoding="utf-8",
+            )
+            text_counts, _ = self.arm.audit_stream(log, ["/vault/raw"])
+            tool_counts = self.arm.audit_tool_calls(log, ["/vault/raw"])
+        self.assertEqual(text_counts, {"/vault/raw": 1})
+        self.assertEqual(tool_counts, {"/vault/raw": 0})
+
+    def test_a_path_inside_a_tool_call_is_counted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "stream.jsonl"
+            log.write_text(
+                json.dumps({"type": "assistant", "message": {"content": [
+                    {"type": "tool_use", "name": "Bash",
+                     "input": {"command": "cat /vault/raw/labels.csv"}}]}}) + "\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(self.arm.audit_tool_calls(log, ["/vault/raw"]), {"/vault/raw": 1})
+
+    def test_a_tool_that_cannot_carry_a_path_is_not_scanned(self) -> None:
+        """``TodoWrite`` echoing a path back is a plan, not an access."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "stream.jsonl"
+            log.write_text(
+                json.dumps({"type": "assistant", "message": {"content": [
+                    {"type": "tool_use", "name": "TodoWrite",
+                     "input": {"todos": ["look at /vault/raw"]}}]}}) + "\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(self.arm.audit_tool_calls(log, ["/vault/raw"]), {"/vault/raw": 0})
+
     def test_an_unreadable_log_is_reported_rather_than_read_as_clean(self) -> None:
         counts, missing = self.arm.audit_stream(Path("/nonexistent/stream.jsonl"), ["x"])
         self.assertTrue(missing)
