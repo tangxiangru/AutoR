@@ -133,9 +133,9 @@ naming them.
 | Required stage-summary headings | `REQUIRED_STAGE_HEADINGS` | 7 |
 | Rubric criteria (weighted, backend-free) | `CRITERIA`, [src/rubric.py](src/rubric.py) | 10 |
 | Flags on `main.py` / `rcb_agent.py` | `parse_args` | 61 / 37 |
-| Python modules / lines / tests | the tree | 254 / 137 k / 4048 |
+| Python modules / lines / tests | the tree | 254 / 137 k / 4053 |
 
-`python -m unittest discover -s tests -p "test_*.py"` runs **4048 tests in ~440 s across 143 test
+`python -m unittest discover -s tests -p "test_*.py"` runs **4053 tests in ~440 s across 143 test
 modules**, with no third-party dependency.
 
 ## Quick start
