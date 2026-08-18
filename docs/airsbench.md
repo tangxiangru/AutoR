@@ -27,7 +27,7 @@ A change that moves this needle moved something real.
 
 ## What the adapter is
 
-Four files, and one of them is the one that matters.
+Five files, and one of them is the one that matters.
 
 | File | What it owns |
 | --- | --- |
@@ -36,6 +36,7 @@ Four files, and one of them is the one that matters.
 | [tools/airs_setup.py](../tools/airs_setup.py) | Stage the raw dataset and build the workspace with the benchmark's own `prepare.py` |
 | [tools/score_airs_run.py](../tools/score_airs_run.py) | Score a finished workspace with the benchmark's own `evaluate.py` |
 | [tools/airs_arm.py](../tools/airs_arm.py) | Run one arm of a comparison over several tasks, and compare two arms |
+| [tools/airs_report.py](../tools/airs_report.py) | Report finished arms in the benchmark's own three metrics, and draw the per-task figure |
 
 **AutoR reimplements none of the benchmark.** `prepare.py`, `evaluate_prepare.py` and
 `evaluate.py` are the task's own files and are invoked as subprocesses, unmodified. A
@@ -299,8 +300,25 @@ description of it.
 
 **Nineteen tasks** (the twentieth cannot be staged), one seed, `claude-opus-5` executing in
 both arms, **4 h of wall clock each**, no web search, one `(arm, task)` per slurm array
-element on CPU-only nodes with 6 cores and 48 GB. Scores are AIRS-Bench's own normalized
-score, **1.000 = human SOTA**.
+element on CPU-only nodes with 6 cores and 48 GB.
+
+Reported in the three units of the benchmark's own Figure 4, computed by
+`tools/airs_report.py` from the rules in `create_summary_plots.ipynb` rather than from the
+paper's prose. The rule that matters most is only in the code: **a run with no scoreable
+submission is `fillna(0)` — a zero in the mean, with its task still in the denominator.**
+An earlier version of this document scored "the tasks both arms managed", which removed
+AutoR's one failure from AutoR's own average and understated the gap by 0.013.
+
+| arm | valid submission | mean | median | IQM | Elo\*\* |
+|:---|---:|---:|---:|---:|---:|
+| bare Claude Code | **100.0 %** | **1.560** | **0.932** | **0.899** | 951 |
+| AutoR | 94.7 % | 1.134 | 0.844 | 0.838 | 895 |
+| *SOTA* | *—* | *1.000* | *1.000* | *1.000* | *1154* |
+
+Paired: **+0.426 mean, +0.069 median** to the bare CLI, winning **16 of 19**. Excluding
+APPS, the same runs read **0.860 against 0.787, +0.073 paired, 15 of 18**.
+
+![Per-task normalized score, both arms](images/airs_per_task.png)
 
 | task | AutoR | bare | Δ | AutoR reached |
 |:---|---:|---:|---:|:---:|
@@ -314,7 +332,7 @@ score, **1.000 = human SOTA**.
 | `MathQuestionAnsweringSVAMPAccuracy` | 0.902 | 0.887 | -0.015 | 03 |
 | `QuestionAnsweringDuoRCAccuracy` | 0.639 | 0.743 | +0.105 | 02 |
 | `QuestionAnsweringEli5RougeL` | 0.606 | 0.678 | +0.072 | 01 |
-| `QuestionAnsweringFinqaAccuracy` | — | 0.291 | — | 01 |
+| `QuestionAnsweringFinqaAccuracy` | 0.000 *(no valid submission)* | 0.291 | +0.291 | 01 |
 | `R2AbsMolecularPropertyPredictionQm9MeanAbsoluteError` | 0.759 | 0.956 | +0.197 | 04 |
 | `ReadingComprehensionSquadExactMatch` | 1.141 | 1.134 | -0.007 | 01 |
 | `SentimentAnalysisYelpReviewFullAccuracy` | 0.597 | 0.636 | +0.039 | 01 |
@@ -324,63 +342,55 @@ score, **1.000 = human SOTA**.
 | `TimeSeriesForecastingSolarWeeklyMAE` | 0.908 | 0.945 | +0.037 | 02 |
 | `U0MolecularPropertyPredictionQm9MeanAbsoluteError` | 0.844 | 0.955 | +0.111 | 02 |
 
-| | AutoR | bare |
-|:---|---:|---:|
-| mean normalized, 17 paired tasks | 0.834 | **0.894** |
-| median normalized, 17 paired | 0.844 | **0.932** |
-| paired mean difference | | **+0.060** |
-| paired median difference | | **+0.051** |
-| tasks won, of 17 | 3 | **14** |
-| valid submissions | 18 of 19 | **19 of 19** |
-| **hit the 4 h cap** | **19 of 19** | **0 of 19** |
+**\* Why APPS is broken out of the figure and quoted separately.** Its normalized score is
+`(φ(s) − φ(0)) / (φ(0.187) − φ(0))`, and that denominator is **0.090** — eleven times
+smaller than a typical task's. Pass@5 of 0.783 and 0.947 therefore land at 7.37 and 14.15,
+which is why the mean and the median disagree by a factor of six. Nothing is excluded from
+the headline table; the median and the IQM are printed beside the mean because the notebook
+computes all three and only one of them survives a task like this.
 
-**\* APPS is excluded from every aggregate above, and the reason is a property of the
-benchmark's own metric.** Its normalized score is
-`(φ(s) − φ(0)) / (φ(0.187) − φ(0))`, and `φ(0.187) − φ(0) = 0.090` — a denominator eleven
-times smaller than a typical task's. The two arms scored Pass@5 of 0.783 and 0.947, which
-normalize to **7.37 and 14.15**. Including them takes the paired mean difference from
-+0.060 to +0.433 on the strength of one task, so the mean over tasks is not a robust
-statistic on this benchmark and the median is reported beside it.
+Those Pass@5 figures were checked against a measured floor: `pass` for all 5,000 problems ×
+5 slots scores **0.0008** and a program that does not compile scores **0.0000**, so the
+metric discriminates. (`print(0)` crashes the evaluator — see below.)
 
-Those Pass@5 figures are high against a published SOTA of 0.187 and were checked before
-being used. `solves_testcases` returns `np.all(fixed)`, and `np.all([])` is `True`, so a
-harness that returned no test results would score every problem correct. No shipped test
-problem has an empty `input_output`, and three null submissions over all 5,000 problems ×
-5 slots settle it directly:
+**\*\* Elo is computed and then hedged.** The construction is theirs — SOTA injected as an
+agent, one battle per (task, pair, seed × seed), an invalid submission losing to a valid
+one, Bradley-Terry at `SCALE=400`, `INIT_RATING=1000`. But Elo is only meaningful within a
+pool, and three entities is not the fifteen the published ratings come from; with two agents
+it re-expresses the head-to-head count. **No error bars**: the published intervals bootstrap
+10–20 seeds per task and these arms have one seed each, so an interval over *tasks* would be
+a different quantity wearing the same mark.
 
-| null submission | Pass@5 | normalized |
-|:---|---:|---:|
-| `pass` | 0.0008 | 0.004 |
-| `def (` (does not compile) | 0.0000 | 0.000 |
-| `print(0)` | *the evaluator crashed* | — |
+**One deviation from the notebook, and it is forced.** It derives each task's `worst_score`
+from the runs in the analysis (`scores.min()` across every agent). Two arms are not a pool:
+on a task where both beat SOTA the observed worst is *better* than SOTA, `φ(sota) − φ(worst)`
+goes negative, and both arms score 0 on a task they both won. The published
+`estimated_worst_score` is used instead — the fixed anchor from the fourteen-agent run the
+leaderboard was built on. `tools/airs_report.py --observed-worst` runs it the notebook's way
+and reports how many tasks it degenerates on.
 
-The metric discriminates: the floor is zero, and the `np.all([])` path is not reachable
-through a program that fails to compile — `solves_testcases` catches that case and fills in
-a row of zeros. What is eleven times more sensitive than elsewhere is the *normalization*
-on this one task, not the measurement.
-
-**What AutoR spent the four hours on.** Every one of the nineteen runs hit the cap and
-**not one finished the walk**. Final stage reached: **six runs never left Stage 01**, three
-reached 02, five reached 03, four reached 04, and one reached 06. Four of the six stuck at
-Stage 01 spent 13–22 attempts on the literature survey. The bare arm hit the cap zero
-times, at a median of 3 h 14 m.
+**What AutoR spent the four hours on.** Every one of the nineteen runs hit the cap and **not
+one finished the walk**. Final stage reached: **six runs never left Stage 01**, three reached
+02, five reached 03, four reached 04, one reached 06. Four of the six stuck at Stage 01 spent
+13–22 attempts on the literature survey. The bare arm hit the cap zero times, at a median of
+3 h 14 m.
 
 **AutoR's one invalid submission is the failure the brief warns about.** On
 `QuestionAnsweringFinqaAccuracy` it wrote **1,137 rows where the test split has 1,147** and
-the evaluator refuses the file — a whole task lost to ten rows, with a valid submission
-that had existed earlier in the run. The bare arm produced nineteen valid submissions.
+the evaluator refuses the file — a whole task lost to ten rows, with a valid submission that
+had existed earlier in the run. Under the benchmark's convention that is a 0 in its mean and
+a point off its valid-submission rate, which is exactly what those two metrics are for.
 
 **Only the bare arm downloaded a model.** Seven of its nineteen runs called
 `snapshot_download` — `Qwen2.5-7B`, `Qwen2.5-Math-1.5B-Instruct`, `Qwen3-1.7B`, all small
-because the nodes have no GPU. Zero AutoR runs did. That is not a confound in the arms'
-access, which was identical; it is part of what the scaffold spent its budget on instead.
+because the nodes have no GPU. Zero AutoR runs did. Not a difference in access, which was
+identical; a difference in what the scaffold spent its budget on.
 
 **Neither arm reached for the labels.** Tool-call audit hits on the private raw-data
-directory, the benchmark checkout and `test_with_labels`: **zero, across all 38 runs.** The
-text-only hits are `ps` output and one AutoR stage summary stating that
-`data/test_with_labels` does not exist in its workspace.
+directory, the benchmark checkout and `test_with_labels`: **zero, across all 38 runs.**
 
 ### Five tasks, on a GPU node
+
 
 The first arm, run before the cluster campaign, on one node with eight shared H100s and a
 5-task subset. Same protocol otherwise.

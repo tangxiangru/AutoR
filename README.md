@@ -133,9 +133,9 @@ naming them.
 | Required stage-summary headings | `REQUIRED_STAGE_HEADINGS` | 7 |
 | Rubric criteria (weighted, backend-free) | `CRITERIA`, [src/rubric.py](src/rubric.py) | 10 |
 | Flags on `main.py` / `rcb_agent.py` | `parse_args` | 61 / 37 |
-| Python modules / lines / tests | the tree | 251 / 134 k / 3976 |
+| Python modules / lines / tests | the tree | 254 / 137 k / 4040 |
 
-`python -m unittest discover -s tests -p "test_*.py"` runs **3976 tests in ~400 s across 142 test
+`python -m unittest discover -s tests -p "test_*.py"` runs **4040 tests in ~430 s across 143 test
 modules**, with no third-party dependency.
 
 ## Quick start
@@ -198,6 +198,7 @@ modules**, with no third-party dependency.
 | Stage an AIRS-Bench task's data and workspace | `python tools/airs_setup.py --task <TASK> --repo <AIRS_BENCH> --raw-dir <RAW> --workspace <WS>` |
 | Solve one AIRS-Bench task and score the submission | `python airs_agent.py --task <TASK> --repo <AIRS_BENCH> --raw-dir <RAW> --workspace <WS>` |
 | Run one arm of an AIRS-Bench comparison — AutoR, or the same CLI with no AutoR | `python tools/airs_arm.py --arm autor --tasks <TASK>...` · `--arm bare` |
+| Report finished AIRS-Bench arms in the benchmark's own three metrics | `python tools/airs_report.py --arm autor=<MANIFEST> --arm bare=<MANIFEST> --figure <PNG>` |
 
 Every flag, its default, and what is preserved on resume:
 **[docs/cli-reference.md](docs/cli-reference.md)**. Stage identifiers accept `03`, `3` or
@@ -1143,40 +1144,50 @@ manifests that disagree on any of them.
 
 **Nineteen tasks** (the twentieth cannot be staged), one seed, opus executing in both arms,
 **4 h of wall clock each**, no web search, one `(arm, task)` per slurm array element on
-CPU-only nodes. Scores are the benchmark's normalized score, where **1.000 is human SOTA**:
+CPU-only nodes. Reported in the benchmark's own three units, computed by its own
+`create_summary_plots.ipynb` rules — a run with no scoreable submission is a **0** in the
+mean, not an omission. **1.000 is human SOTA.**
 
-| arm | mean norm. | median norm. | tasks won | valid submissions | hit the 4 h cap |
+| arm | valid submission | mean | median | IQM | Elo\* |
 |:---|---:|---:|---:|---:|---:|
-| bare Claude Code (opus) | **0.894** | **0.932** | **14** of 17 | **19** of 19 | **0** of 19 |
-| AutoR (opus) | 0.834 | 0.844 | 3 of 17 | 18 of 19 | **19** of 19 |
+| bare Claude Code (opus) | **100.0 %** | **1.560** | **0.932** | **0.899** | 951 |
+| AutoR (opus) | 94.7 % | 1.134 | 0.844 | 0.838 | 895 |
+| *SOTA* | *—* | *1.000* | *1.000* | *1.000* | *1154* |
 
-Paired over the seventeen tasks both arms scored, that is **−0.060** (median −0.051). A
-five-task pilot on a GPU node gave −0.173 the same way. The mechanism is legible rather
-than inferred, and it is the same one both times: **every AutoR run hit the cap and not one
-finished the walk** — six of nineteen never left Stage 01, at 13 to 22 attempts on a
-literature survey for tasks whose whole specification is "predict this column" — while the
-bare arm hit the cap zero times at a median of 3 h 14 m. AutoR's single invalid submission
-is the failure the brief warns about: 1,137 rows where the split has 1,147, a whole task
-lost to ten rows.
+Paired over the nineteen tasks: **+0.426 mean, +0.069 median** to the bare CLI, which wins
+**16 of 19**. The mean and the median disagree by a factor of six because one task carries
+it: `CodeGenerationAPPSPassAt5`'s normalized score has a denominator eleven times smaller
+than a typical task's, and the two arms' Pass@5 of 0.783 and 0.947 land at 7.37 and 14.15.
+Drop that task and the same nineteen-task run reads **0.860 against 0.787, +0.073 paired,
+bare winning 15 of 18** — which is why all three aggregates are printed and the median is
+the one to quote. A five-task pilot on a GPU node gave the same direction.
+
+\* Elo is over a three-entity pool including SOTA and is **not** comparable to a rating
+from the published fifteen-entity pool; with two agents it re-expresses the head-to-head
+count. There are no error bars: the published ones bootstrap 10–20 seeds per task and these
+arms have one seed each, so drawing an interval over tasks instead would be a different
+quantity wearing the same mark.
+
+The mechanism is legible rather than inferred, and it is the same one the pilot showed:
+**every AutoR run hit the cap and not one finished the walk** — six of nineteen never left
+Stage 01, at 13 to 22 attempts on a literature survey for tasks whose whole specification is
+"predict this column" — while the bare arm hit the cap zero times at a median of 3 h 14 m.
+AutoR's single invalid submission is the failure the brief warns about: 1,137 rows where the
+split has 1,147, a whole task lost to ten rows, and under the benchmark's own convention
+that task is a zero in its mean rather than a gap in it.
 
 This is the same direction as the other three, and the fourth benchmark to say it
 ([§6.8](docs/framework.md#68-the-scaffold-is-currently-worth-less-than-no-scaffold)) — this
 time through an instrument with no judge in it, which is the one thing the reading could not
 previously be blamed on.
 
-Three caveats travel with those numbers, all in the docs. **APPS is excluded from every
-aggregate**: its normalized score has a denominator eleven times smaller than a typical
-task's, so the two arms' Pass@5 of 0.783 and 0.947 normalize to 7.37 and 14.15 and would
-carry the mean by themselves — the mean over tasks is not a robust statistic on this
-benchmark, which is why the median is beside it. Those Pass@5 figures were checked against a
-measured floor before being used: `pass` for all 5,000 problems scores 0.0008 and a program
-that does not compile scores 0.0000, so the metric discriminates.
-**These are not leaderboard numbers**: the
-published table is twenty tasks at ten to twenty seeds, and its agents run in a container
-with no network, while an agent with a shell here can `snapshot_download` a model and run
-inference — seven of the bare arm's nineteen runs did. And one seed per arm is one seed.
-The arms are comparable with each other: same machine, same access, same brief, same cap,
-and **zero tool-call audit hits for the held-out labels across all 38 runs**.
+**These are not leaderboard numbers.** The published table is twenty tasks at ten to twenty
+seeds, scored in a container with no network, while an agent with a shell here can
+`snapshot_download` a model and run inference — seven of the bare arm's nineteen runs did.
+One deviation from the notebook is deliberate and forced: it anchors each task on the worst
+score observed *in the analysis*, which for a two-arm pool that both beat SOTA sends the
+denominator negative, so the published `estimated_worst_score` is used instead. Tool-call
+audit hits for the held-out labels across all 38 runs: **zero**.
 
 The adapter, the arm harness, the five defects running it surfaced in the benchmark itself,
 and the one it surfaced in this adapter are in [docs/airsbench.md](docs/airsbench.md).
