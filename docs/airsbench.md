@@ -23,7 +23,8 @@ A change that moves this needle moved something real.
 [The output contract](#the-output-contract) · [The normalized score](#the-normalized-score) ·
 [Running an arm, and its control](#running-an-arm-and-its-control) ·
 [What running it found in the benchmark](#what-running-it-found-in-the-benchmark) ·
-[Results](#results) · [What is not measured](#what-is-not-measured)
+[Results](#results) · [What is not measured](#what-is-not-measured) ·
+[Run log](airsbench-run-log.md)
 
 ## What the adapter is
 
@@ -318,7 +319,7 @@ AutoR's one failure from AutoR's own average and understated the gap by 0.013.
 Paired: **+0.426 mean, +0.069 median** to the bare CLI, winning **16 of 19**. Excluding
 APPS, the same runs read **0.860 against 0.787, +0.073 paired, 15 of 18**.
 
-![Per-task normalized score, both arms](images/airs_per_task.png)
+![Per-task normalized score, both arms](../assets/airsbench/airs_per_task.png)
 
 | task | AutoR | bare | Δ | AutoR reached |
 |:---|---:|---:|---:|:---:|
@@ -388,6 +389,10 @@ identical; a difference in what the scaffold spent its budget on.
 
 **Neither arm reached for the labels.** Tool-call audit hits on the private raw-data
 directory, the benchmark checkout and `test_with_labels`: **zero, across all 38 runs.**
+
+The full experimental record — provenance, the exact commands, every task's value and
+wall clock, the six things that went wrong while it ran, and the integrity audit — is in
+**[airsbench-run-log.md](airsbench-run-log.md)**.
 
 ### Five tasks, on a GPU node
 
