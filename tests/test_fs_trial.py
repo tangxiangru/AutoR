@@ -32,6 +32,7 @@ from src.frontierscience import (
     FS_TASK_INSTRUCTION_SHA256,
 )
 from src.fs_trial import (
+    FS_LAUNCH_GRACE_SECONDS,
     FS_ADMISSION_CLAUSES,
     FS_FAKE_FAULTS,
     FS_MAX_REFUSAL_RATE,
@@ -1201,6 +1202,57 @@ class TheStateMachineTests(unittest.TestCase):
         )
         self.assertEqual([action for action in actions if action.kind == "launch"], [])
         self.assertEqual([action.kind for action in actions], ["wait"])
+
+    def test_a_run_launched_a_moment_ago_is_not_abandoned_before_its_pid_can_be_seen(self) -> None:
+        """The liveness test is not observable at the instant a run starts.
+
+        `tools/fs_trial.py` writes the state file *before* `Popen`, so there is a window
+        where the state says `launched` and carries no `child_pid` at all -- and
+        `autor_pids` is a `/proc` walk, measured at 33-42 ms on this box, so even after
+        `Popen` the pid is not in the set yet. With no grace the driver abandoned runs it
+        had started microseconds earlier, gave the replacement a fresh workspace, and paid
+        for both. In `tests/test_fs_trial_driver.py`, whose poll interval is 20 ms --
+        shorter than one `/proc` scan -- that surfaced as an extra attempt failing a
+        different test on about one module run in three.
+        """
+        for label, state in (
+            ("no pid written yet", {"task_key": "fs:000", "arm": CONTROL.label,
+                                    "attempt": 1, "phase": "launched", "launched_at": 100.0}),
+            ("pid written, not yet visible",
+             {**self.launched("fs:000", CONTROL.label, 4242), "launched_at": 100.0}),
+        ):
+            with self.subTest(label):
+                actions = next_actions(self.plan, [state], now=100.0, live_pids=frozenset())
+                self.assertNotIn("abandon", [action.kind for action in actions])
+
+    def test_a_run_in_its_grace_window_consumes_the_budget(self) -> None:
+        """Counted live, not merely skipped.
+
+        Skipping it would leave the budget thinking nothing is running, and the loop would
+        start one more run than the plan asks for every time it polled inside a launch.
+        """
+        states = [
+            {**self.launched("fs:000", CONTROL.label, 4242), "launched_at": 100.0},
+            {**self.launched("fs:000", TREATMENT.label, 4243), "launched_at": 100.0},
+        ]
+        actions = next_actions(self.plan, states, now=100.0, live_pids=frozenset())
+        self.assertEqual([action.kind for action in actions], ["wait"])
+
+    def test_after_the_grace_a_launch_whose_pid_is_gone_is_still_abandoned(self) -> None:
+        """The control on the recovery the grace must not disable."""
+        state = {**self.launched("fs:000", CONTROL.label, 4242), "launched_at": 100.0}
+        actions = next_actions(
+            self.plan, [state], now=100.0 + FS_LAUNCH_GRACE_SECONDS + 1, live_pids=frozenset()
+        )
+        self.assertEqual(actions[0].kind, "abandon")
+
+    def test_a_state_with_no_launch_time_gets_no_grace(self) -> None:
+        """Back-compat control: a record this cannot date behaves exactly as before."""
+        actions = next_actions(
+            self.plan, [self.launched("fs:000", CONTROL.label, 4242)], now=1e9,
+            live_pids=frozenset(),
+        )
+        self.assertEqual(actions[0].kind, "abandon")
 
     def test_a_launched_run_whose_pid_is_gone_is_abandoned_and_never_resumed(self) -> None:
         actions = next_actions(
