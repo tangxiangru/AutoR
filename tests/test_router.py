@@ -661,6 +661,54 @@ class UnfinishedBusinessTests(unittest.TestCase):
             json.dumps({"version": 1, "obligations": list(obligations)}),
         )
 
+    def _closed_visit(self, slug: str, digests: list[str]) -> None:
+        from src.stage_cost import StageCostMeter, append_stage_cost_row
+        from src.utils import STAGES as _STAGES
+
+        stage = next(item for item in _STAGES if item.slug == slug)
+        meter = StageCostMeter(stage)
+        for index, digest in enumerate(digests, start=1):
+            meter.note_attempt()
+            meter.note_failure(index, "validators_refused", digest)
+        append_stage_cost_row(self.paths, meter.close())
+
+    def test_what_this_node_already_charged_is_named(self) -> None:
+        """The cost ledger's first reader outside its own tests.
+
+        The router is shown `Visits to <node>: N of M` and the backward moves already
+        taken, and neither says what those visits were spent on. A node that refused four
+        attempts against one wall is a different proposition from one that refused four
+        against four different objections, and the move out of here is the decision that
+        difference is about.
+        """
+        self._closed_visit(STAGE_06.slug, ["a", "a", "a"])
+        text = unfinished_business(self.paths, STAGE_06)
+        self.assertIn("already charged 3 attempt(s) over 1 closed visit(s)", text)
+        self.assertIn("3 of them in a row failed for the same recorded reason", text)
+
+    def test_distinct_failures_are_reported_as_distinct(self) -> None:
+        """The other half of the same fact, and the reason it is worth printing at all."""
+        self._closed_visit(STAGE_06.slug, ["a", "b", "c"])
+        text = unfinished_business(self.paths, STAGE_06)
+        self.assertIn("no two of them consecutive repeats", text)
+        self.assertNotIn("in a row", text)
+
+    def test_it_spans_visits(self) -> None:
+        """Two visits, one wall. This is the case the supervisor's rule cannot see."""
+        self._closed_visit(STAGE_06.slug, ["a", "a"])
+        self._closed_visit(STAGE_06.slug, ["a"])
+        text = unfinished_business(self.paths, STAGE_06)
+        self.assertIn("over 2 closed visit(s)", text)
+        self.assertIn("3 of them in a row", text)
+
+    def test_another_stages_spend_is_not_reported_here(self) -> None:
+        self._closed_visit("04_implementation", ["a", "a", "a"])
+        self.assertNotIn("already charged", unfinished_business(self.paths, STAGE_06))
+
+    def test_a_node_that_has_never_closed_a_visit_says_nothing(self) -> None:
+        """Silence is the point, as it is for every other block here."""
+        self.assertEqual(unfinished_business(self.paths, STAGE_06), "")
+
     def test_an_inconclusive_hypothesis_is_named(self) -> None:
         self.outcomes("supported", "inconclusive", "refuted")
         text = unfinished_business(self.paths, STAGE_06)

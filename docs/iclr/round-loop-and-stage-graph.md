@@ -395,6 +395,29 @@ figure to `describe_budget_for_prompt`. Do not add a `prior_refusals` doer chann
 also that `Visit.refusal` already exists with a different meaning — why the router's answer
 was not used — so the new field needs a different name.
 
+**Landed as the router's fact, and refused as the supervisor's rule.**
+
+`src.router.unfinished_business` now names what a node has already charged across its
+closed visits and whether that spend went against one wall or many — `prior_digests` in
+`src.stage_cost`, beside the ledger it reads. That is the closed rows' first reader
+outside their own tests.
+
+Feeding those digests to `RunSupervisor`'s repeat rule, which is what this section
+originally proposed, was implemented and then **reverted**: it ends a revisit at its first
+repeated attempt, and two tests already in the tree are this repository's decision the
+other way — `test_a_second_visit_to_an_exhausted_stage_still_buys_attempts` and
+`test_a_revisit_gets_the_whole_ceiling_and_not_one_attempt`, whose docstring says in as
+many words that one attempt is a revisit that cannot work. Both went red on the
+concatenation. `TheRepeatRuleDeliberatelyStopsAtTheVisitBoundaryTests` is the note that
+stops the idea coming back.
+
+Blast radius of the version that was reverted, replayed over
+`tools/supervisor_threshold_replay.py`'s `MEASURED_RUNS` before the two tests spoke: 0 of
+22 visits change verdict, because only two of twenty stages in that population were
+visited more than once and neither repeated a digest. Worth recording as a caution: the
+replay said the change was free, and the suite said it was wrong. A population that
+contains no instance of the case cannot price it.
+
 *Class: a ledger nobody reads. Effort: small.*
 
 ### 4.7 Retry state the harness owns, not state the provider owns
