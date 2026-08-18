@@ -13,6 +13,7 @@ detail behind it.
 | Look up a command-line flag | [CLI Reference](cli-reference.md) |
 | Run AutoR unattended, or benchmark it on ResearchClawBench | [ResearchClawBench](researchclawbench.md) |
 | Answer and score a written science exam question | [FrontierScience-Research](frontierscience.md) |
+| Compare two AutoR versions on the benchmark without fooling yourself | [Arm Register](researchclawbench-arms.md) |
 | Understand what a run leaves on disk | [Run Artifacts](run-artifacts.md) |
 | Know exactly what a stage must produce to be accepted | [Stage Contract](stage-contract.md) |
 | Choose how much optional machinery a run uses | [Rigor](rigor.md) |
@@ -76,6 +77,10 @@ detail behind it.
   gate, the `direct` and `ideate` profiles, the judge's measured sampling noise
   and refusal rules, the paired trial's ten admission clauses, and the two
   numbers about AutoR itself that are **not** measured.
+- **[researchclawbench-arms.md](researchclawbench-arms.md)** — the register of
+  every 40-task configuration run so far: which checkout, which stage budget,
+  which node class, what it scored, what each pair of arms can and cannot
+  answer, and how much a 40-task mean moves before any code changes.
 
 ### Internals
 

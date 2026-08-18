@@ -777,6 +777,10 @@ The channel is Stage 07 only, and deliberately thin:
 The three comparison agents were re-scored from their public runs under that same judge, so
 the four rows are commensurable with each other. Measured 2026-08-06, scored 2026-08-11.
 
+> **This table is the oldest arm on record and is kept for the stratification below it, not
+> for its mean.** Five later configurations score higher; see
+> [the arm register](researchclawbench-arms.md).
+
 | agent | mean | median | max | tasks scoring 0 |
 |:---|---:|---:|---:|---:|
 | Codex CLI | 19.53 | 17.73 | 48.40 | 2 |
@@ -813,8 +817,13 @@ Four caveats travel with every number above:
 - **The judge is part of the result.** `gpt-5.1` is the benchmark's own. On identical
   artifacts Gemini 2.5 Flash scored 37.0 where Claude Opus scored 20.8, so a number quoted
   without its judge compares to nothing.
-- **This is the pre-repair batch.** #180 and #181 closed the routes that produced the eight
-  stubs; their effect is unmeasured until a re-run lands.
+- **This is the pre-repair batch, and it has been superseded five times.** #180 and #181
+  closed the routes that produced the eight stubs. The re-runs this bullet used to say were
+  pending have landed: 23.57, then 31.35 at `2ffaeb4`, against a bare-agent control of 31.53
+  re-scored under the grader's current 15-image window. **Do not quote 14.16 as AutoR's
+  number.** [The arm register](researchclawbench-arms.md) carries every configuration run
+  since, what each scored, and which pairs of them are actually comparable — the answer for
+  several is "not to each other".
   [The framework document's §6](framework.md#6-the-system-measured-against-itself) works
   through what the eight zeros were made of and what changed.
 
