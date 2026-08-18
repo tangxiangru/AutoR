@@ -1,6 +1,6 @@
 ---
 name: chemistry-reproduce-the-scoring-path-before-you-replace-it
-description: Use at implementation and experimentation when you are reproducing a published benchmark number and the source's scoring path is one you can read — which rows are scored, in what order, how many the loader drops, which epoch is reported, how tasks are pooled, over how many seeds. Covers implementing that path exactly before improving it, the one-row-per-step ladder from the published rule down to your own honest estimate, and why one un-replicated step makes the reproduction gap you report uninterpretable.
+description: Use at implementation, experimentation and analysis when you are reproducing a published benchmark number and the source's scoring path is one you can read — which rows are scored, in what order, how many the loader drops, which epoch is reported, how tasks are pooled, over how many seeds. Covers implementing that path exactly before improving it, the one-row-per-step ladder from the published rule down to your own honest estimate, and why one un-replicated step makes the reproduction gap you report uninterpretable.
 applies_when: molecular property prediction
 stages: 04_implementation, 05_experimentation, 06_analysis
 ---
@@ -42,13 +42,20 @@ to be implemented before they can be removed.
 
 ## Publish the ladder, one row per step
 
-| step removed | BACE | BBBP | ClinTox |
-|---|---|---|---|
-| source's rule, as published | | | |
-| − partial batches dropped from a shuffled scoring loader | | | |
-| − maximum over epochs instead of a selected checkpoint | | | |
-| − pooled instead of per-task aggregation | | | |
-| your honest estimate | | | |
+| step removed | one column per dataset you scored, all of them |
+|---|---|
+| the source's rule, as published | |
+| − *first step of theirs you disagree with* | |
+| − *second* | |
+| − *third* | |
+| your honest estimate | |
+
+The middle rows are whatever `notes/scoring_path.md` turned out to hold, in the
+order you would remove them; a shuffled loader that drops its last batch, a maximum
+taken over epochs, and labels pooled across tasks are three that recur, not a list
+to copy. The columns are every dataset the comparison covers — the ladder is where a
+partial run is most visible, because a rung measured on two of five datasets is a
+rung about two datasets.
 
 Each row is a delta you measured; the ladder as a whole is the decomposition of the
 difference between the published convention and yours. "Their protocol inflates the

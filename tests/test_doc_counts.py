@@ -53,7 +53,7 @@ from pathlib import Path
 
 from src.information_flow import ALL_STAGES, CHANNELS
 from src.rubric import CRITERIA
-from src.run_skills import discipline_of, read_skill_pack
+from src.run_skills import discipline_of, load_task_pins, read_skill_pack
 from src.stage_graph import (
     _ADVANCE_GUARDS,
     BLOCK_KINDS,
@@ -178,6 +178,15 @@ def _skills_without_a_field() -> int:
     )
 
 
+def _task_scoped_skills() -> int:
+    """Skills the shape filter routes rather than installing everywhere."""
+    return sum(1 for entry in read_skill_pack(REPO / "src" / "skills") if entry.task_scoped)
+
+
+def _pinned_tasks() -> int:
+    return len(load_task_pins(REPO / "configs" / "task_skill_pins.json"))
+
+
 COUNTED_NOUNS: tuple[tuple[str, int], ...] = (
     ("typed channels", len(CHANNELS)),
     ("typed information channels", len(CHANNELS)),
@@ -200,6 +209,19 @@ COUNTED_NOUNS: tuple[tuple[str, int], ...] = (
     ("skills ship today", _skill_pack_size()),
     ("general ones", _skills_without_a_field()),
     ("field-specific ones", _skill_pack_size() - _skills_without_a_field()),
+    # The same defect one paragraph further down, found by a reviewer who re-ran the tool
+    # the sentence cites. The README described four `applies_when` predicates selecting
+    # "3, 4, 6 and 8 tasks each", with twenty-five tasks receiving none. Four was right;
+    # the set sizes were 2, 3, 5 and 7 and twenty-seven tasks received none, so the only
+    # number in that sentence that had not rotted was the one no corpus is needed to
+    # re-derive. Only the count is re-derivable inside this repo, because the
+    # selection sets need a corpus of briefs that does not ship here; the sentence names
+    # the command for those and this row holds the one a symbol can hold.
+    ("skills are scoped this way today", _task_scoped_skills()),
+    # And the pin table's own size, which the README described at the shape it had two
+    # merges earlier. The per-task cap is asserted against `MAX_PINS_PER_TASK` in
+    # `test_run_skills.py`; this is the row for how many tasks carry any pin at all.
+    ("ResearchClawBench tasks are pinned today", _pinned_tasks()),
 )
 
 #: Three documents state the channel count and ``docs/framework.md`` states it

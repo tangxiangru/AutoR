@@ -1,6 +1,6 @@
 ---
 name: chemistry-accuracy-and-cost-for-every-module-you-swap-in
-description: Use at study design and again at analysis when the method under test is a drop-in replacement for a standard layer — a different basis, kernel, activation family or transform — and the source claims the replacement is both more accurate and cheaper. Covers giving every alternative module a cell in the accuracy column and in the cost column, fixing one matching convention across both, and dividing the runtime by the invariant already sitting in your own results file before you publish a contradiction of the source's ratio.
+description: Use at study design, through experimentation and again at analysis when the method under test is a drop-in replacement for a standard layer — a different basis, kernel, activation family or transform — and the source claims the replacement is both more accurate and cheaper. Covers giving every alternative module a cell in the accuracy column and in the cost column, fixing one matching convention across both, and dividing the runtime by the invariant already sitting in your own results file before you publish a contradiction of the source's ratio.
 applies_when: Fourier-based Kolmogorov|replacing conventional MLP-based transformations
 stages: 03_study_design, 05_experimentation, 06_analysis
 ---
@@ -85,18 +85,21 @@ Measured on Chemistry_000 of ResearchClawBench, scored with gpt-5.1 over three
 draws. The criterion covering the basis comparison (weight 0.35) scored 48.3 for
 the run under study against 58.7 for bare Claude Code on the identical brief.
 
-Reading that run's artifacts: `outputs/results/runtime_by_basis.json` is the only
-results file in which the B-spline arm appears at all — it was timed and never
-scored, so the alternative basis has no accuracy cell anywhere in the run, and the
-third basis the source compares was named in a comment in
-`outputs/notes/build_hypothesis_manifest.py` and appears zero times in the report.
-The same JSON reports Fourier/MLP seconds ratios of 2.1168, 3.7198 and 3.8333
-against the authors' own deposited 1.0094, 1.0086 and 1.0615, and the report calls
-the authors' caption wrong on that basis. The parameter counts sit in the same
-file: 43489/21889, 53793/13569 and 70370/17762. Dividing the seconds ratio by the
-parameter ratio gives 1.0654, 0.9383 and 0.9676 — the deposited numbers, to within
-a few per cent. The contradiction was a capacity difference the run had already
-measured, in the file it was quoting from. The B-spline leg survives the same
-division (0.286, 0.281, 0.279 against a deposited 0.417-0.467), which is what a
-division does: it relocates the finding rather than deleting it. That arm was also
-timed at K=5 against Fourier at K=1.
+Reading that run's artifacts: of the eleven files in `outputs/results/`,
+`runtime_by_basis.json` is the only one the B-spline arm appears in at all — it was
+timed and never scored, so the alternative basis has no accuracy cell anywhere in
+the run, and it was timed at K=5 against the proposed basis at K=1. The third basis
+the source compares is named twice in the run's own note scripts, once in a comment
+and once inside a string, and zero times in the report.
+
+That same JSON reports Fourier/MLP seconds ratios of 2.1168, 3.7198 and 3.8333
+beside the authors' own deposited 1.0094, 1.0086 and 1.0615 — high by 110, 269 and
+261 per cent. The report prints both, concludes that the source's caption is
+contradicted by the source's own deposited data, and disposes of its own factor of
+two-to-four in one clause about parameter counts. Those parameter counts were in
+the same file: 43489/21889, 53793/13569 and 70370/17762. Dividing the seconds ratio
+by the parameter ratio gives 1.0654, 0.9383 and 0.9676 — within nine per cent of
+the deposited values rather than two to four times them. The clause was a division
+the run was one line from publishing. The B-spline leg survives that division
+(0.286, 0.281, 0.279 against a deposited 0.417-0.467), which is what a division
+does: it relocates the finding rather than deleting it.

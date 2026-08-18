@@ -1,8 +1,8 @@
 ---
 name: chemistry-a-cut-variant-takes-its-analyses-with-it
-description: Use at study design and again at every descope decision when the source's method is a family — the same module dropped into two or more backbones, or one architecture published in several named variants — and you are about to run only one of them. Covers listing which of the source's downstream analyses were produced from which variant before any of them is cut, shrinking a variant rather than deleting it, and what a saliency map, case study or ablation computed on the surviving variant is and is not evidence for.
+description: Use at literature survey, at study design, at every descope decision and again at writing, when the source's method is a family — the same module dropped into two or more backbones, or one architecture published in several named variants — and you are about to run only one of them. Covers listing which of the source's downstream analyses were produced from which variant before any of them is cut, shrinking a variant rather than deleting it, and what a saliency map, case study or ablation computed on the surviving variant is and is not evidence for.
 applies_when: Kolmogorov.{0,3}Arnold Graph Neural Network|KA-GNN
-stages: 03_study_design, 05_experimentation, 07_writing
+stages: 01_literature_survey, 03_study_design, 05_experimentation, 07_writing
 ---
 
 # An analysis inherits the model it was run on
@@ -44,9 +44,10 @@ silence. `train-the-named-architecture` says cut seeds and substrates before you
 cut the model; this is the same rule inside a method that is plural — cut the
 *size* of a variant, not the variant.
 
-Measuring that a variant costs thirteen times the other one is a cost measurement.
-Keep it, report it in the cost section, and let it justify the shrink. It is not a
-result about that variant, and it does not entitle the arms table to a row.
+Measuring that a variant costs several times what the one you kept costs is a cost
+measurement. Keep it, report it in the cost section, and let it justify the shrink.
+It is not a result about that variant, and it does not entitle the arms table to a
+row.
 
 ## If you must substitute, say which model you are showing
 
@@ -72,11 +73,12 @@ interpretability names the attention one; the run under study scored 38.0 on it
 against 55.0 for bare Claude Code on the identical brief, and 27.3 against 30.0 on
 the benchmark-table criterion that names both backbones.
 
-Its artifacts: no arm whose name contains `gat` exists anywhere under
-`outputs/campaign/` or `outputs/results/`. The attention variant appears in the
-run exactly once, as `outputs/notes/convergence_and_gat_probe.json` — 560,180
-parameters, 3.332 s per training epoch — a profile taken and then used to justify
-the cut. The saliency analysis that answers the interpretability criterion was
+Its artifacts: `outputs/campaign/` holds 63 files and `outputs/results/` eleven,
+and the attention variant has a result in none of them. What it does have is a
+`gat` hyper-parameter block in each of the three per-dataset `__meta.json` files —
+planned, never run — and one profile,
+`outputs/notes/convergence_and_gat_probe.json`, 560,180 parameters and 3.332 s per
+training epoch, taken and then used to justify the cut. The saliency analysis that answers the interpretability criterion was
 therefore computed from the convolutional variant, against a published map drawn
 from the attention one, and the report says in its limitations that the attention
 variant's entry in the legend of the main results figure is empty. That figure was

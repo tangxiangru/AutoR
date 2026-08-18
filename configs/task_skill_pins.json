@@ -12,7 +12,16 @@
       "pins": 12
     },
     "Chemistry_000": {
-      "pins": 10
+      "autor": 36.82,
+      "control": 45.03,
+      "net": -8.22,
+      "recoverable": 8.22,
+      "headroom": 63.18,
+      "new_to_this_run": [
+        "information-fill-the-whole-results-grid"
+      ],
+      "pins": 10,
+      "why_the_three_added_here": "Weighted (control - autor) per criterion, from _score_gpt51.json in both workspaces, three draws, gpt-5.1: image/benchmark table w=0.45 loses 1.20, text/basis comparison w=0.35 loses 3.62, text/interpretability w=0.20 loses 3.40. The largest single loss had no pin aimed at it -- five of the seven incumbents address the 1.20 criterion and two address the 3.40 -- so the three added take the two criteria carrying 7.02 of the 8.22. Pinning them rather than leaving them on applies_when costs nothing: all three already select this task and nothing else, and they name stages, so the announcement count over the eight stage prompts is 32 either way and the pinned rendering is 1230 characters shorter because it collapses two banners into one."
     },
     "Chemistry_001": {
       "pins": 10
