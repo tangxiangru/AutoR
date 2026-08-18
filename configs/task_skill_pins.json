@@ -75,7 +75,18 @@
       "pins": 10
     },
     "Physics_000": {
-      "pins": 3
+      "pins": 5,
+      "autor": 30.4,
+      "control": 50.67,
+      "net": -20.27,
+      "recoverable": 20.27,
+      "headroom": 69.6,
+      "new_to_this_run": [],
+      "per_criterion": "All three criteria are type=image and all three lost. Growth experiments, weight 0.3: 3.33 against 36.00, 9.80 weighted, the largest single component. Optimal-mismatch formula, weight 0.4: 37.00 against 49.67, 5.07. Lattice paths and magic numbers, weight 0.3: 48.67 against 66.67, 5.40, though the comparator's three draws there spread 55-80, so some of that one is judge variance rather than craft.",
+      "what_the_two_new_pins_cost": "Nothing, measured. Both are task-scoped with an `applies_when` this brief already matches, so the shape channel was announcing them at exactly the stages they name; the pin moves them from one block to the other. Announcements summed over the seven stage prompts: 13 with no pins at all, 22 with the three incumbents alone, 22 with those three plus these two. The stage-routed budget rule in `_maximum` is what makes that free, and the pin is worth taking anyway because the pinned block's heading is a claim about this identifier while the shape block's is a claim about task shape -- and because on this brief 05_experimentation has no shape-matched skill at all, so all three of the announcements it gets are pins.",
+      "the_two_new_ones": "physics-a-forced-outcome-is-still-a-published-result takes the 9.80 -- the judge's stated reason for the 3.33 is that the images do not show the named growth phenomena, and the run had simulated one of them and never labelled it. physics-the-anomaly-behind-the-miss-is-a-result takes the 5.07 and the ceiling on the 5.40: the run's own mechanism reached the report only as an error attribution.",
+      "why_no_incumbent_was_displaced": "It was tried and it is not a demotion, it is a deletion. All three incumbents are general skills -- no field prefix, no `applies_when` -- and this entry is the only thing that names them anywhere in the repo: `tests/test_a_skill_is_named_where_it_is_needed.py::test_every_general_skill_is_named_by_a_prompt_that_runs` fails on a-supplied-parameter-file-is-a-list-of-questions and the-process-deliverable-is-the-labelled-state-at-every-step the moment they leave this list. So `applies_when` is not a fallback for them, and the choice was never between two registers. the-axis-carries-the-observable-not-the-verdict would have earned its slot regardless: the deposition figure's three panels are band occupancy, Clopper-Pearson intervals on the run's own frozen clauses and its enantiomer-label margin, and the mismatch figure spends a panel on residual magnitudes.",
+      "routed_not_pinned": "physics-a-known-answer-is-a-prior-not-a-contaminant, and not because it is weaker. Its loss -- three pre-known items withheld as contaminated, which the comparator published as its findings 1, 2 and 3 -- is cross-cutting and cannot be booked against one weighted criterion, so the pin block's heading would be overclaiming for it. And a pin could not raise its odds of being read: at 01_literature_survey and 02_hypothesis_generation, the two stages where its advice has to land, it is already the only skill this brief announces, one of one."
     },
     "Physics_001": {
       "pins": 3
@@ -368,6 +379,8 @@
   ],
   "Physics_000": [
     "a-supplied-parameter-file-is-a-list-of-questions",
+    "physics-a-forced-outcome-is-still-a-published-result",
+    "physics-the-anomaly-behind-the-miss-is-a-result",
     "the-process-deliverable-is-the-labelled-state-at-every-step",
     "the-axis-carries-the-observable-not-the-verdict"
   ],
