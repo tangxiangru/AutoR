@@ -235,11 +235,15 @@ names. The `_score.json` files were being rewritten by a scoring pass in flight.
 
 ## 5. Still open
 
-- **The three largest prompt blocks are still uncapped.** Approved memory and the handoff
-  context are arguments to `build_prompt` rather than channels, so `Channel.max_chars` does
-  not reach them — and at ~175 KB and ~123 KB at p90 they are larger than every channel put
-  together. The repair prompt still inlines whole stdout, stderr, original prompt, draft and
-  promoted file, while the same module caps stdout at 2000 characters for its *log* excerpt.
+- **Approved memory and the handoff context are still uncapped, and that is now a
+  decision.** They are arguments to `build_prompt` rather than channels, so
+  `Channel.max_chars` does not reach them, and at ~175 KB and ~123 KB at p90 they are
+  larger than every channel put together. But capping them would edit the *median* prompt
+  to solve something with no measured cost: over 13,980 attempts with both a prompt and an
+  outcome, failure rate by prompt size is 21.9% (0–100 KB), 16.3% (100–250 KB), 24.4%
+  (250–500 KB) — not monotone — and only **20 attempts in the whole archive (0.14%)** exceed
+  500 KB. Big is not, on this evidence, broken. Revisit if the telemetry from #279 shows a
+  channel or a block growing without bound on a live arm.
 - **The deliverables contract is still checked once, at the end.** #267 made it
   format-independent; it did not give the coverage artifact an earlier writer or a reviewer
   axis.
@@ -251,9 +255,44 @@ names. The `_score.json` files were being rewritten by a scoring pass in flight.
 
 ---
 
+### 5.1 The repair prompt, which was the one that *was* broken
+
+The same question asked of the recovery path gave the opposite answer, and it is in the
+record because the contrast is the point.
+
+Over 2,166 archived repair prompts: median **354 KB** against the attempt prompt's 156 KB
+— **1.84× its own attempt at the median, 6.55× at p90**, and **33.8% of repairs exceed
+500 KB where 0.14% of attempt prompts do**. The narrowest task in the system, *"overwrite
+this one markdown file, do not browse, do not continue the workflow"*, was being handed the
+largest prompt.
+
+Two blocks are all of it:
+
+| block | p50 | p90 | max |
+| --- | --- | --- | --- |
+| original prompt | 147,161 | 309,582 | 3,165,479 |
+| original stdout | 92,967 | 906,857 | 1,475,824 |
+| current draft | 16,584 | 36,461 | 95,942 |
+| current promoted file | 10 | 16,448 | 95,942 |
+| original stderr | 8 | 16 | 20,347 |
+
+And **nothing measurable is lost by clipping them**. Repair success over 2,157 recorded
+outcomes is flat across two orders of magnitude of prompt size — 98.1% below 150 KB, 100%
+at 150–300 KB, then 98.6%, 98.2%, 98.9% — so the 645 repairs that already got a small
+prompt are a control group that succeeds at the same rate as the ones given a megabyte.
+
+`REPAIR_PROMPT_EXCERPT_CHARS = 80_000` keeps the head, because `# Stage Instructions` is
+the first section and is what a rewrite needs; 80,000 is above that section's own p90.
+`REPAIR_STDOUT_EXCERPT_CHARS = 40_000` keeps the *tail*, because what matters is what the
+attempt ended up doing — the same reason `_write_attempt_state` records
+`stdout_text[-2000:]`. The draft, the promoted file and stderr stay whole; a ceiling on a
+median of 10 bytes is a mechanism with nothing to do.
+
+---
+
 ## 6. What this cost, and what it did not buy
 
-Ten merged changes plus one correction. Four are behaviour changes; the rest change what the
+Ten merged changes plus two corrections. Four are behaviour changes; the rest change what the
 record says. Every one carries a test that goes red without it.
 
 None has been measured on a run. The benchmark arms in flight during this work were pinned
