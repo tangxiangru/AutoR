@@ -58,6 +58,8 @@ from pathlib import Path
 from typing import Any
 
 from .approval_agent import extract_json_payload
+from .stage_cost import prior_digests, read_stage_cost_ledger
+from .supervisor import charged_attempts, longest_unchanged_run
 from .obligations import load_ledger
 from .preregistration import load_hypothesis_outcomes
 from .rubric import StageScore, format_score_for_prompt
@@ -717,6 +719,44 @@ def unfinished_business(paths: RunPaths, stage: StageSpec) -> str:
             lines.append(
                 f"- `{obligation.obligation_id}` (raised at {obligation.origin_stage}, "
                 f"deferred {obligation.deferrals}x): {truncate_text(obligation.text, max_chars=400)}"
+            )
+        lines.append("")
+
+    # What this node has already cost, and whether it cost it against one wall.
+    #
+    # The router is shown `Visits to <node>: N of M` and the backward moves already taken,
+    # and neither says what those visits were *spent on*. The cost ledger has carried the
+    # answer per visit since it existed -- `attempt_digests`, and the repeat structure over
+    # them -- and had no reader outside its own tests. A node that has refused eleven
+    # attempts across two visits, the last four of them for the same reason, is a
+    # different proposition from one that has refused eleven for eleven different reasons,
+    # and the move out of here is the decision that difference is about.
+    #
+    # A fact, not advice, like everything else in this block: it says what was spent and
+    # whether it repeated, and nothing about where to go. It is also deliberately not a
+    # rule -- ending a visit on a cross-visit repeat was tried in `RunSupervisor` and
+    # refused, because a revisit is entitled to its own attempts
+    # (`test_a_revisit_gets_the_whole_ceiling_and_not_one_attempt`).
+    rows = read_stage_cost_ledger(paths)
+    spent_here = [row for row in rows if str(row.get("stage") or "") == stage.slug]
+    charged = sum(charged_attempts(row) for row in spent_here)
+    if spent_here and charged:
+        digests = prior_digests(rows, stage.slug)
+        repeat = longest_unchanged_run(digests)
+        lines += [
+            f"**This stage has already charged {charged} attempt(s) over "
+            f"{len(spent_here)} closed visit(s).**",
+            "",
+        ]
+        if repeat > 1:
+            lines.append(
+                f"- {repeat} of them in a row failed for the same recorded reason, so that "
+                "much of the spend bought no change."
+            )
+        elif digests:
+            lines.append(
+                f"- {len(digests)} recorded failure(s), no two of them consecutive "
+                "repeats: the spend was against different objections each time."
             )
         lines.append("")
 

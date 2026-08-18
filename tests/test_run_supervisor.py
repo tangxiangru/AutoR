@@ -64,6 +64,7 @@ from unittest.mock import MagicMock
 from src.stage_cost import (
     OUTCOME_APPROVED,
     OUTCOME_AUTO_SKIPPED,
+    OUTCOME_ROLLED_BACK,
     REVIEWER_REFUSED,
     StageCostMeter,
     append_stage_cost_row,
@@ -513,6 +514,62 @@ class UnchangingFailureTests(unittest.TestCase):
             meter.note_polish_round(number)
         digests = [entry["digest"] for entry in meter.attempt_digests()]
         self.assertTrue(unchanging_failure(digests))
+
+
+class TheRepeatRuleDeliberatelyStopsAtTheVisitBoundaryTests(unittest.TestCase):
+    """Concatenating the closed rows' digests here was tried, and is refused.
+
+    The gap is real: `StageCostMeter.attempt_digests` stops at its own visit, so the rule
+    cannot see that the walk already fought this node over the same objection, and
+    `longest_unchanged_run`'s own docstring says it is "here for the closed rows" that no
+    caller passed it.
+
+    Acting on it here is what is refused. Feeding the prior visits in ends a revisit at
+    its first repeated attempt, and two tests in this file are this repository's decision
+    the other way -- `test_a_second_visit_to_an_exhausted_stage_still_buys_attempts` and
+    `test_a_revisit_gets_the_whole_ceiling_and_not_one_attempt`, whose docstring says one
+    attempt is a revisit that cannot work. Both go red on the concatenation; they are the
+    measurement, and this class is the note that stops the idea coming back.
+
+    The closed rows do get a reader: `src.router.unfinished_business` puts the repeat in
+    front of the party choosing the next move, where it costs no attempt.
+    """
+
+    def _closed_visit_refusing(self, paths, slug: str, digest: str, times: int) -> None:
+        stage = next(item for item in STAGES if item.slug == slug)
+        meter = StageCostMeter(stage)
+        for index in range(times):
+            meter.note_attempt()
+            meter.note_failure(index + 1, "validators_refused", digest)
+        meter.note_outcome(OUTCOME_ROLLED_BACK)
+        append_stage_cost_row(paths, meter.close())
+
+    def test_a_revisit_is_not_ended_by_what_the_last_visit_kept_hitting(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = fresh_paths(tmp)
+            self._closed_visit_refusing(
+                paths, "03_study_design", "same", STOP_AFTER_IDENTICAL_FAILURES + 2
+            )
+            stage = next(item for item in STAGES if item.slug == "03_study_design")
+            meter = StageCostMeter(stage)
+            meter.note_attempt()
+            meter.note_failure(1, "validators_refused", "same")
+            ruling = rule_on(a_supervisor(), paths, "03_study_design", meter=meter, attempt=2)
+            self.assertFalse(ruling.ends_the_visit)
+
+    def test_the_open_visit_reaching_the_threshold_still_ends_it(self) -> None:
+        """The control: stopping at the boundary is not the same as not stopping."""
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = fresh_paths(tmp)
+            stage = next(item for item in STAGES if item.slug == "03_study_design")
+            meter = StageCostMeter(stage)
+            for index in range(STOP_AFTER_IDENTICAL_FAILURES):
+                meter.note_attempt()
+                meter.note_failure(index + 1, "validators_refused", "same")
+            ruling = rule_on(a_supervisor(), paths, "03_study_design", meter=meter,
+                             attempt=STOP_AFTER_IDENTICAL_FAILURES + 1)
+            self.assertTrue(ruling.ends_the_visit)
+            self.assertEqual(ruling.rule, UNCHANGING_FAILURE)
 
 
 # ---------------------------------------------------------------------------

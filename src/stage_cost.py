@@ -708,6 +708,37 @@ def stage_cost_ledger_path(paths: RunPaths) -> Path:
     return paths.stage_cost_ledger
 
 
+def prior_digests(rows: Sequence[Mapping[str, Any]], stage_slug: str) -> list[str]:
+    """What earlier visits to *stage_slug* were spent on, oldest first.
+
+    :meth:`StageCostMeter.attempt_digests` answers this for the visit in progress and
+    stops at its own boundary, so nothing in the tree could say that a stage had already
+    been fought over, with the same objection, before the walk came back to it. The rows
+    have carried the answer since this module existed and had no reader outside the
+    tests.
+
+    Not for the supervisor's repeat rule. Feeding it these ends a revisit at its first
+    repeated attempt, and this repository has already decided the other way --
+    ``test_a_revisit_gets_the_whole_ceiling_and_not_one_attempt`` says in as many words
+    that one attempt is a revisit that cannot work. The reader is
+    :func:`src.router.unfinished_business`, which puts the fact in front of the party
+    choosing the next move instead of spending the visit on it.
+
+    The rows come off :func:`read_stage_cost_ledger`, which is written in the ``finally``
+    of a stage visit, so the open visit is never in here.
+    """
+
+    found: list[str] = []
+    for row in rows:
+        if str(row.get("stage") or "") != stage_slug:
+            continue
+        entries = row.get("attempt_digests")
+        if isinstance(entries, Sequence) and not isinstance(entries, (str, bytes)):
+            found.extend([str(e.get("digest") or "") for e in entries
+                         if isinstance(e, Mapping) and e.get("digest")])
+    return found
+
+
 def read_stage_cost_ledger(paths: RunPaths) -> list[dict[str, Any]]:
     """The rows written so far, oldest first. ``[]`` when there is nothing readable.
 

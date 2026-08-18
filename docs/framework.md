@@ -1073,9 +1073,13 @@ them — the ratchet polishes every stage towards 1.000 and 71% of routing decis
 against a stage reporting exactly that, with the rubric's "where the points are" list empty. The
 grounds were on disk and unread: 30% of hypotheses came back `inconclusive` or `not_tested` and 84%
 of runs held at least one, and the prompt's own worked example of a good reason is "H2 is
-inconclusive because only one seed was run". `unfinished_business` now puts the unsettled verdicts
-and the open obligations in front of the router, and a saturated total is labelled as the ceiling it
-is rather than left to read as a verdict on the research. Whether that moves the departure rate is
+inconclusive because only one seed was run". `unfinished_business` now puts the unsettled verdicts,
+the open obligations and **what this node has already charged** in front of the router, and a
+saturated total is labelled as the ceiling it is rather than left to read as a verdict on the
+research. The last of those is the cost ledger's first reader outside its own tests: the router was
+shown `Visits to <node>: N of M` and the backward moves already taken, and neither says what those
+visits were *spent on* — a node that refused eleven attempts against one wall is a different
+proposition from one that refused eleven against eleven different objections. Whether that moves the departure rate is
 unmeasured — it changes what the router is shown, not what it is told to choose, and a prompt that
 instructed it to depart more often would be obeyed on the runs that had nothing to go back for.
 
