@@ -658,10 +658,11 @@ the same tasks today and generalise to nothing.
    task — it is a record that this exact identifier already ran, already scored, and lost criteria
    whose subject is those skills, so it is the one routing input that cannot be derived from the
    task statement and does not generalise past the name it carries. Twenty-five ResearchClawBench
-   tasks are pinned today, 244 pins between them — median ten per task, at most fifteen, and each
-   pin routed to the stages its own `SKILL.md` names. Twenty-five of those pins are skills the two
-   filters would have withheld: twenty a field skill whose content applies outside its own field,
-   five a skill whose `applies_when` does not match that brief. **A run that matches an entry writes `skill_pins` into its `run_config.json` and a
+   tasks are pinned today, 244 pins between them — median ten per task, at most fifteen, and every
+   pin routed to the stages its own `SKILL.md` names, so the listing cost falls on those stage
+   prompts and not on all of them. Twenty-five of the 244 are pins the two filters would have
+   withheld: twenty a field skill whose content applies outside its own field, five a skill whose
+   `applies_when` does not match that brief. **A run that matches an entry writes `skill_pins` into its `run_config.json` and a
    `skills pinned_by_task_id` line into its log**, because a pinned arm and an unpinned arm are two
    configurations and a score from one is not a score from the other.
 
