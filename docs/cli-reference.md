@@ -896,7 +896,7 @@ Those four options are the whole flag surface.
 | Flag | Default | Description |
 | --- | --- | --- |
 | `--json` | off | Emit `{query, model, backend, answer, grounded, citable_source_count, results[]}` instead of markdown, each result being `{title, url, citable, supported_claims[]}`. |
-| `--model MODEL` | `gemini-2.5-flash` (API key) / `gemini-3.6-flash` (Vertex) | Overridable with `AUTOR_WEB_SEARCH_MODEL` or `GEMINI_MODEL`. |
+| `--model MODEL` | `gemini-2.5-flash` (API key) / `gemini-3.7-flash` (Vertex) | Overridable with `AUTOR_WEB_SEARCH_MODEL` or `GEMINI_MODEL`. |
 | `--max-results N` | `10` | Maximum number of grounded sources to report. |
 | `--no-resolve-urls` | off | Leave Vertex grounding redirects unresolved. Faster, but the source URLs are opaque stubs that cannot be cited. |
 
