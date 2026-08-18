@@ -146,9 +146,9 @@ that is the part that works.
 **Landed**, as `src/review_custody.py`, with two corrections the design did not survive
 contact with.
 
-*The census is over content, not modification time.* Replayed over 138 archived reviewer
+*The census is over content, not modification time.* Replayed over 152 archived reviewer
 episodes (`tools/review_custody_replay.py`, population pinned by name), an mtime census
-fires on **138 of 138** with no exclusion list and **4 of 138** with one — and all four
+fires on **152 of 152** with no exclusion list and **4 of 152** with one — and all four
 are the same behaviour: the reviewer re-running the doer's producer scripts in place to
 check they reproduce. Both of the two approvals among them say so in their own recorded
 reason. A gate that fires hardest on the most rigorous reviewer is the wrong gate, so a
@@ -161,7 +161,7 @@ census would also have caught is not answerable from disk. That is what the ledg
 for.
 
 What it still cannot see is worth stating, because the reading that produced this
-mechanism also produced the counterexample: in the same 138 episodes there are three
+mechanism also produced the counterexample: in the same 152 episodes there are three
 tool-level writes, and two of them go to a `~/.claude/projects/.../memory/` directory
 far outside any run root. The census claims *"the reviewer changed nothing it was
 judging"*, not *"the reviewer changed nothing"*.
@@ -343,9 +343,14 @@ now would be a behaviour change with an unmeasured cost.
 
 Measured while doing it, and worth recording because it is the number the whole section
 is about: over 197 archived stage prompts, `# Stage Instructions` (the rendered channel
-set) has a median of 25.6 KB and a p90 of 78.6 KB, `# Approved Memory` a p90 of 132 KB
-and a maximum of 177 KB, `# Stage Handoff Context` a p90 of 99 KB. The prompt they sit in
-runs from a median of 21 KB at Stage 01 to 277 KB at Stage 07, with a maximum of 1.79 MB.
+set) has a median of 25.6 KB and a p90 of 78.6 KB, `# Approved Memory` a p90 of ~175 KB
+and a maximum of 301 KB, `# Stage Handoff Context` a p90 of ~123 KB. The prompt they sit in
+runs from a median of 20 KB at Stage 01 to 277 KB at Stage 07, with a maximum of 3.17 MB.
+
+Those channel-set figures are the ones first published and they were taken from a slice of
+a live archive; the full-archive table, and the six budgets that turned out to clip because
+of that sample, are in [what-the-comparison-changed.md](what-the-comparison-changed.md) §2.2
+and §3.1.
 
 **Still open:** approved memory and the handoff context are not channels — they are
 arguments to `build_prompt` — so neither is covered by this, and they are two of the
@@ -398,8 +403,9 @@ at `stage.number >= 7` whatever the output format, and its locator half reads th
 actual deliverable — `report.md`, or the `.tex` sources under `workspace/writing/` — so
 it no longer degrades to a skip with no counter when there is no markdown report.
 
-Blast radius, measured before landing: **335 archived run configs, every one of them
-`markdown`**. So no archived run changes verdict, which is the honest figure and cuts
+Blast radius, measured before landing: **every archived run config is `markdown`,
+zero latex** -- 335 of them when the branch was written, 437 as of 2026-08-18; the
+population grew and the finding did not. So no archived run changes verdict, which is the honest figure and cuts
 both ways — the gap never cost an observed run, and the fix has never been exercised by
 one either. It is a correctness change about coupling, not a bug with a measured price.
 
@@ -507,10 +513,9 @@ sentinel, and both prompts must carry all five — a parameter one builder accep
 drops is the same defect under another name.
 
 For (3): the goal is inlined on the retry path rather than pointed at, bounded by
-`MAX_RETRY_GOAL_CHARS` — measured at a 13.6 KB median and a 16.7 KB maximum over 197
-archived prompts, so the ceiling clips nothing the archive contains. Approved memory
-stays a pointer, and that is the trade rather than an omission: its p90 over the same
-archive is 132 KB. The false premise is gone by moving the claim to whoever can make it.
+`MAX_RETRY_GOAL_CHARS` — a 13.6 KB median and a 16.7 KB maximum over the archive, so the
+ceiling clips nothing it contains. Approved memory stays a pointer, and that is the trade
+rather than an omission: its p90 over the same archive is ~175 KB. The false premise is gone by moving the claim to whoever can make it.
 The prompt now speaks about the *work* — there is a draft and the job is to improve it,
 which is true on both paths — and the operator writes a `_restart.prompt.md` carrying the
 one sentence only it can say, that the earlier turns are gone. Whether a session was

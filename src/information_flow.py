@@ -119,10 +119,45 @@ class Channel:
     #: every channel either declares a budget or is named in ``UNBOUNDED_BY_CONSTRUCTION``
     #: with the reason it cannot grow, so the exemption list cannot grow by assertion.
     #:
-    #: What the numbers are measured against: over 197 archived stage prompts the whole
-    #: rendered channel set -- everything under ``# Stage Instructions`` after the static
-    #: template -- has a median of 25.6 KB and a p90 of 78.6 KB, and the prompt it sits
-    #: in runs to a median of 277 KB by Stage 07 with a maximum of 1.79 MB.
+    #: What the numbers are measured against, and the mistake the first version made.
+    #:
+    #: These ceilings were first set from a 40-run-root sample of an archive that is still
+    #: being written to, and six of the sixteen came out **below** the channel's real
+    #: maximum -- two of them below its *median*, so `decision_ledger` was clipped on 53.6%
+    #: of renders and `writing_manifest` on 72.0%. A budget that bites the median render is
+    #: not headroom, it is a silent edit to every prompt. The table below is the full
+    #: archive: 13,671 attempt prompts (review, panel, repair and route excluded) under
+    #: ``/rmeng_data/robtang/rcb_runs`` as of 2026-08-18, with each channel's body extracted
+    #: by its own ``heading`` -- the same quantity ``_render`` compares.
+    #:
+    #: ====================  =======  =======  =======  =========  =======
+    #: channel                   p50      p90      p99        max   budget
+    #: ====================  =======  =======  =======  =========  =======
+    #: decision_ledger         25,476   48,703   68,838     91,431  120,000
+    #: hypotheses              22,914   31,362   45,480     79,284   96,000
+    #: preregistration         12,078   18,431   27,908     71,386   96,000
+    #: report_plan             13,897   19,802   25,792     28,291   30,000
+    #: validity_findings       16,046   20,375   23,526     26,460   32,000
+    #: hypothesis_verdicts     13,836   19,244   23,427     25,198   32,000
+    #: research_rounds          4,880    7,005   14,842     19,614   24,000
+    #: experimental_protocol    4,877    6,618    8,249      9,558   12,000
+    #: writing_manifest        10,431   20,195  138,788  2,774,270  160,000
+    #: artifact_index           1,820    2,281    2,718      4,552    6,000
+    #: experiment_manifest      1,492    1,679    1,823      1,896    6,000
+    #: intake_resources         1,430    1,517    1,620      1,620    4,000
+    #: task_shaped_skills       2,485    4,592    6,698      7,411   12,000
+    #: ====================  =======  =======  =======  =========  =======
+    #:
+    #: Every budget above sits over its channel's observed maximum **except**
+    #: ``writing_manifest``, and that one is deliberate: its maximum is 2.77 MB against a
+    #: p99 of 139 KB, so a single render is two hundred times the ninety-ninth percentile.
+    #: A ceiling above *that* would be no ceiling at all. 160,000 keeps 99% intact and
+    #: clips the outlier, which is the one case a budget is actually for.
+    #:
+    #: Four channels -- ``project_context``, ``idea_pool``, ``researcher_profile`` and the
+    #: unbudgeted ``settled_reasoning`` -- render nothing anywhere in this archive, so their
+    #: ceilings are stated guesses from the shape of what the builder emits and are
+    #: untested. Said here rather than left for a reader to assume all sixteen are measured.
     max_chars: int | None = None
 
     def serves(self, stage: StageSpec) -> bool:
@@ -591,7 +626,7 @@ CHANNELS: tuple[Channel, ...] = (
     ),
     Channel(
         key="writing_manifest",
-        max_chars=8_000,
+        max_chars=160_000,
         heading="## Writing Manifest",
         produced_by=None,
         consumed_by=frozenset({"07_writing"}),
@@ -614,7 +649,7 @@ CHANNELS: tuple[Channel, ...] = (
     ),
     Channel(
         key="decision_ledger",
-        max_chars=24_000,
+        max_chars=120_000,
         heading="# Decision Ledger (from prior stages)",
         produced_by="01_literature_survey",
         consumed_by=_from("02_hypothesis_generation"),
@@ -628,7 +663,7 @@ CHANNELS: tuple[Channel, ...] = (
     ),
     Channel(
         key="hypotheses",
-        max_chars=40_000,
+        max_chars=96_000,
         heading="# Hypothesis Context (from Stage 02)",
         produced_by="02_hypothesis_generation",
         consumed_by=frozenset({"03_study_design", "04_implementation"}),
@@ -648,7 +683,7 @@ CHANNELS: tuple[Channel, ...] = (
     ),
     Channel(
         key="preregistration",
-        max_chars=40_000,
+        max_chars=96_000,
         heading="# Preregistered Hypotheses (frozen — not editable)",
         produced_by="04_implementation",
         consumed_by=_from("05_experimentation"),
@@ -775,7 +810,7 @@ CHANNELS: tuple[Channel, ...] = (
     ),
     Channel(
         key="validity_findings",
-        max_chars=24_000,
+        max_chars=32_000,
         heading="# Adversarial Validity Findings (each must be answered)",
         produced_by="05_experimentation",
         consumed_by=frozenset({"06_analysis", "07_writing"}),
@@ -784,7 +819,7 @@ CHANNELS: tuple[Channel, ...] = (
     ),
     Channel(
         key="hypothesis_verdicts",
-        max_chars=24_000,
+        max_chars=32_000,
         heading="# Hypothesis Verdicts",
         produced_by="06_analysis",
         consumed_by=frozenset({"07_writing", "08_dissemination"}),
