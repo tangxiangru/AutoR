@@ -52,6 +52,12 @@ import sys
 import time
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from src.firebench import load_credentials  # noqa: E402
+
 #: Where the benchmark's scoring dependencies live. A virtualenv rather than the system
 #: interpreter because ``refchecker`` pins ``torch>=2,<3`` and pulls in spacy and
 #: transformers; installing that into whatever python happens to be first on PATH is how
@@ -202,6 +208,10 @@ def main(argv: list[str] | None = None) -> int:
     if not driver.is_file():
         raise SystemExit(f"No driver at {driver}")
     python = find_interpreter(args.python or None)
+    # From the key file, into this process's environment, and inherited by every draw's
+    # subprocess. Not copied into the checkout: the judge needs the key, the repository
+    # does not, and FIRE-Bench's `.env` is a tracked file.
+    load_credentials()
     out_dir = Path(args.out_dir).expanduser().resolve() if args.out_dir else log_file.parent / "_score"
     out_dir.mkdir(parents=True, exist_ok=True)
 

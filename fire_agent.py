@@ -48,6 +48,15 @@ produces is not a measurement of research ability. ``--web-search off`` is the d
 here for the same reason, and ``_meta.json`` records the denial per seat so the claim is
 checkable rather than asserted.
 
+Denial takes **two** levers, because they close different sets. ``--web-search off``
+declines to seat AutoR's own Gemini-backed search server and names ``WebSearch`` and
+``WebFetch`` to the CLI as denied -- tools AutoR supplies or knows by name. Anything the
+operator's user has configured in ``~/.claude.json`` is outside that by design, and on a
+first real trial one such server was called nine times across two cells. So this front
+end also passes ``--strict-mcp-config`` whenever browsing is off, which confines the agent
+to the run's own servers. Neither lever subsumes the other, and ``Bash`` -- with ``curl``
+inside it -- is under neither, so "did not browse" remains a question for the transcript.
+
 **What the exit code means.** Not "the pipeline said it finished". Six clauses over the
 same dictionary that is written to ``_meta.json`` -- :data:`src.firebench.FIRE_EXIT_CLAUSES`
 -- so any holder of the artifact can recompute the verdict. A conclusion has to exist, be
@@ -103,6 +112,7 @@ from src.firebench import (  # noqa: E402
     mirror_run_artifacts,
     fire_runs_dir_for,
     fire_workspace_name,
+    load_credentials,
     load_task,
     log_path_for,
     preview_task_inputs,
@@ -257,6 +267,7 @@ def create_operator(
     ui: TerminalUI,
     stage_timeout: int,
     disallowed_tools: Sequence[str],
+    strict_mcp: bool = False,
 ) -> Any:
     if backend == "codex":
         return CodexOperator(
@@ -274,6 +285,14 @@ def create_operator(
         stage_timeout=stage_timeout,
         web_search_mcp=False,
         disallowed_tools=disallowed_tools,
+        # Only this run's servers -- a *second* lever, not a fix to the first.
+        # `--web-search off` declines to seat AutoR's Gemini search server and denies the
+        # two browsing tools it knows by name; a third-party MCP server configured in the
+        # operator's own `~/.claude.json` is outside both, and measured on a real trial
+        # `mcp__ai4ai-web-search__web_search` was called nine times across two cells. On a
+        # benchmark whose every task is the rediscovery of a published finding, that is
+        # the answer key, so this front end closes the set rather than the names.
+        strict_mcp=strict_mcp,
     )
 
 
@@ -333,6 +352,12 @@ def build_manager(
         unattended=True,
         disallowed_tools=disallowed_tools,
     )
+    # The reviewer is a seat like any other and reads the same task statement. Confining
+    # the executor and leaving the reviewer able to search would move the leak one seat
+    # over, which is the shape of leak that gets recorded as "denied".
+    inner = getattr(reviewer, "operator", None)
+    if inner is not None and hasattr(inner, "strict_mcp"):
+        inner.strict_mcp = args.web_search == "off"
     return ResearchManager(
         project_root=REPO_ROOT,
         runs_dir=fire_runs_dir_for(workspace),
@@ -466,6 +491,17 @@ def run(args: argparse.Namespace) -> FireRunResult:
     else:
         ensure_fire_workspace(workspace)
         staged = stage_task_inputs(task, workspace, utils_src=bench_root / "utils")
+        # Measured on a real trial before this line existed: ten of twelve AutoR cells
+        # logged `Missing credentials` on their first OpenAI call, while the stock arm --
+        # which calls `load_dotenv()` and writes a sandbox `.env` -- could reach gpt-5.x.
+        # The two arms therefore had different model catalogues, and the goal contract
+        # told both of them the larger one: a false statement in the prompt and an
+        # undeclared asymmetry in the comparison.
+        #
+        # Fixed by *exporting*, not by copying. The agent's experiment code inherits this
+        # process's environment, so one read of the key file reaches every subprocess and
+        # leaves no copy of the secret behind in 105 sandboxes.
+        staged["credentials"] = load_credentials()
 
     model_catalog = _probe_model_catalog(bench_root)
     goal = build_fire_goal(
@@ -526,6 +562,7 @@ def run(args: argparse.Namespace) -> FireRunResult:
         ui=ui,
         stage_timeout=int(deadline.remaining_before_reserve) if not pipeline else stage_timeout,
         disallowed_tools=disallowed_tools,
+        strict_mcp=args.web_search == "off",
     )
 
     watcher = ConclusionWatcher(workspace=workspace, log_file=log_file)

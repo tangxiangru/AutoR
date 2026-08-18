@@ -43,6 +43,7 @@ class ClaudeOperator:
         stage_timeout: int = 14400,
         web_search_mcp: bool = False,
         disallowed_tools: Sequence[str] | None = None,
+        strict_mcp: bool = False,
     ) -> None:
         self.command = command
         self.model = model
@@ -61,6 +62,24 @@ class ClaudeOperator:
         # `disallowed_tools_for` is the only thing that fills it today, for a run whose
         # protocol says it must not browse.
         self.disallowed_tools = tuple(disallowed_tools or ())
+        #: Confine the agent to *this run's* MCP servers, dropping whatever the user has
+        #: configured in `~/.claude.json`.
+        #:
+        #: Off by default, because on an ordinary run the user's own servers are not
+        #: AutoR's to remove.
+        #:
+        #: **This is a different axis from `--web-search off`, and neither covers the
+        #: other.** `--web-search off` does two things: it does not seat AutoR's own
+        #: Gemini-backed search server, and it names `WebSearch` and `WebFetch` to the CLI
+        #: as denied. Both are about tools AutoR either supplies or knows by name. A
+        #: third-party server the operator's user has configured is outside all of that,
+        #: by design -- and on a benchmark whose every task is the rediscovery of a
+        #: published finding, it is also the answer key. Measured on a FIRE-Bench trial
+        #: run with `--web-search off`: a user-level server `ai4ai-web-search` supplied
+        #: `mcp__ai4ai-web-search__web_search`, and two cells called it nine times. No
+        #: AutoR flag was wrong; there was no flag. A deny-list closes the names it
+        #: enumerates, and an allow-list is what closes the rest.
+        self.strict_mcp = bool(strict_mcp)
 
     def run_stage(
         self,
@@ -1627,9 +1646,12 @@ Original stderr:
             "--dangerously-skip-permissions",
         ]
         if mcp_config is not None:
-            # Not --strict-mcp-config: that would also drop whatever servers the user has
-            # configured for their own environment, which is not AutoR's call to make.
+            # `--strict-mcp-config` is opt-in (see `strict_mcp`): dropping the user's own
+            # servers is not AutoR's call to make on an ordinary run, and is exactly the
+            # call a no-browsing benchmark protocol has to make.
             command.extend(["--mcp-config", str(mcp_config)])
+            if self.strict_mcp:
+                command.append("--strict-mcp-config")
         if tools:
             command.extend(["--tools", tools])
         if disallowed_tools:

@@ -63,6 +63,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import time
@@ -237,6 +238,56 @@ class FireTask:
         return read_text(candidate).strip() if candidate.is_file() else ""
 
 
+#: Where the OpenAI-compatible key lives on this deployment. Outside any repository on
+#: purpose -- a default inside the tree is one ``git add -A`` away from a leak -- and the
+#: same file ``tools/score_fs_run.py`` reads for the FrontierScience judge.
+DEFAULT_KEY_FILE = Path.home() / "api.txt"
+
+
+def read_api_key(path: Path | None = None) -> str:
+    """The key, from a file that is never committed and never copied.
+
+    Tolerant about shape because the caller should never have to print the file to find
+    out what shape it is: a bare token, ``KEY=token`` and a quoted value all read the
+    same. Nothing here echoes the value.
+    """
+    path = path or DEFAULT_KEY_FILE
+    if not path.is_file():
+        return ""
+    raw = path.read_text(encoding="utf-8").strip()
+    if "=" in raw and not raw.startswith("sk-"):
+        raw = raw.split("=", 1)[1]
+    return raw.strip().strip("\"'")
+
+
+def load_credentials(*, key_file: Path | None = None, base_url: str = "") -> list[str]:
+    """Put the credentials in the environment, and put them nowhere else.
+
+    **Nothing is written to disk.** The first version of this wrote a ``.env`` into every
+    sandbox, copying the benchmark's own agents -- which is how they do it, and which
+    spreads one secret into as many files as there are cells. It is not needed: the
+    operator's subprocess inherits this process's environment, ``load_dotenv()`` does not
+    override an already-set variable, and ``utils/llm_inference.py`` reads
+    ``os.getenv("OPENAI_API_KEY")``. So exporting here reaches the agent's own experiment
+    code by inheritance, with no copy to clean up afterwards.
+
+    Returns the names that were populated, for the record. Never the values.
+    """
+    populated: list[str] = []
+    key = os.environ.get("OPENAI_API_KEY") or read_api_key(key_file)
+    if key:
+        os.environ["OPENAI_API_KEY"] = key
+        populated.append("OPENAI_API_KEY")
+    url = base_url or os.environ.get("OPENAI_BASE_URL", "")
+    if url:
+        os.environ["OPENAI_BASE_URL"] = url
+        populated.append("OPENAI_BASE_URL")
+    for name in ("ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "HF_TOKEN", "ANTHROPIC_VERTEX_PROJECT_ID"):
+        if os.environ.get(name):
+            populated.append(name)
+    return populated
+
+
 def bench_root_from(path: Path | str) -> Path:
     """Resolve a FIRE-Bench checkout, refusing anything that is not one.
 
@@ -317,14 +368,6 @@ def ensure_fire_workspace(workspace: Path) -> None:
     fire_runs_dir_for(workspace).mkdir(parents=True, exist_ok=True)
 
 
-#: Above this, ``data/`` is linked instead of copied. Two of the thirty-five verified
-#: tasks are over it -- ``lost_in_the_middle`` at 875 MB and ``questbench`` at 592 MB --
-#: and a paired trial that copies those per arm per repeat writes tens of gigabytes to
-#: say nothing new. Under it, copying is worth the disk: the copy is what makes "read
-#: only" true rather than merely asked for.
-LINK_DATA_ABOVE_BYTES = 200 * 1024 * 1024
-
-
 def _tree_bytes(root: Path) -> int:
     return sum(path.stat().st_size for path in root.rglob("*") if path.is_file())
 
@@ -358,12 +401,15 @@ def stage_task_inputs(task: FireTask, workspace: Path, *, utils_src: Path | None
     which means those twenty produce no log file whatsoever, while ``run_agent.py``, which
     never checks a return code, prints that the task "completed".
 
-    ``data/`` is copied rather than symlinked because the goal contract calls it read-only
-    and a symlink into the checkout turns an agent's stray ``open(..., "w")`` into an edit
-    of the benchmark. The copy *is* the read-only guarantee. Above
-    :data:`LINK_DATA_ABOVE_BYTES` that trade stops paying and the directory is linked;
-    ``_meta.json`` records which of the two happened, because "the data was read-only"
-    is then a claim about a different mechanism.
+    ``data/`` is **always copied, never symlinked, whatever the size.** An earlier version
+    linked it back into the checkout above 200 MB, to avoid copying ``lost_in_the_middle``
+    (875 MB) and ``questbench`` (592 MB) once per arm. That put the agent's data directory
+    one level below ``benchmark/papers/<task>/conclusion.txt`` -- the answer it is scored
+    against -- reachable as ``../conclusion.txt`` by a process running with
+    ``--dangerously-skip-permissions``, and it made "read-only" false in the other
+    direction too, since a stray write would have edited the benchmark. Neither of those
+    two tasks was in the pilot, so nothing fired; both are in the full split. Two
+    gigabytes of copies against 42 TB free is not a trade.
     """
     staged: dict[str, Any] = {
         "data": None,
@@ -378,17 +424,28 @@ def stage_task_inputs(task: FireTask, workspace: Path, *, utils_src: Path | None
                 destination.unlink()
             else:
                 shutil.rmtree(destination)
-        size = _tree_bytes(task.data_dir)
-        staged["data_bytes"] = size
-        if size > LINK_DATA_ABOVE_BYTES:
-            destination.symlink_to(task.data_dir.resolve(), target_is_directory=True)
-            staged["data_mode"] = "symlink"
-        else:
-            shutil.copytree(task.data_dir, destination)
-            staged["data_mode"] = "copy"
+        staged["data_bytes"] = _tree_bytes(task.data_dir)
+        shutil.copytree(task.data_dir, destination)
+        staged["data_mode"] = "copy"
         staged["data"] = sorted(
             str(path.relative_to(destination)) for path in destination.rglob("*") if path.is_file()
         )
+        # And again at the sandbox root, which is where all four of the benchmark's own
+        # agents put it: they call `copytree(<task>/data, sandbox)`, so a file the task
+        # ships as `data/qa_data/x.jsonl` is `qa_data/x.jsonl` to an official run. Several
+        # instruction sheets name their files by exactly that path. Staging only under
+        # `data/` made every such path a dead reference and made our arms a different
+        # environment from the stock arm they are compared against; staging only at the
+        # root loses the one directory the contract can call read-only. Both, then, and
+        # the goal names both.
+        for path in sorted(task.data_dir.rglob("*")):
+            if not path.is_file():
+                continue
+            mirrored = workspace / path.relative_to(task.data_dir)
+            mirrored.parent.mkdir(parents=True, exist_ok=True)
+            if not mirrored.exists():
+                shutil.copy2(path, mirrored)
+        staged["data_at_root"] = True
     if utils_src is not None and utils_src.is_dir():
         destination = workspace / "utils"
         if destination.exists():
@@ -442,12 +499,16 @@ def build_fire_goal(
         f"- `{resolved}/outputs/` — raw results, tables, intermediate data, logs of your own runs.",
         f"- `{resolved}/{CONCLUSION_FILENAME}` — **the scored deliverable.** See below.",
     ]
-    if staged.get("data"):
-        listed = staged["data"][:20]
-        more = "" if len(staged["data"]) <= 20 else f"\n  … and {len(staged['data']) - 20} more file(s)."
+    real_data = [name for name in (staged.get("data") or []) if Path(name).name != ".gitkeep"]
+    if real_data:
+        listed = real_data[:20]
+        more = "" if len(real_data) <= 20 else f"\n  … and {len(real_data) - 20} more file(s)."
         resources_lines.insert(
             0,
-            f"- `{resolved}/data/` — the data this task ships, **read-only**:\n"
+            f"- `{resolved}/data/` — the data this task ships, **read-only**. The same files "
+            f"are also at the sandbox root, which is where the benchmark's own agents put "
+            f"them, so a path the task statement writes as `qa_data/x.jsonl` resolves as "
+            f"well as `data/qa_data/x.jsonl`:\n"
             + "\n".join(f"  - `data/{name}`" for name in listed)
             + more,
         )

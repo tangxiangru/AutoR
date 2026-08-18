@@ -404,7 +404,15 @@ class StagingTests(unittest.TestCase):
             self.assertIsNone(staged["data"])
             self.assertTrue((workspace / "code").is_dir())
 
-    def test_data_is_copied_not_linked_under_the_threshold(self) -> None:
+    def test_data_is_always_copied_never_linked(self) -> None:
+        """A symlink puts the answer key one level above the agent's data directory.
+
+        The first version linked instead of copying above 200 MB, which on the two tasks
+        over that size would have made ``../conclusion.txt`` -- the text the run is scored
+        against -- reachable from inside the sandbox, to a process running with
+        ``--dangerously-skip-permissions``. Neither task was in the pilot; both are in the
+        full split.
+        """
         with tempfile.TemporaryDirectory() as tmp:
             task = _task(Path(tmp), with_data=True)
             workspace = Path(tmp) / "ws"
@@ -416,6 +424,39 @@ class StagingTests(unittest.TestCase):
             self.assertEqual(
                 (task.root / "data" / "rows.jsonl").read_text(encoding="utf-8"), '{"a": 1}\n'
             )
+
+    def test_data_is_also_at_the_sandbox_root_where_upstream_puts_it(self) -> None:
+        """All four shipped agents do ``copytree(<task>/data, sandbox)``.
+
+        So a file the task ships as ``data/qa_data/x.jsonl`` is ``qa_data/x.jsonl`` to an
+        official run, and several instruction sheets name their files by exactly that
+        path. Staging only under ``data/`` makes every such path a dead reference, and
+        makes our arms a different environment from the stock arm they are compared to.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            task = _task(Path(tmp), with_data=True)
+            workspace = Path(tmp) / "ws"
+            ensure_fire_workspace(workspace)
+            stage_task_inputs(task, workspace)
+            self.assertTrue((workspace / "rows.jsonl").is_file(), "upstream's layout")
+            self.assertTrue((workspace / "data" / "rows.jsonl").is_file(), "ours")
+
+    def test_a_gitkeep_only_data_dir_is_not_described_as_shipping_data(self) -> None:
+        """Two verified tasks ship a ``data/`` holding one zero-byte ``.gitkeep``.
+
+        The contract used to tell those runs their data was staged, when the correct
+        branch -- "you generate everything you measure, that is the task" -- was the one
+        they needed.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            task = _task(Path(tmp), with_data=False)
+            (task.root / "data").mkdir(parents=True, exist_ok=True)
+            (task.root / "data" / ".gitkeep").write_text("", encoding="utf-8")
+            workspace = Path(tmp) / "ws"
+            ensure_fire_workspace(workspace)
+            staged = stage_task_inputs(task, workspace)
+            goal = build_fire_goal(task, workspace, staged=staged)
+            self.assertIn("ships no data", goal)
 
     def test_staging_twice_does_not_accumulate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
