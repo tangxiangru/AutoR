@@ -326,6 +326,33 @@ an inline marker in the prompt string), and any blanket swap of tail-drop for he
 since two callers already implement the head-drop variant deliberately and one argues for
 tail-drop on a goal.
 
+**Landed, the structural half and the telemetry.** `Channel` now carries `max_chars`,
+`_render` enforces it and names the dropped characters in the block, and a channel that
+declares no budget has to be in `UNBOUNDED_BY_CONSTRUCTION` with the structure that
+bounds it — checked at import, raising, the way `Edge.__post_init__` refuses an
+unregistered guard, so the rule is the program's and not only a test's. The sizes reach
+the run log per channel, with a mark on any channel at its ceiling.
+
+The ceilings are measured rather than picked: every channel was rendered against 40
+archived run roots, and each budget sits above that channel's observed maximum
+(`hypotheses` 27,713 → 40,000; `decision_ledger` 15,087 → 24,000; and so on). Ten of the
+twenty channels rendered anything on those runs; the other ten carry a stated guess from
+the shape of what the builder emits, and the docstring says which are which. A budget
+here is a guard against the tail, not a squeeze on today's content — clipping what runs
+now would be a behaviour change with an unmeasured cost.
+
+Measured while doing it, and worth recording because it is the number the whole section
+is about: over 197 archived stage prompts, `# Stage Instructions` (the rendered channel
+set) has a median of 25.6 KB and a p90 of 78.6 KB, `# Approved Memory` a p90 of 132 KB
+and a maximum of 177 KB, `# Stage Handoff Context` a p90 of 99 KB. The prompt they sit in
+runs from a median of 21 KB at Stage 01 to 277 KB at Stage 07, with a maximum of 1.79 MB.
+
+**Still open:** approved memory and the handoff context are not channels — they are
+arguments to `build_prompt` — so neither is covered by this, and they are two of the
+three biggest blocks. The repair prompt still inlines whole stdout, stderr, prompt, draft
+and promoted file. Those are behaviour changes on the largest blocks in the prompt and
+want the telemetry that just landed to price them.
+
 *Class: design gap plus missing telemetry. Effort: medium.*
 
 ### 4.5 The contract is back-checked every round; ours is checked once, at the end

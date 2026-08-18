@@ -3429,13 +3429,15 @@ class ResearchManager:
         # instead of every block being gated on a stage-number threshold. The
         # delivered keys are recorded so a run can say what information actually
         # reached a stage — which is what attribution needs.
+        channel_sizes: list[tuple[str, int, int | None]] = []
         inbound, delivered = render_inbound(
             ChannelContext(paths=paths, stage=stage, attempt_no=attempt_no, manager=self),
             CHANNELS,
+            channel_sizes,
         )
         if inbound:
             stage_template = stage_template.rstrip() + "\n\n" + inbound + "\n"
-        self._record_inbound_channels(paths, stage, delivered)
+        self._record_inbound_channels(paths, stage, delivered, channel_sizes)
 
         routine = self.effort_plan.is_routine(stage)
         if self.effort_plan.enabled:
@@ -5070,7 +5072,11 @@ class ResearchManager:
             )
 
     def _record_inbound_channels(
-        self, paths: RunPaths, stage: StageSpec, delivered: list[str]
+        self,
+        paths: RunPaths,
+        stage: StageSpec,
+        delivered: list[str],
+        sizes: "list[tuple[str, int, int | None]] | None" = None,
     ) -> None:
         """Write down what information reached this stage.
 
@@ -5079,13 +5085,32 @@ class ResearchManager:
         get from "this edge helped" to "this information helped". This is the
         cheapest possible version of that record: the channel keys, per stage,
         in the run log.
+
+        And what each one spent. The keys alone answered *which* information reached a
+        stage and nothing about *how much*, so the one number every reader of this run
+        actually wanted -- a Stage 07 prompt has a median of 277 KB over 197 archived
+        prompts and a maximum of 1.79 MB -- could only be recovered by measuring
+        ``prompt_cache/`` from outside. A channel at its declared budget is marked, so a
+        ceiling that has started biting is legible here rather than inferable from a
+        clip marker buried in the prompt.
         """
+        measured = dict((key, (chars, budget)) for key, chars, budget in (sizes or []))
+        lines = []
+        for key in delivered:
+            chars, budget = measured.get(key, (0, None))
+            share = f"{chars} chars"
+            if budget is not None:
+                share += f" of {budget}"
+                if chars >= budget:
+                    share += " (AT BUDGET -- clipped)"
+            lines.append(f"- {key}: {share}")
         append_log_entry(
             paths.logs,
             f"{stage.slug} inbound_channels",
             (
-                f"{len(delivered)} information channels delivered.\n"
-                + ("\n".join(f"- {key}" for key in delivered) or "- none")
+                f"{len(delivered)} information channels delivered, "
+                f"{sum(chars for chars, _ in measured.values())} characters in total.\n"
+                + ("\n".join(lines) or "- none")
             ),
         )
 

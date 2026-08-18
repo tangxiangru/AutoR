@@ -14,14 +14,17 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from src.run_skills import read_skill_pack
 from src.information_flow import (
     ALL_STAGES,
     CHANNELS,
+    UNBOUNDED_BY_CONSTRUCTION,
     Channel,
     ChannelContext,
+    _render,
     dependency_edges,
     inbound_channels,
     render_inbound,
@@ -86,6 +89,126 @@ class TopologyTest(unittest.TestCase):
         edges = dependency_edges(CHANNELS)
         self.assertGreater(len(edges), 20)
         self.assertIn(("04_implementation", "06_analysis", "preregistration"), edges)
+
+
+class EveryChannelDeclaresWhatItMaySpendTest(unittest.TestCase):
+    """A budget was a per-builder convention, and a convention has no floor.
+
+    Three channels capped themselves and argued for it in their own module docstrings --
+    `withdrawal_ledger`'s five records, `settled_reasoning`'s four cruxes and six hundred
+    characters a field, `artifact_index`'s five entries a category. Each argument lived
+    inside the builder that made it, so a channel added without one was unbounded and
+    nothing anywhere said so. `Channel.max_chars` is the rule; this is what stops the
+    exemption from being the easy answer.
+    """
+
+    def test_a_channel_declares_a_budget_or_says_why_it_cannot_grow(self) -> None:
+        undeclared = [
+            channel.key
+            for channel in CHANNELS
+            if channel.max_chars is None and channel.key not in UNBOUNDED_BY_CONSTRUCTION
+        ]
+        self.assertEqual(
+            undeclared, [],
+            "give it a max_chars, or name it in UNBOUNDED_BY_CONSTRUCTION with the "
+            "structure that bounds it",
+        )
+
+    def test_the_exemption_list_names_no_channel_that_is_gone(self) -> None:
+        """The other direction: a reason for a channel that no longer exists is a reason
+        nobody will notice has stopped applying."""
+        live = {channel.key for channel in CHANNELS}
+        self.assertEqual([key for key in UNBOUNDED_BY_CONSTRUCTION if key not in live], [])
+
+    def test_every_exemption_carries_a_reason_long_enough_to_be_one(self) -> None:
+        short = [
+            key for key, reason in UNBOUNDED_BY_CONSTRUCTION.items() if len(reason.strip()) < 40
+        ]
+        self.assertEqual(short, [], "a reason too short to check is not a reason")
+
+    def test_the_rule_is_the_programs_and_not_only_this_files(self) -> None:
+        """It raises at import, like `Edge.__post_init__` on an unregistered guard.
+
+        A rule that lives only in a test is a rule that passes for anyone who does not
+        run it. The population here is source rather than run data, so raising can only
+        happen while someone is editing the channel table.
+        """
+        from src.information_flow import _every_channel_declares_what_it_may_spend
+
+        with patch("src.information_flow.CHANNELS", (
+            Channel(key="nameless", heading="## X", produced_by=None,
+                    consumed_by=frozenset(), build=lambda _ctx: "x"),
+        )):
+            with self.assertRaises(ValueError) as caught:
+                _every_channel_declares_what_it_may_spend()
+        self.assertIn("nameless", str(caught.exception))
+
+    def test_a_reason_for_a_channel_that_is_gone_also_raises(self) -> None:
+        from src.information_flow import _every_channel_declares_what_it_may_spend
+
+        stale = dict(UNBOUNDED_BY_CONSTRUCTION)
+        stale["retired"] = "a reason long enough to look like a real one, and stale"
+        with patch("src.information_flow.UNBOUNDED_BY_CONSTRUCTION", stale):
+            with self.assertRaises(ValueError) as caught:
+                _every_channel_declares_what_it_may_spend()
+        self.assertIn("retired", str(caught.exception))
+
+    def test_a_declared_budget_is_a_positive_number(self) -> None:
+        self.assertEqual(
+            [c.key for c in CHANNELS if c.max_chars is not None and c.max_chars <= 0], []
+        )
+
+
+class TheBudgetIsEnforcedAndSaysWhatItDroppedTest(unittest.TestCase):
+    """A silent truncation is the worst of the three available behaviours.
+
+    The model cannot tell a channel that had little to say from one whose tail was taken,
+    and neither can a reader of `prompt_cache/`.
+    """
+
+    def _channel(self, budget: int | None, body: str) -> Channel:
+        return Channel(
+            key="probe", heading="## Probe", produced_by=None,
+            consumed_by=frozenset({STAGES[0].slug}), build=lambda _ctx: body,
+            max_chars=budget,
+        )
+
+    def _render_probe(self, budget: int | None, body: str) -> str:
+        return _render(body, self._channel(budget, body))
+
+    def test_a_block_inside_its_budget_is_untouched(self) -> None:
+        rendered = self._render_probe(100, "short")
+        self.assertIn("short", rendered)
+        self.assertNotIn("dropped", rendered)
+
+    def test_a_block_over_budget_is_clipped_and_says_by_how_much(self) -> None:
+        rendered = self._render_probe(50, "x" * 200)
+        self.assertIn("150 character(s) dropped", rendered)
+        self.assertIn("budget is 50", rendered)
+
+    def test_the_head_is_what_survives(self) -> None:
+        """These blocks lead with what is open. Two callers elsewhere keep the tail
+        instead, reading a verdict at the end of a transcript, and implement their own
+        head-drop for that reason -- the direction is the reader's decision."""
+        rendered = self._render_probe(10, "HEADHEADHEADtailtail")
+        self.assertIn("HEADHEADHE", rendered)
+        self.assertNotIn("tailtail", rendered)
+
+    def test_no_budget_means_no_clip(self) -> None:
+        """The control on the exemption: a channel on the list is genuinely not clipped."""
+        rendered = self._render_probe(None, "y" * 5000)
+        self.assertNotIn("dropped", rendered)
+        self.assertIn("y" * 5000, rendered)
+
+    def test_the_heading_and_preface_are_outside_the_budget(self) -> None:
+        channel = Channel(
+            key="probe", heading="## Probe", produced_by=None,
+            consumed_by=frozenset({STAGES[0].slug}), build=lambda _ctx: "z" * 100,
+            preface="Read this first.", max_chars=10,
+        )
+        rendered = _render("z" * 100, channel)
+        self.assertIn("## Probe", rendered)
+        self.assertIn("Read this first.", rendered)
 
 
 class HypothesisDuplicationTest(unittest.TestCase):
