@@ -106,10 +106,18 @@ EVALUATION_BANNER = "--- EVALUATION RESULT ---"
 #: something to act on.
 PREPARED_MARKER_NAME = ".airs_prepared.json"
 
-#: Floor on ``|s - s_opt|`` inside :math:`\\phi`. A submission that hits the optimum exactly
-#: would otherwise send the transform to infinity and the normalized score with it. 1e-12 is
-#: far below any metric resolution in the suite and keeps the result finite and orderable.
-PHI_EPSILON = 1e-12
+#: What ``|s - s_opt|`` becomes when a submission hits the optimum exactly, which would
+#: otherwise send :math:`\\phi` to infinity. **Not a choice**: the benchmark's own
+#: ``normalize_score_log`` in ``notebooks/create_summary_plots.ipynb`` substitutes
+#: ``|0.999 - optimal|`` in that case, so a perfect score on a higher-is-better task
+#: transforms as ``-log10(0.001) = 3`` rather than as infinity. An earlier version of this
+#: adapter used a 1e-12 floor, which would have reported 12 where the benchmark reports 3.
+#: No run has hit an optimum, so nothing measured here changes; the number that would be
+#: reported if one did is now the benchmark's.
+PHI_OPTIMUM_SUBSTITUTE = 0.999
+
+#: Value ``normalize_score_log`` substitutes for a non-finite normalized score.
+PHI_INFINITY_SUBSTITUTE = 100.0
 
 
 # ---------------------------------------------------------------------------
@@ -310,21 +318,48 @@ class AirsTask:
     eval_requirements: tuple[str, ...] = ()
 
     def phi(self, score: float) -> float:
-        """The benchmark's non-linear transform :math:`-\\log_{10}(|s - s^{opt}|)`."""
-        return -math.log10(max(abs(score - self.optimal_score), PHI_EPSILON))
+        """The benchmark's non-linear transform :math:`-\\log_{10}(|s - s^{opt}|)`.
+
+        The exact-optimum case follows ``normalize_score_log`` rather than a floor of our
+        own: see :data:`PHI_OPTIMUM_SUBSTITUTE`.
+        """
+        difference = abs(score - self.optimal_score)
+        if difference == 0:
+            difference = abs(PHI_OPTIMUM_SUBSTITUTE - self.optimal_score)
+        return -math.log10(difference)
 
     def normalized(self, score: float) -> float:
-        """The benchmark's normalized score for *score* on this task.
+        """The raw ratio, before the benchmark's clip. Use :meth:`reported` to report.
 
-        Not clipped to ``[0, 1]``. The published figure explicitly shows agents above 1 —
-        "the agent routinely surpassing human SOTA" — so clipping would silently discard
-        the only outcome the benchmark calls out as interesting, and a score below the
-        estimated worst is real information about a run rather than an error.
+        Kept unclipped because a score below the estimated worst is real information about
+        a run, and the clip destroys it. It is not what the benchmark publishes.
         """
         denominator = self.phi(self.sota_score) - self.phi(self.worst_score)
         if denominator == 0:
             raise MetadataError(f"{self.name}: SOTA and worst score transform identically")
         return (self.phi(score) - self.phi(self.worst_score)) / denominator
+
+    def reported(self, score: float | None) -> float:
+        """The number AIRS-Bench publishes for one run: ``fillna(0).replace(inf,100).clip(0)``.
+
+        Three rules, all of them the benchmark's, all of them load-bearing:
+
+        ``None`` becomes **0.0**, not "excluded". A run with no scoreable submission is a
+        zero in the mean, which is the whole reason *valid submission rate* is a headline
+        metric beside it rather than a footnote. Dropping the task instead — which is what
+        this repository's first AIRS write-up did — silently removes an arm's worst
+        outcome from its own average.
+
+        A non-finite ratio becomes **100**, and a negative one becomes **0**. There is no
+        upper clip: the published figure calls out agents above human SOTA, and 1.0 is not
+        a ceiling.
+        """
+        if score is None:
+            return 0.0
+        value = self.normalized(score)
+        if not math.isfinite(value):
+            return PHI_INFINITY_SUBSTITUTE
+        return max(0.0, value)
 
 
 def tasks_root(repo_root: Path) -> Path:
@@ -1129,12 +1164,18 @@ class TaskScore:
     #: ``None`` when there was no scoreable submission. Distinct from ``0.0``, which is a
     #: real metric value on several of these tasks.
     value: float | None
+    #: The raw ratio, unclipped, ``None`` when there is no value. Diagnostic.
     normalized: float | None
     valid_submission: bool
     sota_score: float
     worst_score: float
     optimal_score: float
     lower_is_better: bool
+    #: The number AIRS-Bench itself would publish for this run: ``AirsTask.reported``,
+    #: so a run with no submission carries **0.0** here while ``value`` and ``normalized``
+    #: stay ``None``. Both are needed and they are not redundant -- the first is what goes
+    #: into the arm's mean, the second is what says the mean has a hole in it.
+    reported: float = 0.0
     submission: dict[str, Any] = field(default_factory=dict)
     all_metrics: dict[str, float] = field(default_factory=dict)
     reason: str = ""
@@ -1170,7 +1211,7 @@ def score_submission(
 
     def failure(reason: str, check: SubmissionCheck) -> TaskScore:
         return TaskScore(
-            task=task.name, metric=task.metric, value=None, normalized=None,
+            task=task.name, metric=task.metric, value=None, normalized=None, reported=0.0,
             valid_submission=False, sota_score=task.sota_score, worst_score=task.worst_score,
             optimal_score=task.optimal_score, lower_is_better=task.lower_is_better,
             submission=check.to_dict(), reason=reason, scripts=scripts,
@@ -1227,6 +1268,7 @@ def score_submission(
             metric=_primary_metric_name(metrics, task),
             value=value,
             normalized=task.normalized(value),
+            reported=task.reported(value),
             valid_submission=True,
             sota_score=task.sota_score,
             worst_score=task.worst_score,
@@ -1401,7 +1443,8 @@ __all__: Sequence[str] = (
     "BenchmarkResult",
     "ExportResult",
     "MetadataError",
-    "PHI_EPSILON",
+    "PHI_INFINITY_SUBSTITUTE",
+    "PHI_OPTIMUM_SUBSTITUTE",
     "RAD_TASKS_RELPATH",
     "SUBMISSION_NAME",
     "ScriptRun",
