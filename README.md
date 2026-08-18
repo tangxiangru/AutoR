@@ -46,7 +46,7 @@ overview and the operating manual.
 [Review](#review-five-kinds-of-critic) · [The stage contract](#the-stage-contract-and-what-gets-validated) ·
 [Execution model](#execution-model) · [Run layout](#run-layout) · [Architecture](#architecture) ·
 [Benchmarks](#benchmarks) ([ResearchClawBench](#researchclawbench) ·
-[FrontierScience](#frontierscience-research)) ·
+[FrontierScience](#frontierscience-research) · [AIRS-Bench](#airs-bench)) ·
 [Documentation](#documentation) · [Limits](#limits) · [License](#license)
 
 ## What AutoR is
@@ -192,6 +192,9 @@ modules**, with no third-party dependency.
 | Score a finished benchmark run with the reference judge | `python tools/score_rcb_run.py --workspace <WORKSPACE> --bench <BENCH>` |
 | Answer one FrontierScience question, with AutoR or with one direct call | `python fs_agent.py --task fs:043 --profile ideate` · `--profile direct` |
 | Grade a FrontierScience answer against its rubric | `python tools/score_fs_run.py --task fs:043 --answer answer.md --out score.json` |
+| Stage an AIRS-Bench task's data and workspace | `python tools/airs_setup.py --task <TASK> --repo <AIRS_BENCH> --raw-dir <RAW> --workspace <WS>` |
+| Solve one AIRS-Bench task and score the submission | `python airs_agent.py --task <TASK> --repo <AIRS_BENCH> --raw-dir <RAW> --workspace <WS>` |
+| Run one arm of an AIRS-Bench comparison — AutoR, or the same CLI with no AutoR | `python tools/airs_arm.py --arm autor --tasks <TASK>...` · `--arm bare` |
 
 Every flag, its default, and what is preserved on resume:
 **[docs/cli-reference.md](docs/cli-reference.md)**. Stage identifiers accept `03`, `3` or
@@ -818,6 +821,7 @@ flowchart LR
 | [main.py](main.py) | CLI entry: 61 flags, start, resume, `--redo-stage`, `--rollback-stage`, the archive record and the reports that print and exit |
 | [src/report_plan.py](src/report_plan.py) | Figures and headline numbers committed at Stage 03, stamped outside the workspace, enforced at 03, 06 and 07 |
 | [src/rcb.py](src/rcb.py) | The ResearchClawBench adapter core: workspace layout, goal construction, report synthesis, figure publication, export |
+| [src/airsbench.py](src/airsbench.py) | The AIRS-Bench adapter core: task specifications, the scaffold-neutral brief both arms get, submission export that never writes a submission, and the benchmark's own normalized score |
 | [src/stage_graph.py](src/stage_graph.py) | Stages as nodes: six guarded forward edges, thirteen backward edges, a conditional terminal, a per-stage visit budget |
 | [src/archive.py](src/archive.py) | Cross-run routes and edge payoffs keyed on a comparability basis; variant proposal, exploration and promotion |
 | [src/rubric.py](src/rubric.py) | The rigour score over a draft and the artifacts it names. Never calls a backend |
@@ -870,13 +874,23 @@ is in **[docs/framework.md](docs/framework.md)**.
 
 ## Benchmarks
 
-AutoR is wired to two, and they measure different halves of it.
+AutoR is wired to three, and they measure different halves of it.
 [ResearchClawBench](#researchclawbench) hands the agent a workspace of raw data and reference
 papers and scores the report and figures it produces against the published paper — a test of
 conducting research. [FrontierScience-Research](#frontierscience-research) hands it one written
 examination question and grades the text of the answer against a ten-point rubric — no data, no
 reference paper, no figure, no reference answer, and a test of what the system knows and can
-derive. A change that moves one need not move the other.
+derive. [AIRS-Bench](#airs-bench) hands it a prepared dataset and a metric and scores the
+predictions it writes — no judge anywhere in the loop. A change that moves one need not move
+the others.
+
+The third one is worth having for a reason the first two cannot supply. Both of those reach
+their number through a model reading what AutoR wrote, and on ResearchClawBench the choice of
+reader is worth more than most of the effects being argued about — 16.2 points between two
+judges on one identical artifact set, and 8.5 points between eight draws of the *same* judge.
+AIRS-Bench runs `scipy` over a CSV: the same submission scores the same number every time. It
+is the only one of the three where a one-task before-and-after is a measurement rather than a
+draw from a distribution.
 
 ### ResearchClawBench
 
@@ -1044,6 +1058,7 @@ below is the detail behind it.
 | [Studio Guide & API](docs/studio.md) | The browser workspace and its complete HTTP API. |
 | [ResearchClawBench](docs/researchclawbench.md) | Running with no human in the loop: unattended execution, the benchmark adapter and its output contract, and Gemini-backed web search. |
 | [ResearchClawBench Landscape](docs/researchclawbench-landscape.md) | How EvoScientist, ARIS Codex and MIRA actually score on the benchmark, which reported numbers reproduce, and the baseline any result must be quoted against. |
+| [AIRS-Bench](docs/airsbench.md) | The third benchmark: twenty ML research tasks scored by a deterministic metric over `submission.csv`. The adapter, the arm harness, three defects running it surfaced in the benchmark itself, and what AutoR scores. |
 | [FrontierScience-Research](docs/frontierscience.md) | The second benchmark: sixty written science questions graded against a rubric by a judge model. The two profiles, the prompt contract, the judge's measured noise, the paired trial, and the two numbers that are not measured. |
 | [Architecture](docs/architecture.md) | Layers, the module map, the stage walk, prompt assembly by typed channel, recovery, extension points. |
 | [Development](docs/development.md) | Dev setup, tests, CI, conventions, and recipes for adding a stage, venue, or backend. |

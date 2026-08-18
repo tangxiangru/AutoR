@@ -135,7 +135,7 @@ REPO = Path(__file__).resolve().parent.parent
 #: ``fs_agent.py`` is the decision :data:`_FS_SCORER_ONLY` said would have to be made when
 #: the FrontierScience front end landed: it is a product entry point, a way this repository
 #: is actually started, and not an instrument reading the library from outside.
-ENTRY_POINTS = ("main.py", "studio.py", "rcb_agent.py", "fs_agent.py")
+ENTRY_POINTS = ("main.py", "studio.py", "rcb_agent.py", "fs_agent.py", "airs_agent.py")
 
 _FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
 
