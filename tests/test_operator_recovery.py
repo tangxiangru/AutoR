@@ -10,6 +10,7 @@ from unittest.mock import patch
 from src.operator import ClaudeOperator
 from src.utils import (
     STAGES,
+    read_text,
     build_run_paths,
     ensure_run_layout,
     initialize_memory,
@@ -260,6 +261,71 @@ class OperatorRecoveryTests(unittest.TestCase):
             )
 
             self.assertIsNone(resolved)
+
+
+class AFreshSessionIsNotAContinuationTests(unittest.TestCase):
+    """The resume fallback used to replay a document that asserted a history it had lost.
+
+    `build_continuation_prompt` opens by telling the agent it is continuing this stage's
+    conversation. When a resume is refused the operator starts a *new* session and, until
+    now, sent it that same file -- so an empty session was told it was mid-conversation,
+    on exactly the path where that is false.
+
+    Whether the earlier turns are in context is a fact about the invocation, and this is
+    the only place that knows it. The prompt now speaks about the work; this speaks about
+    the session.
+    """
+
+    def _run_with_a_refused_resume(self, tmp_dir: str):
+        paths = build_run_paths(Path(tmp_dir) / "run")
+        ensure_run_layout(paths)
+        write_text(paths.user_input, "Resume refused")
+        initialize_memory(paths, "Resume refused")
+        operator = ClaudeOperator(fake_mode=False, output_stream=io.StringIO())
+        stage = STAGES[0]
+        sent: list[str] = []
+
+        def fake_stream(*args, **kwargs):
+            command = kwargs["command"]
+            sent.append(read_text(Path(command[command.index("-p") + 1].lstrip("@"))))
+            if len(sent) == 1:
+                return (1, "", "No conversation found with session id abc", None,
+                        {"raw_line_count": 0, "non_json_line_count": 0, "malformed_json_count": 0})
+            write_text(paths.stage_tmp_file(stage), "# Stage 01: Literature Survey\n")
+            return (0, "done", "", None,
+                    {"raw_line_count": 1, "non_json_line_count": 0, "malformed_json_count": 0})
+
+        with patch("src.operator.shutil.which", return_value="/usr/bin/claude"), patch.object(
+            operator, "_run_streaming_command", side_effect=fake_stream
+        ):
+            operator._run_real(
+                stage, "You are continuing work on Stage 01.", paths,
+                attempt_no=1, continue_session=True,
+            )
+        return paths, stage, sent
+
+    def test_the_restart_is_told_its_history_is_gone(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            _paths, _stage, sent = self._run_with_a_refused_resume(tmp_dir)
+            self.assertEqual(len(sent), 2, "the fallback ran")
+            self.assertNotIn("Earlier Turns Of This Conversation Are Gone", sent[0])
+            self.assertIn("Earlier Turns Of This Conversation Are Gone", sent[1])
+
+    def test_the_restart_keeps_everything_the_original_said(self) -> None:
+        """It is an addition, not a replacement: the work premise is still true."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            _paths, _stage, sent = self._run_with_a_refused_resume(tmp_dir)
+            self.assertIn(sent[0].strip(), sent[1])
+
+    def test_the_original_prompt_file_is_left_alone(self) -> None:
+        """`prompt_cache/` is the record of what actually ran. Overwriting the file would
+        leave the resumed attempt and its restart indistinguishable in it."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            paths, stage, _sent = self._run_with_a_refused_resume(tmp_dir)
+            original = paths.prompt_cache_dir / f"{stage.slug}_attempt_01.prompt.md"
+            restart = paths.prompt_cache_dir / f"{stage.slug}_attempt_01_restart.prompt.md"
+            self.assertTrue(original.is_file() and restart.is_file())
+            self.assertNotIn("Are Gone", read_text(original))
 
 
 class SecondEntryToAStageTests(unittest.TestCase):
