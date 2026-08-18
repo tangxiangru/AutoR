@@ -1024,6 +1024,75 @@ and fires on thinking time, so what it removes is the hard questions.
 The full table, why each arm refused, the ten admission clauses and the judge's measured noise
 are in [docs/frontierscience.md](docs/frontierscience.md).
 
+### FIRE-Bench
+
+`python fire_agent.py --bench-root ~/FIRE-Bench --task cot_in_planning --profile pipeline`
+runs one [FIRE-Bench](https://github.com/maitrix-org/FIRE-Bench) task: a research question
+from a published empirical study, a sandbox, no reference paper, and **3600 seconds of wall
+clock that the harness enforces with a kill**. What is scored is the two-sentence conclusion
+the agent writes, decomposed into atomic claims and matched against the authors' own.
+`--profile direct` is the paired control — the same goal, model, denied tools, sandbox and
+deadline, in one agentic call instead of a stage walk.
+
+**Measured here, six tasks, one run each, `opus` executing and reviewing, every arm on the
+benchmark's own 3600 s clock, three judge draws per log, medians:**
+
+| task | AutoR pipeline | AutoR direct | stock Claude Code |
+|:---|---:|---:|---:|
+| `cot_in_planning` | **100.0** | 70.6 | no conclusion |
+| `premise_order_effects` | 0.0 | **80.0** | no conclusion |
+| `prompt_formatting_sensitivity` | 40.0 | **71.8** | no conclusion |
+| `lifebench_length_following` | 0.0 | **42.9** | no conclusion |
+| `persona_reasoning_biases` | 0.0 | **20.0** | 15.4 |
+| `mcq_selection_bias` | 41.2 | **50.0** | 30.3 |
+| **scoreable runs** | 6 / 6 | 6 / 6 | **2 / 6** |
+| **median F1** | 20.0 | **60.3** | 22.9 |
+| **median wall clock** | 52 min | **11 min** | 61 min (killed) |
+
+**Three things this says, in decreasing order of how much the sample supports them.**
+
+**1. The clock is the benchmark's main filter, and telling the agent about it is what gets
+past it.** Four of six stock Claude Code runs produced *nothing scoreable*: given the raw
+`instruction.txt`, which asks for a full report and says nothing about a deadline, they were
+still building figures and prose when the harness killed them at 61 minutes. Both AutoR arms
+were scoreable 6 times out of 6. The difference is not the pipeline — the direct arm has none
+— it is a goal contract that states the wall clock, states that the conclusion is the only
+artifact read, and says to write it early and rewrite it, plus a watcher that republishes the
+scored line every time the file on disk improves.
+
+**2. Under this clock, the pipeline loses to one call of the same model on the same
+contract.** Direct wins 5 of 6 tasks, median **+25.9 F1**. Every pipeline run hit the reserve
+boundary at 52 minutes having approved one to three of its four stages; the direct arm
+finished in a median of 11. This is the same direction as
+[ResearchClawBench](#researchclawbench) and [FrontierScience](#frontierscience-research), and
+it is the third benchmark to say it.
+
+**3. Three of the pipeline's four low scores are honest nulls, not empty runs — and the
+metric cannot tell the difference.** On `premise_order_effects` the pipeline ran 112 problems
+across nine orderings on two models, 694 billed calls per arm, with a corrupted-premise
+control at 0.15 accuracy confirming the task was real, and concluded that premise order did
+*not* move accuracy. That is correct about what it measured: its strong model scored 1.000 in
+every ordering — at ceiling — and it said so. It scored **0.0**, because the reference
+conclusion says premise order matters. The direct arm, on the same task in a fifth of the
+time, ran a pilot, saw the ceiling, generated a harder pool with chains up to sixteen steps,
+found the effect at sign-test p = 0.0001, and scored **80.0**. The lesson is about
+*iteration*, not about honesty: what the pipeline lacked was a second pass at its own
+instance difficulty, and its budget went to preregistration, a reproduction table and a gate
+ledger instead.
+
+**What this is not.** Six of thirty-five tasks, one run per cell, and a judge whose measured
+range on a single unchanged log is 43 F1 points. It is not comparable to FIRE-Bench's
+published table (best row: Claude Code with Sonnet-4 at 46.7 ± 23.4 F1): different executing
+model, and — decisively — **none of the models the tasks name is served on this deployment**,
+so every arm substituted from the same catalogue and every arm is answering a slightly
+different question from the one the papers answered. That substitution is also the likeliest
+reason for finding 2's ceilings: these papers' effects were measured on gpt-3.5 and
+Llama-2-era models.
+
+The adapter, the deadline design, the six exit clauses, the judge's noise and the six holes
+in the benchmark's own harness that had to be routed around are in
+[docs/firebench.md](docs/firebench.md).
+
 ## Documentation
 
 The [docs/](docs/) directory is the reference documentation. This README is the overview; everything
