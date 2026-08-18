@@ -252,6 +252,24 @@ obligation src/stage_graph.py` returns nothing; obligations reach prompts, and `
 increments a counter with no ceiling and no reader that can refuse. An obligation that can
 be deferred indefinitely with no reader is a debt with no creditor.
 
+**Landed, as the sentence rather than the status.** `_complete_run` now calls
+`_completion_sentence`, which reads two harness-written records the close had never
+consulted — the manifest's own `skipped` flag and the obligation ledger — and says what
+it finds. A run with neither says exactly what it said before, so a clean run's closing
+line is unchanged; the sentence only moves where it would have been false.
+
+That also gives the obligation ledger its first reader that can act on it. `note_deferrals`
+incremented a counter with no ceiling and nothing downstream ever asked what was still
+open; now the run cannot close claiming everything was approved while a debt a reviewer
+attached is outstanding.
+
+**The fourth `run_status` value was considered and refused.** The walk did complete; what
+was false was the prose. A new status would have to be taught to six places in
+`src/frontend/static/app.js` that test `=== "completed"` for settledness, plus
+`humanStatus` and a CSS class — a wide change across a surface this suite does not cover,
+for a defect entirely in a sentence. The RCB adapter is unaffected either way: its
+`status` is derived from whether the report is substantive, not from the manifest.
+
 *Class: a record that overstates. Effort: small.*
 
 ### 4.4 A channel with no declared budget

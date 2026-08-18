@@ -208,7 +208,12 @@ what rollback rewrites. Written by [`src/manifest.py`](../src/manifest.py).
 }
 ```
 
-**`run_status`** — one of `pending`, `running`, `human_review`, `completed`,
+**`run_status`** — unchanged when a walk reaches the terminal with gaps: the walk did
+complete, and what a skipped stage or an open obligation changes is the `run_complete`
+log entry and the closing line, which `ResearchManager._completion_sentence` derives from
+the manifest's `skipped` flags and the obligation ledger rather than asserting. A clean
+run still reads *"All stages approved."*; a run that auto-skipped its writing stage now
+names it instead. One of `pending`, `running`, `human_review`, `completed`,
 `failed`, `cancelled`, `halted`, `abandoned`.
 
 The last two are the ones worth knowing about, because both are stops that are
