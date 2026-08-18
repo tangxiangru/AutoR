@@ -35,10 +35,32 @@ from src.run_skills import read_skill_pack, select_run_skills
 REPO = Path(__file__).resolve().parent.parent
 BENCH = Path("/home/robtang_google_com/RCB/tasks")
 
+_AIRS = (
+    "Written for AIRS-Bench, whose deliverable is a predictions file scored by a fixed "
+    "metric -- a shape none of the forty ResearchClawBench briefs has, since every one of "
+    "those is graded on a report. Reachability was checked on the corpus it was written "
+    "from rather than asserted: `tools/skill_selectivity.py --briefs <airs>/tasks/rad` "
+    "selects 19 of the 20 AIRS briefs and 0 of the 40 RCB ones. The twentieth, "
+    "CodeRetrievalCodeXGlueMRR, has a task paragraph of one sentence that never says what "
+    "the deliverable is, so no predicate over task shape can reach it; all twenty are "
+    "pinned by identifier, which is what reaches that one. The AIRS briefs are not vendored "
+    "here -- they are CC-BY-NC benchmark content and this repository is proprietary -- so "
+    "this corpus cannot check them and says so instead of loosening the predicate until "
+    "something in the wrong corpus matches."
+)
+
 #: Skills that no benchmark brief selects, and the reason that is correct. A skill written
 #: for a research shape the forty tasks do not contain belongs here rather than in a regex
 #: loosened until something matches.
-UNREACHABLE_ON_PURPOSE: dict[str, str] = {}
+UNREACHABLE_ON_PURPOSE: dict[str, str] = {
+    "a-model-you-can-audit-is-not-a-model-that-scores": _AIRS,
+    "a-scoreable-file-in-the-first-hour": _AIRS,
+    "assume-this-stage-is-the-last-one-you-get": _AIRS,
+    "the-audit-trail-is-not-the-deliverable-here": _AIRS,
+    "the-row-count-comes-from-the-split-not-the-brief": _AIRS,
+    "the-submission-is-the-only-artifact-that-scores": _AIRS,
+    "your-survey-already-named-the-method-that-hits-the-number": _AIRS,
+}
 
 
 def briefs() -> dict[str, str]:

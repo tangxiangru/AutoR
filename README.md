@@ -133,9 +133,9 @@ naming them.
 | Required stage-summary headings | `REQUIRED_STAGE_HEADINGS` | 7 |
 | Rubric criteria (weighted, backend-free) | `CRITERIA`, [src/rubric.py](src/rubric.py) | 10 |
 | Flags on `main.py` / `rcb_agent.py` | `parse_args` | 61 / 37 |
-| Python modules / lines / tests | the tree | 254 / 137 k / 4040 |
+| Python modules / lines / tests | the tree | 254 / 137 k / 4048 |
 
-`python -m unittest discover -s tests -p "test_*.py"` runs **4040 tests in ~430 s across 143 test
+`python -m unittest discover -s tests -p "test_*.py"` runs **4048 tests in ~440 s across 143 test
 modules**, with no third-party dependency.
 
 ## Quick start
@@ -642,7 +642,7 @@ Alongside the prompt, AutoR installs an agent skill pack from [src/skills/](src/
 `runs/<run_id>/.claude/skills/` — the operator's working directory — so the agent can *pull*
 long-form craft guidance when it needs it. A skill costs nothing in the prompts that do not use it.
 
-161 skills ship today: 72 general ones and 89 field-specific ones. Forty of them were written in one pass against the twelve tasks that trailed a bare-Claude-Code control under a single judge — three or four per task, each selected by a phrase in that task's brief and in no other of the forty, and every one of the forty pinned. Most of them were written against a scored arm's per-criterion losses on the
+168 skills ship today: 79 general ones and 89 field-specific ones. Forty of them were written in one pass against the twelve tasks that trailed a bare-Claude-Code control under a single judge — three or four per task, each selected by a phrase in that task's brief and in no other of the forty, and every one of the forty pinned. Most of them were written against a scored arm's per-criterion losses on the
 twenty-five ResearchClawBench tasks that lost, at least three per task. **A run is not offered all of
 them.** Two filters narrow the pack, and a skill has to survive both:
 
@@ -650,10 +650,13 @@ them.** Two filters narrow the pack, and a skill has to survive both:
    become two. A materials run does not benefit from being offered advice about observational
    astronomy, it just has one more description to read past.
 2. **Shape.** A skill may carry an `applies_when` regex, matched against this run's own research
-   brief and data manifest. Forty-four skills are scoped this way today; measured over the forty
+   brief and data manifest. 51 skills are scoped this way today; measured over the forty
    ResearchClawBench briefs they select between 1 and 7 tasks each — forty of the
-   forty-four select exactly one — eighteen tasks receive none of them, and no task receives
-   more than six. `tools/skill_selectivity.py` prints the selection set
+   forty-four RCB-shaped ones select exactly one — eighteen tasks receive none of them, and no task
+   receives more than six. The seven added for AIRS-Bench are scoped on a different corpus and
+   select 19 of its 20 briefs and **none** of the forty ResearchClawBench ones; the twentieth is a
+   brief whose whole task paragraph is one sentence that never says what the deliverable is, so no
+   predicate over task shape can reach it and its pin does instead. `tools/skill_selectivity.py` prints the selection set
    for a corpus and `--expect` turns it into an assertion, because a predicate is a claim about a
    kind of research problem and it should be checkable.
 
@@ -665,10 +668,13 @@ the same tasks today and generalise to nothing.
    that are installed for it whatever the two filters say. A pin is not an inference about a kind of
    task — it is a record that this exact identifier already ran, already scored, and lost criteria
    whose subject is those skills, so it is the one routing input that cannot be derived from the
-   task statement and does not generalise past the name it carries. Twenty-seven ResearchClawBench tasks
-   are pinned today, 280 pins between them, at most fifteen on any one task; twenty of the 280
-   are skills the two filters would have withheld, in each case a field skill whose content
-   applies outside its own field. **A run that matches an entry writes `skill_pins` into its `run_config.json` and a
+   task statement and does not generalise past the name it carries. Forty-seven tasks are pinned
+   today — twenty-seven from ResearchClawBench and all twenty of AIRS-Bench — 420 pins between
+   them, at most fifteen on any one task; twenty of them are skills the two filters would have
+   withheld, in each case a field skill whose content applies outside its own field. The two
+   benchmarks' pins are derived differently and the file says so: RCB's from per-criterion losses,
+   AIRS-Bench's from a mechanism that is arm-wide because that benchmark has no criteria — 43% of
+   the median run's tool calls landed after its predictions file stopped changing. **A run that matches an entry writes `skill_pins` into its `run_config.json` and a
    `skills pinned_by_task_id` line into its log**, because a pinned arm and an unpinned arm are two
    configurations and a score from one is not a score from the other.
 

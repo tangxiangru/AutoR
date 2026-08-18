@@ -453,5 +453,363 @@
     "math-a-proposer-that-learned-nothing-is-the-control",
     "math-an-unused-hypothesis-is-a-stronger-theorem",
     "math-rebuild-the-generator-the-system-learned-from"
-  ]
+  ],
+  "_airs_provenance": "The twenty AIRS-Bench task ids below are pinned from the scored 19-task arm at b11af48 (/rmeng_data/robtang/airs-runs/exp2, one seed, opus both arms, 4 h cap, CPU-only slurm array), reported in the benchmark's own units by tools/airs_report.py: bare Claude Code 0.894 mean / 0.932 median normalized against AutoR 0.834 / 0.844, bare winning 16 of 19 with a 100% valid submission rate against AutoR's 94.7%. Unlike the ResearchClawBench pins above, these are NOT derived from per-criterion losses -- AIRS-Bench has no criteria, only a metric over submission.csv -- so they are derived from the mechanism instead, and the mechanism is arm-wide rather than per-task. Three measurements carry it. (1) The median run spent 43% of its tool calls AFTER the last time it changed the predictions file, and 93 minutes of a 240-minute budget; per-task shares are in _airs_rationale. (2) All 19 runs hit the cap and none finished the walk: six never left Stage 01. (3) On two molecular-property tasks the Stage 01 survey recorded the published ladder (0.021-0.029) or resolved the DOIs of the graph networks that produce it, and the run shipped a gradient-boosted tree at 0.11; the control arm, which did no survey, wrote a graph network and won. Because the mechanism is arm-wide, every task that ran gets the same seven, ordered by when they bite. TimeSeriesForecastingRideshareMAE is pinned unmeasured -- its dataset cannot be staged under any `datasets` version, so it has never run here; it is included so that the pin table covers the benchmark rather than covering the subset that happened to work.",
+  "CodeGenerationAPPSPassAt5": [
+    "a-scoreable-file-in-the-first-hour",
+    "the-row-count-comes-from-the-split-not-the-brief",
+    "assume-this-stage-is-the-last-one-you-get",
+    "the-submission-is-the-only-artifact-that-scores",
+    "your-survey-already-named-the-method-that-hits-the-number",
+    "a-model-you-can-audit-is-not-a-model-that-scores",
+    "the-audit-trail-is-not-the-deliverable-here"
+  ],
+  "CodeRetrievalCodeXGlueMRR": [
+    "a-scoreable-file-in-the-first-hour",
+    "the-row-count-comes-from-the-split-not-the-brief",
+    "assume-this-stage-is-the-last-one-you-get",
+    "the-submission-is-the-only-artifact-that-scores",
+    "your-survey-already-named-the-method-that-hits-the-number",
+    "a-model-you-can-audit-is-not-a-model-that-scores",
+    "the-audit-trail-is-not-the-deliverable-here"
+  ],
+  "CoreferenceResolutionSuperGLUEWSCAccuracy": [
+    "a-scoreable-file-in-the-first-hour",
+    "the-row-count-comes-from-the-split-not-the-brief",
+    "assume-this-stage-is-the-last-one-you-get",
+    "the-submission-is-the-only-artifact-that-scores",
+    "your-survey-already-named-the-method-that-hits-the-number",
+    "a-model-you-can-audit-is-not-a-model-that-scores",
+    "the-audit-trail-is-not-the-deliverable-here"
+  ],
+  "CoreferenceResolutionWinograndeAccuracy": [
+    "a-scoreable-file-in-the-first-hour",
+    "the-row-count-comes-from-the-split-not-the-brief",
+    "assume-this-stage-is-the-last-one-you-get",
+    "the-submission-is-the-only-artifact-that-scores",
+    "your-survey-already-named-the-method-that-hits-the-number",
+    "a-model-you-can-audit-is-not-a-model-that-scores",
+    "the-audit-trail-is-not-the-deliverable-here"
+  ],
+  "CvMolecularPropertyPredictionQm9MeanAbsoluteError": [
+    "a-scoreable-file-in-the-first-hour",
+    "the-row-count-comes-from-the-split-not-the-brief",
+    "assume-this-stage-is-the-last-one-you-get",
+    "the-submission-is-the-only-artifact-that-scores",
+    "your-survey-already-named-the-method-that-hits-the-number",
+    "a-model-you-can-audit-is-not-a-model-that-scores",
+    "the-audit-trail-is-not-the-deliverable-here"
+  ],
+  "GMolecularPropertyPredictionQm9MeanAbsoluteError": [
+    "a-scoreable-file-in-the-first-hour",
+    "the-row-count-comes-from-the-split-not-the-brief",
+    "assume-this-stage-is-the-last-one-you-get",
+    "the-submission-is-the-only-artifact-that-scores",
+    "your-survey-already-named-the-method-that-hits-the-number",
+    "a-model-you-can-audit-is-not-a-model-that-scores",
+    "the-audit-trail-is-not-the-deliverable-here"
+  ],
+  "GraphRegressionZincMae": [
+    "a-scoreable-file-in-the-first-hour",
+    "the-row-count-comes-from-the-split-not-the-brief",
+    "assume-this-stage-is-the-last-one-you-get",
+    "the-submission-is-the-only-artifact-that-scores",
+    "your-survey-already-named-the-method-that-hits-the-number",
+    "a-model-you-can-audit-is-not-a-model-that-scores",
+    "the-audit-trail-is-not-the-deliverable-here"
+  ],
+  "MathQuestionAnsweringSVAMPAccuracy": [
+    "a-scoreable-file-in-the-first-hour",
+    "the-row-count-comes-from-the-split-not-the-brief",
+    "assume-this-stage-is-the-last-one-you-get",
+    "the-submission-is-the-only-artifact-that-scores",
+    "your-survey-already-named-the-method-that-hits-the-number",
+    "a-model-you-can-audit-is-not-a-model-that-scores",
+    "the-audit-trail-is-not-the-deliverable-here"
+  ],
+  "QuestionAnsweringDuoRCAccuracy": [
+    "a-scoreable-file-in-the-first-hour",
+    "the-row-count-comes-from-the-split-not-the-brief",
+    "assume-this-stage-is-the-last-one-you-get",
+    "the-submission-is-the-only-artifact-that-scores",
+    "your-survey-already-named-the-method-that-hits-the-number",
+    "a-model-you-can-audit-is-not-a-model-that-scores",
+    "the-audit-trail-is-not-the-deliverable-here"
+  ],
+  "QuestionAnsweringEli5RougeL": [
+    "a-scoreable-file-in-the-first-hour",
+    "the-row-count-comes-from-the-split-not-the-brief",
+    "assume-this-stage-is-the-last-one-you-get",
+    "the-submission-is-the-only-artifact-that-scores",
+    "your-survey-already-named-the-method-that-hits-the-number",
+    "a-model-you-can-audit-is-not-a-model-that-scores",
+    "the-audit-trail-is-not-the-deliverable-here"
+  ],
+  "QuestionAnsweringFinqaAccuracy": [
+    "a-scoreable-file-in-the-first-hour",
+    "the-row-count-comes-from-the-split-not-the-brief",
+    "assume-this-stage-is-the-last-one-you-get",
+    "the-submission-is-the-only-artifact-that-scores",
+    "your-survey-already-named-the-method-that-hits-the-number",
+    "a-model-you-can-audit-is-not-a-model-that-scores",
+    "the-audit-trail-is-not-the-deliverable-here"
+  ],
+  "R2AbsMolecularPropertyPredictionQm9MeanAbsoluteError": [
+    "a-scoreable-file-in-the-first-hour",
+    "the-row-count-comes-from-the-split-not-the-brief",
+    "assume-this-stage-is-the-last-one-you-get",
+    "the-submission-is-the-only-artifact-that-scores",
+    "your-survey-already-named-the-method-that-hits-the-number",
+    "a-model-you-can-audit-is-not-a-model-that-scores",
+    "the-audit-trail-is-not-the-deliverable-here"
+  ],
+  "ReadingComprehensionSquadExactMatch": [
+    "a-scoreable-file-in-the-first-hour",
+    "the-row-count-comes-from-the-split-not-the-brief",
+    "assume-this-stage-is-the-last-one-you-get",
+    "the-submission-is-the-only-artifact-that-scores",
+    "your-survey-already-named-the-method-that-hits-the-number",
+    "a-model-you-can-audit-is-not-a-model-that-scores",
+    "the-audit-trail-is-not-the-deliverable-here"
+  ],
+  "SentimentAnalysisYelpReviewFullAccuracy": [
+    "a-scoreable-file-in-the-first-hour",
+    "the-row-count-comes-from-the-split-not-the-brief",
+    "assume-this-stage-is-the-last-one-you-get",
+    "the-submission-is-the-only-artifact-that-scores",
+    "your-survey-already-named-the-method-that-hits-the-number",
+    "a-model-you-can-audit-is-not-a-model-that-scores",
+    "the-audit-trail-is-not-the-deliverable-here"
+  ],
+  "TextualClassificationSickAccuracy": [
+    "a-scoreable-file-in-the-first-hour",
+    "the-row-count-comes-from-the-split-not-the-brief",
+    "assume-this-stage-is-the-last-one-you-get",
+    "the-submission-is-the-only-artifact-that-scores",
+    "your-survey-already-named-the-method-that-hits-the-number",
+    "a-model-you-can-audit-is-not-a-model-that-scores",
+    "the-audit-trail-is-not-the-deliverable-here"
+  ],
+  "TextualSimilaritySickSpearmanCorrelation": [
+    "a-scoreable-file-in-the-first-hour",
+    "the-row-count-comes-from-the-split-not-the-brief",
+    "assume-this-stage-is-the-last-one-you-get",
+    "the-submission-is-the-only-artifact-that-scores",
+    "your-survey-already-named-the-method-that-hits-the-number",
+    "a-model-you-can-audit-is-not-a-model-that-scores",
+    "the-audit-trail-is-not-the-deliverable-here"
+  ],
+  "TimeSeriesForecastingKaggleWebTrafficMASE": [
+    "a-scoreable-file-in-the-first-hour",
+    "the-row-count-comes-from-the-split-not-the-brief",
+    "assume-this-stage-is-the-last-one-you-get",
+    "the-submission-is-the-only-artifact-that-scores",
+    "your-survey-already-named-the-method-that-hits-the-number",
+    "a-model-you-can-audit-is-not-a-model-that-scores",
+    "the-audit-trail-is-not-the-deliverable-here"
+  ],
+  "TimeSeriesForecastingSolarWeeklyMAE": [
+    "a-scoreable-file-in-the-first-hour",
+    "the-row-count-comes-from-the-split-not-the-brief",
+    "assume-this-stage-is-the-last-one-you-get",
+    "the-submission-is-the-only-artifact-that-scores",
+    "your-survey-already-named-the-method-that-hits-the-number",
+    "a-model-you-can-audit-is-not-a-model-that-scores",
+    "the-audit-trail-is-not-the-deliverable-here"
+  ],
+  "U0MolecularPropertyPredictionQm9MeanAbsoluteError": [
+    "a-scoreable-file-in-the-first-hour",
+    "the-row-count-comes-from-the-split-not-the-brief",
+    "assume-this-stage-is-the-last-one-you-get",
+    "the-submission-is-the-only-artifact-that-scores",
+    "your-survey-already-named-the-method-that-hits-the-number",
+    "a-model-you-can-audit-is-not-a-model-that-scores",
+    "the-audit-trail-is-not-the-deliverable-here"
+  ],
+  "TimeSeriesForecastingRideshareMAE": [
+    "a-scoreable-file-in-the-first-hour",
+    "the-row-count-comes-from-the-split-not-the-brief",
+    "assume-this-stage-is-the-last-one-you-get",
+    "the-submission-is-the-only-artifact-that-scores",
+    "your-survey-already-named-the-method-that-hits-the-number",
+    "a-model-you-can-audit-is-not-a-model-that-scores",
+    "the-audit-trail-is-not-the-deliverable-here"
+  ],
+  "_airs_rationale": {
+    "CodeGenerationAPPSPassAt5": {
+      "pins": 7,
+      "autor": 7.371,
+      "control": 14.153,
+      "net": -6.781,
+      "final_stage_reached": "03",
+      "pct_calls_after_deliverable_froze": 55,
+      "note": "lost to the control"
+    },
+    "CodeRetrievalCodeXGlueMRR": {
+      "pins": 7,
+      "autor": 0.808,
+      "control": 0.817,
+      "net": -0.009,
+      "final_stage_reached": "04",
+      "pct_calls_after_deliverable_froze": 46,
+      "note": "lost to the control"
+    },
+    "CoreferenceResolutionSuperGLUEWSCAccuracy": {
+      "pins": 7,
+      "autor": 0.407,
+      "control": 0.526,
+      "net": -0.12,
+      "final_stage_reached": "06",
+      "pct_calls_after_deliverable_froze": 17,
+      "note": "lost to the control"
+    },
+    "CoreferenceResolutionWinograndeAccuracy": {
+      "pins": 7,
+      "autor": 0.873,
+      "control": 0.845,
+      "net": 0.028,
+      "final_stage_reached": "03",
+      "pct_calls_after_deliverable_froze": 5,
+      "note": "won by AutoR; pinned anyway because the arm-wide mechanism applies and this run still hit the cap"
+    },
+    "CvMolecularPropertyPredictionQm9MeanAbsoluteError": {
+      "pins": 7,
+      "autor": 0.808,
+      "control": 0.956,
+      "net": -0.148,
+      "final_stage_reached": "01",
+      "pct_calls_after_deliverable_froze": 8,
+      "note": "lost to the control"
+    },
+    "GMolecularPropertyPredictionQm9MeanAbsoluteError": {
+      "pins": 7,
+      "autor": 0.828,
+      "control": 0.932,
+      "net": -0.104,
+      "final_stage_reached": "01",
+      "pct_calls_after_deliverable_froze": 12,
+      "note": "lost to the control"
+    },
+    "GraphRegressionZincMae": {
+      "pins": 7,
+      "autor": 0.861,
+      "control": 0.868,
+      "net": -0.007,
+      "final_stage_reached": "04",
+      "pct_calls_after_deliverable_froze": 48,
+      "note": "lost to the control"
+    },
+    "MathQuestionAnsweringSVAMPAccuracy": {
+      "pins": 7,
+      "autor": 0.902,
+      "control": 0.887,
+      "net": 0.015,
+      "final_stage_reached": "03",
+      "pct_calls_after_deliverable_froze": 62,
+      "note": "won by AutoR; pinned anyway because the arm-wide mechanism applies and this run still hit the cap"
+    },
+    "QuestionAnsweringDuoRCAccuracy": {
+      "pins": 7,
+      "autor": 0.639,
+      "control": 0.743,
+      "net": -0.105,
+      "final_stage_reached": "02",
+      "pct_calls_after_deliverable_froze": 65,
+      "note": "lost to the control"
+    },
+    "QuestionAnsweringEli5RougeL": {
+      "pins": 7,
+      "autor": 0.606,
+      "control": 0.678,
+      "net": -0.072,
+      "final_stage_reached": "01",
+      "pct_calls_after_deliverable_froze": 15,
+      "note": "lost to the control"
+    },
+    "QuestionAnsweringFinqaAccuracy": {
+      "pins": 7,
+      "autor": 0.0,
+      "control": 0.291,
+      "net": -0.291,
+      "final_stage_reached": "01",
+      "pct_calls_after_deliverable_froze": 57,
+      "note": "no valid submission: 1137 rows where the split has 1147"
+    },
+    "R2AbsMolecularPropertyPredictionQm9MeanAbsoluteError": {
+      "pins": 7,
+      "autor": 0.759,
+      "control": 0.956,
+      "net": -0.197,
+      "final_stage_reached": "04",
+      "pct_calls_after_deliverable_froze": 69,
+      "note": "lost to the control"
+    },
+    "ReadingComprehensionSquadExactMatch": {
+      "pins": 7,
+      "autor": 1.141,
+      "control": 1.134,
+      "net": 0.007,
+      "final_stage_reached": "01",
+      "pct_calls_after_deliverable_froze": 43,
+      "note": "won by AutoR; pinned anyway because the arm-wide mechanism applies and this run still hit the cap"
+    },
+    "SentimentAnalysisYelpReviewFullAccuracy": {
+      "pins": 7,
+      "autor": 0.597,
+      "control": 0.636,
+      "net": -0.039,
+      "final_stage_reached": "01",
+      "pct_calls_after_deliverable_froze": 31,
+      "note": "lost to the control"
+    },
+    "TextualClassificationSickAccuracy": {
+      "pins": 7,
+      "autor": 1.099,
+      "control": 1.15,
+      "net": -0.051,
+      "final_stage_reached": "03",
+      "pct_calls_after_deliverable_froze": 13,
+      "note": "lost to the control"
+    },
+    "TextualSimilaritySickSpearmanCorrelation": {
+      "pins": 7,
+      "autor": 1.104,
+      "control": 1.173,
+      "net": -0.069,
+      "final_stage_reached": "04",
+      "pct_calls_after_deliverable_froze": 60,
+      "note": "lost to the control"
+    },
+    "TimeSeriesForecastingKaggleWebTrafficMASE": {
+      "pins": 7,
+      "autor": 0.986,
+      "control": 0.988,
+      "net": -0.001,
+      "final_stage_reached": "03",
+      "pct_calls_after_deliverable_froze": 19,
+      "note": "lost to the control"
+    },
+    "TimeSeriesForecastingSolarWeeklyMAE": {
+      "pins": 7,
+      "autor": 0.908,
+      "control": 0.945,
+      "net": -0.037,
+      "final_stage_reached": "02",
+      "pct_calls_after_deliverable_froze": 70,
+      "note": "lost to the control"
+    },
+    "U0MolecularPropertyPredictionQm9MeanAbsoluteError": {
+      "pins": 7,
+      "autor": 0.844,
+      "control": 0.955,
+      "net": -0.111,
+      "final_stage_reached": "02",
+      "pct_calls_after_deliverable_froze": 8,
+      "note": "lost to the control"
+    },
+    "TimeSeriesForecastingRideshareMAE": {
+      "pins": 7,
+      "note": "never run here; its dataset cannot be staged"
+    }
+  }
 }

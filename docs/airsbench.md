@@ -454,6 +454,75 @@ same cap.
 
 <!-- results:end -->
 
+## Why the scaffold loses here, and the seven skills written from it
+
+The result is that the bare CLI wins 16 of 19. The question worth answering is *how*, since
+AutoR is the same model with more machinery. Four measurements over the nineteen AutoR run
+trees answer it, and none of them is "the agent was worse at machine learning".
+
+**1. It does more work, not less.** AutoR made a median of **313 tool calls** per task
+against the bare arm's **86**, and **63** of them touched `submission.csv` against the bare
+arm's **8**. Whatever is going wrong, it is not idleness or timidity.
+
+**2. Nearly half of that work lands after the deliverable stops changing.** Median **43%**
+of AutoR's tool calls came after the last write to `submission.csv`; on seven of nineteen
+tasks it was over half, and on the worst — `R2Abs…Qm9` — it was **294 of 427**. The median
+gap between the last write and the end of the run was **93 minutes of a 240-minute budget**.
+The bare arm's median gap was **2 minutes**. Read the calls in that window and they are
+recognisable: resolving DOIs for two architectures the run had decided not to build,
+rewiring claims to sources, "an independent verifier for every stage number", "a full
+integrity sweep of all artifacts", four calls removing a parenthesised backtick from a notes
+file. Competent work, on a benchmark that reads one CSV.
+
+**3. Every run hit the cap and none finished the walk.** Six of nineteen never left Stage
+01; four of those spent 13–22 attempts on it. So the pipeline's later stages — the ones
+designed to run the experiments and improve the result — mostly never executed, and the
+scored file is whatever an early stage produced in passing.
+
+**4. The survey found the answer and the implementation did not hear it.** On
+`Cv…Qm9` the Stage 01 survey recorded the published ladder for that target and metric —
+**0.021 to 0.029** — and the run shipped **0.11**, five times off a number in its own notes.
+On `R2Abs…Qm9` it resolved the DOIs of two graph-network architectures, cited them
+correctly, and shipped a gradient-boosted tree on hand-built features, beside scripts named
+`audit_train_test_alignment.py`, `audit_units_and_temperature.py` and
+`emit_demand_coverage.py`. The bare arm, which did no survey at all, wrote `schnet.py`,
+`graphs.py` and `finetune.py`, and won all three QM9 tasks by 0.11 to 0.20.
+
+Taken together the failure is not one of capability but of **allocation and closure**: the
+scaffold's gates are the loudest signal in the run, so effort flows to them; and the
+findings that would redirect the modelling arrive as documents rather than as instructions.
+
+### The skills
+
+Seven skills are written from those four measurements, each scoped by `applies_when:
+predictions will be scored` — a claim about task shape that selects **19 of the 20
+AIRS-Bench briefs and 0 of the 40 ResearchClawBench ones** — and pinned to all twenty task
+identifiers in [configs/task_skill_pins.json](../configs/task_skill_pins.json).
+
+| skill | the measurement behind it | stages |
+|:---|:---|:---|
+| [`a-scoreable-file-in-the-first-hour`](../src/skills/a-scoreable-file-in-the-first-hour/SKILL.md) | 19/19 hit the cap; one shipped no valid file at all | 01–04 |
+| [`the-row-count-comes-from-the-split-not-the-brief`](../src/skills/the-row-count-comes-from-the-split-not-the-brief/SKILL.md) | 1,137 rows where the split has 1,147; and a task whose own brief states the wrong shape | 03–05 |
+| [`assume-this-stage-is-the-last-one-you-get`](../src/skills/assume-this-stage-is-the-last-one-you-get/SKILL.md) | six of nineteen never left Stage 01; none finished the walk | 01–04 |
+| [`the-submission-is-the-only-artifact-that-scores`](../src/skills/the-submission-is-the-only-artifact-that-scores/SKILL.md) | 43% of calls, 93 minutes, after the file stopped changing | 01–06 |
+| [`your-survey-already-named-the-method-that-hits-the-number`](../src/skills/your-survey-already-named-the-method-that-hits-the-number/SKILL.md) | ladder recorded at 0.021–0.029, shipped 0.11 | 01–04 |
+| [`a-model-you-can-audit-is-not-a-model-that-scores`](../src/skills/a-model-you-can-audit-is-not-a-model-that-scores/SKILL.md) | gradient-boosted tree against the control's graph network | 03–05 |
+| [`the-audit-trail-is-not-the-deliverable-here`](../src/skills/the-audit-trail-is-not-the-deliverable-here/SKILL.md) | 294 of 427 calls on the record, on the worst-affected task | 01–06 |
+
+**They are weighted at the early stages on purpose.** A skill named only at Stage 05 would
+be unreachable on this benchmark: over a forty-task arm, stages 05, 06 and 07 accounted for
+five `Skill` launches between them, and here most runs never reach 05 at all.
+
+**Pinned, not merely installed, for the same reason.** Measured over that arm, a skill a
+prompt names imperatively fired in 31 of 40 runs; a skill that was only installed fired in
+almost none, with the pack drawing 78 launches in 789 hours of agent time. A skill nobody
+opens is indistinguishable from a skill nobody wrote.
+
+**None of this is measured yet.** The seven are a hypothesis about a measured failure, not a
+result: no arm has been run with them. The honest test is a re-run of the same nineteen
+tasks under the same cap with the pins on, against these numbers as the control — and until
+that exists, this section describes a diagnosis and a prescription, not an improvement.
+
 ## What is not measured
 
 - **This is not a leaderboard number and cannot be placed beside one.** The published table
