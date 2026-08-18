@@ -260,7 +260,18 @@ descriptor ownership`, which needs `filelock<3.19` as well. A 3.10 interpreter w
 `filelock==3.18` scores the task in about six minutes; nothing that satisfies the
 repository's own `requires-python` scores it at all.
 
-**4. One task cannot be staged at all.** `Monash-University/monash_tsf`'s `rideshare`
+**4. The APPS evaluator dies on a submission whose attempts all run to completion.**
+`solves_testcases` creates a **new `multiprocessing.Manager()`** — a whole server process —
+for every `(problem, attempt)` pair, inside a `ThreadPoolExecutor` left at its default
+worker count. That is up to 25,000 manager processes per evaluation. Attempts that fail
+fast keep the live count low, which is why real submissions score; a submission of
+`print(0)` for all 5,000 problems runs every attempt to completion and the evaluation dies
+at `m.start()` with `EOFError`, reproducibly, having scored nothing at all. So an APPS
+score can be lost for reasons unrelated to the submission — which is the case for recording
+a failed evaluation as `value: None` rather than `0.0`, since `0.0` is what a genuinely
+worthless submission gets and the two must not be the same object.
+
+**5. One task cannot be staged at all.** `Monash-University/monash_tsf`'s `rideshare`
 config raises `DatasetGenerationError` under `datasets` 3 (its loading script) and is
 unavailable under `datasets` 4 (there is no script), so
 `TimeSeriesForecastingRideshareMAE` has no data by any route available here. Nineteen of
@@ -333,11 +344,20 @@ statistic on this benchmark and the median is reported beside it.
 
 Those Pass@5 figures are high against a published SOTA of 0.187 and were checked before
 being used. `solves_testcases` returns `np.all(fixed)`, and `np.all([])` is `True`, so a
-harness that returned no test results would score every problem correct — but no shipped
-test problem has an empty `input_output`, and the floor measured directly settles it: a
-submission of `pass` for all 5,000 problems × 5 slots scores **0.0008**, normalized
-**0.004**. The metric discriminates; it is the *normalization* on that task that is
-eleven times more sensitive than elsewhere.
+harness that returned no test results would score every problem correct. No shipped test
+problem has an empty `input_output`, and three null submissions over all 5,000 problems ×
+5 slots settle it directly:
+
+| null submission | Pass@5 | normalized |
+|:---|---:|---:|
+| `pass` | 0.0008 | 0.004 |
+| `def (` (does not compile) | 0.0000 | 0.000 |
+| `print(0)` | *the evaluator crashed* | — |
+
+The metric discriminates: the floor is zero, and the `np.all([])` path is not reachable
+through a program that fails to compile — `solves_testcases` catches that case and fills in
+a row of zeros. What is eleven times more sensitive than elsewhere is the *normalization*
+on this one task, not the measurement.
 
 **What AutoR spent the four hours on.** Every one of the nineteen runs hit the cap and
 **not one finished the walk**. Final stage reached: **six runs never left Stage 01**, three
