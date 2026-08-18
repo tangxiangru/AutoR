@@ -284,6 +284,87 @@ description of it.
 ## Results
 
 <!-- results:begin -->
+### Nineteen tasks, on a CPU-only cluster
+
+**Nineteen tasks** (the twentieth cannot be staged), one seed, `claude-opus-5` executing in
+both arms, **4 h of wall clock each**, no web search, one `(arm, task)` per slurm array
+element on CPU-only nodes with 6 cores and 48 GB. Scores are AIRS-Bench's own normalized
+score, **1.000 = human SOTA**.
+
+| task | AutoR | bare | Δ | AutoR reached |
+|:---|---:|---:|---:|:---:|
+| `CodeGenerationAPPSPassAt5` \* | 7.371 | 14.153 | +6.781 | 03 |
+| `CodeRetrievalCodeXGlueMRR` | 0.808 | 0.817 | +0.009 | 04 |
+| `CoreferenceResolutionSuperGLUEWSCAccuracy` | 0.407 | 0.526 | +0.120 | 06 |
+| `CoreferenceResolutionWinograndeAccuracy` | 0.873 | 0.845 | -0.028 | 03 |
+| `CvMolecularPropertyPredictionQm9MeanAbsoluteError` | 0.808 | 0.956 | +0.148 | 01 |
+| `GMolecularPropertyPredictionQm9MeanAbsoluteError` | 0.828 | 0.932 | +0.104 | 01 |
+| `GraphRegressionZincMae` | 0.861 | 0.868 | +0.007 | 04 |
+| `MathQuestionAnsweringSVAMPAccuracy` | 0.902 | 0.887 | -0.015 | 03 |
+| `QuestionAnsweringDuoRCAccuracy` | 0.639 | 0.743 | +0.105 | 02 |
+| `QuestionAnsweringEli5RougeL` | 0.606 | 0.678 | +0.072 | 01 |
+| `QuestionAnsweringFinqaAccuracy` | — | 0.291 | — | 01 |
+| `R2AbsMolecularPropertyPredictionQm9MeanAbsoluteError` | 0.759 | 0.956 | +0.197 | 04 |
+| `ReadingComprehensionSquadExactMatch` | 1.141 | 1.134 | -0.007 | 01 |
+| `SentimentAnalysisYelpReviewFullAccuracy` | 0.597 | 0.636 | +0.039 | 01 |
+| `TextualClassificationSickAccuracy` | 1.099 | 1.150 | +0.051 | 03 |
+| `TextualSimilaritySickSpearmanCorrelation` | 1.104 | 1.173 | +0.069 | 04 |
+| `TimeSeriesForecastingKaggleWebTrafficMASE` | 0.986 | 0.988 | +0.001 | 03 |
+| `TimeSeriesForecastingSolarWeeklyMAE` | 0.908 | 0.945 | +0.037 | 02 |
+| `U0MolecularPropertyPredictionQm9MeanAbsoluteError` | 0.844 | 0.955 | +0.111 | 02 |
+
+| | AutoR | bare |
+|:---|---:|---:|
+| mean normalized, 17 paired tasks | 0.834 | **0.894** |
+| median normalized, 17 paired | 0.844 | **0.932** |
+| paired mean difference | | **+0.060** |
+| paired median difference | | **+0.051** |
+| tasks won, of 17 | 3 | **14** |
+| valid submissions | 18 of 19 | **19 of 19** |
+| **hit the 4 h cap** | **19 of 19** | **0 of 19** |
+
+**\* APPS is excluded from every aggregate above, and the reason is a property of the
+benchmark's own metric.** Its normalized score is
+`(φ(s) − φ(0)) / (φ(0.187) − φ(0))`, and `φ(0.187) − φ(0) = 0.090` — a denominator eleven
+times smaller than a typical task's. The two arms scored Pass@5 of 0.783 and 0.947, which
+normalize to **7.37 and 14.15**. Including them takes the paired mean difference from
++0.060 to +0.433 on the strength of one task, so the mean over tasks is not a robust
+statistic on this benchmark and the median is reported beside it.
+
+Those Pass@5 figures are high against a published SOTA of 0.187 and were checked before
+being used. `solves_testcases` returns `np.all(fixed)`, and `np.all([])` is `True`, so a
+harness that returned no test results would score every problem correct — but no shipped
+test problem has an empty `input_output`, and the floor measured directly settles it: a
+submission of `pass` for all 5,000 problems × 5 slots scores **0.0008**, normalized
+**0.004**. The metric discriminates; it is the *normalization* on that task that is
+eleven times more sensitive than elsewhere.
+
+**What AutoR spent the four hours on.** Every one of the nineteen runs hit the cap and
+**not one finished the walk**. Final stage reached: **six runs never left Stage 01**, three
+reached 02, five reached 03, four reached 04, and one reached 06. Four of the six stuck at
+Stage 01 spent 13–22 attempts on the literature survey. The bare arm hit the cap zero
+times, at a median of 3 h 14 m.
+
+**AutoR's one invalid submission is the failure the brief warns about.** On
+`QuestionAnsweringFinqaAccuracy` it wrote **1,137 rows where the test split has 1,147** and
+the evaluator refuses the file — a whole task lost to ten rows, with a valid submission
+that had existed earlier in the run. The bare arm produced nineteen valid submissions.
+
+**Only the bare arm downloaded a model.** Seven of its nineteen runs called
+`snapshot_download` — `Qwen2.5-7B`, `Qwen2.5-Math-1.5B-Instruct`, `Qwen3-1.7B`, all small
+because the nodes have no GPU. Zero AutoR runs did. That is not a confound in the arms'
+access, which was identical; it is part of what the scaffold spent its budget on instead.
+
+**Neither arm reached for the labels.** Tool-call audit hits on the private raw-data
+directory, the benchmark checkout and `test_with_labels`: **zero, across all 38 runs.** The
+text-only hits are `ps` output and one AutoR stage summary stating that
+`data/test_with_labels` does not exist in its workspace.
+
+### Five tasks, on a GPU node
+
+The first arm, run before the cluster campaign, on one node with eight shared H100s and a
+5-task subset. Same protocol otherwise.
+
 **Five tasks, one seed, `claude-opus-5` executing in both arms, 4 h of wall clock each, no
 web search, on one GPU node.** The AutoR arm reviewed with the backend's default reviewer
 model (`sonnet`); the bare arm is a single `claude -p` session with the same brief. Scores
