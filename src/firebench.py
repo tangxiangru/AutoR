@@ -71,7 +71,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 from .frontierscience import _OperatorCall, has_refusal, stage_answer_bodies, stages_approved_in
-from .rcb import AUTOR_RUNS_DIRNAME, emit_event, fence_research_task
+from .rcb import AUTOR_RUNS_DIRNAME, emit_event, fence_research_task, mirror_tree
 from .utils import (
     RunPaths,
     StageSpec,
@@ -687,6 +687,77 @@ def conclusion_content_refusals(text: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+def mirror_run_artifacts(workspace: Path, paths: RunPaths | None) -> dict[str, int]:
+    """Copy the run tree's code and results into the sandbox the contract promised.
+
+    The goal contract tells the agent that ``<sandbox>/code/`` and ``<sandbox>/outputs/``
+    are where its work goes, and AutoR's stage contract tells every stage that the run
+    tree's own workspace is. Both are followed, and the sandbox ends up empty -- which
+    makes the contract a false statement about the run, and makes an audit of "what did
+    it actually measure" start in the wrong directory.
+
+    Nothing downstream scores these files; this is for the record and for the human who
+    reads it afterwards. It is a copy rather than a move because the run tree is the
+    provenance and must stay intact.
+    """
+    moved = {"code": 0, "outputs": 0}
+    if paths is None:
+        return moved
+    code_dir = getattr(paths, "code_dir", None)
+    if code_dir is not None and Path(code_dir).is_dir():
+        moved["code"] = mirror_tree(Path(code_dir), workspace / "code")
+    for source in (getattr(paths, "results_dir", None), getattr(paths, "notes_dir", None)):
+        if source is not None and Path(source).is_dir():
+            moved["outputs"] += mirror_tree(Path(source), workspace / "outputs" / Path(source).name)
+    return moved
+
+
+def result_files(*, workspace: Path, paths: RunPaths | None) -> list[str]:
+    """Every file the run produced, from both places a stage might have put it.
+
+    Measured on a real pipeline run: the sandbox's ``code/`` and ``outputs/`` were
+    **empty** while the run tree held 272 files including ``results/responses.jsonl``
+    and ``results/condition_accuracy.json``. The goal contract asks stages to write into
+    the sandbox; AutoR's stage contract points them at the run tree's own workspace, and
+    the stages followed the one they are always given. Listing only the sandbox therefore
+    handed the synthesizer "(none)" for a run that had made 694 model calls per arm and
+    written its accuracies to disk -- so the one call that turns experiments into a
+    conclusion was asked to do it without them.
+
+    Paths are printed as absolute when they come from the run tree, because that is where
+    the model has to open them.
+    """
+    names: list[str] = []
+    for directory in ("outputs", "code", "data"):
+        root = workspace / directory
+        if root.is_dir():
+            names.extend(
+                str(path.relative_to(workspace))
+                for path in sorted(root.rglob("*"))
+                if path.is_file() and "__pycache__" not in path.parts
+            )
+    if paths is not None:
+        for root in (
+            getattr(paths, "results_dir", None),
+            getattr(paths, "code_dir", None),
+            getattr(paths, "notes_dir", None),
+            getattr(paths, "data_dir", None),
+        ):
+            if root is not None and Path(root).is_dir():
+                names.extend(
+                    str(path)
+                    for path in sorted(Path(root).rglob("*"))
+                    if path.is_file() and "__pycache__" not in path.parts
+                )
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for name in names:
+        if name not in seen:
+            seen.add(name)
+            ordered.append(name)
+    return ordered
+
+
 class ConclusionSynthesizer(_OperatorCall):
     """One operator call that turns approved stage work into a conclusion.
 
@@ -726,11 +797,7 @@ class ConclusionSynthesizer(_OperatorCall):
         evidence = "\n\n---\n\n".join(
             truncate_text(body, max_chars=self.STAGE_BODY_CHARS) for body in bodies
         )
-        outputs = sorted(
-            str(path.relative_to(workspace))
-            for path in (workspace / "outputs").rglob("*")
-            if path.is_file()
-        )[:40]
+        outputs = result_files(workspace=workspace, paths=paths)[:40]
         return "\n\n".join(
             [
                 "# Write the conclusion for this study",

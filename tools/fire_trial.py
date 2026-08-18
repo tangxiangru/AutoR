@@ -240,35 +240,49 @@ def do_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _score_cell(plan: dict, cell: dict, scorer: Path, draws: int) -> str:
+    root = cell_dir(plan, cell)
+    record = json.loads((root / "run.json").read_text(encoding="utf-8"))
+    summary_path = root / "_score" / "summary.json"
+    if not record.get("log_exists"):
+        write_json(summary_path, {"task": cell["task"], "draws": 0, "scored": 0,
+                                  "not_scored": {"no_log": 1}})
+        return f"  {cell['id']}: no log"
+    completed = subprocess.run(
+        [
+            sys.executable, str(scorer),
+            "--bench-root", plan["bench_root"],
+            "--log-file", record["log_file"],
+            "--task", cell["task"],
+            "--draws", str(draws),
+            "--out-dir", str(root / "_score"),
+        ],
+        capture_output=True, text=True,
+    )
+    line = completed.stdout.strip().splitlines()[-1] if completed.stdout.strip() else ""
+    return f"  {cell['id']}: rc={completed.returncode} {line[:120]}"
+
+
 def do_score(args: argparse.Namespace) -> int:
     plan = json.loads(Path(args.plan).expanduser().read_text(encoding="utf-8"))
     scorer = Path(plan["autor_root"]) / "tools" / "score_fire_run.py"
-    cells = [cell for cell in plan["cells"] if (cell_dir(plan, cell) / "run.json").is_file()]
-    print(f"[score] {len(cells)} cells x {args.draws} draws")
-    for cell in cells:
-        root = cell_dir(plan, cell)
-        record = json.loads((root / "run.json").read_text(encoding="utf-8"))
-        summary_path = root / "_score" / "summary.json"
-        if summary_path.is_file() and not args.force:
-            continue
-        if not record.get("log_exists"):
-            write_json(summary_path, {"task": cell["task"], "draws": 0, "scored": 0,
-                                      "not_scored": {"no_log": 1}})
-            print(f"  {cell['id']}: no log", flush=True)
-            continue
-        completed = subprocess.run(
-            [
-                sys.executable, str(scorer),
-                "--bench-root", plan["bench_root"],
-                "--log-file", record["log_file"],
-                "--task", cell["task"],
-                "--draws", str(args.draws),
-                "--out-dir", str(root / "_score"),
-            ],
-            capture_output=True, text=True,
-        )
-        line = completed.stdout.strip().splitlines()[-1] if completed.stdout.strip() else ""
-        print(f"  {cell['id']}: rc={completed.returncode} {line[:120]}", flush=True)
+    cells = [
+        cell for cell in plan["cells"]
+        if (cell_dir(plan, cell) / "run.json").is_file()
+        and (args.force or not (cell_dir(plan, cell) / "_score" / "summary.json").is_file())
+    ]
+    print(f"[score] {len(cells)} cells x {args.draws} draws, concurrency {args.concurrency}")
+    # Concurrent across cells, serial within one. The judge is a remote LLM pipeline and
+    # a cell's draws are a sample of *it*, so they must not race each other for the same
+    # rate limit and come back as transport errors -- which is the one failure this tool
+    # is careful not to record as a score.
+    with ThreadPoolExecutor(max_workers=max(1, args.concurrency)) as pool:
+        futures = {pool.submit(_score_cell, plan, cell, scorer, args.draws): cell for cell in cells}
+        for future in as_completed(futures):
+            try:
+                print(future.result(), flush=True)
+            except Exception as exc:  # noqa: BLE001 - one dead cell must not kill the pass
+                print(f"  {futures[future]['id']}: {type(exc).__name__}: {exc}", flush=True)
     return 0
 
 
@@ -364,6 +378,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     score_cmd = sub.add_parser("score")
     score_cmd.add_argument("--plan", required=True)
     score_cmd.add_argument("--draws", type=int, default=3)
+    score_cmd.add_argument("--concurrency", type=int, default=4)
     score_cmd.add_argument("--force", action="store_true")
 
     report_cmd = sub.add_parser("report")

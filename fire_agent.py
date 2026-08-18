@@ -100,6 +100,7 @@ from src.firebench import (  # noqa: E402
     conclusion_path_for,
     ensure_fire_workspace,
     export_conclusion,
+    mirror_run_artifacts,
     fire_runs_dir_for,
     fire_workspace_name,
     load_task,
@@ -577,6 +578,9 @@ def run(args: argparse.Namespace) -> FireRunResult:
         emit_event({"type": "error", "where": args.profile, "traceback": traceback.format_exc()})
 
     watcher.stop()
+    # Before the synthesis call, not after: the prompt lists the run's result files, and
+    # a pipeline arm writes them into the run tree rather than the sandbox.
+    mirrored = mirror_run_artifacts(workspace, paths)
 
     conclusion = export_conclusion(
         workspace=workspace,
@@ -634,6 +638,7 @@ def run(args: argparse.Namespace) -> FireRunResult:
             "stage_timeout_seconds": stage_timeout if pipeline else None,
             "attempt_index": args.attempt_index,
             "watcher_publishes": len(watcher.published),
+            "mirrored_artifacts": mirrored,
             "model_catalog": model_catalog,
         },
     )

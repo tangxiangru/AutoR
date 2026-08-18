@@ -65,9 +65,11 @@ from src.firebench import (
     fire_exit_failures,
     fire_workspace_name,
     load_task,
+    mirror_run_artifacts,
     open_log,
     preview_task_inputs,
     publish_conclusion_line,
+    result_files,
     sanitise_log_body,
     stage_task_inputs,
 )
@@ -485,6 +487,71 @@ class GoalContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             goal = build_fire_goal(_task(Path(tmp)), Path(tmp) / "ws", staged={"data": None})
             self.assertIn("ships no data", goal)
+
+
+class ArtifactVisibilityTests(unittest.TestCase):
+    """Where the run's measurements are, and where the synthesizer was looking.
+
+    Measured on a real pipeline run: the sandbox's ``code/`` and ``outputs/`` were empty
+    while the run tree held 272 files including ``results/responses.jsonl`` and
+    ``results/condition_accuracy.json``. The goal contract points stages at the sandbox
+    and AutoR's stage contract points them at the run tree; the stages follow the one
+    they are always given. The synthesizer -- the one call that turns experiments into
+    the scored conclusion -- was therefore listing "(none)".
+    """
+
+    class _Paths:
+        def __init__(self, root: Path) -> None:
+            self.results_dir = root / "results"
+            self.code_dir = root / "code"
+            self.notes_dir = root / "notes"
+            self.data_dir = root / "data"
+            for directory in (self.results_dir, self.code_dir, self.notes_dir, self.data_dir):
+                directory.mkdir(parents=True, exist_ok=True)
+
+    def test_results_in_the_run_tree_are_listed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "ws"
+            ensure_fire_workspace(workspace)
+            paths = self._Paths(Path(tmp) / "run")
+            (paths.results_dir / "condition_accuracy.json").write_text("{}", encoding="utf-8")
+            listed = result_files(workspace=workspace, paths=paths)
+            self.assertTrue(any("condition_accuracy.json" in name for name in listed), listed)
+
+    def test_the_sandbox_alone_would_have_listed_nothing(self) -> None:
+        """The negative control: this is exactly what the run produced."""
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "ws"
+            ensure_fire_workspace(workspace)
+            self.assertEqual(result_files(workspace=workspace, paths=None), [])
+
+    def test_pycache_is_not_a_result(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "ws"
+            ensure_fire_workspace(workspace)
+            (workspace / "code" / "__pycache__").mkdir(parents=True)
+            (workspace / "code" / "__pycache__" / "x.pyc").write_bytes(b"\x00")
+            (workspace / "code" / "run.py").write_text("x = 1", encoding="utf-8")
+            self.assertEqual(result_files(workspace=workspace, paths=None), ["code/run.py"])
+
+    def test_mirroring_puts_the_artifacts_where_the_contract_said(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "ws"
+            ensure_fire_workspace(workspace)
+            paths = self._Paths(Path(tmp) / "run")
+            (paths.code_dir / "run_grid.py").write_text("x = 1", encoding="utf-8")
+            (paths.results_dir / "responses.jsonl").write_text('{"a": 1}\n', encoding="utf-8")
+            mirror_run_artifacts(workspace, paths)
+            self.assertTrue((workspace / "code" / "run_grid.py").is_file())
+            self.assertTrue((workspace / "outputs" / "results" / "responses.jsonl").is_file())
+            # A copy, not a move: the run tree is the provenance.
+            self.assertTrue((paths.results_dir / "responses.jsonl").is_file())
+
+    def test_mirroring_without_a_run_tree_is_a_no_op(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "ws"
+            ensure_fire_workspace(workspace)
+            self.assertEqual(mirror_run_artifacts(workspace, None), {"code": 0, "outputs": 0})
 
 
 class WorkspaceNameTests(unittest.TestCase):

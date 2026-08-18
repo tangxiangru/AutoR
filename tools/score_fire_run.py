@@ -148,6 +148,12 @@ def main(argv: list[str] | None = None) -> int:
                         help="Where per-draw JSON goes. Defaults to <log-file dir>/_score/.")
     parser.add_argument("--python", default="", help=f"Scoring interpreter. Defaults to {DEFAULT_VENV}/bin/python.")
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT)
+    parser.add_argument("--max-transport-retries", type=int, default=4,
+                        help="Extra attempts to replace draws lost to transport, not to the "
+                             "judge. Measured on this deployment, roughly one draw in four "
+                             "came back APITimeoutError; without this the median is taken "
+                             "over whatever survived, which is a smaller and differently "
+                             "biased sample than the one that was asked for.")
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     bench_root = Path(args.bench_root).expanduser().resolve()
@@ -162,8 +168,14 @@ def main(argv: list[str] | None = None) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     draws: list[dict] = []
-    for index in range(1, max(1, args.draws) + 1):
-        out = out_dir / f"draw_{index:02d}.json"
+    wanted = max(1, args.draws)
+    attempts = 0
+    # Attempts, not draws. A transport failure is not a draw of the judge -- it is a draw
+    # that never reached the judge -- so replacing it keeps the sample the size that was
+    # asked for. A *judge* failure is not replaced: that is the judge answering.
+    while len([d for d in draws if d.get("status") == "scored"]) < wanted and attempts < wanted + max(0, args.max_transport_retries):
+        attempts += 1
+        out = out_dir / f"draw_{attempts:02d}.json"
         record = one_draw(
             python=python, driver=driver, bench_root=bench_root, log_file=log_file,
             task=args.task, out=out, timeout=args.timeout,
@@ -171,7 +183,7 @@ def main(argv: list[str] | None = None) -> int:
         draws.append(record)
         metrics = record.get("overall_metrics") or {}
         print(
-            f"draw {index}/{args.draws}: {record.get('status')} "
+            f"attempt {attempts}: {record.get('status')} "
             + (f"P={metrics.get('precision')} R={metrics.get('recall')} F1={metrics.get('f1')} "
                if metrics else "")
             + f"({record.get('seconds', '?')}s)",
