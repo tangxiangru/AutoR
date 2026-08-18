@@ -281,6 +281,118 @@ def _score_cell(plan: dict, cell: dict, scorer: Path, draws: int) -> str:
     return f"  {cell['id']}: rc={completed.returncode} {line[:120]}"
 
 
+def do_run_cell(args: argparse.Namespace) -> int:
+    """Run exactly one cell. The seam SLURM needs, and the one the local pool uses.
+
+    ``run`` fans out with a thread pool on one machine, which is the wrong shape past a
+    few dozen cells: 105 cells at up to an hour each is four and a half hours of one
+    node's uptime, and a node that reboots loses all of it. An array job is the right
+    shape, but only if a cell can be launched from a command line -- and if that command
+    line goes through the *same* :func:`launch` the local pool uses, so the two cannot
+    drift into launching the agent differently.
+    """
+    plan = json.loads(Path(args.plan).expanduser().read_text(encoding="utf-8"))
+    cells = {cell["id"]: cell for cell in plan["cells"]}
+    if args.index is not None:
+        ordered = [cell["id"] for cell in plan["cells"]]
+        if not 1 <= args.index <= len(ordered):
+            raise SystemExit(f"--index {args.index} out of range 1..{len(ordered)}")
+        cell_id = ordered[args.index - 1]
+    else:
+        cell_id = args.cell
+    if cell_id not in cells:
+        raise SystemExit(f"No cell {cell_id!r} in the plan.")
+    cell = cells[cell_id]
+    root = cell_dir(plan, cell)
+    if (root / "run.json").is_file() and not args.force:
+        print(f"[skip] {cell_id} already has run.json")
+        return 0
+    record = launch(plan, cell)
+    print(f"[done] {cell_id}: rc={record['returncode']} {record['seconds']}s "
+          f"log={'yes' if record['log_exists'] else 'NO'}")
+    return 0
+
+
+#: Written by ``fire_trial.py slurm``. Kept as a template rather than assembled from
+#: fragments so that the file submitted to the scheduler is readable as a shell script by
+#: whoever has to debug it at 3am, which is the only time anyone reads one.
+SLURM_TEMPLATE = """#!/bin/bash
+#SBATCH --job-name={job_name}
+#SBATCH --partition={partition}
+#SBATCH --array=1-{n_cells}%{throttle}
+#SBATCH --cpus-per-task={cpus}
+#SBATCH --mem={mem}
+#SBATCH --time={walltime}
+#SBATCH --output={log_dir}/%A_%a.out
+#SBATCH --error={log_dir}/%A_%a.out
+set -uo pipefail
+
+# The two idle-timeout knobs are shell environment, not CLI configuration. A batch job
+# that does not re-export them falls back to a 300 s floor, which kills any call whose
+# model thinks for five minutes before its first token -- and what that removes is the
+# hard tasks, so the run comes back looking easy.
+export CLAUDE_STREAM_IDLE_TIMEOUT_MS=1800000
+export CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS=1800000
+export CLAUDE_CODE_USE_VERTEX=1
+export ANTHROPIC_VERTEX_PROJECT_ID="{vertex_project}"
+export CLOUD_ML_REGION="{vertex_region}"
+export OPENAI_BASE_URL="{openai_base_url}"
+export FIREBENCH_RUNS_DIR="{sandboxes}"
+# Node-local /tmp is 13 GB on this cluster and shared with everything else on the node.
+export TMPDIR=/tmp
+umask 022
+
+echo "[cell] array=${{SLURM_ARRAY_TASK_ID}} host=$(hostname) start=$(date -Is)"
+{python} {trial} run-cell --plan {plan} --index "${{SLURM_ARRAY_TASK_ID}}"
+rc=$?
+echo "[cell] array=${{SLURM_ARRAY_TASK_ID}} rc=$rc end=$(date -Is)"
+exit $rc
+"""
+
+
+def do_slurm(args: argparse.Namespace) -> int:
+    """Write an array script for the plan and, unless told not to, submit it.
+
+    One array task per cell, throttled. **The throttle is a quota decision, not a
+    scheduler one**: the cluster has idle nodes, and the thing that runs out first is the
+    per-base-model request pool the backend shares with every other session on the box.
+    Measured headroom at the time this was written was 24 concurrent calls with zero
+    429s, alongside another trial already holding about the same again -- so the default
+    is that number and not the node count.
+    """
+    plan_path = Path(args.plan).expanduser().resolve()
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    out_dir = Path(args.out_dir).expanduser().resolve() if args.out_dir else plan_path.parent / "slurm"
+    log_dir = out_dir / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    script = SLURM_TEMPLATE.format(
+        job_name=args.job_name,
+        partition=args.partition,
+        n_cells=len(plan["cells"]),
+        throttle=args.throttle,
+        cpus=args.cpus,
+        mem=args.mem,
+        walltime=args.walltime,
+        log_dir=log_dir,
+        python=sys.executable,
+        trial=str(Path(__file__).resolve()),
+        plan=str(plan_path),
+        sandboxes=str(Path(plan["runs_root"]).parent / "sandboxes"),
+        vertex_project=os.environ.get("ANTHROPIC_VERTEX_PROJECT_ID", ""),
+        vertex_region=os.environ.get("CLOUD_ML_REGION", "us"),
+        openai_base_url=os.environ.get("OPENAI_BASE_URL", ""),
+    )
+    script_path = out_dir / f"{args.job_name}.sbatch"
+    script_path.write_text(script, encoding="utf-8")
+    script_path.chmod(0o755)
+    print(f"[written] {script_path}  ({len(plan['cells'])} cells, throttle {args.throttle})")
+    if args.no_submit:
+        return 0
+    completed = subprocess.run(["sbatch", str(script_path)], capture_output=True, text=True)
+    print(completed.stdout.strip() or completed.stderr.strip())
+    return completed.returncode
+
+
 def do_score(args: argparse.Namespace) -> int:
     plan = json.loads(Path(args.plan).expanduser().read_text(encoding="utf-8"))
     scorer = autor_root(plan) / "tools" / "score_fire_run.py"
@@ -462,6 +574,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     run_cmd.add_argument("--concurrency", type=int, default=4)
     run_cmd.add_argument("--force", action="store_true")
 
+    cell_cmd = sub.add_parser("run-cell", help="Run exactly one cell. What SLURM invokes.")
+    cell_cmd.add_argument("--plan", required=True)
+    group = cell_cmd.add_mutually_exclusive_group(required=True)
+    group.add_argument("--cell", help="Cell id, e.g. cot_in_planning__autor-direct__r0")
+    group.add_argument("--index", type=int, help="1-based index into the plan's cell list")
+    cell_cmd.add_argument("--force", action="store_true")
+
+    slurm_cmd = sub.add_parser("slurm", help="Write and submit an array job for the plan.")
+    slurm_cmd.add_argument("--plan", required=True)
+    slurm_cmd.add_argument("--out-dir", default="")
+    slurm_cmd.add_argument("--job-name", default="firebench")
+    slurm_cmd.add_argument("--partition", default="eval")
+    slurm_cmd.add_argument("--throttle", type=int, default=24,
+                           help="Concurrent array tasks. A backend-quota number, not a node "
+                                "count: 24 concurrent calls was the measured headroom.")
+    slurm_cmd.add_argument("--cpus", type=int, default=4)
+    slurm_cmd.add_argument("--mem", default="16G")
+    slurm_cmd.add_argument("--walltime", default="02:00:00")
+    slurm_cmd.add_argument("--no-submit", action="store_true")
+
     score_cmd = sub.add_parser("score")
     score_cmd.add_argument("--plan", required=True)
     score_cmd.add_argument("--draws", type=int, default=3)
@@ -480,6 +612,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "run":
         return do_run(args)
+    if args.command == "run-cell":
+        return do_run_cell(args)
+    if args.command == "slurm":
+        return do_slurm(args)
     if args.command == "score":
         return do_score(args)
     return do_report(args)
