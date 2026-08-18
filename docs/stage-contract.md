@@ -182,11 +182,11 @@ before the branch:
 | From stage | Requirement | Checked by |
 | --- | --- | --- |
 | **07+** | Every claim in `workspace/artifacts/claim_provenance.json` is `confirmatory` on a `supported` hypothesis or labelled `exploratory`, and cites a file that exists. | `validate_claim_provenance` |
+| **07+** | `workspace/artifacts/deliverables_coverage.json` accounts for what the task statement demanded (see [the deliverables contract](#the-deliverables-contract)). Format-independent: whether the run answered the question it was given is not a question about how the answer was typeset. | `validate_deliverables_coverage` |
 
 Everything else at Stage 07 depends on the run's `output_format`, and **the two
-branches share very little**. In particular `validate_markdown_report`,
-`validate_report_plan_coverage` and `validate_deliverables_coverage` do **not**
-run on the latex branch.
+branches share very little**. In particular `validate_markdown_report` and
+`validate_report_plan_coverage` do **not** run on the latex branch.
 
 **`markdown` (the default):**
 
@@ -199,7 +199,6 @@ run on the latex branch.
 | **07+** | Every image reference resolves to a file that exists under `workspace/report/`. | `validate_markdown_report` |
 | **07+** | Every referenced image is renderable: `.png .jpg .jpeg .gif .webp` (`RENDERABLE_IMAGE_SUFFIXES`). | `validate_markdown_report` |
 | **07+** | The count of **published, renderable images under `workspace/report/images/`** is at least this run's figure floor and at most `MAX_REPORT_FIGURES` (5). | `validate_markdown_report` |
-| **07+** | `workspace/artifacts/deliverables_coverage.json` accounts for what the task statement demanded (see [the deliverables contract](#the-deliverables-contract)). | `validate_deliverables_coverage` |
 | **07+** | `workspace/artifacts/citation_verification.json`, structurally valid. | `validate_citation_verification` |
 | **07+** | `workspace/artifacts/self_review.json`. | — |
 | **07+** | `workspace/artifacts/report_review.json`, structurally valid. | `validate_report_review` |

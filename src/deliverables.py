@@ -215,6 +215,39 @@ def load_coverage(paths: RunPaths) -> Any:
         return "invalid"
 
 
+def _deliverable_text(paths: RunPaths) -> tuple[str, str]:
+    """The document a `where` has to point into, whichever format the run targets.
+
+    This used to read ``paths.report_file`` alone, which is `workspace/report/report.md`
+    and nothing else. A latex run has no such file, so the locator check fell through the
+    ``elif report_text and ...`` guard and asserted nothing -- a skip with no counter,
+    inside the one gate that asks whether the run answered the question it was given.
+
+    The other three halves of this validator -- the quote is verbatim, every demanding
+    sentence is accounted for, an unmet demand states why -- never depended on the
+    format. Only this one did, and only because the deliverable was named rather than
+    resolved.
+
+    Returns the document's name as well as its text, so a refusal says which document it
+    looked in rather than always saying `report.md`.
+
+    Still fail-open when neither exists: a stage that has written no deliverable yet is
+    caught by the gates that check for one, and making this the second refusal for one
+    condition would be two gates over one fact.
+    """
+
+    if paths.report_file.exists():
+        return paths.report_file.name, _normalize(read_text(paths.report_file)).lower()
+    sources = sorted(
+        path for path in paths.writing_dir.rglob("*.tex") if path.is_file()
+    ) if paths.writing_dir.exists() else []
+    if sources:
+        joined = "\n".join(read_text(path) for path in sources)
+        name = "main.tex" if len(sources) == 1 else f"the {len(sources)} .tex sources under workspace/writing"
+        return name, _normalize(joined).lower()
+    return "", ""
+
+
 def validate_deliverables_coverage(paths: RunPaths, task_statement: str) -> list[str]:
     """Check that the report answers what the task statement asked for."""
     problems: list[str] = []
@@ -229,7 +262,7 @@ def validate_deliverables_coverage(paths: RunPaths, task_statement: str) -> list
         return [f"{COVERAGE_FILENAME} must contain a non-empty 'deliverables' list."]
 
     normalized_task = _normalize(task_statement).lower()
-    report_text = _normalize(read_text(paths.report_file)).lower() if paths.report_file.exists() else ""
+    deliverable_name, deliverable_text = _deliverable_text(paths)
 
     quotes: list[str] = []
     declined: list[str] = []
@@ -268,10 +301,10 @@ def validate_deliverables_coverage(paths: RunPaths, task_statement: str) -> list
                 problems.append(
                     f"{COVERAGE_FILENAME} entry {index} is marked addressed but does not say where."
                 )
-            elif report_text and not _locator_appears(where, report_text):
+            elif deliverable_text and not _locator_appears(where, deliverable_text):
                 problems.append(
                     f"{COVERAGE_FILENAME} entry {index} points at {where[:60]!r}, which does not "
-                    "appear in report.md."
+                    f"appear in {deliverable_name}."
                 )
         elif not _normalize(str(entry.get("reason") or "")):
             problems.append(

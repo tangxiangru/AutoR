@@ -1843,6 +1843,25 @@ def validate_stage_artifacts(
         for problem in validate_claim_provenance(paths):
             problems.append(f"{stage.stage_title} {problem}")
 
+    # Rigour about the wrong question still fails the task. Everything in the
+    # markdown block below measures how well the report was made; this measures whether
+    # it answered what was asked, which is not a question about the output format.
+    #
+    # It sat inside that block until now, so a latex run was never asked whether it
+    # covered the brief. The condition predates the module: it arrived with the change
+    # that made markdown the default report format, and the coverage check was appended
+    # inside it. Blast radius of moving it out, measured over 335 archived run configs:
+    # every one of them is `markdown`, so no archived run changes verdict. That is the
+    # honest figure and it cuts both ways -- the gap has never cost an observed run, and
+    # the fix has never been exercised by one either.
+    if stage.number >= 7:
+        from .deliverables import validate_deliverables_coverage
+
+        problems.extend(
+            f"{stage.stage_title}: {problem}"
+            for problem in validate_deliverables_coverage(paths, task_statement(read_text(paths.user_input)))
+        )
+
     if stage.number >= 7 and selected_output_format(paths) == "markdown":
         from .report_plan import validate_report_plan_coverage
 
@@ -1857,15 +1876,6 @@ def validate_stage_artifacts(
             )
         )
 
-        # Rigour about the wrong question still fails the task. Everything above this
-        # measures how well the report was made; this measures whether it answered what
-        # was asked.
-        from .deliverables import validate_deliverables_coverage
-
-        problems.extend(
-            f"{stage.stage_title}: {problem}"
-            for problem in validate_deliverables_coverage(paths, task_statement(read_text(paths.user_input)))
-        )
 
         if not (paths.artifacts_dir / "citation_verification.json").exists():
             problems.append(

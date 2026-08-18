@@ -432,6 +432,83 @@ class TheStageGateCallsItTest(unittest.TestCase):
         self.assertNotIn(COVERAGE_FILENAME, problems)
 
 
+class CoverageIsNotAMarkdownQuestionTest(unittest.TestCase):
+    """The gate that asks whether the run answered the brief, asked of a latex run too.
+
+    It sat inside `if stage.number >= 7 and selected_output_format(paths) == "markdown"`.
+    That condition arrived with the change making markdown the default report format and
+    the coverage check was appended inside it, so a latex run was never asked whether it
+    covered the task. Measured over 335 archived run configs every one is `markdown`, so
+    no archived run changes verdict -- which is also why nothing noticed.
+
+    Two halves, and both need holding: the gate has to *run* for a latex stage, and the
+    locator check inside it has to have a document to read, or it degrades to a skip with
+    no counter.
+    """
+
+    def _paths(self, output_format: str):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        paths = build_run_paths(Path(tmp.name) / "run")
+        ensure_run_layout(paths)
+        write_text(paths.user_input, TASK)
+        write_text(paths.run_config, json.dumps({"output_format": output_format}))
+        return paths
+
+    def _cover(self, paths, **entry):
+        write_text(paths.artifacts_dir / COVERAGE_FILENAME,
+                   json.dumps({"deliverables": [{"task_quote": MASS_QUOTE, **entry}]}))
+
+    def test_a_latex_stage_is_asked_for_the_coverage_artifact(self) -> None:
+        from src.utils import validate_stage_artifacts
+
+        paths = self._paths("latex")
+        write_text(paths.writing_dir / "main.tex", r"\section{Coupling Limits}")
+        problems = " ".join(validate_stage_artifacts(STAGES[6], paths))
+        self.assertIn(COVERAGE_FILENAME, problems)
+
+    def test_a_markdown_stage_is_still_asked(self) -> None:
+        """Control: the move must not take the check off the format that had it."""
+        from src.utils import validate_stage_artifacts
+
+        paths = self._paths("markdown")
+        write_text(paths.report_file, "# Report\n")
+        problems = " ".join(validate_stage_artifacts(STAGES[6], paths))
+        self.assertIn(COVERAGE_FILENAME, problems)
+
+    def test_a_locator_is_checked_against_the_tex_sources(self) -> None:
+        paths = self._paths("latex")
+        write_text(paths.writing_dir / "main.tex", r"\section{Coupling Limits}" + "\ntext\n")
+        self._cover(paths, addressed=True, where="Coupling Limits")
+        self.assertEqual(validate_deliverables_coverage(paths, TASK), [])
+
+    def test_a_locator_that_points_nowhere_in_the_tex_is_refused(self) -> None:
+        """The half that used to fall through: no report.md, so no check at all."""
+        paths = self._paths("latex")
+        write_text(paths.writing_dir / "main.tex", r"\section{Mass Limits}" + "\ntext\n")
+        self._cover(paths, addressed=True, where="Coupling Limits")
+        problems = " ".join(validate_deliverables_coverage(paths, TASK))
+        self.assertIn("does not appear in", problems)
+        self.assertIn("main.tex", problems)
+
+    def test_sections_under_writing_are_read_too(self) -> None:
+        paths = self._paths("latex")
+        write_text(paths.writing_dir / "main.tex", r"\input{sections/results}")
+        write_text(paths.writing_dir / "sections" / "results.tex", r"\subsection{Coupling Limits}")
+        self._cover(paths, addressed=True, where="Coupling Limits")
+        self.assertEqual(validate_deliverables_coverage(paths, TASK), [])
+
+    def test_with_no_deliverable_at_all_the_locator_still_fails_open(self) -> None:
+        """A stage that has written nothing is caught by the gates that check for one.
+
+        Two refusals for one condition is one too many, and the second is the one nobody
+        maintains.
+        """
+        paths = self._paths("latex")
+        self._cover(paths, addressed=True, where="Coupling Limits")
+        self.assertEqual(validate_deliverables_coverage(paths, TASK), [])
+
+
 class RefinementTurnsKeepTheContractTest(unittest.TestCase):
     """A contract that only appears on the first attempt is one every retry can forget.
 
