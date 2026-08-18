@@ -1,7 +1,7 @@
 ---
 name: decide-the-input-or-the-deadline-decides-it
 description: Use at study design, and again at every stage boundary after it, when the run's own notes still carry an open question about which file or which system one of the named experiments will run on - the shipped stand-in, the authors' release, or one you generate from the Methods. Covers writing the default outcome beside every open question, ranking the list by that default rather than by difficulty, and the three-route ladder for a system the task did not ship.
-applies_when: binding energy curves?
+applies_when: latent charges|Born effective charges
 stages: 02_hypothesis_generation, 03_study_design, 05_experimentation
 ---
 

@@ -189,7 +189,10 @@
     "close-the-gap-to-the-published-number",
     "draw-the-source-figure-panel-for-panel",
     "the-canonical-figure",
-    "the-supplied-item-is-the-graded-unit"
+    "the-supplied-item-is-the-graded-unit",
+    "decide-the-input-or-the-deadline-decides-it",
+    "hand-the-model-the-quantity-it-is-supposed-to-infer",
+    "withdraw-the-clause-whose-precondition-failed"
   ],
   "Earth_000": [
     "earth-the-technique-grid-needs-values-in-its-cells",
@@ -278,7 +281,8 @@
     "evidence-not-assertion",
     "draw-the-source-figure-panel-for-panel",
     "the-canonical-figure",
-    "the-supplied-item-is-the-graded-unit"
+    "the-supplied-item-is-the-graded-unit",
+    "information-a-predicate-you-wrote-is-not-the-verdict"
   ],
   "Information_001": [
     "price-the-queue-and-preempt-your-own-arms",
@@ -287,7 +291,10 @@
     "information-fill-the-whole-results-grid",
     "information-exhibit-the-intermediate-objects",
     "run-the-conditions-the-source-ran",
-    "draw-the-source-figure-panel-for-panel"
+    "draw-the-source-figure-panel-for-panel",
+    "information-port-every-branch-of-the-released-dispatch",
+    "information-the-release-defaults-name-the-graded-cell",
+    "information-the-small-object-needs-a-readable-panel"
   ],
   "Information_002": [
     "information-transformation-ledger-for-a-multi-step-derivation",
@@ -312,7 +319,11 @@
     "run-the-conditions-the-source-ran",
     "close-the-gap-to-the-published-number",
     "publish-what-the-run-already-computed",
-    "the-supplied-item-is-the-graded-unit"
+    "the-supplied-item-is-the-graded-unit",
+    "life-the-named-method-owns-the-deliverable",
+    "the-earliest-measurement-was-taken-by-the-least-informed-run",
+    "the-verdict-belongs-to-the-corrected-run",
+    "two-marginal-rates-are-not-an-agreement"
   ],
   "Life_003": [
     "a-refutation-banner-over-a-confirming-panel",
@@ -377,7 +388,11 @@
     "material-as-specified-run-and-stage-diagnostics",
     "material-landmark-scalars-in-physical-units",
     "train-the-named-architecture",
-    "the-canonical-figure"
+    "the-canonical-figure",
+    "material-a-contingency-chooses-the-method-not-the-deliverable",
+    "material-score-your-chain-on-the-class-you-are-designing",
+    "material-the-command-timeout-is-not-the-training-budget",
+    "material-train-the-generator-on-the-space-not-the-labels"
   ],
   "Math_002": [
     "math-budget-the-grid-before-the-cell",
@@ -418,18 +433,25 @@
     "draw-the-source-figure-panel-for-panel",
     "neuroscience-noise-ladder-not-a-null-band",
     "neuroscience-embedding-carries-the-label-and-the-score",
-    "neuroscience-a-benchmark-rerun-owes-a-ranking"
+    "neuroscience-a-benchmark-rerun-owes-a-ranking",
+    "neuroscience-simulate-the-topologies-you-were-not-given"
   ],
   "Physics_000": [
     "a-supplied-parameter-file-is-a-list-of-questions",
     "physics-a-forced-outcome-is-still-a-published-result",
     "physics-the-anomaly-behind-the-miss-is-a-result",
     "the-process-deliverable-is-the-labelled-state-at-every-step",
-    "the-axis-carries-the-observable-not-the-verdict"
+    "the-axis-carries-the-observable-not-the-verdict",
+    "physics-a-known-answer-is-a-prior-not-a-contaminant"
   ],
   "Physics_001": [
     "every-supplied-array-is-a-series-in-a-results-panel",
     "physics-plot-the-named-quantity-and-declare-the-calibration",
     "the-results-panel-is-not-where-the-run-argues-with-itself"
+  ],
+  "Math_003": [
+    "math-a-proposer-that-learned-nothing-is-the-control",
+    "math-an-unused-hypothesis-is-a-stronger-theorem",
+    "math-rebuild-the-generator-the-system-learned-from"
   ]
 }
