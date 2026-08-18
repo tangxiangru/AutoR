@@ -853,7 +853,12 @@ kill-and-restart wall clock. Four decisions differ from the sibling driver: a li
 run consumes concurrency budget instead of aborting the trial (the lock has already refused a
 second live driver, so a live child is this trial's child); a `launched` run whose pid is gone
 is **abandoned and never resumed**, into a fresh workspace, because adopting a half-finished
-workspace means scoring an answer nobody can say was finished; `fallback` and `incomplete` are
+workspace means scoring an answer nobody can say was finished — but not within
+`FS_LAUNCH_GRACE_SECONDS` (60) of its `launched_at`, because "its pid is gone" is not
+observable the instant a run starts: the state file is written before `Popen` and carries no
+pid at all, and `autor_pids` is a `/proc` walk measured at 33–42 ms on this box. With no grace
+the driver abandoned runs it had launched microseconds earlier and paid for both. A state with
+no `launched_at` gets no grace and behaves as it did before; `fallback` and `incomplete` are
 **refused, not retried**, because the run ran and produced a non-run; and there is no scoring
 action in the loop at all.
 

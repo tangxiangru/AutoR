@@ -149,6 +149,32 @@ FS_MAX_ATTEMPTS = 2
 #: catch a hang is short enough to kill a run that was going to finish.
 FS_STALL_SECONDS = 2700
 
+#: How long a ``launched`` run is given to become visible before it may be called dead.
+#:
+#: The liveness test is ``child_pid in autor_pids(...)``, and that set is built by walking
+#: ``/proc`` and substring-matching each command line. Neither end of it is instantaneous.
+#: Measured on this box, over twelve samples on a quiet and a loaded machine, a child took
+#: **33-42 ms** to appear in that set -- and most of it is the ``/proc`` walk itself, not
+#: the child, so the floor rises with the number of processes on the box. Before that, a
+#: perfectly healthy run reads as dead.
+#:
+#: What it cost with no grace at all: ``tools/fs_trial.py`` writes the run's state file
+#: *before* ``Popen``, so there is also a window in which the state says ``launched`` and
+#: carries no ``child_pid`` -- ``int(None or 0)`` is 0, 0 is in no pid set, and the run is
+#: abandoned microseconds after it was started. The replacement gets a fresh workspace and
+#: a fresh attempt while the original child is still executing, so the trial pays twice
+#: and the abandoned attempt's state file stays in its launch shape for ever. In
+#: ``tests/test_fs_trial_driver.py`` the poll interval is overridden to 20 ms -- shorter
+#: than one ``/proc`` scan -- which turned this into an intermittent extra attempt that
+#: failed a different test on about one module run in three.
+#:
+#: Sixty seconds is three orders of magnitude above the measured latency and forty-five
+#: times *below* :data:`FS_STALL_SECONDS`, which is this module's existing statement about
+#: how long a run may be silent before anyone worries. Waiting a minute before declaring a
+#: run that has just started dead is strictly more conservative than the policy already in
+#: force for one that has gone quiet.
+FS_LAUNCH_GRACE_SECONDS = 60
+
 #: Above this share of refused runs in *either* arm, the paired difference is not
 #: published at all -- only the refusal rates are. Refusals are not random with respect
 #: to arm: the pipeline arm can be refused for a stage timeout, an auto-skip or a
@@ -2130,10 +2156,14 @@ def next_actions(
       the same state is the ordinary one after a restart: the lock has already refused a
       second live driver, so a live child is *this* trial's child and the right response
       is to count it and start fewer.
-    * **A ``launched`` run whose pid is gone is abandoned and never resumed.** There is no
-      resume: ``fs_agent.py`` has ``--export-only`` and nothing else, and adopting a
-      half-finished workspace would mean scoring an answer nobody can say was finished.
-      The replacement attempt gets a *fresh* workspace.
+    * **A ``launched`` run whose pid is gone is abandoned and never resumed** -- but not
+      before :data:`FS_LAUNCH_GRACE_SECONDS`. There is no resume: ``fs_agent.py`` has
+      ``--export-only`` and nothing else, and adopting a half-finished workspace would
+      mean scoring an answer nobody can say was finished. The replacement attempt gets a
+      *fresh* workspace. The grace is there because "its pid is gone" is not observable
+      the instant a run starts: the state file is written before ``Popen`` and carries no
+      pid at all, and the pid set is a ``/proc`` walk that takes longer than the child
+      takes to exist. Without it the driver abandoned runs it had just launched.
     * **``fallback`` and ``incomplete`` are refused, not retried.** The run ran and
       produced a non-run. A second draw on the same dice is not what an attempt budget is
       for, and spending it hides the failure behind an eventual success.
@@ -2154,7 +2184,27 @@ def next_actions(
         key = (str(state.get("task_key", "")), str(state.get("arm", "")))
         if state.get("phase") != "launched":
             continue
+        launched_at = state.get("launched_at")
+        dated = isinstance(launched_at, (int, float))
         if int(state.get("child_pid") or 0) in live_pids:
+            live.add(key)
+        elif dated and now - float(launched_at) < FS_LAUNCH_GRACE_SECONDS:
+            # Too young to be called dead: see FS_LAUNCH_GRACE_SECONDS. Counted as live
+            # rather than merely skipped, because the child almost certainly is running
+            # and the concurrency budget below has to see it -- treating it as neither
+            # live nor abandoned would let the loop start one more run than the plan asks
+            # for, every time a launch is polled inside its own first second.
+            #
+            # A state with no `launched_at` gets no grace and behaves exactly as before.
+            # The field has been written by `launch_run` since the driver existed, so the
+            # only states without one are hand-made; failing back to the old behaviour is
+            # the right answer for a record this cannot date.
+            #
+            # `isinstance` and not `or 0.0`: the first draft of this coerced a missing
+            # field to 0.0, which gives an undated record a *sixty-second* grace whenever
+            # `now` is itself near zero -- and `test_a_launched_run_whose_pid_is_gone_is_
+            # abandoned_and_never_resumed` calls this with `now=0.0`. The comment above
+            # was true of the intent and false of the code until that test said so.
             live.add(key)
         else:
             actions.append(
