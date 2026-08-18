@@ -1154,6 +1154,45 @@ Three things follow, and the third is the one that matters most.
    until a review of the next arm's tooling did it. A benchmark comparison is a claim about two
    configurations, and the configuration is part of the claim.
 
+**A second confound, found later and larger than the first: both arms could read an answer key,
+and the control read it three times as often.** Every `claude` process in every arm reports, in
+its own `init` record, `"memory_paths":{"auto":".../projects/-rmeng-data-robtang/memory/"}` — a
+shared Claude Code auto-memory directory attached because the workspaces live under that path.
+That directory holds **41 files named `rcb-<task>-target-paper.md`**, one per benchmark task,
+written by earlier sessions doing analysis on this benchmark. They are answer keys. The
+`Astronomy_001` one opens:
+
+> The ResearchClawBench task `Astronomy_001` … reproduces **E. Chaussidon, M. White, A. de Mattia
+> et al. (DESI collaboration), "Early time solution as an alternative to the late time evolving
+> dark energy with DESI DR2 BAO", arXiv:2503.24343** … the paper quotes the CMB-vs-DESI-DR2
+> discrepancy as **2.3 sigma**, finds EDE "can alleviate the tension" …
+
+That is the paper the task exists to have the agent find, and the figure it exists to have the
+agent derive. Counting `Read`/`Grep`/`Glob` calls whose path names the *run's own* task:
+
+| arm | runs opening their own answer key | rate |
+|:---|---:|---:|
+| bare Claude Code | 15 of 44 | **34%** |
+| AutoR | 4 of 41 | **10%** |
+
+The exposure is real, it is uncontrolled, and it runs in the direction of the reported result.
+Nothing here says the deficit is an artifact of it — a flailing agent may go read memory *because*
+it is losing, so cause and effect are not separable from the transcripts. What it does say is that
+no number in this section is a clean measurement of scaffold against no scaffold, and that the
+control had an advantage nobody granted it.
+
+The same audit killed a claim that had been made in the other direction. It had been recorded that
+the bare arm ran with **no working search at all**, on the evidence of its `WebSearch` calls
+returning `Organization Policy constraint constraints/vertexai.allowedPartnerModelFeatures
+violated`. Sixteen such calls did fail that way. But the same transcripts show a *second* search
+path that nobody had looked for: all 44 runs list `ai4ai-web-search` as a connected MCP server —
+inherited from the user-level config, because neither arm passes `--strict-mcp-config` — and
+`mcp__ai4ai-web-search__web_search` was called 12 times and succeeded 12 times, across 8 tasks,
+returning multi-kilobyte grounded answers. AutoR's 182 successful searches across 32 tasks are a
+**15× usage gap, not a capability gap**, and the server that supplies them was connected on both
+sides. Both readings — "no search" and "search parity" — were arrived at by counting tool *names*.
+The tool result is the only thing that answers the question.
+
 The composition of that deficit is not where the design's story predicted. AutoR is not shipping
 less: its median report is 36,330 bytes against bare Claude Code's 26,669, 36% *more* prose. It is
 not shipping fewer figures: both arms have ~5 images in front of the judge. It covers **less** —
