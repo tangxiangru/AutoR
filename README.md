@@ -1205,6 +1205,7 @@ below is the detail behind it.
 | [Backend Health](docs/backend-health.md) | Telling "the model was unreachable" apart from "the research failed". |
 | [Studio Guide & API](docs/studio.md) | The browser workspace and its complete HTTP API. |
 | [ResearchClawBench](docs/researchclawbench.md) | Running with no human in the loop: unattended execution, the benchmark adapter and its output contract, and Gemini-backed web search. |
+| [Skill-routing arm record](docs/rcb-skill-routing-arm.md) | One arm end to end: the corrected baseline, why the scoring pass is part of the result, the four defects the run exposed, and the analysis written before the numbers arrived. |
 | [ResearchClawBench Landscape](docs/researchclawbench-landscape.md) | How EvoScientist, ARIS Codex and MIRA actually score on the benchmark, which reported numbers reproduce, and the baseline any result must be quoted against. |
 | [AIRS-Bench](docs/airsbench.md) | The fourth benchmark: twenty ML research tasks scored by a deterministic metric over `submission.csv`. The adapter, the arm harness, three defects running it surfaced in the benchmark itself, and what AutoR scores. |
 | [FrontierScience-Research](docs/frontierscience.md) | The second benchmark: sixty written science questions graded against a rubric by a judge model. The two profiles, the prompt contract, the judge's measured noise, the paired trial, and the two numbers that are not measured. |
