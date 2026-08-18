@@ -635,17 +635,18 @@ Alongside the prompt, AutoR installs an agent skill pack from [src/skills/](src/
 `runs/<run_id>/.claude/skills/` — the operator's working directory — so the agent can *pull*
 long-form craft guidance when it needs it. A skill costs nothing in the prompts that do not use it.
 
-121 skills ship today: 66 general ones and 55 field-specific ones. Seventy-five of them were written against a scored arm's per-criterion losses on the
-twenty-five ResearchClawBench tasks that lost, three per task. **A run is not offered all of
+161 skills ship today: 72 general ones and 89 field-specific ones. Forty of them were written in one pass against the twelve tasks that trailed a bare-Claude-Code control under a single judge — three or four per task, each selected by a phrase in that task's brief and in no other of the forty, and every one of the forty pinned. Most of them were written against a scored arm's per-criterion losses on the
+twenty-five ResearchClawBench tasks that lost, at least three per task. **A run is not offered all of
 them.** Two filters narrow the pack, and a skill has to survive both:
 
 1. **Field.** A skill named `<field>-...` is installed only for a run in that field, so twenty
    become two. A materials run does not benefit from being offered advice about observational
    astronomy, it just has one more description to read past.
 2. **Shape.** A skill may carry an `applies_when` regex, matched against this run's own research
-   brief and data manifest. Four skills are scoped this way today; measured over the forty
-   ResearchClawBench briefs they select 3, 4, 6 and 8 tasks each, twenty-five tasks receive none of
-   them, and no task receives more than three. `tools/skill_selectivity.py` prints the selection set
+   brief and data manifest. Forty-four skills are scoped this way today; measured over the forty
+   ResearchClawBench briefs they select between 1 and 7 tasks each — forty of the
+   forty-four select exactly one — eighteen tasks receive none of them, and no task receives
+   more than six. `tools/skill_selectivity.py` prints the selection set
    for a corpus and `--expect` turns it into an assertion, because a predicate is a claim about a
    kind of research problem and it should be checkable.
 
@@ -657,8 +658,8 @@ the same tasks today and generalise to nothing.
    that are installed for it whatever the two filters say. A pin is not an inference about a kind of
    task — it is a record that this exact identifier already ran, already scored, and lost criteria
    whose subject is those skills, so it is the one routing input that cannot be derived from the
-   task statement and does not generalise past the name it carries. Fifteen ResearchClawBench tasks
-   are pinned today, twenty-four pins between them, at most three per task; four of the twenty-four
+   task statement and does not generalise past the name it carries. Twenty-seven ResearchClawBench tasks
+   are pinned today, 280 pins between them, at most fifteen on any one task; twenty of the 280
    are skills the two filters would have withheld, in each case a field skill whose content
    applies outside its own field. **A run that matches an entry writes `skill_pins` into its `run_config.json` and a
    `skills pinned_by_task_id` line into its log**, because a pinned arm and an unpinned arm are two

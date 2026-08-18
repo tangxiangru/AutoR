@@ -8,11 +8,29 @@
     "Astronomy_000": {
       "pins": 13
     },
+    "Astronomy_001": {
+      "pins": 3,
+      "autor": 15.8,
+      "control": 27.93,
+      "net": -12.13,
+      "recoverable": 12.13,
+      "headroom": 84.2,
+      "note": "Every one of the three checklist items lost, so `recoverable` is the whole gap and no incumbent has an item that moved. The three pins are this task's three new skills, ranked by weighted loss: caption-is-the-figure-specification (item 2, w 0.4, 32.3 vs 48.0, -6.27 weighted), joint-posterior (item 1, w 0.4, 6.7 vs 16.0, -3.73), sample-the-published-table-into-chains (item 0, w 0.2, 1.0 vs 11.7, -2.13). The two names this table pinned here before #264 rebuilt it are not restored: `the-canonical-figure` was opened by the measured run of its own accord at Stage 06 and the item still scored 6.7, and `draw-the-source-figure-panel-for-panel` did not exist at 1069e77, the commit that run was launched from. Its instruction is also to read each panel's series off the rendered figure, and this task's target paper is not in the workspace -- the caption skill is written for exactly that gap and cites it."
+    },
     "Astronomy_003": {
       "pins": 12
     },
     "Chemistry_000": {
-      "pins": 7
+      "autor": 36.82,
+      "control": 45.03,
+      "net": -8.22,
+      "recoverable": 8.22,
+      "headroom": 63.18,
+      "new_to_this_run": [
+        "information-fill-the-whole-results-grid"
+      ],
+      "pins": 10,
+      "why_the_three_added_here": "Weighted (control - autor) per criterion, from _score_gpt51.json in both workspaces, gpt-5.1, three draws: the 0.45 image criterion (seven-dataset ROC-AUC table) loses 1.20, the 0.35 text criterion (Fourier against the other bases, accuracy and cost together) loses 3.62, the 0.20 text criterion (KA-GAT interpretability) loses 3.40. The seven incumbents aim at two of those three -- price-the-grid-in-wall-clock-and-fill-it-breadth-first, rebuild-the-sources-headline-table-row-for-row, result-table, information-fill-the-whole-results-grid and train-the-named-architecture at the 0.45 criterion; chemistry-group-attribution-over-the-split-and-the-baseline-model and the-attribution-is-the-deliverable at the 0.20 one -- and none of them at the 0.35 criterion, which is this task's largest single loss. The three added take the two criteria carrying 7.02 of the recoverable 8.22. Pinning them rather than leaving them on applies_when costs this task nothing, measured rather than assumed: each of the three selects Chemistry_000 and no other of the forty briefs (tools/skill_selectivity.py --briefs), the installed set is the same 73 skills either way, and the announcements summed over ALL_STAGES are 32 with or without the pins while the rendered text is 1230 characters shorter with them, because once every task-scoped skill this run is offered is pinned, format_skills_for_prompt writes one banner instead of two. What it does cost: 03_study_design now carries 9 of those 32 announcements and 05_experimentation 8, against an average of 4.6 over the seven stages that render any -- _maximum's arithmetic bounds the average and says nothing about the peak. Recorded, not acted on: trimming an incumbent would be a second change inside a paired re-run, and none of the five aimed at the 0.45 criterion has been re-scored since it was pinned."
     },
     "Chemistry_001": {
       "pins": 10
@@ -21,7 +39,17 @@
       "pins": 11
     },
     "Earth_000": {
-      "pins": 7
+      "pins": 8,
+      "autor": 17.97,
+      "control": 33.97,
+      "net": -16.0,
+      "recoverable": 17.5,
+      "headroom": 82.03,
+      "new_to_this_run": [],
+      "scored_from": "the 3-draw gpt-5.1 re-score in each arm's own run directory (_score_gpt51.json, bench bfffc48, judge shown all 10 of AutoR's figures and all 6 of the control's under the 15-image cap), not the single-draw items_v220/items_control pass the rest of this table was built from. Both files carry the same bench_revision and the same judge, and the four weights sum to 1.0 in each.",
+      "ranked_by": "weight x (control - autor) per criterion: the cross-method comparison -8.93, the record's own description -4.93, the regional shares -3.63. Those three are 17.49 of the 17.50 recoverable, and the three skills added here target them one for one. The fourth criterion, projections against observations, is +1.50 -- AutoR did not lose it -- but at 0.30 weight and a score of 5.0 it is 28.5 of the 82.03 headroom, the largest unclaimed block on the task, so earth-window-mismatch-is-an-alignment-problem stays pinned on it.",
+      "dropped": "result-table and earth-comparator-set-lives-outside-the-supplied-archive. Neither is withheld: all ten skills named here are already among the 69 this brief is offered without any pin at all, so a pin buys the imperative per-stage announcement and nothing else, and un-pinning costs a skill that announcement rather than its presence. result-table goes because AutoR's table craft was not what failed -- its appendix table already carried 19 regional rows, an aggregate row, both units, 95% intervals and signed residuals, and the criterion still scored 10.0; what was missing was two columns, which is the subject of the skill that replaces it. earth-comparator-set goes because its criterion is the one of four AutoR won, and earth-window-mismatch stays pinned over the same ground. Both remain named inside a skill that is still pinned.",
+      "announcement_cost": "8 pins, every one of them naming its stages, so the cost is read per stage prompt and not per task: 01 gets 1, 02 gets 1, 03 gets 6, 04 gets 2, 05 gets 0, 06 gets 7, 07 gets 6. The peak stage is unchanged from the 7-pin table this replaces (06_analysis was already at 7, 03_study_design already at 6); the trade is that 05_experimentation goes dark and the two stages where this task's failure actually began, 01 and 02, stop being dark."
     },
     "Earth_001": {
       "pins": 9
@@ -33,13 +61,13 @@
       "pins": 12
     },
     "Energy_002": {
-      "pins": 13
+      "pins": 15
     },
     "Energy_003": {
       "pins": 11
     },
     "Information_000": {
-      "pins": 9
+      "pins": 12
     },
     "Information_001": {
       "pins": 7
@@ -72,10 +100,21 @@
       "pins": 13
     },
     "Neuroscience_003": {
-      "pins": 10
+      "pins": 13
     },
     "Physics_000": {
-      "pins": 3
+      "pins": 5,
+      "autor": 30.4,
+      "control": 50.67,
+      "net": -20.27,
+      "recoverable": 20.27,
+      "headroom": 69.6,
+      "new_to_this_run": [],
+      "per_criterion": "All three criteria are type=image and all three lost. Growth experiments, weight 0.3: 3.33 against 36.00, 9.80 weighted, the largest single component. Optimal-mismatch formula, weight 0.4: 37.00 against 49.67, 5.07. Lattice paths and magic numbers, weight 0.3: 48.67 against 66.67, 5.40, though the comparator's three draws there spread 55-80, so some of that one is judge variance rather than craft.",
+      "what_the_two_new_pins_cost": "Nothing, measured. Both are task-scoped with an `applies_when` this brief already matches, so the shape channel was announcing them at exactly the stages they name; the pin moves them from one block to the other. Announcements summed over the seven stage prompts: 13 with no pins at all, 22 with the three incumbents alone, 22 with those three plus these two. The stage-routed budget rule in `_maximum` is what makes that free, and the pin is worth taking anyway because the pinned block's heading is a claim about this identifier while the shape block's is a claim about task shape -- and because on this brief 05_experimentation has no shape-matched skill at all, so all three of the announcements it gets are pins.",
+      "the_two_new_ones": "physics-a-forced-outcome-is-still-a-published-result takes the 9.80 -- the judge's stated reason for the 3.33 is that the images do not show the named growth phenomena, and the run had simulated one of them and never labelled it. physics-the-anomaly-behind-the-miss-is-a-result takes the 5.07 and the ceiling on the 5.40: the run's own mechanism reached the report only as an error attribution.",
+      "why_no_incumbent_was_displaced": "It was tried and it is not a demotion, it is a deletion. All three incumbents are general skills -- no field prefix, no `applies_when` -- and this entry is the only thing that names them anywhere in the repo: `tests/test_a_skill_is_named_where_it_is_needed.py::test_every_general_skill_is_named_by_a_prompt_that_runs` fails on a-supplied-parameter-file-is-a-list-of-questions and the-process-deliverable-is-the-labelled-state-at-every-step the moment they leave this list. So `applies_when` is not a fallback for them, and the choice was never between two registers. the-axis-carries-the-observable-not-the-verdict would have earned its slot regardless: the deposition figure's three panels are band occupancy, Clopper-Pearson intervals on the run's own frozen clauses and its enantiomer-label margin, and the mismatch figure spends a panel on residual magnitudes.",
+      "routed_not_pinned": "physics-a-known-answer-is-a-prior-not-a-contaminant, and not because it is weaker. Its loss -- three pre-known items withheld as contaminated, which the comparator published as its findings 1, 2 and 3 -- is cross-cutting and cannot be booked against one weighted criterion, so the pin block's heading would be overclaiming for it. And a pin could not raise its odds of being read: at 01_literature_survey and 02_hypothesis_generation, the two stages where its advice has to land, it is already the only skill this brief announces, one of one."
     },
     "Physics_001": {
       "pins": 3
@@ -96,6 +135,11 @@
     "the-canonical-figure",
     "the-supplied-item-is-the-graded-unit"
   ],
+  "Astronomy_001": [
+    "astronomy-the-caption-is-the-figure-specification",
+    "astronomy-the-joint-posterior-is-the-parameter-result",
+    "astronomy-sample-the-published-table-into-chains"
+  ],
   "Astronomy_003": [
     "the-supplied-arm-owns-figure-one",
     "every-claim-in-the-data-description-is-a-result",
@@ -114,6 +158,9 @@
     "price-the-grid-in-wall-clock-and-fill-it-breadth-first",
     "rebuild-the-sources-headline-table-row-for-row",
     "chemistry-group-attribution-over-the-split-and-the-baseline-model",
+    "chemistry-accuracy-and-cost-for-every-module-you-swap-in",
+    "chemistry-a-cut-variant-takes-its-analyses-with-it",
+    "chemistry-reproduce-the-scoring-path-before-you-replace-it",
     "the-attribution-is-the-deliverable",
     "result-table",
     "information-fill-the-whole-results-grid",
@@ -142,16 +189,20 @@
     "close-the-gap-to-the-published-number",
     "draw-the-source-figure-panel-for-panel",
     "the-canonical-figure",
-    "the-supplied-item-is-the-graded-unit"
+    "the-supplied-item-is-the-graded-unit",
+    "decide-the-input-or-the-deadline-decides-it",
+    "hand-the-model-the-quantity-it-is-supposed-to-infer",
+    "withdraw-the-clause-whose-precondition-failed"
   ],
   "Earth_000": [
-    "earth-window-mismatch-is-an-alignment-problem",
-    "earth-shape-of-the-record-and-share-of-the-budget",
+    "earth-the-technique-grid-needs-values-in-its-cells",
     "earth-inter-technique-spread-is-a-result-not-a-caveat",
-    "earth-comparator-set-lives-outside-the-supplied-archive",
-    "earth-report-the-lattice-and-show-the-field",
-    "result-table",
-    "publish-what-the-run-already-computed"
+    "earth-a-verified-answer-key-does-not-change-the-question",
+    "earth-shape-of-the-record-and-share-of-the-budget",
+    "earth-two-orderings-of-a-regional-decomposition",
+    "earth-window-mismatch-is-an-alignment-problem",
+    "publish-what-the-run-already-computed",
+    "earth-report-the-lattice-and-show-the-field"
   ],
   "Earth_001": [
     "reconstruct-the-figure-layer-you-cannot-source",
@@ -189,11 +240,13 @@
     "the-supplied-item-is-the-graded-unit"
   ],
   "Energy_002": [
+    "energy-a-check-over-a-choice-is-a-lock",
     "energy-build-the-domain-the-question-names",
     "energy-cost-surface-before-the-verdict-map",
     "energy-publish-the-ordering-when-the-level-fails",
+    "energy-sweep-the-legs-only-one-side-pays",
+    "energy-a-frozen-rule-binds-the-verdict-not-the-work",
     "earth-comparator-set-lives-outside-the-supplied-archive",
-    "energy-counterfactual-pair-and-hierarchy-closure",
     "mine-the-papers-you-were-given",
     "energy-canonical-configuration-before-the-enhanced-variant",
     "use-the-sources-own-names",
@@ -218,6 +271,9 @@
   ],
   "Information_000": [
     "extract-the-pdf-text-layer-then-read-every-figure",
+    "information-run-the-prompt-printed-inside-the-figure",
+    "information-the-capability-panel-comes-before-the-audit-grid",
+    "information-paste-the-output-not-the-pass-rate",
     "the-headline-entry-is-the-canonical-outcome",
     "price-the-missing-object-before-you-deepen-an-arm",
     "astronomy-figure-is-the-unit-of-result",
@@ -225,7 +281,8 @@
     "evidence-not-assertion",
     "draw-the-source-figure-panel-for-panel",
     "the-canonical-figure",
-    "the-supplied-item-is-the-graded-unit"
+    "the-supplied-item-is-the-graded-unit",
+    "information-a-predicate-you-wrote-is-not-the-verdict"
   ],
   "Information_001": [
     "price-the-queue-and-preempt-your-own-arms",
@@ -234,7 +291,10 @@
     "information-fill-the-whole-results-grid",
     "information-exhibit-the-intermediate-objects",
     "run-the-conditions-the-source-ran",
-    "draw-the-source-figure-panel-for-panel"
+    "draw-the-source-figure-panel-for-panel",
+    "information-port-every-branch-of-the-released-dispatch",
+    "information-the-release-defaults-name-the-graded-cell",
+    "information-the-small-object-needs-a-readable-panel"
   ],
   "Information_002": [
     "information-transformation-ledger-for-a-multi-step-derivation",
@@ -259,7 +319,11 @@
     "run-the-conditions-the-source-ran",
     "close-the-gap-to-the-published-number",
     "publish-what-the-run-already-computed",
-    "the-supplied-item-is-the-graded-unit"
+    "the-supplied-item-is-the-graded-unit",
+    "life-the-named-method-owns-the-deliverable",
+    "the-earliest-measurement-was-taken-by-the-least-informed-run",
+    "the-verdict-belongs-to-the-corrected-run",
+    "two-marginal-rates-are-not-an-agreement"
   ],
   "Life_003": [
     "a-refutation-banner-over-a-confirming-panel",
@@ -324,7 +388,11 @@
     "material-as-specified-run-and-stage-diagnostics",
     "material-landmark-scalars-in-physical-units",
     "train-the-named-architecture",
-    "the-canonical-figure"
+    "the-canonical-figure",
+    "material-a-contingency-chooses-the-method-not-the-deliverable",
+    "material-score-your-chain-on-the-class-you-are-designing",
+    "material-the-command-timeout-is-not-the-training-budget",
+    "material-train-the-generator-on-the-space-not-the-labels"
   ],
   "Math_002": [
     "math-budget-the-grid-before-the-cell",
@@ -362,16 +430,28 @@
     "reproduce-then-extend",
     "run-the-conditions-the-source-ran",
     "cover-what-the-task-named",
-    "draw-the-source-figure-panel-for-panel"
+    "draw-the-source-figure-panel-for-panel",
+    "neuroscience-noise-ladder-not-a-null-band",
+    "neuroscience-embedding-carries-the-label-and-the-score",
+    "neuroscience-a-benchmark-rerun-owes-a-ranking",
+    "neuroscience-simulate-the-topologies-you-were-not-given"
   ],
   "Physics_000": [
     "a-supplied-parameter-file-is-a-list-of-questions",
+    "physics-a-forced-outcome-is-still-a-published-result",
+    "physics-the-anomaly-behind-the-miss-is-a-result",
     "the-process-deliverable-is-the-labelled-state-at-every-step",
-    "the-axis-carries-the-observable-not-the-verdict"
+    "the-axis-carries-the-observable-not-the-verdict",
+    "physics-a-known-answer-is-a-prior-not-a-contaminant"
   ],
   "Physics_001": [
     "every-supplied-array-is-a-series-in-a-results-panel",
     "physics-plot-the-named-quantity-and-declare-the-calibration",
     "the-results-panel-is-not-where-the-run-argues-with-itself"
+  ],
+  "Math_003": [
+    "math-a-proposer-that-learned-nothing-is-the-control",
+    "math-an-unused-hypothesis-is-a-stronger-theorem",
+    "math-rebuild-the-generator-the-system-learned-from"
   ]
 }
