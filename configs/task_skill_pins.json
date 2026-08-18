@@ -21,7 +21,16 @@
       "pins": 12
     },
     "Chemistry_000": {
-      "pins": 7
+      "autor": 36.82,
+      "control": 45.03,
+      "net": -8.22,
+      "recoverable": 8.22,
+      "headroom": 63.18,
+      "new_to_this_run": [
+        "information-fill-the-whole-results-grid"
+      ],
+      "pins": 10,
+      "why_the_three_added_here": "Weighted (control - autor) per criterion, from _score_gpt51.json in both workspaces, gpt-5.1, three draws: the 0.45 image criterion (seven-dataset ROC-AUC table) loses 1.20, the 0.35 text criterion (Fourier against the other bases, accuracy and cost together) loses 3.62, the 0.20 text criterion (KA-GAT interpretability) loses 3.40. The seven incumbents aim at two of those three -- price-the-grid-in-wall-clock-and-fill-it-breadth-first, rebuild-the-sources-headline-table-row-for-row, result-table, information-fill-the-whole-results-grid and train-the-named-architecture at the 0.45 criterion; chemistry-group-attribution-over-the-split-and-the-baseline-model and the-attribution-is-the-deliverable at the 0.20 one -- and none of them at the 0.35 criterion, which is this task's largest single loss. The three added take the two criteria carrying 7.02 of the recoverable 8.22. Pinning them rather than leaving them on applies_when costs this task nothing, measured rather than assumed: each of the three selects Chemistry_000 and no other of the forty briefs (tools/skill_selectivity.py --briefs), the installed set is the same 73 skills either way, and the announcements summed over ALL_STAGES are 32 with or without the pins while the rendered text is 1230 characters shorter with them, because once every task-scoped skill this run is offered is pinned, format_skills_for_prompt writes one banner instead of two. What it does cost: 03_study_design now carries 9 of those 32 announcements and 05_experimentation 8, against an average of 4.6 over the seven stages that render any -- _maximum's arithmetic bounds the average and says nothing about the peak. Recorded, not acted on: trimming an incumbent would be a second change inside a paired re-run, and none of the five aimed at the 0.45 criterion has been re-scored since it was pinned."
     },
     "Chemistry_001": {
       "pins": 10
@@ -149,6 +158,9 @@
     "price-the-grid-in-wall-clock-and-fill-it-breadth-first",
     "rebuild-the-sources-headline-table-row-for-row",
     "chemistry-group-attribution-over-the-split-and-the-baseline-model",
+    "chemistry-accuracy-and-cost-for-every-module-you-swap-in",
+    "chemistry-a-cut-variant-takes-its-analyses-with-it",
+    "chemistry-reproduce-the-scoring-path-before-you-replace-it",
     "the-attribution-is-the-deliverable",
     "result-table",
     "information-fill-the-whole-results-grid",
