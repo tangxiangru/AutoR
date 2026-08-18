@@ -46,7 +46,10 @@ One census over the four archived run roots, re-measured with a warm page cache 
 repetitions: medians of 516 and 567 ms on the Astronomy roots (500-630 paths, 110-145 MB)
 and 1188 and 1278 ms on the Chemistry ones (1180-1260 paths, 1.8-4.7 GB), with a full
 observed range of 428-1541 ms. Two per episode, so roughly 1-3 s of the several minutes
-an episode takes, and 3-7 minutes over a whole run. The first figures recorded here --
+an episode takes, and 3-7 minutes over a whole run.
+
+Those are warm-cache numbers. The *first* census of a cold root costs 2.9-10.8 s here,
+six to eight times higher, which is the one an episode early in a run actually pays. The first figures recorded here --
 395-1190 ms -- were a single timing each and sat at the optimistic end of that range. Hashing dominates, which is why
 the cap in :func:`src.provenance.content_identity` is reused rather than re-picked: the
 4.7 GB root is mostly files above it, and those are stat-only.
@@ -56,7 +59,8 @@ What it cannot see
 The census is rooted at the run root because that is the reviewer's working directory. A
 reviewer that writes outside it is invisible here, and that is not hypothetical either:
 in the same 152 episodes there are three tool-level writes, and two of them go to a
-``~/.claude/projects/.../memory/`` directory far outside any run. What the census claims
+``~/.claude/projects/.../memory/`` directory -- not merely outside the run root but the
+operator's own persistent memory, which outlives every run there will ever be. What the census claims
 is narrower than "the reviewer changed nothing" -- it is "the reviewer changed nothing it
 was judging", which is the claim the verdict depends on.
 

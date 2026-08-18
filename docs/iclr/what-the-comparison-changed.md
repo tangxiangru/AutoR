@@ -56,11 +56,14 @@ file, so how far below 4 the content-keyed rate sits **cannot be settled from di
 
 Cost, `src.review_custody.census` on the same four roots, warm cache, ten repetitions:
 medians **516, 567, 1188, 1278 ms**, full observed range 428–1541 ms. Two per episode, so
-roughly 1–3 s per episode and 3–7 minutes over a run.
+roughly 1–3 s per episode and 3–7 minutes over a run. Those are warm-cache figures; the
+*first* census of a cold root costs **2.9–10.8 s**, six to eight times higher, and that is
+the one an early episode actually pays.
 
 What the census cannot see: in the same 152 episodes there are **three tool-level writes**
-(two `Write`, one `Edit`), and **two go to a `~/.claude/projects/.../memory/` directory
-outside any run root**. The claim it supports is *"the reviewer changed nothing it was
+(two `Write`, one `Edit`), and **two go to a `~/.claude/projects/.../memory/` directory** — not
+merely outside the run root but the operator's own persistent memory, which outlives every
+run there will ever be. The claim it supports is *"the reviewer changed nothing it was
 judging"*, not *"the reviewer changed nothing"*.
 
 > **This population moved under the pin, and the tool caught it.** These figures were 138
