@@ -1036,19 +1036,38 @@ the agent writes, decomposed into atomic claims and matched against the authors'
 deadline, in one agentic call instead of a stage walk.
 
 **Measured here, six tasks, one run each, `opus` executing and reviewing, every arm on the
-benchmark's own 3600 s clock, three judge draws per log, medians:**
+benchmark's own 3600 s clock. Each cell is the median judge draw of three — one draw, so
+its three numbers are consistent with each other; arms are the mean ± sd across tasks,
+which is the shape [FIRE-Bench's own Table 3](https://github.com/maitrix-org/FIRE-Bench)
+reports:**
 
-| task | AutoR pipeline | AutoR direct | stock Claude Code |
-|:---|---:|---:|---:|
-| `cot_in_planning` | **100.0** | 70.6 | no conclusion |
-| `premise_order_effects` | 0.0 | **80.0** | no conclusion |
-| `prompt_formatting_sensitivity` | 40.0 | **71.8** | no conclusion |
-| `lifebench_length_following` | 0.0 | **42.9** | no conclusion |
-| `persona_reasoning_biases` | 0.0 | **20.0** | 15.4 |
-| `mcq_selection_bias` | 41.2 | **50.0** | 30.3 |
-| **scoreable runs** | 6 / 6 | 6 / 6 | **2 / 6** |
-| **median F1** | 20.0 | **60.3** | 22.9 |
-| **median wall clock** | 52 min | **11 min** | 61 min (killed) |
+| task | AutoR pipeline | | | AutoR direct | | | stock Claude Code | | |
+|:---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| | P | R | F1 | P | R | F1 | P | R | F1 |
+| `cot_in_planning` | 62.5 | 100.0 | **76.9** | 60.0 | 66.7 | 63.2 | — | — | *no conclusion* |
+| `premise_order_effects` | 0.0 | 0.0 | 0.0 | 80.0 | 80.0 | **80.0** | — | — | *no conclusion* |
+| `prompt_formatting_sensitivity` | 50.0 | 33.3 | 40.0 | 75.0 | 66.7 | **70.6** | — | — | *no conclusion* |
+| `lifebench_length_following` | 0.0 | 0.0 | 0.0 | 46.2 | 40.0 | **42.9** | — | — | *no conclusion* |
+| `persona_reasoning_biases` | 0.0 | 0.0 | 0.0 | 28.6 | 50.0 | **36.4** | 11.1 | 50.0 | 18.2 |
+| `mcq_selection_bias` | 30.0 | 50.0 | 37.5 | 75.0 | 66.7 | **70.6** | 25.0 | 83.3 | 38.5 |
+
+| arm | scoreable | Prec. | Recall | F1 | median wall clock |
+|:---|---:|---:|---:|---:|---:|
+| AutoR pipeline | 6 / 6 | 23.8 ± 28.0 | 30.6 ± 40.0 | 25.7 ± 31.5 | 52 min |
+| AutoR direct | 6 / 6 | **60.8 ± 20.1** | **61.7 ± 14.3** | **60.6 ± 17.2** | **11 min** |
+| stock Claude Code | **2 / 6** | 18.1 ± 9.8 | 66.7 ± 23.5 | 28.4 ± 14.4 | 61 min, killed |
+| *stock, counting an unscoreable run as 0* | 6 / 6 | 6.0 ± 10.3 | 22.2 ± 36.0 | 9.4 ± 16.0 | |
+
+The stock arm's two rows are both reported because neither is obviously the right one and
+the choice moves its F1 from 28.4 to 9.4. Which is comparable to a published table depends
+on how that table handled a run that produced nothing, and FIRE-Bench's paper does not say.
+
+**How much of this is the judge.** These six logs were scored twice, with nothing changing
+but the judge's sampling. The arm means moved by 4 to 5 F1 points — pipeline 30.2 → 25.7,
+direct 55.9 → 60.6, stock 22.9 → 28.4 — and one *task* moved by 13.7 (`cot_in_planning`,
+pipeline arm, 100.0 → 76.9). The ordering of the arms did not move. Treat the ordering as
+the result and the individual numbers as one draw of a noisy instrument; on a single
+unchanged log the measured range is 43 F1 points.
 
 **Three things this says, in decreasing order of how much the sample supports them.**
 
@@ -1062,7 +1081,8 @@ artifact read, and says to write it early and rewrite it, plus a watcher that re
 scored line every time the file on disk improves.
 
 **2. Under this clock, the pipeline loses to one call of the same model on the same
-contract.** Direct wins 5 of 6 tasks, median **+25.9 F1**. Every pipeline run hit the reserve
+contract.** Direct wins 5 of 6 tasks, median **+34.8 F1**, and it wins on precision and
+recall alike rather than by trading one for the other. Every pipeline run hit the reserve
 boundary at 52 minutes having approved one to three of its four stages; the direct arm
 finished in a median of 11. This is the same direction as
 [ResearchClawBench](#researchclawbench) and [FrontierScience](#frontierscience-research), and
@@ -1076,7 +1096,7 @@ control at 0.15 accuracy confirming the task was real, and concluded that premis
 every ordering — at ceiling — and it said so. It scored **0.0**, because the reference
 conclusion says premise order matters. The direct arm, on the same task in a fifth of the
 time, ran a pilot, saw the ceiling, generated a harder pool with chains up to sixteen steps,
-found the effect at sign-test p = 0.0001, and scored **80.0**. The lesson is about
+found the effect at sign-test p = 0.0001, and scored **80.0 / 80.0 / 80.0**. The lesson is about
 *iteration*, not about honesty: what the pipeline lacked was a second pass at its own
 instance difficulty, and its budget went to preregistration, a reproduction table and a gate
 ledger instead.

@@ -99,6 +99,24 @@ def cell_dir(plan: dict, cell: dict) -> Path:
     return Path(plan["runs_root"]) / cell["id"]
 
 
+def autor_root(plan: dict) -> Path:
+    """The checkout to run the adapter and the scorer from.
+
+    The plan records the checkout it was written in, because a trial has to be able to
+    say which tree produced its runs. But a plan outlives that tree: this one was written
+    in a worktree that was removed after the branch merged, and every later
+    ``fire_trial.py score`` then invoked a path that no longer existed -- which python
+    reports as exit code 2, the same code argparse uses for a bad flag, so it read as a
+    tool bug rather than a missing file. Fall back to the checkout this file is in, and
+    say so.
+    """
+    recorded = Path(plan.get("autor_root", ""))
+    if recorded.is_dir() and (recorded / "fire_agent.py").is_file():
+        return recorded
+    print(f"[note] recorded autor_root {recorded} is gone; using {REPO_ROOT}", flush=True)
+    return REPO_ROOT
+
+
 def launch(plan: dict, cell: dict) -> dict:
     root = cell_dir(plan, cell)
     root.mkdir(parents=True, exist_ok=True)
@@ -116,7 +134,7 @@ def launch(plan: dict, cell: dict) -> dict:
     if arm["kind"] == "autor":
         command = [
             sys.executable,
-            str(Path(plan["autor_root"]) / "fire_agent.py"),
+            str(autor_root(plan) / "fire_agent.py"),
             "--bench-root", plan["bench_root"],
             "--task", cell["task"],
             "--profile", arm["profile"],
@@ -265,7 +283,7 @@ def _score_cell(plan: dict, cell: dict, scorer: Path, draws: int) -> str:
 
 def do_score(args: argparse.Namespace) -> int:
     plan = json.loads(Path(args.plan).expanduser().read_text(encoding="utf-8"))
-    scorer = Path(plan["autor_root"]) / "tools" / "score_fire_run.py"
+    scorer = autor_root(plan) / "tools" / "score_fire_run.py"
     cells = [
         cell for cell in plan["cells"]
         if (cell_dir(plan, cell) / "run.json").is_file()
@@ -286,11 +304,29 @@ def do_score(args: argparse.Namespace) -> int:
     return 0
 
 
-def _median_f1(summary: dict, metric: str = "f1") -> float | None:
-    block = summary.get(metric)
-    if isinstance(block, dict) and block.get("median") is not None:
-        return float(block["median"])
-    return None
+#: The three numbers FIRE-Bench reports, in the order its own Table 3 prints them.
+METRICS = ("precision", "recall", "f1")
+
+
+def _row(summary: dict) -> dict | None:
+    """The cell's (precision, recall, F1), from one draw.
+
+    ``median_draw`` is written by ``tools/score_fire_run.py`` and is the draw whose F1 is
+    the median. The fallback reads the per-metric medians, which is what the first
+    version of this file did for every cell -- and which produced rows whose F1 was not
+    the harmonic mean of their own precision and recall, because the three medians came
+    from three different draws. It is kept only so that a summary written before that
+    field existed still reports something, and it is marked when used.
+    """
+    row = summary.get("median_draw")
+    if isinstance(row, dict) and row.get("f1") is not None:
+        return {**row, "coherent": True}
+    legacy = {}
+    for metric in METRICS:
+        block = summary.get(metric)
+        if isinstance(block, dict) and block.get("median") is not None:
+            legacy[metric] = float(block["median"])
+    return {**legacy, "coherent": False} if "f1" in legacy else None
 
 
 def do_report(args: argparse.Namespace) -> int:
@@ -309,8 +345,13 @@ def do_report(args: argparse.Namespace) -> int:
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
             entry["scored"] = summary.get("scored", 0)
             entry["not_scored"] = summary.get("not_scored", {})
-            for metric in ("precision", "recall", "f1"):
-                entry[metric] = _median_f1(summary, metric)
+            row = _row(summary)
+            for metric in METRICS:
+                entry[metric] = row.get(metric) if row else None
+            # None when there is no row at all -- an unscoreable run and an incoherent
+            # one are different facts and a boolean cannot hold both.
+            entry["coherent_row"] = None if row is None else bool(row.get("coherent"))
+            entry["f1_spread"] = (summary.get("f1") or {}).get("values")
             entry["conclusion"] = summary.get("conclusion")
         table[(cell["task"], cell["arm"])] = entry
 
@@ -318,18 +359,51 @@ def do_report(args: argparse.Namespace) -> int:
                               "per_task": {}, "per_arm": {}, "paired": {}}
     for task in plan["tasks"]:
         report["per_task"][task] = {arm: table.get((task, arm), {}) for arm in plan["arms"]}
+    # All three metrics, mean and sd across tasks, which is the shape FIRE-Bench's own
+    # Table 3 reports (`52.1±26.1  48.3±24.8  46.7±23.4` for its best row). Reporting F1
+    # alone was the first version and it drops two of the three columns the benchmark is
+    # defined by -- and the two it drops are the ones that say *how* a score was reached:
+    # a run can lose on precision by saying more than was asked, or on recall by
+    # answering a narrower question, and an F1 column cannot tell those apart.
+    #
+    # Each metric is averaged over tasks independently, which is what the paper does:
+    # its own 52.1 and 48.3 give a harmonic mean of 50.1, not the 46.7 it prints, because
+    # a macro-average of per-task F1 is not the F1 of the macro-averaged P and R. That is
+    # correct at this level and wrong one level down, which is why the per-cell row comes
+    # from a single draw.
     for arm in plan["arms"]:
-        values = [table.get((task, arm), {}).get("f1") for task in plan["tasks"]]
-        got = [v for v in values if v is not None]
-        report["per_arm"][arm] = {
-            "tasks": len(plan["tasks"]),
-            "scored_tasks": len(got),
-            "f1_median": round(statistics.median(got), 2) if got else None,
-            "f1_mean": round(statistics.mean(got), 2) if got else None,
-            "f1_sd": round(statistics.stdev(got), 2) if len(got) > 1 else None,
-            "f1_values": got,
-            "unscored_tasks": [t for t, v in zip(plan["tasks"], values) if v is None],
+        per_task = {
+            metric: [table.get((task, arm), {}).get(metric) for task in plan["tasks"]]
+            for metric in METRICS
         }
+        got = {metric: [v for v in values if v is not None] for metric, values in per_task.items()}
+        entry: dict[str, Any] = {
+            "tasks": len(plan["tasks"]),
+            "scored_tasks": len(got["f1"]),
+            "unscored_tasks": [
+                task for task, value in zip(plan["tasks"], per_task["f1"]) if value is None
+            ],
+        }
+        for metric in METRICS:
+            values = got[metric]
+            entry[metric] = {
+                "mean": round(statistics.mean(values), 1) if values else None,
+                "sd": round(statistics.stdev(values), 1) if len(values) > 1 else None,
+                "median": round(statistics.median(values), 1) if values else None,
+                "values": values,
+            }
+            # The same three, with an unscoreable run counted as a zero. Both are
+            # reported because neither is obviously right and the choice moves the
+            # answer: on the measured six-task matrix the stock arm's F1 is 22.9
+            # excluding its four unscoreable runs and 7.6 counting them, and which one is
+            # comparable to a published table depends on how that table handled a run
+            # that produced nothing -- which its paper does not say.
+            padded = values + [0.0] * (len(plan["tasks"]) - len(values))
+            entry[metric]["mean_unscoreable_as_zero"] = round(statistics.mean(padded), 1) if padded else None
+            entry[metric]["sd_unscoreable_as_zero"] = (
+                round(statistics.stdev(padded), 1) if len(padded) > 1 else None
+            )
+        report["per_arm"][arm] = entry
     if len(plan["arms"]) >= 2:
         base = plan["arms"][-1]
         for arm in plan["arms"][:-1]:
@@ -338,6 +412,7 @@ def do_report(args: argparse.Namespace) -> int:
                 for task in plan["tasks"]
                 if table.get((task, arm)) and table.get((task, base))
             ]
+            report["paired"].setdefault("_metric", "f1")
             complete = [(t, a, b) for t, a, b in pairs if a is not None and b is not None]
             deltas = [a - b for _, a, b in complete]
             report["paired"][f"{arm} - {base}"] = {
@@ -351,6 +426,18 @@ def do_report(args: argparse.Namespace) -> int:
             }
     out = Path(args.out).expanduser() if args.out else Path(plan["runs_root"]) / "report.json"
     write_json(out, report)
+    print(f"{'arm':18s} {'n':>4s}   {'Prec.':>13s} {'Recall':>13s} {'F1':>13s}")
+    for arm in plan["arms"]:
+        entry = report["per_arm"][arm]
+        cells = []
+        for metric in METRICS:
+            block = entry[metric]
+            cells.append(
+                f"{block['mean']:6.1f}±{block['sd'] if block['sd'] is not None else 0.0:4.1f}"
+                if block["mean"] is not None else f"{'--':>11s}"
+            )
+        print(f"{arm:18s} {entry['scored_tasks']:2d}/{entry['tasks']:<2d}   " + " ".join(cells))
+    print()
     print(json.dumps({"per_arm": report["per_arm"], "paired": report["paired"]}, indent=2))
     print(f"[written] {out}")
     return 0
