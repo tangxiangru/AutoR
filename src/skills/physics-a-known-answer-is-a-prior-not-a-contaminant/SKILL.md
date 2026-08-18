@@ -79,16 +79,35 @@ still the status at writing time the ledger has eaten a deliverable.
 
 Measured on Physics_000 of ResearchClawBench, one judge (gpt-5.1, three draws).
 The AutoR run's `workspace/literature/prior_exposure_disclosure.json` lists
-**13** pre-known quantities carried in from a previous run. Four are marked
+**13** pre-known quantities, carried in from memory notes left by earlier runs of
+this same task and read in the first minute of the run. Four are marked
 "NOT MEASURED HERE" or "NOT TESTED HERE": the threshold form of the growth rule
 (PK08, known to score 12 of 12 against 9 of 12 for the alternative reading); the
 mismatch below which the chiral shell stops being a local minimum and relaxes
 onto the achiral one (PK09, annotated "the single most contaminating item in the
-notes", and demoted in Stage 02 to "a flagged secondary observable"); the alkali
-lattice constants (PK10); and the erratum in the source's supplementary Eq. (86)
-(PK12, whose note reads "This run reached the AM optimal mismatches through the
-Methods' edge-length route, never through Eq. (86)"). Bare Claude Code, working
-the same task with no such ledger, opened its summary with three of those four
-as its headline findings, and beat the AutoR run **50.7 to 30.4**. The strings
-`erratum`, `errata` and `Eq. (86)` appear on **0** lines of the AutoR report and
-**3** of the comparator's, one of them in its opening summary.
+notes"); the alkali lattice constants (PK10); and the erratum in the source's
+supplementary Eq. (86) (PK12, whose note reads "This run reached the AM optimal
+mismatches through the Methods' edge-length route, never through Eq. (86)").
+Stage 02 then disposed of PK09 in one clause — "branch existence is reported as a
+secondary observable with the exposure flagged" — and what that clause bought
+downstream was a single sentence at the tail of a results subsection, under no
+heading of its own, with no figure whose subject it is and no line in the
+abstract. PK12 bought nothing at all. Bare Claude Code, on the
+same task, read one of the very same memory notes — its transcript shows the
+`Read` — and kept no ledger at all: no such file in its workspace, no mention of
+prior exposure anywhere in its report. It opened with three of those four items
+as **findings 1, 2 and 3** of four, and beat the AutoR run **50.7 to 30.4**. That
+is not an argument for keeping no ledger. It is the measurement that separates
+the ledger's two effects: the disclosure was free and the withholding was not. The
+strings `erratum`, `errata` and `Eq. (86)` appear on **0** lines of the AutoR
+report and **3** of the comparator's, one of them in that opening block.
+
+Worth knowing before you trust a note-to-self here: this ledger *already* carried
+the right instruction. Its own `consequences_for_later_stages` says to register
+each contaminated item "as a pre-registered replication test and say which side
+of its threshold the pre-known value falls on BEFORE writing the rule" — close to
+what this skill asks for — and no such registration reached the report. None of
+the 13 identifiers appears in it, the string `pre-known` appears **0** times, and
+the ledger's vocabulary survives in exactly one clause: the "exposure flag" that
+demotes PK09 to a secondary observable. An instruction about how to think does
+not survive six stages. An instruction that names a row in a table does.
