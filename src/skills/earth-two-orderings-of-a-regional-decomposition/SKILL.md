@@ -28,12 +28,13 @@ orderings, and the gap between them is what the decomposition is for.
    in which small regions are visible at all.
 
 Then rank the table twice, once by column 2 and once by column 3, and write both
-lists out in prose with the region names the archive uses. Name the top four or
-five of each. State the divergence explicitly: the regions that dominate the
-total are large and slow, the regions losing the largest share of themselves are
-small and fast, and a reader who has only the absolute column will draw the
-wrong conclusion about which places are in trouble. That sentence is a result
-and it costs one line of sorting.
+lists out in prose with the region names the archive uses. Name the members of
+each list, with their percentages - a leader on its own is not a ranking. State
+the divergence explicitly: the regions that dominate the total are large and
+slow, the regions losing the largest share of themselves are small and fast, and
+a reader who has only the absolute column will draw the wrong conclusion about
+which places are in trouble. That sentence is a result and it costs one line of
+sorting.
 
 ## The denominators have to be built, so budget them at design
 
@@ -86,9 +87,9 @@ figure is read on its own far more often than the table beside it is.
 ## Before you finish
 
 Take your regional table and ask three questions of it. Can a reader name the
-four regions that supply most of the total, with percentages? Can they name the
-four losing the largest fraction of themselves, with percentages? Are those two
-lists different, and does a sentence in the report say so? If the table has one
+regions that supply most of the total, with percentages? Can they name the ones
+losing the largest fraction of themselves, with percentages? Are those two lists
+different, and does a sentence in the report say so? If the table has one
 numeric column per unit and no per cent sign anywhere in it, the decomposition
 has been tabulated and not interpreted.
 
@@ -106,7 +107,8 @@ release, put the legend in the twentieth cell, carried one of the brief's two
 named units on the axis, and produced a per-region table built entirely out of
 its own values set against the published ones - inside-or-outside verdicts and
 signed residuals, no share column and no fraction-of-initial-stock column. The
-share column was free: its own appendix already held every regional rate and the
-global total. The intensity column needed one number per region that this
-archive does not ship, and nothing anywhere in that run's workspace holds a
-year-2000 mass. It scored 10.0.
+share column was free: one appendix table already held every regional rate and
+the global row, so both the numerator and the denominator were in the same grid
+of numbers as the missing column. The intensity column needed one number per
+region that this archive does not ship, and no file anywhere in that run's
+workspace holds a year-2000 mass. It scored 10.0.

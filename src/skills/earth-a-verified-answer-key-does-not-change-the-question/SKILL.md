@@ -42,24 +42,22 @@ not a substitute for stating the result in your own report.
 
 Do not put the verified values in a metrics file and move on. The moment you
 recompute the source's headline numbers from the archive, open the report
-skeleton and write one sentence per number, with a blank where your own value
-will go:
+skeleton and write one sentence per quantity, in your own results voice, with a
+blank where your own value will go and the reference value in parentheses
+beside it. A blanked sentence looks like a sentence and reads like a debt:
 
-> The mean rate over the record was ____ +/- ____ (released ____, published
-> ____). The first half averaged ____ against ____ for the second, an increase of
-> ____ per cent. The largest single year was ____ +/- ____, in ____. Over the
-> window it shares with ____, the record is ____ per cent of ____.
+> Over the full record the quantity changed by ____ +/- ____ (released ____).
 
-Fill the blanks when your rebuild exists. This costs ten minutes, it happens
-before any hypothesis is frozen, and it converts a verification into a
-commitment: from then on a missing sentence is visible as a blank rather than
-invisible as an absence. `publish-what-the-run-already-computed` is the sweep
-that finds these at the end; this is the cheaper move that stops them being lost
-in the first place.
+One of those per quantity, nothing more. Fill the blanks when your rebuild
+exists. This costs ten minutes, it happens before any hypothesis is frozen, and
+it converts a verification into a commitment: from then on a missing statistic
+is visible as a blank rather than invisible as an absence.
 
-`earth-shape-of-the-record-and-share-of-the-budget` tells you *which* statistics
-a record owes. Use it to write the skeleton, and write the skeleton on the day
-you verify.
+`earth-shape-of-the-record-and-share-of-the-budget` tells you *which*
+statistics a record of this kind owes; that list is the skeleton, and the day
+you verify is the day to write it. `publish-what-the-run-already-computed` is
+the sweep that finds the survivors at the end. This is the cheaper move that
+stops them being lost in the first place.
 
 ## The budget rule
 
@@ -87,9 +85,9 @@ measured in hour one, confirmed against the published paper, and never printed
 is the most expensive absence available: it cost you nothing to produce and it
 is indistinguishable, to a reader, from a quantity you were unable to compute.
 
-Then read your results headings end to end. If the delivered product occupies
-one of them and the other six name choices the source made, the run has audited
-a study and not done one.
+Then read your results headings end to end. If one of them names the delivered
+product and the rest name choices the source made, the run has audited a study
+and not done one.
 
 ## Why this is here
 
@@ -98,13 +96,14 @@ source's release and wrote `first_half_gt_yr`, `second_half_gt_yr`,
 `acceleration_pct`, `year_2023_gt` and `year_2023_err_gt` into a validation
 artifact, each agreeing with the published paper - under a heading saying the
 reproduction had a complete verified answer key and that this changed what the
-study was. It then froze six hypotheses about the source's method. Not one of
-those five values reaches the shipped report: all five strings occur zero times
-in it, and the word for the change in rate over the record occurs once, inside a
-bibliography title. The criterion asking for the cumulative loss, the two
-sub-period rates, the record year and the comparison against the other terms of
-the sea-level budget carried two fifths of the task's weight and scored 37.0
-against 49.3 for a plain agent that printed all of them. Of the run's seven
-results subsections, one described the delivered series and six adjudicated the
-source's choices; its discussion of those choices was longer than its entire
-results section.
+study was. It went on to freeze six hypotheses: one that the rebuild would land
+inside the published intervals, and five about the source's method choices and
+its external comparators. Not one of those five verified values reaches the
+shipped report: all five strings occur zero times in it, and the word for the
+change in rate over the record occurs once, inside a bibliography title. The
+criterion asking for the change over the record, its extremes and its size
+against the other terms of its budget carried two fifths of the task's weight
+and scored 37.0 against 49.3 for a plain agent that printed all of them. The
+report has seven results subsections and six of them carry a hypothesis verdict
+in the heading; its results section runs 7,582 characters against 10,389 for the
+discussion of those verdicts.

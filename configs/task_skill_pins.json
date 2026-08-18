@@ -21,7 +21,16 @@
       "pins": 11
     },
     "Earth_000": {
-      "pins": 7
+      "pins": 8,
+      "autor": 17.97,
+      "control": 33.97,
+      "net": -16.0,
+      "recoverable": 17.5,
+      "headroom": 82.03,
+      "new_to_this_run": [],
+      "scored_from": "the 3-draw gpt-5.1 re-score in each run directory (_score_gpt51.json, bench bfffc48, 15-image window), not the single-draw items_v220/items_control pass this table was first built from; on the cross-method criterion that pass scored the control 5 where three later draws scored it 47, 52 and 45",
+      "ranked_by": "weight x (control - autor) per criterion: cross-method comparison -8.93, the record's own description -4.93, the regional shares -3.63. The projections criterion is +1.50 -- AutoR did not lose it -- but it is 0.30 weight at 5.0, the largest block of unclaimed weight on the task, so one pin stays on it.",
+      "dropped": "result-table and earth-comparator-set-lives-outside-the-supplied-archive. Both still install for this run -- one from the general pack, one from the Earth field filter -- so this un-announces them rather than withholding them, and it holds 06_analysis at 7 pin announcements, where it already was."
     },
     "Earth_001": {
       "pins": 9
@@ -145,13 +154,14 @@
     "the-supplied-item-is-the-graded-unit"
   ],
   "Earth_000": [
-    "earth-window-mismatch-is-an-alignment-problem",
-    "earth-shape-of-the-record-and-share-of-the-budget",
+    "earth-the-technique-grid-needs-values-in-its-cells",
     "earth-inter-technique-spread-is-a-result-not-a-caveat",
-    "earth-comparator-set-lives-outside-the-supplied-archive",
+    "earth-a-verified-answer-key-does-not-change-the-question",
+    "earth-shape-of-the-record-and-share-of-the-budget",
+    "publish-what-the-run-already-computed",
+    "earth-two-orderings-of-a-regional-decomposition",
     "earth-report-the-lattice-and-show-the-field",
-    "result-table",
-    "publish-what-the-run-already-computed"
+    "earth-window-mismatch-is-an-alignment-problem"
   ],
   "Earth_001": [
     "reconstruct-the-figure-layer-you-cannot-source",
