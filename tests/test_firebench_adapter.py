@@ -554,6 +554,65 @@ class ArtifactVisibilityTests(unittest.TestCase):
             self.assertEqual(mirror_run_artifacts(workspace, None), {"code": 0, "outputs": 0})
 
 
+class ReportedRowTests(unittest.TestCase):
+    """FIRE-Bench reports three numbers, and they have to come from one draw.
+
+    Table 3 of the paper is precision, recall and F1 side by side; a report that prints
+    only F1 drops the two columns that say *how* a score was reached -- a run can lose on
+    precision by saying more than was asked, or on recall by answering a narrower
+    question, and F1 alone cannot tell those apart.
+
+    And the three have to be one draw. Taking the median of each metric independently is
+    arithmetically fine and produces rows that describe no run that happened: measured on
+    two real cells, ``P = 53.8, R = 50.0, F1 = 41.2``, whose harmonic mean is 51.8.
+    """
+
+    #: The tool under test is stdlib-only and lives in ``tools/``, which is not a package.
+    @staticmethod
+    def _median_draw(draws):
+        import importlib.util
+
+        path = Path(__file__).resolve().parent.parent / "tools" / "score_fire_run.py"
+        spec = importlib.util.spec_from_file_location("_score_fire_run", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module.median_draw(draws)
+
+    @staticmethod
+    def _draw(precision, recall, f1):
+        return {"status": "scored", "overall_metrics": {"precision": precision, "recall": recall, "f1": f1}}
+
+    def test_the_row_is_one_draw_and_its_f1_is_its_own_harmonic_mean(self) -> None:
+        row = self._median_draw([
+            self._draw(27.3, 50.0, 35.3),
+            self._draw(53.8, 33.3, 41.2),
+            self._draw(55.6, 50.0, 52.6),
+        ])
+        self.assertEqual(row, {"precision": 53.8, "recall": 33.3, "f1": 41.2})
+        harmonic = 2 * row["precision"] * row["recall"] / (row["precision"] + row["recall"])
+        self.assertAlmostEqual(harmonic, row["f1"], delta=0.2)
+
+    def test_independent_medians_would_not_have_been_coherent(self) -> None:
+        """The negative control: the exact three draws that produced the bad row."""
+        import statistics
+
+        draws = [(27.3, 50.0, 35.3), (53.8, 33.3, 41.2), (55.6, 50.0, 52.6)]
+        p = statistics.median(d[0] for d in draws)
+        r = statistics.median(d[1] for d in draws)
+        f1 = statistics.median(d[2] for d in draws)
+        self.assertNotAlmostEqual(2 * p * r / (p + r), f1, delta=0.2)
+
+    def test_a_draw_that_failed_is_not_eligible_to_be_the_row(self) -> None:
+        row = self._median_draw([
+            {"status": "error", "overall_metrics": {}},
+            self._draw(80.0, 80.0, 80.0),
+        ])
+        self.assertEqual(row["f1"], 80.0)
+
+    def test_no_scored_draw_is_no_row_rather_than_a_zero(self) -> None:
+        self.assertIsNone(self._median_draw([{"status": "no_conclusion"}]))
+
+
 class WorkspaceNameTests(unittest.TestCase):
     def test_a_task_id_with_underscores_survives_the_round_trip(self) -> None:
         """``to_cot_or_not_to_cot`` is a real task id. A single-underscore scheme loses it."""

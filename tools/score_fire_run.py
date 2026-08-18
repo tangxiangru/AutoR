@@ -26,6 +26,13 @@ under it, one draw per subprocess. One draw per process rather than a loop insid
 deliberate: ``refchecker`` retries a 4xx forever with a ten-second sleep and no
 traceback, so a hung draw has to be killable without losing the draws already finished.
 
+**The reportable row is ``median_draw``, not the three per-metric medians.** FIRE-Bench
+reports precision, recall and F1 together, and those three numbers have to come from one
+draw or the row describes no run that happened -- ``F1 = 2PR/(P+R)`` fails on it, and the
+reader cannot tell that from an arithmetic error. The per-metric medians and ranges are
+kept beside it because each metric's spread is worth reporting; laying three of them out
+as a row is what is forbidden.
+
 **A draw that did not produce a number is not a zero.** ``no_conclusion``,
 ``judge_failed`` and ``error`` draws are counted and named in the summary, and excluded
 from the statistics -- the failure mode this guards against is the one that scored a
@@ -109,12 +116,43 @@ def one_draw(
     return {"status": "error", "note": "driver wrote no readable result"}
 
 
+def median_draw(draws: list[dict]) -> dict | None:
+    """The one draw whose F1 is the median, as a coherent (precision, recall, F1) triple.
+
+    **A row has to come from one draw.** Taking the median of each metric independently
+    is what this function replaced, and it produces rows that cannot be true together:
+    measured on two real cells, ``P = 53.8, R = 50.0, F1 = 41.2`` -- whose harmonic mean
+    is 51.8, not 41.2 -- because the three medians came from three different draws.
+    Nothing in the arithmetic is wrong; the row simply describes no run that happened,
+    and a reader who checks it against F1 = 2PR/(P+R) finds an error that is not there.
+
+    The per-metric medians stay in the summary beside this, because the spread of each
+    metric is a real thing to report. What may not be done is to lay three of them out
+    as a row.
+    """
+    scored = [
+        d for d in draws
+        if d.get("status") == "scored" and (d.get("overall_metrics") or {}).get("f1") is not None
+    ]
+    if not scored:
+        return None
+    scored.sort(key=lambda d: float(d["overall_metrics"]["f1"]))
+    chosen = scored[len(scored) // 2]["overall_metrics"]
+    return {
+        "precision": round(float(chosen.get("precision", 0.0)), 2),
+        "recall": round(float(chosen.get("recall", 0.0)), 2),
+        "f1": round(float(chosen.get("f1", 0.0)), 2),
+    }
+
+
 def summarise(draws: list[dict]) -> dict:
     scored = [d for d in draws if d.get("status") == "scored" and d.get("overall_metrics")]
     summary: dict = {
         "draws": len(draws),
         "scored": len(scored),
         "not_scored": {},
+        # The row. Everything below it is per-metric spread, which is not a row.
+        "median_draw": median_draw(draws),
     }
     for draw in draws:
         if draw.get("status") != "scored":
@@ -207,7 +245,8 @@ def main(argv: list[str] | None = None) -> int:
     summary_path = out_dir / "summary.json"
     summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(json.dumps({k: v for k, v in summary.items()
-                      if k in {"task", "draws", "scored", "not_scored", "precision", "recall", "f1"}},
+                      if k in {"task", "draws", "scored", "not_scored", "median_draw",
+                               "precision", "recall", "f1"}},
                      indent=2))
     print(f"[written] {summary_path}")
     return 0 if summary["scored"] else 1

@@ -224,6 +224,27 @@ Only `overall_metrics` (precision, recall, F1) is meaningful: `eval.py` requests
 eleven metrics while hardcoding `retrieved_context: []`, so the eight retriever and
 generator metrics are empty-input fallbacks that read like measurements.
 
+### Report all three, and report them from one draw
+
+FIRE-Bench's own Table 3 is precision, recall and F1 side by side, and there is a reason
+to keep all three: a run can lose on precision by saying more than was asked, or on recall
+by answering a narrower question, and an F1 column cannot tell those apart. On the six-task
+matrix measured here the stock arm's recall (66.7) is the highest of any arm while its
+precision (18.1) is the lowest — it answered the right question at enormous length, and F1
+alone would have read as "it did badly".
+
+**The three numbers in a row have to come from one draw.** Taking the median of each metric
+independently is arithmetically fine and produces rows that describe no run that happened:
+measured on two real cells, `P = 53.8, R = 50.0, F1 = 41.2`, whose harmonic mean is 51.8.
+`score_fire_run.py` writes `median_draw` — the draw whose F1 is the median — and that is the
+row; the per-metric medians and ranges stay beside it because each metric's spread is worth
+reporting, and laying three of *those* out as a row is the thing that is forbidden.
+
+Across tasks, each metric is averaged independently, which is what the paper does: its own
+52.1 and 48.3 give a harmonic mean of 50.1, not the 46.7 it prints, because a macro-average
+of per-task F1 is not the F1 of the macro-averaged precision and recall. That is correct at
+the arm level and wrong one level down.
+
 ### Making the shipped scorer run at all
 
 Two things, neither of them optional, both outside this repository:
