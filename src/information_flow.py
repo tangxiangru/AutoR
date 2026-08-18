@@ -436,12 +436,22 @@ def _task_shaped_skills(context: ChannelContext) -> str:
     `stages` names this stage, so a run whose brief matches nothing gets no block
     and pays nothing. The unconditional pack stays pull-based, which is the trade
     the skill mechanism was built to make.
+
+    Three inputs rather than one, because three different things can put a skill in
+    front of a stage and the renderer announces each under its own banner: a
+    predicate over the brief, a pin on this task's identifier, and a front end that
+    forces a set on every run of its benchmark. Each is read with `getattr` and a
+    default, because a channel builder that raises takes the whole prompt down with
+    it and the test doubles in this suite carry only the attributes they need.
     """
     from .run_skills import format_skills_for_prompt
 
     entries = getattr(context.manager, "_installed_skills", None) or []
     pinned = getattr(context.manager, "_pinned_skills", None) or frozenset()
-    return format_skills_for_prompt(list(entries), context.stage.slug, frozenset(pinned))
+    forced = getattr(context.manager, "_forced_skills", None) or frozenset()
+    return format_skills_for_prompt(
+        list(entries), context.stage.slug, frozenset(pinned), frozenset(forced)
+    )
 
 
 #: Channels that declare no budget, and the reason each cannot grow.

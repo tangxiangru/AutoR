@@ -12,6 +12,7 @@ been loaded.
 
 from __future__ import annotations
 
+import io
 import re
 import json
 import tempfile
@@ -764,3 +765,379 @@ class ThePinRecordSurvivesTest(unittest.TestCase):
             self.assertEqual(after.get("skill_pins"), ["a-skill"])
             self.assertEqual(after.get("skill_pin_task_id"), "Physics_000")
             self.assertEqual(after.get("venue"), "neurips_2025", "a managed field still wins")
+
+
+class ForcedSkillsTest(unittest.TestCase):
+    """Skills a front end installs on every run of a benchmark, over both filters.
+
+    A third standing, and the reason it is not folded into either of the two that
+    already exist. A predicate is an inference about the shape of *this* task; a pin
+    is a record of what *this identifier* lost when it ran. Forcing is neither: it is
+    a decision about a whole population, taken outside the run, on evidence the run
+    cannot see. Recording it as a pin would put a claim in the prompt that is false —
+    "a previous run of this exact task lost this" — and recording it as a predicate
+    match would make the run's own brief responsible for a choice it did not make.
+
+    It also closes a hole the predicate half cannot. `select_run_skills` fails closed
+    on an empty brief: every task-scoped skill is refused, silently, and a front end
+    that means "every run of this benchmark gets these five" has no way to say so.
+    """
+
+    def _pack(self) -> Path:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        for name, extra in (
+            ("physics-forced-thing", "applies_when: widget\nstages: 02_hypothesis_generation"),
+            ("scoped-design", "applies_when: widget\nstages: 03_study_design"),
+            ("always-thing", ""),
+        ):
+            (root / name).mkdir(parents=True)
+            (root / name / "SKILL.md").write_text(
+                f"---\nname: {name}\ndescription: Use when a situation arises, at some stage.\n"
+                f"{extra}\n---\n\nbody\n",
+                encoding="utf-8",
+            )
+        return root
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.paths = build_run_paths(Path(self._tmp.name) / "run_0001")
+        ensure_run_layout(self.paths)
+        self.pack = self._pack()
+        self.entries = read_skill_pack(self.pack)
+
+    def test_a_forced_skill_is_announced_under_its_own_banner(self) -> None:
+        """Its own banner, and not the pin's. The pin sentence earns its force by being
+        precise about a scored run of this exact task, and a forced skill has no such
+        record behind it — so reusing that wording would put a false claim in the
+        prompt of every run that reads it."""
+        forced = frozenset({"physics-forced-thing"})
+        block = format_skills_for_prompt(
+            self.entries, "02_hypothesis_generation", frozenset(), forced
+        )
+        self.assertIn("physics-forced-thing", block)
+        self.assertIn("installed on every run of this benchmark", block)
+        self.assertNotIn("pinned to this task by name", block)
+        self.assertIn("Read every one of them", block)
+
+    def test_a_forced_skill_is_listed_once_and_not_also_as_a_shape_match(self) -> None:
+        """Its predicate matches the brief too, and it must still be announced once.
+
+        Two announcements of one skill spend two descriptions' worth of prompt on it
+        and leave a reader deciding which of two justifications to believe.
+        """
+        forced = frozenset({"physics-forced-thing"})
+        block = format_skills_for_prompt(
+            self.entries, "02_hypothesis_generation", frozenset(), forced
+        )
+        self.assertEqual(block.count("`physics-forced-thing`"), 1)
+        self.assertNotIn("selected against the brief you were given", block)
+
+    def test_a_skill_that_is_both_pinned_and_forced_is_announced_as_forced(self) -> None:
+        """The front end is what put it there on this run, so that is what is declared."""
+        names = frozenset({"physics-forced-thing"})
+        block = format_skills_for_prompt(self.entries, "02_hypothesis_generation", names, names)
+        self.assertEqual(block.count("`physics-forced-thing`"), 1)
+        self.assertIn("installed on every run of this benchmark", block)
+        self.assertNotIn("pinned to this task by name", block)
+
+    def test_a_forced_skill_is_announced_only_at_the_stages_it_names(self) -> None:
+        forced = frozenset({"physics-forced-thing"})
+        for slug in ("01_literature_survey", "03_study_design", "07_writing"):
+            with self.subTest(stage=slug):
+                block = format_skills_for_prompt(self.entries, slug, frozenset(), forced)
+                self.assertNotIn("physics-forced-thing", block)
+                self.assertNotIn("installed on every run of this benchmark", block)
+
+    def test_a_forced_skill_that_names_no_stage_is_announced_everywhere(self) -> None:
+        """Same fallback as a pin, and for the same reason: a skill nothing announces is
+        a skill nobody is told about, which is the failure the routing must not create."""
+        forced = frozenset({"always-thing"})
+        for slug in ("01_literature_survey", "02_hypothesis_generation", "07_writing"):
+            with self.subTest(stage=slug):
+                self.assertIn(
+                    "always-thing",
+                    format_skills_for_prompt(self.entries, slug, frozenset(), forced),
+                )
+
+    def test_the_three_groups_are_rendered_weakest_claim_first(self) -> None:
+        """Shape, then force, then pin. The last thing read is the strongest reason."""
+        block = format_skills_for_prompt(
+            self.entries,
+            "02_hypothesis_generation",
+            frozenset({"always-thing"}),
+            frozenset({"physics-forced-thing"}),
+        )
+        self.assertLess(
+            block.index("installed on every run of this benchmark"),
+            block.index("pinned to this task by name"),
+        )
+
+    def test_forcing_nothing_renders_no_forced_block(self) -> None:
+        """The control for every assertion above: the banner is absent when nothing
+        was forced, so its presence in the others is the seam and not the template."""
+        block = format_skills_for_prompt(
+            self.entries, "03_study_design", frozenset(), frozenset()
+        )
+        self.assertIn("scoped-design", block)
+        self.assertNotIn("installed on every run of this benchmark", block)
+
+    def test_forcing_survives_a_predicate_that_rejects_everything(self) -> None:
+        """`brief=""` is the fail-closed case, and it is the one that made this seam
+        necessary: every task-scoped skill is refused and nothing says so."""
+        without = install_run_skills(self.paths, self.pack, brief="")
+        self.assertEqual(without, ["always-thing"])
+        with_force = install_run_skills(
+            self.paths, self.pack, brief="", pinned=frozenset({"physics-forced-thing"})
+        )
+        self.assertIn("physics-forced-thing", with_force)
+        self.assertTrue((self.paths.skills_dir / "physics-forced-thing" / "SKILL.md").is_file())
+
+    def test_forcing_beats_the_field_filter_too(self) -> None:
+        """The name carries a field prefix the run is not in; it is installed anyway."""
+        installed = install_run_skills(
+            self.paths,
+            self.pack,
+            discipline="chemistry",
+            brief="a widget",
+            pinned=frozenset({"physics-forced-thing"}),
+        )
+        self.assertIn("physics-forced-thing", installed)
+
+
+class ForcingIsDeclaredWhereAScoreIsReadTest(unittest.TestCase):
+    """A forced run has to say so in the log and in the run config, or the seam is a
+    silent prompt change.
+
+    This is the whole point of the mechanism rather than a nicety. Two arms of the next
+    trial differ by exactly this set, and the only durable statement that a given run
+    was in the treatment arm is the one the run itself writes down: a directory listing
+    of `.claude/skills/` is deleted with the workspace, and the front-end flag that
+    caused it lives in somebody's shell history.
+    """
+
+    class _Operator:
+        model = "test-model"
+        backend_name = "claude"
+
+    def _manager(self, project_root: Path, skills_dir: Path):
+        from src.manager import ResearchManager
+        from src.terminal_ui import TerminalUI
+
+        manager = ResearchManager(
+            project_root=project_root,
+            runs_dir=project_root / "runs",
+            operator=self._Operator(),
+            ui=TerminalUI(interactive=False, output_stream=io.StringIO()),
+        )
+        manager.skills_dir = skills_dir
+        return manager
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.pack = self.root / "pack"
+        for name in ("forced-one", "forced-two"):
+            (self.pack / name).mkdir(parents=True)
+            (self.pack / name / "SKILL.md").write_text(
+                f"---\nname: {name}\ndescription: Use when a situation arises, at some "
+                f"stage.\napplies_when: nothing in this brief\n"
+                f"stages: 02_hypothesis_generation\n---\n\nbody\n",
+                encoding="utf-8",
+            )
+        self.paths = build_run_paths(self.root / "runs" / "run_0001")
+        ensure_run_layout(self.paths)
+        from src.utils import ensure_run_config
+
+        ensure_run_config(self.paths, model="opus")
+
+    def test_a_forced_run_writes_both_halves_of_its_declaration(self) -> None:
+        from src.utils import load_run_config, read_text
+
+        manager = self._manager(self.root, self.pack)
+        manager.skill_force = frozenset({"forced-one", "forced-two"})
+        manager.skill_force_source = "test_agent:TEST_FORCED_SKILLS"
+        installed = manager._install_skills(self.paths)
+
+        self.assertEqual(sorted(installed), ["forced-one", "forced-two"])
+        self.assertEqual(manager._forced_skills, frozenset({"forced-one", "forced-two"}))
+        config = load_run_config(self.paths)
+        self.assertEqual(config["skill_forced"], ["forced-one", "forced-two"])
+        self.assertEqual(config["skill_forced_by"], "test_agent:TEST_FORCED_SKILLS")
+        log = read_text(self.paths.logs)
+        self.assertIn("skills forced_by_front_end", log)
+        self.assertIn("is not comparable", log)
+        self.assertIn("test_agent:TEST_FORCED_SKILLS", log)
+
+    def test_an_unforced_run_writes_neither_half(self) -> None:
+        """The control. Without it every assertion above could be the template."""
+        from src.utils import load_run_config, read_text
+
+        manager = self._manager(self.root, self.pack)
+        manager._install_skills(self.paths)
+
+        config = load_run_config(self.paths)
+        self.assertNotIn("skill_forced", config)
+        self.assertNotIn("skill_forced_by", config)
+        self.assertNotIn("forced_by_front_end", read_text(self.paths.logs))
+
+    def test_forcing_a_name_the_pack_does_not_have_declares_nothing(self) -> None:
+        """Silent by construction otherwise: `select_run_skills` filters by name, so a
+        renamed skill would leave a run config claiming a skill that never arrived."""
+        from src.utils import load_run_config
+
+        manager = self._manager(self.root, self.pack)
+        manager.skill_force = frozenset({"forced-one", "no-such-skill"})
+        manager.skill_force_source = "test_agent:TEST_FORCED_SKILLS"
+        manager._install_skills(self.paths)
+
+        self.assertEqual(load_run_config(self.paths)["skill_forced"], ["forced-one"])
+
+    def test_a_forced_name_is_not_also_reported_as_a_pin(self) -> None:
+        """One skill, one standing. Reporting it twice would double-count the treatment
+        in any later census of which runs were pinned."""
+        pins = self.root / "configs"
+        pins.mkdir(parents=True, exist_ok=True)
+        (pins / DEFAULT_PINS_FILENAME).write_text(
+            json.dumps({"T_000": ["forced-one"]}), encoding="utf-8"
+        )
+        manager = self._manager(self.root, self.pack)
+        manager.skill_task_id = "T_000"
+        manager.skill_force = frozenset({"forced-one"})
+        manager.skill_force_source = "test_agent:TEST_FORCED_SKILLS"
+        manager._install_skills(self.paths)
+
+        self.assertEqual(manager._forced_skills, frozenset({"forced-one"}))
+        self.assertEqual(manager._pinned_skills, frozenset())
+
+
+class TheForcedRecordSurvivesTest(unittest.TestCase):
+    """`skill_forced` has to still be in the config after the run finishes starting.
+
+    Written against the defect `ThePinRecordSurvivesTest` was written against, because
+    it is the same defect one field along: `Manager._install_skills` writes the key and
+    `ensure_run_config` rebuilds the config field by field, dropping everything it does
+    not name. A forced run that logs the treatment and then publishes a config saying it
+    had none is worse than one that records nothing, because the config is the half a
+    later reader parses when they are deciding which arm a score came from.
+    """
+
+    def test_ensure_run_config_keeps_the_forced_keys_too(self) -> None:
+        from src.utils import ensure_run_config, load_run_config, save_run_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = build_run_paths(Path(tmp) / "run_0001")
+            ensure_run_layout(paths)
+            ensure_run_config(paths, model="opus")
+            config = load_run_config(paths)
+            config["skill_forced"] = ["a-skill", "b-skill"]
+            config["skill_forced_by"] = "fs_agent:FS_FORCED_SKILLS"
+            save_run_config(paths, config)
+
+            ensure_run_config(paths, model="opus", venue="neurips_2025")
+
+            after = load_run_config(paths)
+            self.assertEqual(after.get("skill_forced"), ["a-skill", "b-skill"])
+            self.assertEqual(after.get("skill_forced_by"), "fs_agent:FS_FORCED_SKILLS")
+            self.assertEqual(after.get("venue"), "neurips_2025", "a managed field still wins")
+
+
+class WithholdingIsWhatBuildsAControlArmTest(unittest.TestCase):
+    """The one input that is not a routing decision, and why clearing `skill_force`
+    could not do the job on its own.
+
+    The five FrontierScience skills are force-installed by their front end *and* carry a
+    predicate that matches all sixty of that benchmark's task statements. So the first
+    version of `--no-forced-skills` cleared the force and the shape filter put the same
+    five back, announced under the shape banner instead of the forced one — measured on a
+    `--fake-operator` run, where the "control" arm differed from the treatment arm by one
+    paragraph of prompt. A control a predicate can re-add is not a control, and it fails
+    in the direction that produces a null result and an explanation for it.
+    """
+
+    def _pack(self) -> Path:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        for name, extra in (
+            ("matching-thing", "applies_when: widget\nstages: 06_analysis"),
+            ("always-thing", ""),
+        ):
+            (root / name).mkdir(parents=True)
+            (root / name / "SKILL.md").write_text(
+                f"---\nname: {name}\ndescription: Use when a situation arises, at some stage.\n"
+                f"{extra}\n---\n\nbody\n",
+                encoding="utf-8",
+            )
+        return root
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.paths = build_run_paths(Path(self._tmp.name) / "run_0001")
+        ensure_run_layout(self.paths)
+        write_text(self.paths.user_input, "Scientific Objective: measure the widget.")
+        self.pack = self._pack()
+
+    def test_withholding_beats_a_predicate_that_matches(self) -> None:
+        self.assertIn("matching-thing", install_run_skills(self.paths, self.pack))
+        self.assertNotIn(
+            "matching-thing",
+            install_run_skills(self.paths, self.pack, withheld=frozenset({"matching-thing"})),
+        )
+
+    def test_withholding_beats_a_pin(self) -> None:
+        """A pin is the strongest routing input and this is not a routing input at all:
+        a control arm a pin table can quietly opt out of is not one."""
+        pinned = frozenset({"always-thing"})
+        self.assertIn("always-thing", install_run_skills(self.paths, self.pack, pinned=pinned))
+        self.assertNotIn(
+            "always-thing",
+            install_run_skills(
+                self.paths, self.pack, pinned=pinned, withheld=frozenset({"always-thing"})
+            ),
+        )
+
+    def test_a_withheld_skill_an_earlier_install_wrote_is_swept_from_disk(self) -> None:
+        """The resume case, and the one that would have been silent: the run directory
+        already holds the treatment arm's pack, and the flag would have changed only what
+        the prompt said about it."""
+        install_run_skills(self.paths, self.pack)
+        self.assertTrue((self.paths.skills_dir / "matching-thing").is_dir())
+        install_run_skills(self.paths, self.pack, withheld=frozenset({"matching-thing"}))
+        self.assertFalse((self.paths.skills_dir / "matching-thing").exists())
+
+    def test_withholding_nothing_changes_nothing(self) -> None:
+        self.assertEqual(
+            install_run_skills(self.paths, self.pack),
+            install_run_skills(self.paths, self.pack, withheld=frozenset()),
+        )
+
+    def test_the_manager_withholds_what_the_front_end_told_it_to(self) -> None:
+        """End to end through `_install_skills`, because that is where the two halves --
+        the force set and the withhold set -- have to agree."""
+        from src.manager import ResearchManager
+        from src.terminal_ui import TerminalUI
+
+        class _Operator:
+            model = "test-model"
+            backend_name = "claude"
+
+        manager = ResearchManager(
+            project_root=Path(self._tmp.name),
+            runs_dir=Path(self._tmp.name) / "runs",
+            operator=_Operator(),
+            ui=TerminalUI(interactive=False, output_stream=io.StringIO()),
+        )
+        manager.skills_dir = self.pack
+        manager.skill_force = frozenset({"matching-thing"})
+        manager.skill_force_source = "test_agent:TEST"
+        manager.skill_withhold = frozenset({"matching-thing"})
+
+        installed = manager._install_skills(self.paths)
+
+        self.assertNotIn("matching-thing", installed)
+        self.assertEqual(manager._forced_skills, frozenset())

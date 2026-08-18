@@ -641,7 +641,7 @@ Alongside the prompt, AutoR installs an agent skill pack from [src/skills/](src/
 `runs/<run_id>/.claude/skills/` — the operator's working directory — so the agent can *pull*
 long-form craft guidance when it needs it. A skill costs nothing in the prompts that do not use it.
 
-161 skills ship today: 72 general ones and 89 field-specific ones. Forty of them were written in one pass against the twelve tasks that trailed a bare-Claude-Code control under a single judge — three or four per task, each selected by a phrase in that task's brief and in no other of the forty, and every one of the forty pinned. Most of them were written against a scored arm's per-criterion losses on the
+166 skills ship today: 77 general ones and 89 field-specific ones. Forty of them were written in one pass against the twelve tasks that trailed a bare-Claude-Code control under a single judge — three or four per task, each selected by a phrase in that task's brief and in no other of the forty, and every one of the forty pinned. Most of them were written against a scored arm's per-criterion losses on the
 twenty-five ResearchClawBench tasks that lost, at least three per task. **A run is not offered all of
 them.** Two filters narrow the pack, and a skill has to survive both:
 
@@ -649,12 +649,20 @@ them.** Two filters narrow the pack, and a skill has to survive both:
    become two. A materials run does not benefit from being offered advice about observational
    astronomy, it just has one more description to read past.
 2. **Shape.** A skill may carry an `applies_when` regex, matched against this run's own research
-   brief and data manifest. Forty-four skills are scoped this way today; measured over the forty
-   ResearchClawBench briefs they select between 1 and 7 tasks each — forty of the
-   forty-four select exactly one — eighteen tasks receive none of them, and no task receives
+   brief and data manifest. Forty-nine skills are scoped this way today; measured over the forty
+   ResearchClawBench briefs they select between 0 and 7 tasks each — forty of the
+   forty-nine select exactly one — eighteen tasks receive none of them, and no task receives
    more than six. `tools/skill_selectivity.py` prints the selection set
    for a corpus and `--expect` turns it into an assertion, because a predicate is a claim about a
    kind of research problem and it should be checkable.
+
+   Five of the forty-nine select **nothing** over that corpus, and are exempt by name in
+   `tests/test_every_skill_can_be_loaded.py` rather than by a loosened regex. They were written
+   against FrontierScience-Research, not ResearchClawBench, and their shared predicate is a phrase
+   in that benchmark's own closing instruction: measured, it occurs in 60 of its 60 task statements
+   and in 0 of these 40 briefs. That is a real cost written down rather than argued away — a
+   predicate over a harness's tail sentence generalises to nothing outside that harness — and it is
+   why those five reach a run through the third route below rather than through this one.
 
 The predicate reads the brief, never the task's identifier: a table of benchmark ids would select
 the same tasks today and generalise to nothing.
@@ -670,6 +678,24 @@ the same tasks today and generalise to nothing.
    applies outside its own field. **A run that matches an entry writes `skill_pins` into its `run_config.json` and a
    `skills pinned_by_task_id` line into its log**, because a pinned arm and an unpinned arm are two
    configurations and a score from one is not a score from the other.
+4. **Force.** A front end may set `Manager.skill_force` to a set of names installed on every run it
+   launches, whatever the filters say and whatever the pin table holds. Neither an inference about
+   this task nor a record of this task: a decision about a whole benchmark population, taken outside
+   the run, on evidence the run cannot see. `fs_agent.py` is the only caller today —
+   `FS_FORCED_SKILLS`, five skills written against a paired sixty-task FrontierScience-Research
+   trial, with `--no-forced-skills` as the control arm out of the same binary. It also closes a hole
+   the predicate cannot: `select_run_skills` fails closed on an empty brief and refuses every
+   task-scoped skill silently. The control arm sets `Manager.skill_withhold` as well as clearing
+   the force, and has to: those five also carry a predicate that matches all sixty of that
+   benchmark's task statements, so clearing the force alone leaves the same pack installed under a
+   different banner. Withholding beats every other input here, including a pin, because it is not a
+   routing decision — it is an experimenter saying which arm this run is.
+   **A forced run writes `skill_forced` and `skill_forced_by` into its
+   `run_config.json` and a `skills forced_by_front_end` line into its log**, saying in the same
+   sentence that a score from it is not comparable to one from a run without them. Announced in the
+   prompt under its own banner, never the pin's: the pin sentence earns its force by being precise
+   about a scored run of this exact task, and reusing it here would be a claim that is false of
+   every run that reads it.
 
 Pull-based is not the same as discoverable. Measured over a 40-task arm, the pack drew **78 `Skill`
 calls in 789 hours of agent time**, 31 of them the one skill a stage prompt named imperatively —

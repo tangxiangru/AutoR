@@ -336,6 +336,7 @@ def select_run_skills(
     discipline: str | None = None,
     brief: str = "",
     pinned: frozenset[str] = frozenset(),
+    withheld: frozenset[str] = frozenset(),
 ) -> list[SkillPackEntry]:
     """The subset of the pack a run with this field and this brief is offered.
 
@@ -355,6 +356,16 @@ def select_run_skills(
     observed outcome and the two filters are inferences about tasks in general. A
     pinned name that is not in the pack is ignored here; `validate_task_pins` is where
     that is reported.
+
+    ``withheld`` overrides *everything*, pins included, and it is the only input here
+    that is not a routing decision at all. It is an experimenter saying "this run is
+    the control arm, and these skills are the thing being measured". A control a
+    predicate can re-add is not a control: the five FrontierScience skills are
+    force-installed by their front end *and* carry a predicate that matches all sixty of
+    that benchmark's task statements, so clearing the force alone left the arm running
+    with the same five under a different banner -- measured on a ``--fake-operator`` run
+    before this parameter existed, and the difference between the two arms was one
+    paragraph of prompt rather than five skills.
     """
     if discipline:
         wanted = discipline.casefold()
@@ -364,7 +375,8 @@ def select_run_skills(
             or not discipline_of(entry.name)
             or discipline_of(entry.name) == wanted
         ]
-    return [entry for entry in entries if entry.name in pinned or entry.applies_to(brief)]
+    entries = [entry for entry in entries if entry.name in pinned or entry.applies_to(brief)]
+    return [entry for entry in entries if entry.name not in withheld]
 
 
 def install_run_skills(
@@ -374,6 +386,7 @@ def install_run_skills(
     discipline: str | None = None,
     brief: str | None = None,
     pinned: frozenset[str] = frozenset(),
+    withheld: frozenset[str] = frozenset(),
 ) -> list[str]:
     """Copy the skills this run is offered into its ``.claude/skills/``.
 
@@ -392,6 +405,11 @@ def install_run_skills(
 
     ``pinned`` is the set of skill names this run's identifier is pinned to; they are
     installed regardless of the two filters. See `load_task_pins`.
+
+    ``withheld`` is the set this run is deliberately denied, whatever anything else says.
+    It is how a control arm is built, and it beats ``pinned``; the sweep below then also
+    removes a withheld skill an earlier install of the same run directory had written, so
+    a resume with the flag on does not leave the previous arm's pack behind.
     """
     entries = read_skill_pack(source_dir)
     all_names = {entry.name for entry in entries}
@@ -400,6 +418,7 @@ def install_run_skills(
         discipline=discipline,
         brief=task_brief(paths) if brief is None else brief,
         pinned=pinned,
+        withheld=withheld,
     )
     paths.skills_dir.mkdir(parents=True, exist_ok=True)
     wanted = {entry.name for entry in entries}
@@ -421,8 +440,30 @@ def install_run_skills(
     return installed
 
 
+#: The banner over the forced group. Kept apart from the pin banner on purpose, and the
+#: two must not be merged: the pin sentence earns its force by being *precise* -- it says
+#: a previous run of this exact task was scored and lost the thing the skill describes --
+#: and a forced skill has no such record behind it. Reusing the pin's wording for a
+#: front-end decision about a whole benchmark would put a claim in the prompt that is
+#: false of every run that reads it.
+#:
+#: Imperative for the same measured reason as the other two: over a 40-task arm the one
+#: skill a prompt told the operator to *read* fired in 31 of 40 runs, and the three a
+#: prompt said were "installed for this stage" fired in none.
+FORCED_SKILLS_BANNER = (
+    "**These skills are installed on every run of this benchmark by the front end that "
+    "launched it.** They were not chosen from your task statement and they are not a "
+    "record of what this task lost before; they are a decision about the whole "
+    "population of runs this one belongs to. **Read every one of them before you plan "
+    "this stage.**"
+)
+
+
 def format_skills_for_prompt(
-    entries: list[SkillPackEntry], stage_slug: str, pinned: frozenset[str] = frozenset()
+    entries: list[SkillPackEntry],
+    stage_slug: str,
+    pinned: frozenset[str] = frozenset(),
+    forced: frozenset[str] = frozenset(),
 ) -> str:
     """The skills chosen *for this run* that this stage should be told about.
 
@@ -433,13 +474,23 @@ def format_skills_for_prompt(
 
     What is different about the skills here is that something decided they were for
     this run, and the model has no way to see that: it gets the same undifferentiated
-    listing of about thirty entries it gets on every task. Two groups, because the two
-    decisions have different standing and a reader should be able to tell them apart:
+    listing of about thirty entries it gets on every task. Three groups, because the
+    three decisions have different standing and a reader should be able to tell them
+    apart:
 
     * **shape** -- a predicate over this run's brief matched, and the skill named this
       stage. An inference, and it can be wrong about this task.
+    * **forced** -- the front end that launched this run installs these on every run of
+      its benchmark. Neither an inference about the task nor a record of it: a decision
+      about a population, taken outside the run.
     * **pinned** -- this run's identifier is in the pin table. Not an inference: a
       record of what a previous run of the same task lost.
+
+    Rendered in that order -- shape, force, pin -- weakest claim first, so the last
+    thing read before the stage begins is the strongest. A name in ``forced`` is
+    excluded from the other two groups rather than repeated: announcing one skill twice
+    under two different justifications spends two descriptions' worth of prompt on one
+    skill and leaves a reader deciding which sentence to believe.
 
     A pin is announced at the stages it names, and at every stage only when it names
     none. That used to be unconditional, and it was affordable because the table capped
@@ -451,6 +502,10 @@ def format_skills_for_prompt(
     stage it is for is announced there, and the stage that needed it is the stage it
     names.
 
+    A forced skill is routed the same way as a pin -- at the stages it names, everywhere
+    only when it names none -- for the same budget reason, and because a front end that
+    forces a skill for one stage has said so in the skill's own ``stages`` field.
+
     Named imperatively, because that is the form measured to work: over a 40-task arm
     the one skill a rendered prompt told the operator to *read* fired in 31 of 40 runs,
     and the three a prompt said were "installed for this stage" fired in none.
@@ -459,7 +514,18 @@ def format_skills_for_prompt(
         (
             entry
             for entry in entries
-            if entry.task_scoped and stage_slug in entry.stages and entry.name not in pinned
+            if entry.task_scoped
+            and stage_slug in entry.stages
+            and entry.name not in pinned
+            and entry.name not in forced
+        ),
+        key=lambda entry: entry.name,
+    )
+    by_force = sorted(
+        (
+            entry
+            for entry in entries
+            if entry.name in forced and (not entry.stages or stage_slug in entry.stages)
         ),
         key=lambda entry: entry.name,
     )
@@ -467,11 +533,13 @@ def format_skills_for_prompt(
         (
             entry
             for entry in entries
-            if entry.name in pinned and (not entry.stages or stage_slug in entry.stages)
+            if entry.name in pinned
+            and entry.name not in forced
+            and (not entry.stages or stage_slug in entry.stages)
         ),
         key=lambda entry: entry.name,
     )
-    if not by_shape and not by_pin:
+    if not by_shape and not by_force and not by_pin:
         return ""
 
     lines: list[str] = []
@@ -483,6 +551,11 @@ def format_skills_for_prompt(
             "",
         ]
         lines += [f"- `{entry.name}` — {entry.description}" for entry in by_shape]
+    if by_force:
+        if lines:
+            lines.append("")
+        lines += [FORCED_SKILLS_BANNER, ""]
+        lines += [f"- `{entry.name}` — {entry.description}" for entry in by_force]
     if by_pin:
         if lines:
             lines.append("")

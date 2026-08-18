@@ -331,12 +331,35 @@ class ResearchManager:
         #: reads it: every other routing input is derived from the task statement, and
         #: an identifier is not a property of the research question.
         self.skill_task_id: str | None = None
+        #: Skills the front end installs because of the benchmark this run was launched
+        #: from, not because of anything in its task statement. A pin records what a
+        #: previous run of *this task* lost; this records a decision about a whole
+        #: population, and the two are different evidence, so they are announced apart.
+        #:
+        #: It also closes a failure mode the predicate half cannot: `select_run_skills`
+        #: fails closed on an empty brief and refuses every task-scoped skill silently,
+        #: so a front end that means "every run of this benchmark gets these five" has
+        #: no way to say it through `applies_when` alone.
+        self.skill_force: frozenset[str] = frozenset()
+        #: Who forced them, for the run config. Free text naming the front end, so a
+        #: reader of the config can find the decision rather than only its effect.
+        self.skill_force_source: str = ""
+        #: Skills this run is denied whatever the filters, the pins or `skill_force` say.
+        #: The control arm of an experiment about skills, and the only routing input here
+        #: that is not a claim about the task: clearing `skill_force` alone does not build
+        #: one, because a forced skill may also carry a predicate that matches, and then
+        #: the "control" runs with the same pack under a different banner.
+        self.skill_withhold: frozenset[str] = frozenset()
         #: The pack entries this run was actually offered, kept so a stage prompt can
         #: name the ones a predicate selected for this brief. Empty until
         #: `_install_skills` has run.
         self._installed_skills: list[SkillPackEntry] = []
         #: The subset of those that are there because this task id is pinned to them.
         self._pinned_skills: frozenset[str] = frozenset()
+        #: The subset that are there because the front end forced them. Disjoint from
+        #: `_pinned_skills`: a name in both is a forced name, because the front end's
+        #: decision is the one that put it there on this run.
+        self._forced_skills: frozenset[str] = frozenset()
         self.output_stream = output_stream
         self.ui = ui or TerminalUI(output_stream=output_stream)
         self.approval_mode = "agent" if reviewer is not None else "manual"
@@ -1592,7 +1615,6 @@ class ResearchManager:
         # brief, and installing first would offer every task-scoped skill nothing to
         # match against. On the resume path above, the file is already there.
         write_text(paths.user_input, user_goal)
-        self._install_skills(paths)
 
         # Ingest any pre-provided resources into workspace
         intake_summary: str | None = None
@@ -1617,6 +1639,19 @@ class ResearchManager:
             web_search=self.web_search_mode,
             min_report_figures=self.min_report_figures,
         )
+        # After the config is initialized, not before, and this ordering is load-bearing.
+        # `_install_skills` writes `skill_pins` / `skill_forced` into the run config to
+        # record that this run's pack was not the one its task statement would have
+        # chosen, and `initialize_run_config` builds the config from scratch and writes
+        # it whole -- so installing first meant those keys were written and then
+        # overwritten on every fresh run. The log line survived and the config did not,
+        # which is the worse half to lose: the log is prose and the config is what a
+        # later reader parses when they are deciding which arm a score came from. The
+        # resume path is safe either way because `ensure_run_config` preserves keys it
+        # does not manage, which is why `ThePinRecordSurvivesTest` was green throughout.
+        # Still before `observe_artifacts`, so what the skills layer writes into the run
+        # root is attributed to intake exactly as it was.
+        self._install_skills(paths)
         initialize_run_manifest(paths)
         # Whatever bootstrap has already put in the workspace belongs to intake, not to
         # Stage 01. Attributing it at the first stage boundary instead would make a
@@ -5130,9 +5165,19 @@ class ResearchManager:
         for problem in validate_task_pins(pin_table, self.skills_dir):
             append_log_entry(paths.logs, "skills pin_table_problem", problem)
         pinned = pins_for(self.skill_task_id, pin_table)
+        # Narrowed to the pack before it is used, so a front end naming a skill that has
+        # been renamed forces nothing rather than putting a name into the run config that
+        # no directory answers to. `install_run_skills` would ignore it either way; what
+        # this buys is that the *declaration* below names only skills that arrived.
+        forced = self.skill_force & {entry.name for entry in read_skill_pack(self.skills_dir)}
+        forced -= self.skill_withhold
         try:
             installed = install_run_skills(
-                paths, self.skills_dir, discipline=self.skill_discipline, pinned=pinned
+                paths,
+                self.skills_dir,
+                discipline=self.skill_discipline,
+                pinned=pinned | forced,
+                withheld=self.skill_withhold,
             )
             # Kept, not discarded. Discarding it is why `format_skills_for_prompt`
             # had no caller and sat under a named exemption in
@@ -5144,7 +5189,31 @@ class ResearchManager:
             self._installed_skills = [
                 entry for entry in read_skill_pack(self.skills_dir) if entry.name in chosen
             ]
-            self._pinned_skills = frozenset(pinned & chosen)
+            self._forced_skills = frozenset(forced & chosen)
+            self._pinned_skills = frozenset(pinned & chosen) - self._forced_skills
+            # Forcing does not follow from the task statement either, and unlike a pin it
+            # does not follow from this task's history: it is a decision about every run
+            # of one benchmark. So it gets the same two-surface declaration a pin gets --
+            # the human-readable log and the machine-readable config -- and the sentence
+            # says the thing a later reader of the score needs, which is that a run with
+            # these installed and a run without them are two configurations.
+            if self._forced_skills:
+                append_log_entry(
+                    paths.logs,
+                    "skills forced_by_front_end",
+                    "This run had skills installed because of the benchmark it was launched "
+                    "from, not because anything in its task statement selected them. A score "
+                    "from this run is not comparable to one from a run of the same task "
+                    f"without them.\n{self.skill_force_source or '<unknown front end>'}: "
+                    + ", ".join(sorted(self._forced_skills)),
+                )
+                try:
+                    config = load_run_config(paths)
+                    config["skill_forced"] = sorted(self._forced_skills)
+                    config["skill_forced_by"] = self.skill_force_source
+                    save_run_config(paths, config)
+                except (OSError, TypeError, ValueError):
+                    pass
             # A pin is the one routing input that does not follow from the task
             # statement, so a run that was pinned has to say so where a reader of its
             # result will find it. Both the human-readable log and the machine-readable

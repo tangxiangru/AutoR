@@ -38,7 +38,36 @@ BENCH = Path("/home/robtang_google_com/RCB/tasks")
 #: Skills that no benchmark brief selects, and the reason that is correct. A skill written
 #: for a research shape the forty tasks do not contain belongs here rather than in a regex
 #: loosened until something matches.
-UNREACHABLE_ON_PURPOSE: dict[str, str] = {}
+#:
+#: The five below are one decision, not five, and it is a deliberate trade rather than a
+#: predicate that missed. They carry ``applies_when: intermediate derivations``, which is
+#: a phrase in FrontierScience-Research's own closing instruction to the model rather than
+#: a description of a research shape — the thing `src.run_skills`'s module docstring
+#: argues against. Measured both ways before it landed: the phrase occurs in **60 of the
+#: 60** FrontierScience task statements, through `routing_text`, and in **0 of the 40**
+#: ResearchClawBench briefs that are this file's corpus. So they are unreachable here by
+#: construction and by design, and a regex loosened until one of the forty matched would
+#: be selecting a task nobody wrote them for.
+#:
+#: The cost is written down rather than argued away: a predicate over a harness's tail
+#: sentence generalises to nothing outside that harness. It was taken because the largest
+#: measured effect these five are aimed at is a refusal rate, and a predicate covering
+#: only some of the sixty tasks would leave the primary endpoint uninterpretable. They are
+#: also force-installed by `fs_agent.FS_FORCED_SKILLS`, which is what actually puts them
+#: in front of a run; the predicate is the second route, not the first.
+_FRONTIERSCIENCE_PREDICATE = (
+    "predicate is FrontierScience-Research's own closing instruction ('intermediate "
+    "derivations'), measured at 60/60 of its task statements and 0/40 of this corpus's "
+    "briefs; force-installed by fs_agent.FS_FORCED_SKILLS rather than routed here"
+)
+
+UNREACHABLE_ON_PURPOSE: dict[str, str] = {
+    "answer-in-the-symbols-the-problem-printed": _FRONTIERSCIENCE_PREDICATE,
+    "bind-every-deliverable-to-the-file-that-is-graded": _FRONTIERSCIENCE_PREDICATE,
+    "every-printed-part-gets-its-own-answered-section": _FRONTIERSCIENCE_PREDICATE,
+    "grant-the-expected-reading-before-you-depart-from-it": _FRONTIERSCIENCE_PREDICATE,
+    "one-visible-line-per-quantity-the-answer-owes": _FRONTIERSCIENCE_PREDICATE,
+}
 
 
 def briefs() -> dict[str, str]:
@@ -97,6 +126,44 @@ class EverySkillIsReachableTests(unittest.TestCase):
         names = {entry.name for entry in read_skill_pack(REPO / "src" / "skills")}
         stale = sorted(set(UNREACHABLE_ON_PURPOSE) - names)
         self.assertEqual(stale, [], f"exemptions for skills that are gone: {stale}")
+
+    def test_every_exemption_is_still_needed(self) -> None:
+        """The other direction, and the one that rots quietly.
+
+        A skill listed here that a brief now selects is a skill the assertion above
+        stopped covering, with a written reason that is no longer true. Loosening a
+        predicate is exactly how one gets into that state, and nothing else would say so.
+        """
+        counted = reach()
+        reachable = sorted(name for name in UNREACHABLE_ON_PURPOSE if counted[name])
+        self.assertEqual(
+            reachable,
+            [],
+            "these are exempt as unreachable but the corpus now selects them; drop the "
+            f"exemption: {reachable}",
+        )
+
+    def test_the_reason_the_five_carry_is_the_measurement_it_states(self) -> None:
+        """The exemption's reason is a number, so it is checked rather than believed.
+
+        It claims the predicate occurs in none of the forty briefs. If a brief ever
+        contains the phrase the exemption is wrong in the direction that matters — the
+        skills would be installed for a ResearchClawBench run they were not written for,
+        and the sentence in this file would still say they cannot be.
+        """
+        import re
+
+        matched = sorted(
+            task
+            for task, brief in briefs().items()
+            if re.search("intermediate derivations", brief, re.I)
+        )
+        self.assertEqual(
+            matched,
+            [],
+            "the FrontierScience predicate now selects tasks in this corpus, so the "
+            f"exemption's stated 0/40 is stale: {matched}",
+        )
 
     def test_a_predicate_taken_from_the_source_study_is_caught(self) -> None:
         """The control: the check has to fail on the shape that got past review.
