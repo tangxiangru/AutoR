@@ -353,6 +353,7 @@ def build_manager(
     review_backend: str,
     review_model: str,
     disallowed_tools: Sequence[str],
+    web_search_context: str | None = None,
 ) -> ResearchManager:
     """The smallest manager that can still run an experiment.
 
@@ -631,6 +632,7 @@ def run(args: argparse.Namespace) -> FireRunResult:
                 review_backend=review_backend,
                 review_model=review_model,
                 disallowed_tools=disallowed_tools,
+                web_search_context=web_search_context,
             )
             pipeline_completed, deadline_hit = _run_walk_under_deadline(
                 manager,

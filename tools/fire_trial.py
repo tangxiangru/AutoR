@@ -153,6 +153,12 @@ def launch(plan: dict, cell: dict) -> dict:
         # Without it the two arms reach the web through different tools, and the
         # difference lands in the score as if it were a difference in reasoning.
         env.setdefault("AUTOR_ROOT", str(autor_root(plan)))
+        # The stock arm stops its own CLI on a budget under the harness's, so that there
+        # is time left to publish what the model wrote. That budget has to track the
+        # plan's deadline rather than the agent's hardcoded default, or a campaign given
+        # three hours would still stop its stock arm at fifty-four minutes -- and the
+        # resulting gap would read as the stock agent being slow.
+        env.setdefault("AGENT_WALL_SECONDS", str(max(300, plan["deadline_seconds"] - 360)))
         cwd = plan["bench_root"]
 
     started = time.time()
