@@ -36,19 +36,20 @@ check that fires on progress will not be argued with. It will be obeyed.
 
 - **Assert agreement between artifacts, never equality to a literal you typed.**
   "the coverage table and the design pins name the same uncovered set" survives
-  an improvement. "the coverage table has twenty-seven rows" does not.
+  an improvement. "the coverage table has the row count it had this morning"
+  does not.
 - **Make the check print the number rather than assert it.** A line of output
-  reading `coverage: 27 of 31` gives you the same protection against silent
-  drift, appears in the log where a later stage will read it, and costs nothing
-  the day you widen.
+  reading `coverage: <covered> of <total>` gives you the same protection against
+  silent drift, appears in the log where a later stage will read it, and costs
+  nothing the day you widen.
 - **Never encode a decision's wording.** A ban list of phrasings that no later
   artifact may contain is a decision defended by string matching. The next
   stage's honest sentence about changing course is indistinguishable, to a
   matcher, from the failure mode you were guarding against.
 - **Tolerances are fine; populations are not.** Freezing "the closure residual
   must stay under 0.01" before any result exists is exactly right. Freezing
-  "the site set has twenty-three members" is the same syntax doing the opposite
-  job.
+  "the site set is the one the sample shipped with" is the same syntax doing the
+  opposite job.
 
 ## The decisions most likely to need reversing are the ones taken first
 
@@ -72,9 +73,11 @@ Energy_002. `code/s01_artifact_consistency_check.py` is 1,263 lines against the
 inside 13,930 lines of Python. Its check 14a asserts that the country arm covers
 twenty-seven of thirty-one countries and that a named set of four is uncovered,
 so a run that widened its own coverage would first have had to edit the test that
-says it did not. A second block bans eleven separate phrasings of one decision
-being reversed — "drop reading b", "reading b need not be carried", and nine more
-— matched whitespace-normalised across every prose note and stage summary, and
-negative-tested six times. The run's highest-weight criterion, at 0.40, asked
-whether cost varies across the continent; it scored 19.3 against a plain agent's
-55.0, on a study that never left the box its supplied sample came in.
+says it did not. A second block bans twelve separate phrasings of one decision
+being reversed — "drop reading b", "reading b need not be carried", and ten more
+— matched whitespace-normalised across every prose note and every stage summary,
+with an explicit tagged exemption so that a correction record may quote the
+wording it removed. The heaviest thing the task was graded on, at weight 0.40,
+was whether delivered cost varied across the continent the brief names; this run
+scored 19.3 against a plain agent's 55.0, on a study that never left the box its
+supplied sample came in.

@@ -25,11 +25,11 @@ asking it.
 
 One table. The frozen population with its frozen verdict, and the extended
 population with the same statistic beside it, labelled exploratory, with the
-reason the extension exists stated before its value is quoted — *the diagnostic
-in §5 says the published minimum sits on a coastline our sample never reaches,
-so we costed coastal cells through the identical chain.* A reader can discount a
-labelled row. A reader cannot recover a row that is not there, and a verdict
-with no second row reads as the only thing you know.
+reason the extension exists stated before its value is quoted — *our own
+diagnostic says the published minimum sits on a coastline the supplied sample
+never reaches, so we costed coastal cells through the identical chain.* A reader
+can discount a labelled row. A reader cannot recover a row that is not there,
+and a verdict with no second row reads as the only thing you know.
 
 The extension is a run, not a paragraph, so it has to happen while compute is
 open. The moment a diagnostic names the thing that would close your gap, that
@@ -90,13 +90,16 @@ agent's 52.0. The run held the fix and declined it in writing. Its own §5.3
 reports that the seven Atlantic coordinates in the supplied file close 78.2% of
 its S1 gap and 75.2% of its S2 gap when costed through the identical chain, then
 rules that they "are outside the preregistered population, and change no
-verdict". Its §7 says the refutation of its reproduction hypothesis would be
-overturned by "a buildable coastal Namibian coordinate, which the shipped file
-does not contain" — with a coastline in the shipped shapefile and a
-per-coordinate resource lookup already built and exercised at thirty points. On
-the competitiveness criterion, weight 0.25, scored 38.7 against 56.7, the run
-computed that correcting the calibration error on its own African side gives a
-margin of −€2.18/kg, which is competitive, and printed it as one clause inside a
-discussion paragraph while the abstract, the headline table and the conclusion
-all state zero competitive sites. Four of its preregistered rules fell back to
-degenerate-count clauses in the same run.
+verdict". Its discussion says the refutation of its reproduction hypothesis
+would be overturned by "a buildable coastal Namibian coordinate, which the
+shipped file does not contain" — while its own covariate table records that it
+already places each site's loading port on the shipped basemap's coastline, and
+its resource lookup had been run at all thirty supplied coordinates and two
+European ones over 26,280 hours apiece. On the export-competitiveness item,
+weight 0.25, scored 38.7 against 56.7, the run computed that correcting the
+calibration error on its own African side gives a margin of −€2.178/kg, which is
+competitive; that figure appears exactly once in the report, inside a discussion
+paragraph, while the abstract, row 8 of the headline table and the conclusion
+all say no site is competitive in any scenario. Four of its preregistered
+decision rules collapsed to degenerate-count fallbacks in the same run, which
+the report itself counts and names.

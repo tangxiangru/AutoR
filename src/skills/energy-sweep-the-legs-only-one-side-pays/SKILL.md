@@ -71,20 +71,23 @@ terms deserve the sweep budget.
 
 ## Why this is here
 
-Energy_002. The run declared eighteen ablation legs and ran all of them
-(`outputs/s05_ablation_results.csv`): resource arm, cost-of-debt reading,
-resource mapping constant, sovereign spread, political-risk price, turbine curve,
-electrolyser capex, cost of capital, site set, two ammonia parameter rows,
-storage sizing, synthesis electricity, synthesis capex basis, three opex
-fractions, a shipping detour factor and an omitted battery. Exactly one touches
+Energy_002. In `outputs/s05_ablation_results.csv` the run declared eighteen
+distinct perturbations, across fifteen ablation ids, and ran every one of them:
+resource arm, cost-of-debt reading, resource mapping constant, sovereign spread,
+political-risk price, turbine curve, electrolyser capex, cost of capital, site
+set, two ammonia parameter rows, storage sizing, synthesis electricity, synthesis
+capex basis, three opex fractions, a shipping detour factor and an omitted
+battery. Exactly one touches
 the export chain and none varies the reconversion charge at the far end, which
 the report states once, as €0.617/kg, inside a figure caption. Its sea leg is a
 great circle inflated by a detour factor, and across the thirty supplied
 coordinates it spans 7,730 to 9,127 km and moves delivered cost by €0.045/kg — so
 the "delivered" half of a delivered-cost study had no variation in it at all. The
 plain agent assigned each cell a port over sixty-five export ports with a routing
-library, reported sea freight of €0.07–0.36/kg, and ran every headline at both
-ends of a published €0.47–1.17/kg reconversion range; its competitive share of
-1.6–9.2% brackets the two published values. The criterion whose keywords include
-"maritime export distances impact competitiveness" scored 38.7 against 56.7 at
-weight 0.25.
+library, reported sea freight of €0.07–0.36/kg, and says its results are reported
+at both ends of a published €0.47–1.17/kg reconversion range — which is what let
+it say of its own two competitive shares that they track the published pair.
+Both sit a little under it: 1.6% and 9.2% against 2.1% and 11.0%, and its sweep
+of the reconversion charge moves the second from 1.7% to 9.2% without reaching
+11.0%. The graded item that turns on export competitiveness, weight 0.25, scored
+38.7 against 56.7.

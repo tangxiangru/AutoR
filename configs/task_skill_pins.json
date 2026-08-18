@@ -33,7 +33,7 @@
       "pins": 12
     },
     "Energy_002": {
-      "pins": 13
+      "pins": 15
     },
     "Energy_003": {
       "pins": 11
@@ -189,11 +189,13 @@
     "the-supplied-item-is-the-graded-unit"
   ],
   "Energy_002": [
+    "energy-a-check-over-a-choice-is-a-lock",
     "energy-build-the-domain-the-question-names",
     "energy-cost-surface-before-the-verdict-map",
     "energy-publish-the-ordering-when-the-level-fails",
+    "energy-sweep-the-legs-only-one-side-pays",
+    "energy-a-frozen-rule-binds-the-verdict-not-the-work",
     "earth-comparator-set-lives-outside-the-supplied-archive",
-    "energy-counterfactual-pair-and-hierarchy-closure",
     "mine-the-papers-you-were-given",
     "energy-canonical-configuration-before-the-enhanced-variant",
     "use-the-sources-own-names",
