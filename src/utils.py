@@ -1158,11 +1158,11 @@ def build_prompt(
             "2. The final approved stage file will be promoted separately by the workflow manager after validation.\n"
             "3. Do not write half-finished, in-progress, placeholder, outline-only, or pending content to the stage output file.\n"
             "4. If you need scratch work, drafts, notes, or temporary checkpoints, write them under the workspace directories instead of the stage output file.\n"
-            "5. Only write or overwrite the stage output file once you are ready to produce a complete stage summary for the current attempt.\n"
-            "6. If any tool, search, or subtask fails, still finish the stage by writing the best complete summary you can, clearly marking limitations in prose rather than leaving placeholders.\n"
-            "7. Read the stage output file back before finishing and verify every required heading is present and fully filled.\n"
-            "8. Do not leave placeholder text such as [In progress], [Pending], [TODO], [TBD], or similar unfinished in the final file.\n"
-            "9. Never leave the stage without a valid stage summary markdown file at the temporary output path."
+            "6. Only write or overwrite the stage output file once you are ready to produce a complete stage summary for the current attempt.\n"
+            "7. If any tool, search, or subtask fails, still finish the stage by writing the best complete summary you can, clearly marking limitations in prose rather than leaving placeholders.\n"
+            "8. Read the stage output file back before finishing and verify every required heading is present and fully filled.\n"
+            "9. Do not leave placeholder text such as [In progress], [Pending], [TODO], [TBD], or similar unfinished in the final file.\n"
+            "10. Never leave the stage without a valid stage summary markdown file at the temporary output path."
         ),
         "# Original User Request",
         user_request.strip(),
@@ -1206,6 +1206,17 @@ def build_prompt(
     return "\n\n".join(sections).strip() + "\n"
 
 
+#: How much of the goal a retry carries. Measured over 197 archived stage prompts, the
+#: `# Original User Request` block has a median of 13.6 KB and a maximum of 16.7 KB, so
+#: this clips nothing the archive contains -- it is a ceiling against a pathological task
+#: statement, the same shape as `Channel.max_chars`. One block of that size against a
+#: prompt whose median is 144 KB is the cheapest thing in it, and it is the one thing a
+#: long-horizon harness must not lose: losing the goal after a context refresh is the
+#: first failure `docs/iclr/round-loop-and-stage-graph.md` records the other harness
+#: designing against.
+MAX_RETRY_GOAL_CHARS = 24_000
+
+
 def build_continuation_prompt(
     stage: StageSpec,
     stage_template: str,
@@ -1222,10 +1233,19 @@ def build_continuation_prompt(
     current_final = paths.stage_file(stage)
 
     sections = [
-        "# Continue Existing Stage Conversation",
+        "# Continue Existing Stage Work",
         (
-            f"You are continuing {stage.stage_title} in the same AutoR conversation for this stage. "
-            "This is an incremental improvement pass inside the current stage, not a fresh restart."
+            # About the *work*, not about the conversation. This block used to say "you
+            # are continuing in the same AutoR conversation for this stage", which the
+            # manager is not in a position to promise: whether the earlier turns are in
+            # context is a fact about the invocation, and only the operator knows it.
+            # `ClaudeOperator._run_real` falls back to a fresh session when a resume is
+            # refused and replays this same file, so on exactly that path the sentence
+            # was false -- an empty session told it had a history. The operator now says
+            # what it alone knows, and this says what is true on both paths: there is a
+            # draft on disk and the job is to improve it.
+            f"You are continuing work on {stage.stage_title}. This is an incremental "
+            "improvement pass on an existing draft, not a fresh start on the stage."
         ),
         "# Stage Instructions",
         stage_template.strip(),
@@ -1240,15 +1260,15 @@ def build_continuation_prompt(
         (
             f"1. Read the current draft at `{current_draft.resolve()}` if it exists.\n"
             f"2. Read the last promoted stage summary at `{current_final.resolve()}` if it exists.\n"
-            f"3. Read approved memory from `{paths.memory.resolve()}` and the original user goal from `{paths.user_input.resolve()}` if needed.\n"
+            f"3. Read approved memory from `{paths.memory.resolve()}` if you need what earlier stages settled.\n"
             f"4. Read prior handoff summaries under `{paths.handoff_dir.resolve()}` when they exist.\n"
-            f"4. Treat workspace artifacts already under `{paths.workspace_root.resolve()}` as part of the current stage context and reuse them.\n"
-            "5. Preserve all valid work already completed in this stage unless the new feedback requires changing it.\n"
-            "6. Fill the missing pieces, fix weak points, and update the stage summary instead of throwing away correct work.\n"
-            "7. Overwrite only the draft stage output path once you are ready to produce the updated complete summary.\n"
-            "8. Do not leave placeholder text such as [In progress], [Pending], [TODO], [TBD], or similar unfinished markers.\n"
-            "9. If the existing stage work is partially correct, keep the correct parts and extend them rather than replacing them blindly.\n"
-            "10. **Revision Delta**: Because this is a refinement pass, you MUST insert a `## Revision Delta` section "
+            f"5. Treat workspace artifacts already under `{paths.workspace_root.resolve()}` as part of the current stage context and reuse them.\n"
+            "6. Preserve all valid work already completed in this stage unless the new feedback requires changing it.\n"
+            "7. Fill the missing pieces, fix weak points, and update the stage summary instead of throwing away correct work.\n"
+            "8. Overwrite only the draft stage output path once you are ready to produce the updated complete summary.\n"
+            "9. Do not leave placeholder text such as [In progress], [Pending], [TODO], [TBD], or similar unfinished markers.\n"
+            "10. If the existing stage work is partially correct, keep the correct parts and extend them rather than replacing them blindly.\n"
+            "11. **Revision Delta**: Because this is a refinement pass, you MUST insert a `## Revision Delta` section "
             "immediately after the top-level `# Stage ...` heading and before `## Objective`. "
             "This section must contain a concise bullet-point summary of what you changed in this attempt compared to the previous version. Include:\n"
             "   - Which sections were modified and how\n"
@@ -1261,6 +1281,16 @@ def build_continuation_prompt(
         sections.extend(["# Web Search Capability", web_search_context.strip()])
     # A contract that only appears on the first attempt is one every retry can forget.
     from .deliverables import format_deliverables_for_prompt
+
+    # Inlined, not pointed at. This block used to say "read the original user goal from
+    # <path> if needed" -- an agent-pull with an opt-out, for the one input the whole
+    # stage is judged against. Approved memory stays a pointer beside it and that is
+    # deliberate: its p90 over the same archive is 132 KB against the goal's 16.7 KB
+    # maximum, and re-sending it on every retry is the duplication `build_prompt` already
+    # withholds the handoff to avoid.
+    _goal = truncate_text(read_text(paths.user_input), max_chars=MAX_RETRY_GOAL_CHARS)
+    if _goal:
+        sections.extend(["# Original User Request", _goal])
 
     _deliverables = format_deliverables_for_prompt(task_statement(read_text(paths.user_input)))
     if _deliverables:

@@ -501,10 +501,21 @@ not adopt the general framing of "add a *what this stage has established* block"
 duplicates the handoff context and the channel set already in the prompt, and this repository
 has already paid for sending memory and handoff together.
 
-**(1) and (2) are fixed** (#256). The parity test that came with the first is the general
+**All three are fixed** — (1) and (2) in #256, (3) here. The parity test that came with the first is the general
 form: the two builders take five of the same optional content parameters, each gets a
 sentinel, and both prompts must carry all five — a parameter one builder accepts and
-drops is the same defect under another name. (3) stands.
+drops is the same defect under another name.
+
+For (3): the goal is inlined on the retry path rather than pointed at, bounded by
+`MAX_RETRY_GOAL_CHARS` — measured at a 13.6 KB median and a 16.7 KB maximum over 197
+archived prompts, so the ceiling clips nothing the archive contains. Approved memory
+stays a pointer, and that is the trade rather than an omission: its p90 over the same
+archive is 132 KB. The false premise is gone by moving the claim to whoever can make it.
+The prompt now speaks about the *work* — there is a draft and the job is to improve it,
+which is true on both paths — and the operator writes a `_restart.prompt.md` carrying the
+one sentence only it can say, that the earlier turns are gone. Whether a session was
+resumed is a fact about the invocation, and `build_continuation_prompt` is written before
+anyone asks the CLI for one.
 
 *Class: two live defects plus one false premise. Effort: small.*
 

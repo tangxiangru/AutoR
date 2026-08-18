@@ -403,7 +403,13 @@ is used:
 
 A separate mechanism handles a **resume failure**: if the backend reports that
 a session ID no longer exists, the operator detects it from the error text and
-falls back to a fresh session rather than failing the stage.
+falls back to a fresh session rather than failing the stage. It writes a
+`<slug>_attempt_NN_restart.prompt.md` beside the original rather than replaying it:
+the continuation prompt speaks about the *work* -- there is a draft and the job is
+to improve it, which is true on both paths -- and the restart file adds the one
+sentence only the operator can say, that the earlier turns are gone. The original
+is left untouched, because `prompt_cache/` is the record of what actually ran and
+overwriting it would make the resumed attempt and its restart indistinguishable.
 
 After `MAX_STAGE_ATTEMPTS` (5, `src/utils.py`) AutoR stops and offers you
 skip, roll back, or abort. Under `--full-auto` the stage is auto-skipped

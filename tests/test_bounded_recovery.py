@@ -304,3 +304,80 @@ class TestRunStageMaxAttempts(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheGoalSurvivesARetryTest(unittest.TestCase):
+    """The one input the whole stage is judged against was an agent-pull with an opt-out.
+
+    `build_continuation_prompt` said "read the original user goal from <path> if needed".
+    Approved memory stays a pointer beside it on purpose -- p90 132 KB over 197 archived
+    prompts, against the goal's 16.7 KB maximum -- but the goal itself is the cheapest
+    block in the prompt and the first thing a long-horizon harness must not lose.
+    """
+
+    def _paths(self, tmp: str, goal: str):
+        from src.utils import build_run_paths, ensure_run_layout, write_text
+
+        paths = build_run_paths(Path(tmp) / "run")
+        ensure_run_layout(paths)
+        write_text(paths.user_input, goal)
+        return paths
+
+    def test_the_goal_is_in_the_retry_prompt(self) -> None:
+        from src.utils import STAGES, build_continuation_prompt
+
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = self._paths(tmp, "Derive the coupling limit and report it in GeV^-1.")
+            prompt = build_continuation_prompt(
+                STAGES[2], "template", paths, handoff_context="", revision_feedback=None
+            )
+            self.assertIn("# Original User Request", prompt)
+            self.assertIn("Derive the coupling limit", prompt)
+
+    def test_memory_is_still_a_pointer(self) -> None:
+        """The control on the trade: inlining the goal is not inlining everything."""
+        from src.utils import STAGES, build_continuation_prompt
+
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = self._paths(tmp, "goal")
+            prompt = build_continuation_prompt(
+                STAGES[2], "template", paths, handoff_context="", revision_feedback=None
+            )
+            self.assertIn("Read approved memory from", prompt)
+
+    def test_a_pathological_goal_is_clipped_to_the_declared_budget(self) -> None:
+        from src.utils import MAX_RETRY_GOAL_CHARS, STAGES, build_continuation_prompt
+
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = self._paths(tmp, "g" * (MAX_RETRY_GOAL_CHARS * 2))
+            prompt = build_continuation_prompt(
+                STAGES[2], "template", paths, handoff_context="", revision_feedback=None
+            )
+            self.assertLess(prompt.count("g"), MAX_RETRY_GOAL_CHARS + 100)
+
+    def test_the_premise_no_longer_claims_a_conversation(self) -> None:
+        """Only the operator knows whether the earlier turns are in context."""
+        from src.utils import STAGES, build_continuation_prompt
+
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = self._paths(tmp, "goal")
+            prompt = build_continuation_prompt(
+                STAGES[2], "template", paths, handoff_context="", revision_feedback=None
+            )
+            self.assertNotIn("same AutoR conversation", prompt)
+            self.assertIn("existing draft", prompt)
+
+    def test_the_discipline_list_numbers_each_item_once(self) -> None:
+        """It had two items numbered 4, which is how a list nobody counts reads."""
+        import re
+
+        from src.utils import STAGES, build_continuation_prompt
+
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = self._paths(tmp, "goal")
+            prompt = build_continuation_prompt(
+                STAGES[2], "template", paths, handoff_context="", revision_feedback=None
+            )
+            block = prompt.split("# Continuation Discipline", 1)[1].split("\n# ", 1)[0]
+            numbers = [int(m.group(1)) for m in re.finditer(r"^(\d+)\. ", block, re.M)]
+            self.assertEqual(numbers, list(range(1, len(numbers) + 1)))

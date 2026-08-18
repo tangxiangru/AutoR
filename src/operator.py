@@ -147,8 +147,34 @@ class ClaudeOperator:
             and self._looks_like_resume_failure(stdout_text, stderr_text)
         ):
             fallback_session_id = str(uuid.uuid4())
+            # A different file, carrying one sentence the original cannot: the earlier
+            # turns are gone.
+            #
+            # Whether a stage's conversation is in context is a fact about the
+            # invocation, and this is the only place that knows it -- `build_continuation_prompt`
+            # is written before anyone asks the CLI to resume, and it used to assert the
+            # continuation outright. Replaying it here handed a brand-new, empty session
+            # a document telling it that it was mid-conversation. The prompt now speaks
+            # about the work and this speaks about the session, so neither has to guess
+            # at the other's half.
+            #
+            # Written beside the original rather than over it: `prompt_cache/` is the
+            # audit trail of what actually ran, and overwriting the file would leave the
+            # resumed attempt and its restart indistinguishable in it.
+            fallback_prompt_path = prompt_path.with_name(
+                prompt_path.name.replace(".prompt.md", "_restart.prompt.md")
+            )
+            write_text(
+                fallback_prompt_path,
+                read_text(prompt_path)
+                + "\n\n# The Earlier Turns Of This Conversation Are Gone\n\n"
+                "This stage's session could not be resumed, so this is a new one and "
+                "nothing before this message is in context. Everything the sections above "
+                "point at is still on disk and still correct; read what you need rather "
+                "than relying on having seen it.\n",
+            )
             fallback_command, fallback_cwd, fallback_stdin_text = self._prepare_invocation(
-                prompt_path,
+                fallback_prompt_path,
                 fallback_session_id,
                 paths=paths,
                 resume=False,
@@ -163,7 +189,7 @@ class ClaudeOperator:
                         "previous_session_id": session_id,
                         "fallback_session_id": fallback_session_id,
                         "command": fallback_command,
-                        "prompt_path": str(prompt_path),
+                        "prompt_path": str(fallback_prompt_path),
                     }
                 },
             )
