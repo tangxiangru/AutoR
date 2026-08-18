@@ -29,6 +29,7 @@ Means are over the tasks that arm actually scored, judged by `gpt-5.1` through
 | `arm_2ffaeb4` | **`2ffaeb4`** | adapter default | 40 | **31.35** | 32.75 | 08-15 |
 | `full40_pins` | **`bb32a8c`** | adapter default | 37/40 | **34.65** | 36.10 | 08-17, in flight |
 | `full40_a9c2b48` | **`a9c2b48`** | adapter default | 0/40 | — | — | 08-18, in flight |
+| `full40_skills161` | **`95861bd`** | 1800 s | 0/40 | — | — | 08-18, queued (re-run) |
 | `verdict_fix` | partial probe | 1800 s | 12 | 23.88 | 23.85 | 08-11 |
 | `full40_13a918d` | partial probe | 1800 s | 1 | 15.00 | — | 08-13 |
 
@@ -41,14 +42,90 @@ more than five images, so both windows hand the judge an identical list.
 
 ### Arms that ran and were never scored
 
-Six roots hold 40 completed workspaces each and have no score directory anywhere on disk:
-`full40_head` (`f16878b`), `full40_v220`, `full40_gpt54` (AutoR driven by GPT-5.4),
-`full40_skills` (`9e6aadd`), `full40_skills161` (`95861bd`, 12 tasks), and
-`control_search_g37`. That is roughly 240 finished runs, several thousand GPU-free CPU-hours,
-that produced no number. Two of them — `full40_gpt54` and `control_search_g37` — are the
-only arms that would answer questions nothing else here can: what the scaffold is worth at a
-model the public leaderboard already has a bare-agent row for, and whether the bare control's
-search parity holds.
+Six roots held finished workspaces with no score directory anywhere on disk — roughly 240
+runs, 192 of them carrying a report large enough to hand a judge, that had produced no
+number. Scoring them costs judge calls and no compute, which made it the cheapest
+unanswered question on the cluster. It is running now (`backfill.py`, six arms concurrent,
+same `score_rcb_run.py`, same `gpt-5.1`). Partial, at 84 of 192:
+
+| arm root | checkout | n so far | mean | median | max |
+|:---|:---|---:|---:|---:|---:|
+| `full40_skills` | `9e6aadd` | 14/34 | **40.10** | 42.90 | 53.40 |
+| `full40_head` | `f16878b` | 17/40 | 32.02 | 30.10 | 48.10 |
+| `control_search_g37` | bare Claude Code + a second search server | 14/37 | 29.76 | 27.95 | 54.04 |
+| `full40_v220` | SHA unrecoverable | 16/40 | 28.76 | 25.00 | 51.33 |
+| `full40_gpt54` | AutoR driven by GPT-5.4 | 22/40 | **3.04** | 0.00 | 45.30 |
+| `full40_skills161` | `95861bd` | 1/1 | 43.00 | — | — |
+
+Two of these are worth saying out loud before the passes finish.
+
+**`full40_skills` is provisionally the best arm on record.** At 14 of 34 tasks it means
+40.10 against 34.65 for `bb32a8c` and 31.53 for the bare control. If that survives the
+remaining twenty tasks it is a result that sat unscored on disk for a day while two newer
+arms were launched to look for three points.
+
+**`full40_gpt54` did not run.** All 40 of its reports are the adapter's 2.2 kB
+`Incomplete run.` placeholder with zero images — every stage was auto-skipped. Its mean is a
+statement about a broken configuration, not about GPT-5.4's research ability, and it must
+never be quoted as the latter. This is also why it was never scored: the arm that would have
+placed AutoR against the leaderboard's bare Codex CLI row, at the model that row was
+measured at, still has not been run.
+
+`full40_skills161` was likewise not an arm. Eleven of its twelve workspaces hold no report at
+all, so the 12-task comparison it was launched for was never possible. It has been
+resubmitted as a fresh 40-task arm.
+
+---
+
+## What a task actually costs
+
+Every submission on this cluster before 2026-08-18 sized its request by guessing. Measured
+instead, on five concurrent tasks on one node and three sampled individually:
+
+| | measured |
+|:---|---:|
+| CPU, steady state | **0.8 core** (load average 3.52 across 44 CPUs, five tasks) |
+| resident memory, mid-run | 12.5 – 21.8 GB |
+| wall clock, median | 18.4 h |
+
+The task is one agent process waiting on an API for most of eighteen hours. **CPU is not what
+limits it, and adding cores buys nothing.** Memory is what kills it, and the peak is well
+above the resident figure — from the kill record, somewhere between 28 and 48 GB:
+
+| per-task memory | elements run | OOM-killed |
+|---:|---:|---:|
+| 28 GB | 157 | 8 (5.1%) |
+| 31,408 MB (a whole c3small node, shared with the OS) | 55 | 7 (12.7%) |
+| 48 GB | 38 | 1 (2.6%) |
+| **64 GB** | 39 | **0** |
+
+So the request that has never lost a task is **64 GB and 2–4 CPU**, one task per array
+element. Everything else follows from the ratio that implies.
+
+### Sizing a request, or a machine order
+
+```
+tasks per node = min( vCPU / 2 , memory_GB / 64 )
+```
+
+A task needs **32 GB per vCPU** at a 2-core request. Every node class here is poorer than
+that, which is why every arm so far has been memory-bound and has left CPU idle:
+
+| node class | vCPU | memory | GB/vCPU | tasks/node | what goes unused |
+|:---|---:|---:|---:|---:|:---|
+| c3small | 4 | 31 GB | 7.9 | **0** | cannot hold one task |
+| c3 | 44 | 341 GB | 7.8 | 5 | 77% of the cores |
+| a3 | 208 | 1,817 GB | 8.7 | 28 | 73% of the cores |
+| a memory-optimised node at 28 GB/vCPU | 64 | 1,792 GB | 28 | 28 | 12% of the cores |
+
+The last row is the point: matching the machine to the ratio takes core waste from 77% to
+12%, and one such node replaces 5.6 c3 nodes. **Whether cores are wasted is set by the
+cores-per-task in the request, not by how large the node is** — a 16-vCPU and a 64-vCPU node
+of the same GB/vCPU waste the same fraction.
+
+What node *size* changes is blast radius. A node holding 28 tasks is 70% of an arm; one
+holding 7 is 17%. Given that this project has already lost tasks to a single element dying,
+the middle of that range is the right trade.
 
 ---
 
@@ -100,23 +177,21 @@ draws per task, not more tasks.
 
 ---
 
-## Resourcing, and the arm that lost two tasks to it
+## The two submission shapes that lose tasks
 
-Memory per task is not a detail of the submission. Across every AutoR RCB job on this
-cluster, by what the element requested:
+The sizing above says how much one task needs. This is about the other half — how tasks are
+grouped into Slurm elements — which has cost this project more runs than the sizing has.
 
 | per-element request | tasks per element | elements | OOM-killed |
 |:---|---:|---:|---:|
-| 28 GB / 4 CPU | 1 | 117 | 8 (6.8%) |
-| 31,408 MB / 4 CPU (whole c3small node) | 1 | 99 | 7 (7.1%) |
-| 40 GB / 1 CPU | 1 | 40 | 0 |
-| 320 GB / 40 CPU | **5** | 30 | 2 (6.7%) |
+| 31,408 MB (a whole c3small node) | 1 | 99 | 7 (7.1%) |
+| **320 GB / 40 CPU** | **5** | 30 | **2 (6.7%)** |
 | 64 GB / 5 CPU | 1 | 41 | 0 |
 
-Two shapes fail, for different reasons. A 31 GB c3small node is shared with the OS, dockerd
-and journald, leaving roughly 27 GB for a task that sometimes wants more. And packing five
-tasks into one 320 GB element means one greedy task takes the other four down with it — the
-`autorhead` arm lost 2 of its 8 elements, which is up to 10 tasks, that way.
+The middle row is the one that is easy to miss, because 320 GB looks generous. It is 64 GB
+per task, which is the safe figure — but the five tasks share one cgroup, so **one greedy
+task takes the other four down with it.** The `autorhead` arm lost 2 of its 8 elements that
+way, which is up to ten tasks from a submission that looked over-provisioned.
 
 The `bb32a8c` arm paid both. Five of its thirty c3small elements were killed
 `OUT_OF_MEMORY`. Three of the five had their task rescued by another element through
@@ -127,9 +202,16 @@ array had exited and no launcher was left to notice.** `Earth_003` and `Life_002
 So `a9c2b48` was submitted one task per array element at 64 GB / 5 CPU. That fixes the blast
 radius — an OOM kills exactly one task and 39 elements remain to take its claim — and it
 schedules far better: a 320 GB element needs a whole free node and only four could start
-against that day's cluster, while 64 GB fits wherever 64 GB is free and twenty-seven started
-immediately. The request also does the node selection for free, since no 31,408 MB node can
-ever satisfy it.
+against that day's cluster, while 64 GB fits wherever 64 GB is free and **twenty-seven
+started immediately**, then all forty within two hours. The request also does the node
+selection for free, since no 31,408 MB node can ever satisfy it.
+
+Over-reserving is not free either, and it is paid by the next job in the queue. The rescue
+submitted for `Earth_003` and `Life_002` first asked for 320 GB per task, on the reasoning
+that more is safer. It held two whole nodes for two tasks and starved the forty-element
+`a9c2b48` array of 512 GB — eight tasks that could have been running. Resized to 64 GB, the
+running count went from 27 to 37. On a shared partition the cost of a generous request lands
+on someone, and here it landed on the same experiment.
 
 CPU is *not* held constant across arms and cannot be: `bb32a8c` ran 8 CPUs per task on big
 nodes and 4 on small ones, so it has no single value to match. Any per-task wall clock read
