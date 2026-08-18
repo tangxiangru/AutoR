@@ -21,7 +21,17 @@
       "pins": 11
     },
     "Earth_000": {
-      "pins": 7
+      "pins": 8,
+      "autor": 17.97,
+      "control": 33.97,
+      "net": -16.0,
+      "recoverable": 17.5,
+      "headroom": 82.03,
+      "new_to_this_run": [],
+      "scored_from": "the 3-draw gpt-5.1 re-score in each arm's own run directory (_score_gpt51.json, bench bfffc48, judge shown all 10 of AutoR's figures and all 6 of the control's under the 15-image cap), not the single-draw items_v220/items_control pass the rest of this table was built from. Both files carry the same bench_revision and the same judge, and the four weights sum to 1.0 in each.",
+      "ranked_by": "weight x (control - autor) per criterion: the cross-method comparison -8.93, the record's own description -4.93, the regional shares -3.63. Those three are 17.49 of the 17.50 recoverable, and the three skills added here target them one for one. The fourth criterion, projections against observations, is +1.50 -- AutoR did not lose it -- but at 0.30 weight and a score of 5.0 it is 28.5 of the 82.03 headroom, the largest unclaimed block on the task, so earth-window-mismatch-is-an-alignment-problem stays pinned on it.",
+      "dropped": "result-table and earth-comparator-set-lives-outside-the-supplied-archive. Neither is withheld: all ten skills named here are already among the 69 this brief is offered without any pin at all, so a pin buys the imperative per-stage announcement and nothing else, and un-pinning costs a skill that announcement rather than its presence. result-table goes because AutoR's table craft was not what failed -- its appendix table already carried 19 regional rows, an aggregate row, both units, 95% intervals and signed residuals, and the criterion still scored 10.0; what was missing was two columns, which is the subject of the skill that replaces it. earth-comparator-set goes because its criterion is the one of four AutoR won, and earth-window-mismatch stays pinned over the same ground. Both remain named inside a skill that is still pinned.",
+      "announcement_cost": "8 pins, every one of them naming its stages, so the cost is read per stage prompt and not per task: 01 gets 1, 02 gets 1, 03 gets 6, 04 gets 2, 05 gets 0, 06 gets 7, 07 gets 6. The peak stage is unchanged from the 7-pin table this replaces (06_analysis was already at 7, 03_study_design already at 6); the trade is that 05_experimentation goes dark and the two stages where this task's failure actually began, 01 and 02, stop being dark."
     },
     "Earth_001": {
       "pins": 9
@@ -156,13 +166,14 @@
     "the-supplied-item-is-the-graded-unit"
   ],
   "Earth_000": [
-    "earth-window-mismatch-is-an-alignment-problem",
-    "earth-shape-of-the-record-and-share-of-the-budget",
+    "earth-the-technique-grid-needs-values-in-its-cells",
     "earth-inter-technique-spread-is-a-result-not-a-caveat",
-    "earth-comparator-set-lives-outside-the-supplied-archive",
-    "earth-report-the-lattice-and-show-the-field",
-    "result-table",
-    "publish-what-the-run-already-computed"
+    "earth-a-verified-answer-key-does-not-change-the-question",
+    "earth-shape-of-the-record-and-share-of-the-budget",
+    "earth-two-orderings-of-a-regional-decomposition",
+    "earth-window-mismatch-is-an-alignment-problem",
+    "publish-what-the-run-already-computed",
+    "earth-report-the-lattice-and-show-the-field"
   ],
   "Earth_001": [
     "reconstruct-the-figure-layer-you-cannot-source",
