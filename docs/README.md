@@ -71,6 +71,10 @@ detail behind it.
   other agents on the ResearchClawBench leaderboard score, which of their
   published numbers reproduce from the public data, and the same-model baseline
   any AutoR result has to be quoted against.
+- **[researchclawbench-arms.md](researchclawbench-arms.md)** — the lab notebook:
+  every full-benchmark arm AutoR has run, what changed between them, what each
+  scored against bare Claude Code, and the scorer fault that invented four points
+  of deficit before anyone noticed it was the instrument.
 - **[frontierscience.md](frontierscience.md)** — the second benchmark: sixty
   written science examination questions graded against a ten-point rubric by a
   judge model, with no data, no reference paper and no reference answer. The
