@@ -29,6 +29,18 @@ class StageManifestEntry:
     invalidated_by_stage: str | None = None
     updated_at: str = ""
     approved_at: str | None = None
+    #: Why this stage was promoted when a reviewer had just asked for a change, or empty
+    #: for an ordinary approval.
+    #:
+    #: `approved` alone could not tell the two apart. When the send-back budget is spent,
+    #: `ResearchManager._collect_review_decision` rewrites a live refusal to choice "5"
+    #: and everything downstream reads a plain approval -- the manifest, the cost ledger,
+    #: the memory entry the next stage reads. The only trace was one line in `logs.txt`.
+    #: Over 200 archived runs, 78 contain at least one of these and they account for
+    #: roughly 45% of the recorded approvals, so this is the ordinary case rather than
+    #: the rare one. `AutomatedReviewer.is_degraded_verdict` is the same discipline
+    #: applied to refusals; this is the missing half for promotions.
+    promoted_over_refusal: str = ""
     #: A digest per declared input channel, taken when the stage was approved. What the
     #: stage read, so that "is this approval still good" can be answered by comparing
     #: rather than by arithmetic on the stage number. Empty for a stage approved before
@@ -69,6 +81,7 @@ class StageManifestEntry:
             "invalidated_by_stage": self.invalidated_by_stage,
             "updated_at": self.updated_at,
             "approved_at": self.approved_at,
+            "promoted_over_refusal": self.promoted_over_refusal,
             "committed_view": dict(self.committed_view),
         }
 
@@ -95,6 +108,7 @@ class StageManifestEntry:
             invalidated_by_stage=str(payload["invalidated_by_stage"]) if payload.get("invalidated_by_stage") is not None else None,
             updated_at=str(payload.get("updated_at") or ""),
             approved_at=str(payload["approved_at"]) if payload.get("approved_at") is not None else None,
+            promoted_over_refusal=str(payload.get("promoted_over_refusal") or ""),
             committed_view={
                 str(key): str(value)
                 for key, value in dict(payload.get("committed_view") or {}).items()
@@ -369,6 +383,8 @@ def mark_stage_approved_manifest(
     stage: StageSpec,
     attempt_no: int,
     artifact_paths: list[str],
+    *,
+    promoted_over_refusal: str = "",
 ) -> RunManifest:
     """Record the approval, and what the stage was reading when it was given.
 
@@ -400,6 +416,7 @@ def mark_stage_approved_manifest(
         attempt_count=attempt_no,
         artifact_paths=artifact_paths,
         approved_at=_now(),
+        promoted_over_refusal=promoted_over_refusal,
         committed_view=current_view(paths, stage),
     )
 
@@ -629,7 +646,13 @@ def rebuild_memory_from_manifest(paths: RunPaths, manifest: RunManifest | None =
         stage_path = paths.stage_file(stage)
         if not stage_path.exists():
             continue
-        entries.append(render_approved_stage_entry(stage, read_text(stage_path)))
+        entries.append(
+            render_approved_stage_entry(
+                stage,
+                read_text(stage_path),
+                promoted_over_refusal=entry.promoted_over_refusal,
+            )
+        )
 
     body = (
         "# Approved Run Memory\n\n"

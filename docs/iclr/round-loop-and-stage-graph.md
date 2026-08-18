@@ -203,6 +203,24 @@ override is **wrong**, because the overridden stage was read by a reviewer that 
 criterion; calling its artifacts unreviewed conflates it with a stage nobody looked at.
 That is a third state, not the second one.
 
+**Landed.** The override now reaches three readers instead of one log line: the manifest
+entry carries `promoted_over_refusal`, the cost ledger records a `promoted_over_refusal`
+outcome instead of `approved`, and `render_approved_stage_entry` puts a line above the
+memory block so the *next stage's prompt* reads the work as something the gate let through
+rather than something a reviewer accepted.
+
+It is not the corner case the section implied. Measured over 200 archived runs before
+landing: **78 contain at least one override, 1270 events against 2802 recorded `choice: 5`
+lines** — roughly 45% of what the record called an approval. (Both counts are per decision
+and the denominator includes the intake and bootstrap reviewers, so read the share as an
+order of magnitude rather than a rate.)
+
+The wider `promotion_basis` vocabulary the section sketched is still refused, for the
+reason the verification pass gave: the skip paths already record their authority through
+`skip_kind` and the nine-value outcome ledger, and an overridden refusal is a *third*
+state rather than a synonym for "unreviewed" — the reviewer did read it and scored every
+mechanical criterion.
+
 *Class: record fidelity. Effort: small-to-medium.*
 
 ### 4.3 The terminal label is re-derived; ours is asserted

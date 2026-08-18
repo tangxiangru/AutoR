@@ -2016,14 +2016,34 @@ def validate_stage_artifacts(
     return problems
 
 
-def render_approved_stage_entry(stage: StageSpec, stage_markdown: str) -> str:
+def render_approved_stage_entry(
+    stage: StageSpec, stage_markdown: str, *, promoted_over_refusal: str = ""
+) -> str:
+    """The stage as later stages will read it, and on whose authority it stands.
+
+    *promoted_over_refusal* is the reason the send-back budget refused a live reviewer
+    refusal and the stage was promoted anyway. It is rendered because this block is what
+    the next stage's prompt carries: without it a later stage reads work a reviewer asked
+    to change under a heading saying every entry here was approved, and has no way to
+    weigh it differently. Empty for an ordinary approval, and then the entry is byte for
+    byte what it was.
+    """
+
     objective = extract_markdown_section(stage_markdown, "Objective") or "Not provided."
     what_i_did = extract_markdown_section(stage_markdown, "What I Did") or "Not provided."
     key_results = extract_markdown_section(stage_markdown, "Key Results") or "Not provided."
     files_produced = extract_markdown_section(stage_markdown, "Files Produced") or "Not provided."
 
+    provenance = (
+        "> **Promoted over a reviewer that asked for a change.** "
+        f"{promoted_over_refusal.rstrip('.')}. Read what follows as work the gate let "
+        "through, not as work a reviewer accepted.\n\n"
+        if promoted_over_refusal
+        else ""
+    )
     return (
         f"### {stage.stage_title}\n\n"
+        f"{provenance}"
         "#### Objective\n"
         f"{objective}\n\n"
         "#### What I Did\n"
@@ -2092,7 +2112,13 @@ def filtered_approved_memory(memory_text: str, max_stage_number: int) -> str:
     return build_memory_text(user_goal, kept_entries, intake_summary=intake_summary)
 
 
-def append_approved_stage_summary(memory_path: Path, stage: StageSpec, stage_markdown: str) -> None:
+def append_approved_stage_summary(
+    memory_path: Path,
+    stage: StageSpec,
+    stage_markdown: str,
+    *,
+    promoted_over_refusal: str = "",
+) -> None:
     if stage.number < 0:
         raise ValueError(f"Cannot append pseudo-stage {stage.slug} to approved memory.")
     current = read_text(memory_path)
@@ -2103,7 +2129,11 @@ def append_approved_stage_summary(memory_path: Path, stage: StageSpec, stage_mar
         for number, entry in approved_stage_entries(current)
         if number < stage.number
     ]
-    retained_entries.append(render_approved_stage_entry(stage, stage_markdown))
+    retained_entries.append(
+        render_approved_stage_entry(
+            stage, stage_markdown, promoted_over_refusal=promoted_over_refusal
+        )
+    )
     write_text(memory_path, build_memory_text(user_goal, retained_entries, intake_summary=intake_summary))
 
 

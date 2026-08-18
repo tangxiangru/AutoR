@@ -228,6 +228,13 @@ DEGRADED_FAILURE_KINDS: tuple[str, ...] = (
 # ---------------------------------------------------------------------------
 
 OUTCOME_APPROVED = "approved"
+#: Promoted because the send-back budget was spent, over a reviewer that asked for a
+#: change. `approved` is what this used to record, and the two are not the same event:
+#: one is a reviewer accepting the work and the other is the harness overruling one that
+#: did not. Measured over 200 archived runs, 78 of them contain at least one -- 1270
+#: events against 2802 recorded approvals, so about 45% of what the record called an
+#: approval was this.
+OUTCOME_PROMOTED_OVER_REFUSAL = "promoted_over_refusal"
 OUTCOME_AUTO_SKIPPED = "auto_skipped"
 OUTCOME_HUMAN_SKIPPED = "human_skipped"
 OUTCOME_ROUTED_TO_DELIVERABLE = "routed_to_deliverable"
@@ -249,6 +256,7 @@ OUTCOME_UNKNOWN = "unknown"
 
 OUTCOMES: tuple[str, ...] = (
     OUTCOME_APPROVED,
+    OUTCOME_PROMOTED_OVER_REFUSAL,
     OUTCOME_AUTO_SKIPPED,
     OUTCOME_HUMAN_SKIPPED,
     OUTCOME_ROUTED_TO_DELIVERABLE,
