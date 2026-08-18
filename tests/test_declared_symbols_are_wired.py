@@ -138,7 +138,9 @@ REPO = Path(__file__).resolve().parent.parent
 #: ``fire_agent.py`` is here on the same argument one benchmark later: it is the only
 #: thing that reaches ``src/firebench.py``, and leaving it out would make every symbol in
 #: that module read as dead while the front end that calls them ships beside it.
-ENTRY_POINTS = ("main.py", "studio.py", "rcb_agent.py", "fs_agent.py", "fire_agent.py")
+#: ``airs_agent.py`` is here for the same reason and ``src/airsbench.py``.
+ENTRY_POINTS = ("main.py", "studio.py", "rcb_agent.py", "fs_agent.py", "fire_agent.py",
+                "airs_agent.py")
 
 _FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
 

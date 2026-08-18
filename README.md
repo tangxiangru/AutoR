@@ -46,7 +46,8 @@ overview and the operating manual.
 [Review](#review-five-kinds-of-critic) · [The stage contract](#the-stage-contract-and-what-gets-validated) ·
 [Execution model](#execution-model) · [Run layout](#run-layout) · [Architecture](#architecture) ·
 [Benchmarks](#benchmarks) ([ResearchClawBench](#researchclawbench) ·
-[FrontierScience](#frontierscience-research) · [FIRE-Bench](#fire-bench)) ·
+[FrontierScience](#frontierscience-research) · [FIRE-Bench](#fire-bench) ·
+[AIRS-Bench](#airs-bench)) ·
 [Documentation](#documentation) · [Limits](#limits) · [License](#license)
 
 ## What AutoR is
@@ -132,9 +133,9 @@ naming them.
 | Required stage-summary headings | `REQUIRED_STAGE_HEADINGS` | 7 |
 | Rubric criteria (weighted, backend-free) | `CRITERIA`, [src/rubric.py](src/rubric.py) | 10 |
 | Flags on `main.py` / `rcb_agent.py` | `parse_args` | 61 / 37 |
-| Python modules / lines / tests | the tree | 226 / 114 k / 3501 |
+| Python modules / lines / tests | the tree | 251 / 134 k / 3976 |
 
-`python -m unittest discover -s tests -p "test_*.py"` runs **3501 tests in ~290 s across 134 test
+`python -m unittest discover -s tests -p "test_*.py"` runs **3976 tests in ~400 s across 142 test
 modules**, with no third-party dependency.
 
 ## Quick start
@@ -194,6 +195,9 @@ modules**, with no third-party dependency.
 | Grade a FrontierScience answer against its rubric | `python tools/score_fs_run.py --task fs:043 --answer answer.md --out score.json` |
 | Rediscover a published finding on FIRE-Bench, under its own one-hour clock | `python fire_agent.py --bench-root ~/FIRE-Bench --task cot_in_planning --profile pipeline` · `--profile direct` |
 | Score a FIRE-Bench conclusion with the benchmark's own claim-level judge | `python tools/score_fire_run.py --bench-root ~/FIRE-Bench --log-file <log.log> --task cot_in_planning --draws 3` |
+| Stage an AIRS-Bench task's data and workspace | `python tools/airs_setup.py --task <TASK> --repo <AIRS_BENCH> --raw-dir <RAW> --workspace <WS>` |
+| Solve one AIRS-Bench task and score the submission | `python airs_agent.py --task <TASK> --repo <AIRS_BENCH> --raw-dir <RAW> --workspace <WS>` |
+| Run one arm of an AIRS-Bench comparison — AutoR, or the same CLI with no AutoR | `python tools/airs_arm.py --arm autor --tasks <TASK>...` · `--arm bare` |
 
 Every flag, its default, and what is preserved on resume:
 **[docs/cli-reference.md](docs/cli-reference.md)**. Stage identifiers accept `03`, `3` or
@@ -821,6 +825,7 @@ flowchart LR
 | [main.py](main.py) | CLI entry: 61 flags, start, resume, `--redo-stage`, `--rollback-stage`, the archive record and the reports that print and exit |
 | [src/report_plan.py](src/report_plan.py) | Figures and headline numbers committed at Stage 03, stamped outside the workspace, enforced at 03, 06 and 07 |
 | [src/rcb.py](src/rcb.py) | The ResearchClawBench adapter core: workspace layout, goal construction, report synthesis, figure publication, export |
+| [src/airsbench.py](src/airsbench.py) | The AIRS-Bench adapter core: task specifications, the scaffold-neutral brief both arms get, submission export that never writes a submission, and the benchmark's own normalized score |
 | [src/stage_graph.py](src/stage_graph.py) | Stages as nodes: six guarded forward edges, thirteen backward edges, a conditional terminal, a per-stage visit budget |
 | [src/archive.py](src/archive.py) | Cross-run routes and edge payoffs keyed on a comparability basis; variant proposal, exploration and promotion |
 | [src/rubric.py](src/rubric.py) | The rigour score over a draft and the artifacts it names. Never calls a backend |
@@ -873,7 +878,7 @@ is in **[docs/framework.md](docs/framework.md)**.
 
 ## Benchmarks
 
-AutoR is wired to three, and they measure different halves of it.
+AutoR is wired to four, and they measure different halves of it.
 [ResearchClawBench](#researchclawbench) hands the agent a workspace of raw data and reference
 papers and scores the report and figures it produces against the published paper — a test of
 conducting research. [FrontierScience-Research](#frontierscience-research) hands it one written
@@ -881,8 +886,17 @@ examination question and grades the text of the answer against a ten-point rubri
 reference paper, no figure, no reference answer, and a test of what the system knows and can
 derive. [FIRE-Bench](#fire-bench) hands it a research question from a published empirical study,
 expects it to design and run its own experiments, and scores the two-sentence conclusion it
-writes against the authors' own — claim by claim, under a wall clock the harness enforces. A
-change that moves one need not move the other.
+writes against the authors' own — claim by claim, under a wall clock the harness enforces.
+[AIRS-Bench](#airs-bench) hands it a prepared dataset and a metric and scores the predictions it
+writes. A change that moves one need not move the others.
+
+The fourth one is worth having for a reason the other three cannot supply. All three of them
+reach their number through a model reading what AutoR wrote, and on ResearchClawBench the choice
+of reader is worth more than most of the effects being argued about — 16.2 points between two
+judges on one identical artifact set, and 8.5 points between eight draws of the *same* judge.
+AIRS-Bench runs `scipy` over a CSV: the same submission scores the same number every time. It is
+the only one of the four where a one-task before-and-after is a measurement rather than a draw
+from a distribution.
 
 ### ResearchClawBench
 
@@ -1114,6 +1128,56 @@ The adapter, the deadline design, the six exit clauses, the judge's noise and th
 in the benchmark's own harness that had to be routed around are in
 [docs/firebench.md](docs/firebench.md).
 
+### AIRS-Bench
+
+`python airs_agent.py --task <TASK> --repo <AIRS_BENCH> --raw-dir <RAW> --workspace <WS>`
+runs AutoR against one of [AIRS-Bench](https://github.com/facebookresearch/airs-bench)'s
+twenty machine-learning research tasks and exports the one thing it scores,
+`submission.csv`. Scoring is the task's own `evaluate.py` — `scipy` over a CSV — so unlike
+the other two benchmarks the same artifact scores the same number every time.
+
+`tools/airs_arm.py` runs one arm of a comparison and its control: both arms are handed
+`build_task_brief`'s output byte for byte, the same CLI, model, permission mode, denied
+tools, workspace and wall-clock cap, and `--compare` refuses to print a delta between two
+manifests that disagree on any of them.
+
+**Nineteen tasks** (the twentieth cannot be staged), one seed, opus executing in both arms,
+**4 h of wall clock each**, no web search, one `(arm, task)` per slurm array element on
+CPU-only nodes. Scores are the benchmark's normalized score, where **1.000 is human SOTA**:
+
+| arm | mean norm. | median norm. | tasks won | valid submissions | hit the 4 h cap |
+|:---|---:|---:|---:|---:|---:|
+| bare Claude Code (opus) | **0.894** | **0.932** | **14** of 17 | **19** of 19 | **0** of 19 |
+| AutoR (opus) | 0.834 | 0.844 | 3 of 17 | 18 of 19 | **19** of 19 |
+
+Paired over the seventeen tasks both arms scored, that is **−0.060** (median −0.051). A
+five-task pilot on a GPU node gave −0.173 the same way. The mechanism is legible rather
+than inferred, and it is the same one both times: **every AutoR run hit the cap and not one
+finished the walk** — six of nineteen never left Stage 01, at 13 to 22 attempts on a
+literature survey for tasks whose whole specification is "predict this column" — while the
+bare arm hit the cap zero times at a median of 3 h 14 m. AutoR's single invalid submission
+is the failure the brief warns about: 1,137 rows where the split has 1,147, a whole task
+lost to ten rows.
+
+This is the same direction as the other three, and the fourth benchmark to say it
+([§6.8](docs/framework.md#68-the-scaffold-is-currently-worth-less-than-no-scaffold)) — this
+time through an instrument with no judge in it, which is the one thing the reading could not
+previously be blamed on.
+
+Three caveats travel with those numbers, all in the docs. **APPS is excluded from every
+aggregate**: its normalized score has a denominator eleven times smaller than a typical
+task's, so the two arms' Pass@5 of 0.783 and 0.947 normalize to 7.37 and 14.15 and would
+carry the mean by themselves — the mean over tasks is not a robust statistic on this
+benchmark, which is why the median is beside it. **These are not leaderboard numbers**: the
+published table is twenty tasks at ten to twenty seeds, and its agents run in a container
+with no network, while an agent with a shell here can `snapshot_download` a model and run
+inference — seven of the bare arm's nineteen runs did. And one seed per arm is one seed.
+The arms are comparable with each other: same machine, same access, same brief, same cap,
+and **zero tool-call audit hits for the held-out labels across all 38 runs**.
+
+The adapter, the arm harness, the four defects running it surfaced in the benchmark itself,
+and the one it surfaced in this adapter are in [docs/airsbench.md](docs/airsbench.md).
+
 ## Documentation
 
 The [docs/](docs/) directory is the reference documentation. This README is the overview; everything
@@ -1139,6 +1203,7 @@ below is the detail behind it.
 | [Studio Guide & API](docs/studio.md) | The browser workspace and its complete HTTP API. |
 | [ResearchClawBench](docs/researchclawbench.md) | Running with no human in the loop: unattended execution, the benchmark adapter and its output contract, and Gemini-backed web search. |
 | [ResearchClawBench Landscape](docs/researchclawbench-landscape.md) | How EvoScientist, ARIS Codex and MIRA actually score on the benchmark, which reported numbers reproduce, and the baseline any result must be quoted against. |
+| [AIRS-Bench](docs/airsbench.md) | The fourth benchmark: twenty ML research tasks scored by a deterministic metric over `submission.csv`. The adapter, the arm harness, three defects running it surfaced in the benchmark itself, and what AutoR scores. |
 | [FrontierScience-Research](docs/frontierscience.md) | The second benchmark: sixty written science questions graded against a rubric by a judge model. The two profiles, the prompt contract, the judge's measured noise, the paired trial, and the two numbers that are not measured. |
 | [Architecture](docs/architecture.md) | Layers, the module map, the stage walk, prompt assembly by typed channel, recovery, extension points. |
 | [Development](docs/development.md) | Dev setup, tests, CI, conventions, and recipes for adding a stage, venue, or backend. |
