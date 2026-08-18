@@ -90,7 +90,12 @@ print(json.dumps({"splits": list(dataset.keys()), "destination": str(destination
 
 
 def download_dataset(
-    task: AirsTask, raw_dir: Path, *, force: bool = False, python: str = sys.executable
+    task: AirsTask,
+    raw_dir: Path,
+    *,
+    force: bool = False,
+    python: str = sys.executable,
+    fallback_python: str | None = None,
 ) -> Path:
     """Save the task's dataset to disk in the layout ``prepare.py`` expects.
 
@@ -112,21 +117,29 @@ def download_dataset(
         return destination
 
     repo_id, config = dataset_coordinates(task)
-    print(f"[setup] {task.name}: downloading {repo_id} (config={config}) -> {destination}")
-    completed = subprocess.run(  # noqa: S603 - the command is composed here, not user text
-        [python, "-c", _DOWNLOAD_SNIPPET, repo_id, config or "", str(destination)],
-        capture_output=True,
-        text=True,
-    )
-    sys.stderr.write(completed.stderr[-4000:])
-    if completed.returncode != 0:
-        raise RuntimeError(
-            f"{task.name}: downloading {repo_id} exited {completed.returncode}. "
-            f"The interpreter used was {python}; a script-based dataset needs one with "
-            "datasets<4 installed, passed as --download-python."
+    # Both interpreters, in order, because the sixteen datasets do not agree on one version
+    # of `datasets` and there is no version that reads them all. Nine are script-based on
+    # the hub, which 4.x removed outright; `rajpurkar/squad` declares a `List` feature type,
+    # which 3.x has never heard of. Whichever is tried first, some task needs the other.
+    attempts = [python] + [alt for alt in (fallback_python,) if alt and alt != python]
+    failures: list[str] = []
+    for interpreter in attempts:
+        print(f"[setup] {task.name}: downloading {repo_id} (config={config}) with "
+              f"{interpreter} -> {destination}")
+        completed = subprocess.run(  # noqa: S603 - the command is composed here, not user text
+            [interpreter, "-c", _DOWNLOAD_SNIPPET, repo_id, config or "", str(destination)],
+            capture_output=True,
+            text=True,
         )
-    print(f"[setup] {task.name}: {completed.stdout.strip().splitlines()[-1]}")
-    return destination
+        if completed.returncode == 0:
+            print(f"[setup] {task.name}: {completed.stdout.strip().splitlines()[-1]}")
+            return destination
+        failures.append(f"{interpreter} -> exit {completed.returncode}: "
+                        f"{completed.stderr.strip().splitlines()[-1] if completed.stderr.strip() else 'no stderr'}")
+    raise RuntimeError(
+        f"{task.name}: downloading {repo_id} failed under every interpreter tried. "
+        + " | ".join(failures)
+    )
 
 
 def build_workspace(
@@ -221,27 +234,41 @@ def main(argv: list[str] | None = None) -> int:
     raw_dir.mkdir(parents=True, exist_ok=True)
 
     staged: list[dict[str, object]] = []
+    failed: list[dict[str, str]] = []
     for name in args.task:
-        task = load_task(repo, name)
-        download_dataset(task, raw_dir, force=args.force,
-                         python=args.download_python or args.python)
-        if args.download_only:
-            staged.append({"task": task.name, "raw": str(raw_dir / task.raw_relpath)})
-            continue
-        workspace = (
-            Path(args.workspace) if args.workspace
-            else Path(args.workspace_root).expanduser() / task.name
-        )
-        staged.append(
-            build_workspace(task=task, raw_dir=raw_dir, workspace=workspace,
-                            python=args.python, force=args.force)
-        )
+        # One task that cannot be staged must not end the other nineteen. The first version
+        # of this loop raised, and a `rajpurkar/squad` feature-type error twelve tasks in
+        # threw away the eleven downloads after it as well.
+        try:
+            task = load_task(repo, name)
+            download_dataset(task, raw_dir, force=args.force,
+                             python=args.download_python or args.python,
+                             fallback_python=args.python)
+            if args.download_only:
+                staged.append({"task": task.name, "raw": str(raw_dir / task.raw_relpath)})
+                continue
+            workspace = (
+                Path(args.workspace) if args.workspace
+                else Path(args.workspace_root).expanduser() / task.name
+            )
+            staged.append(
+                build_workspace(task=task, raw_dir=raw_dir, workspace=workspace,
+                                python=args.python, force=args.force)
+            )
+        except Exception as exc:  # noqa: BLE001 - reported per task, never fatal to the batch
+            print(f"[setup] {name}: FAILED -- {type(exc).__name__}: {exc}", file=sys.stderr)
+            failed.append({"task": name, "error": f"{type(exc).__name__}: {exc}"})
+
+    if failed:
+        print(f"\n[setup] {len(failed)} of {len(args.task)} task(s) failed: "
+              + ", ".join(entry["task"] for entry in failed), file=sys.stderr)
 
     if args.json:
         Path(args.json).expanduser().write_text(
-            json.dumps(staged, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+            json.dumps({"staged": staged, "failed": failed}, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
         )
-    return 0
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

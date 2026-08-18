@@ -313,6 +313,37 @@ class TaskLoadingTest(unittest.TestCase):
         task = load_task(self.root, "WidgetSortingFooBarAccuracy")
         self.assertEqual(task.raw_relpath, "example/widgets")
 
+    def test_a_path_split_across_join_arguments_is_read_whole(self) -> None:
+        """``os.path.join(shared, 'A/B', 'C')`` is ``A/B/C``, not ``A/B``.
+
+        Two shipped tasks pass the dataset and the config as separate arguments. A pattern
+        that captured only the first staged their data one directory from where the script
+        looks, and both tasks failed at `prepare.py` after the arm had been submitted. It
+        also read as a defect in the benchmark -- "two tasks disagree with their own
+        metadata" -- until the third argument was noticed. It was the reader, not the file.
+        """
+        prepare = FIXTURE_PREPARE.replace(
+            "os.path.join(global_shared_data_dir, 'example/widgets/default')",
+            "os.path.join(global_shared_data_dir, 'example/widgets', 'default')",
+        )
+        write_task_tree(self.root, prepare=prepare)
+        self.assertEqual(
+            load_task(self.root, "WidgetSortingFooBarAccuracy").raw_relpath,
+            "example/widgets/default",
+        )
+
+    def test_the_same_path_written_two_ways_reads_as_one_path(self) -> None:
+        """So a task that writes it both ways is not two datasets."""
+        prepare = FIXTURE_PREPARE + (
+            "\n\ndef again(global_shared_data_dir):\n"
+            "    return os.path.join(global_shared_data_dir, 'example/widgets', 'default')\n"
+        )
+        write_task_tree(self.root, prepare=prepare)
+        self.assertEqual(
+            load_task(self.root, "WidgetSortingFooBarAccuracy").raw_relpath,
+            "example/widgets/default",
+        )
+
     def test_a_prepare_script_reading_two_datasets_is_refused(self) -> None:
         prepare = FIXTURE_PREPARE + (
             "\ndef other(global_shared_data_dir):\n"

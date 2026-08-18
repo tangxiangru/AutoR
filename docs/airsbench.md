@@ -173,6 +173,22 @@ python tools/airs_arm.py --compare /runs/airs/autor/arm_manifest.json \
                                    /runs/airs/bare/arm_manifest.json
 ```
 
+**On a cluster**, run one `(arm, task)` per array element into its own shard root and merge
+the per-task manifests afterwards. `--merge` is not concatenation: it re-checks every shard
+against every other on `COMPARABLE_FIELDS` and refuses rather than averaging across a
+disagreement, because independently submitted array elements are exactly where "the same
+configuration" stops being true.
+
+```bash
+sbatch --array=0-37 airs_array.sbatch          # element i -> (arm, task)
+python tools/airs_arm.py --merge /runs/airs/shards/autor__*/autor/arm_manifest.json \
+    --merge-out /runs/airs/autor/arm_manifest.json
+```
+
+A task that cannot be staged is recorded as *not attempted* and the other eighteen keep
+going. That is not politeness: an arm is hours of wall clock, and the first version of this
+loop threw away eighteen runs to report one `FileNotFoundError`.
+
 `--compare` prints a paired difference and refuses to let it stand alone: if the two
 manifests disagree on the model, the CLI, the wall-clock cap, the denied tools, the task
 python, the task list or the checkout, it prints **THESE ARMS ARE NOT COMPARABLE** and
@@ -225,24 +241,35 @@ prepared split (`len(load_from_disk('./data/test'))`, one line inside the worksp
 agent was given) and states both numbers in the brief. Believing the declaration would make
 this adapter refuse a correct submission and accept a wrong one, in that order.
 
-**2. Two tasks' `metadata.yaml` disagrees with their own `prepare.py` about where the data
-lives.** `Pavithree/eli5` and `Yelp/yelp_review_full` are read without their config
-component, so a raw-data directory staged from the `dataset`/`config` pair puts the files
-one directory from where the script looks. `raw_relpath_for` reads the path out of the
-script instead — the failure mode otherwise is a `FileNotFoundError` at Stage 04 rather
-than at setup.
+**2. The documented download does not run as written, and no single `datasets` version
+runs it.** The README's `./datasets/download_hf_datasets_text.sh` is named
+`download_hf_datasets.sh` in the tree. It pins `datasets==3.6.0` while every task pins
+`datasets==4.0.0`, and that split is not an oversight: nine of the sixteen datasets are
+script-based on the hub, which `datasets` 4 refuses outright, while `rajpurkar/squad`
+declares a `List` feature type that `datasets` 3 has never heard of. Neither version reads
+all sixteen. `tools/airs_setup.py` therefore tries both interpreters per dataset and both
+read the same saved Arrow directory afterwards.
 
-**3. The download instructions do not run as written.** The README's
-`./datasets/download_hf_datasets_text.sh` is named `download_hf_datasets.sh` in the tree,
-and it pins `datasets==3.6.0` while every task pins `datasets==4.0.0` — necessarily, since
-`datasets` 4 removed script-based datasets and nine of the sixteen are script-based. Both
-versions read the same saved Arrow directory, so the two-interpreter setup above is the
-resolution rather than a workaround.
+**3. One task cannot be staged at all.** `Monash-University/monash_tsf`'s `rideshare`
+config raises `DatasetGenerationError` under `datasets` 3 (its loading script) and is
+unavailable under `datasets` 4 (there is no script), so
+`TimeSeriesForecastingRideshareMAE` has no data by any route available here. Nineteen of
+the twenty stage cleanly.
 
 A fourth, worth knowing rather than fixing: `MathQuestionAnsweringSVAMPAccuracy` ships
 `gold_submission.csv` and two permuted copies inside its own task directory. They are not
 staged into the workspace, so no agent sees them, but a harness that mounted the task
 directory would hand that task away.
+
+**And one that was not the benchmark's.** An earlier version of this document reported that
+two tasks' `metadata.yaml` disagreed with their own `prepare.py` about where the data
+lives. It did not. `raw_relpath_for` was reading the *first* argument of
+`os.path.join(shared, 'Yelp/yelp_review_full', 'yelp_review_full')` and dropping the third,
+so it staged the data one directory from where the script looks — and the resulting
+`FileNotFoundError` read like an upstream inconsistency. All twenty scripts agree with
+their metadata exactly. The path is still read from the script rather than composed from
+the two fields, because the script is what has to find the data; the fields are a
+description of it.
 
 ## Results
 

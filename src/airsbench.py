@@ -282,10 +282,12 @@ class AirsTask:
     dataset: str
     config: str
     #: Path under the shared raw-data directory that this task's ``prepare.py`` reads,
-    #: extracted from the script rather than composed from ``dataset``/``config``. Two of
-    #: the twenty disagree with the composed form — ``Pavithree/eli5`` and
-    #: ``Yelp/yelp_review_full`` are read without their config component — so composing it
-    #: would stage the data where the script does not look.
+    #: extracted from the script rather than composed from ``dataset``/``config``. It
+    #: happens to equal ``<dataset>/<config>`` for all twenty today, and it is still read
+    #: from the script: the script is what has to find the data, and the two fields are a
+    #: description of it. The path is also not always one ``os.path.join`` argument -- two
+    #: tasks pass the dataset and the config separately -- which is what
+    #: :data:`_RAW_PATH_PATTERN` is shaped around.
     raw_relpath: str
     lower_is_better: bool
     optimal_score: float
@@ -353,7 +355,16 @@ def resolve_task_name(repo_root: Path, name: str) -> str:
     )
 
 
-_RAW_PATH_PATTERN = re.compile(r"global_shared_data_dir\s*,\s*['\"]([^'\"]+)['\"]")
+#: ``os.path.join(global_shared_data_dir, 'A/B', 'C')`` -- the whole argument list, not the
+#: first argument. Two of the twenty tasks pass the dataset and the config as *separate*
+#: arguments, and a pattern that captured only the first read ``Yelp/yelp_review_full``
+#: where the script means ``Yelp/yelp_review_full/yelp_review_full``. That mistake staged
+#: the data one directory from where the script looks and cost two tasks of an arm; worse,
+#: it read as a defect in the benchmark until the third argument was noticed.
+_RAW_PATH_PATTERN = re.compile(
+    r"global_shared_data_dir\s*,\s*((?:['\"][^'\"]+['\"]\s*,?\s*)+)\)"
+)
+_QUOTED = re.compile(r"['\"]([^'\"]+)['\"]")
 
 
 def raw_relpath_for(task_dir: Path) -> str:
@@ -370,8 +381,10 @@ def raw_relpath_for(task_dir: Path) -> str:
         if not source.is_file():
             continue
         for match in _RAW_PATH_PATTERN.finditer(read_text(source)):
-            if match.group(1) not in found:
-                found.append(match.group(1))
+            parts = _QUOTED.findall(match.group(1))
+            joined = "/".join(part.strip("/") for part in parts if part)
+            if joined and joined not in found:
+                found.append(joined)
     if not found:
         raise MetadataError(f"{task_dir.name}: no raw dataset path found in prepare.py")
     if len(found) > 1:

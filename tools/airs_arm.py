@@ -309,9 +309,19 @@ def _signal_group(process: subprocess.Popen, sig: int) -> None:
 def run_one(task: AirsTask, args: argparse.Namespace) -> RunRecord:
     workspace = Path(args.root).expanduser().resolve() / args.arm / task.name
     workspace.mkdir(parents=True, exist_ok=True)
-    prepare_workspace(
-        task=task, raw_dir=Path(args.raw_dir), workspace=workspace, python=args.task_python
-    )
+    try:
+        prepare_workspace(
+            task=task, raw_dir=Path(args.raw_dir), workspace=workspace, python=args.task_python
+        )
+    except Exception as exc:  # noqa: BLE001 - one task that cannot be staged is one task
+        # Not raised. A twenty-task arm that dies because the nineteenth dataset would not
+        # download has thrown away eighteen runs to report one setup problem, and the arm
+        # is hours of wall clock. The record says the task was never attempted, which is a
+        # different thing from a run that produced no submission.
+        print(f"[{args.arm}] {task.name}: NOT STAGED -- {type(exc).__name__}: {exc}", flush=True)
+        return RunRecord(task=task.name, arm=args.arm, workspace=str(workspace), command=[],
+                         wall_clock_cap=args.wall_clock, reason="workspace could not be staged",
+                         error=f"prepare: {type(exc).__name__}: {exc}")
     write_task_card(workspace, task)
 
     brief = build_task_brief(
@@ -505,6 +515,65 @@ def _fmt(value: float | None) -> str:
     return "--" if value is None else f"{value:.4f}"
 
 
+def merge_manifests(manifests: list[dict]) -> dict:
+    """Combine per-task arm manifests -- one per slurm array task -- into one.
+
+    An arm run as a job array is nineteen processes that never see each other, so each
+    writes a manifest describing one task. Merging is not concatenation: the point of an
+    arm manifest is that every run in it was the *same configuration*, and nineteen
+    independently-submitted array tasks are exactly where that stops being true. So the
+    shards are checked against each other on :data:`COMPARABLE_FIELDS` minus ``tasks``, and
+    a disagreement is an error rather than a footnote -- there is no honest way to average
+    across it.
+    """
+    if not manifests:
+        raise ValueError("nothing to merge")
+    arms = {m.get("arm") for m in manifests}
+    if len(arms) != 1:
+        raise ValueError(f"manifests span more than one arm: {sorted(arms)}")
+    head = manifests[0]
+    for field in COMPARABLE_FIELDS:
+        if field == "tasks":
+            continue
+        values = {json.dumps(m.get(field), sort_keys=True) for m in manifests}
+        if len(values) != 1:
+            raise ValueError(
+                f"shards disagree on {field!r}: {sorted(values)}. They are not one arm."
+            )
+
+    runs: list[dict] = []
+    seen: set[str] = set()
+    for manifest in manifests:
+        for run in manifest.get("runs", []):
+            if run["task"] in seen:
+                raise ValueError(f"{run['task']} appears in more than one shard")
+            seen.add(run["task"])
+            runs.append(run)
+    runs.sort(key=lambda run: run["task"])
+
+    scored = [r for r in runs if r.get("normalized") is not None]
+    patterns = sorted({p for m in manifests for p in (m.get("audit_patterns") or [])})
+    merged = dict(head)
+    merged.update({
+        "tasks": [run["task"] for run in runs],
+        "runs": runs,
+        "shards": len(manifests),
+        "valid_submissions": sum(1 for r in runs if r.get("submission_valid")),
+        "hit_wall_clock": sum(1 for r in runs if r.get("hit_wall_clock")),
+        "audit_patterns": patterns,
+        "audit_totals": {p: sum((r.get("audit") or {}).get(p, 0) for r in runs) for p in patterns},
+        "audit_tool_use_totals": {
+            p: sum((r.get("audit_tool_use") or {}).get(p, 0) for r in runs) for p in patterns
+        },
+        "audit_logs_missing": sum(1 for r in runs if r.get("audit_log_missing")),
+        "mean_normalized": (sum(r["normalized"] for r in scored) / len(scored)) if scored else None,
+        "mean_normalized_over_all_tasks": (
+            sum(r.get("normalized") or 0.0 for r in runs) / len(runs) if runs else None
+        ),
+    })
+    return merged
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="airs_arm", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -532,6 +601,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                              "The raw-data directory and the airs-bench checkout are audited "
                              "automatically, as are the hub download entry points.")
     parser.add_argument("--concurrency", type=int, default=1)
+    parser.add_argument("--merge", nargs="+", metavar="MANIFEST",
+                        help="Merge per-task arm manifests -- one per slurm array task -- into "
+                             "one arm manifest written to --merge-out, and exit.")
+    parser.add_argument("--merge-out", metavar="PATH")
     parser.add_argument("--compare", nargs=2, metavar="MANIFEST",
                         help="Print a paired comparison of two arm manifests and exit.")
     return parser.parse_args(argv)
@@ -539,6 +612,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.merge:
+        shards = [json.loads(Path(p).read_text(encoding="utf-8")) for p in args.merge]
+        merged = merge_manifests(shards)
+        out = Path(args.merge_out) if args.merge_out else Path("arm_manifest.json")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(merged, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        mean = merged["mean_normalized"]
+        print(f"[{merged['arm']}] merged {merged['shards']} shard(s), "
+              f"{len(merged['tasks'])} task(s), {merged['valid_submissions']} valid, "
+              f"mean normalized over scored {mean if mean is None else round(mean, 4)} -> {out}")
+        return 0
     if args.compare:
         left = json.loads(Path(args.compare[0]).read_text(encoding="utf-8"))
         right = json.loads(Path(args.compare[1]).read_text(encoding="utf-8"))
