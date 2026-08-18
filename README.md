@@ -981,6 +981,48 @@ what the reported systems actually score and which of their numbers reproduce, s
 output contract and the export rules, see
 [docs/researchclawbench.md](docs/researchclawbench.md).
 
+### AIRS-Bench
+
+`python airs_agent.py --task <TASK> --repo <AIRS_BENCH> --raw-dir <RAW> --workspace <WS>`
+runs AutoR against one of [AIRS-Bench](https://github.com/facebookresearch/airs-bench)'s
+twenty machine-learning research tasks and exports the one thing it scores,
+`submission.csv`. Scoring is the task's own `evaluate.py` — `scipy` over a CSV — so unlike
+the other two benchmarks the same artifact scores the same number every time.
+
+`tools/airs_arm.py` runs one arm of a comparison and its control: both arms are handed
+`build_task_brief`'s output byte for byte, the same CLI, model, permission mode, denied
+tools, workspace and wall-clock cap, and `--compare` refuses to print a delta between two
+manifests that disagree on any of them.
+
+**Five tasks, one seed, opus executing in both arms, 4 h of wall clock each, no web
+search.** Scores are the benchmark's normalized score, where **1.000 is human SOTA**:
+
+| arm | mean norm. score | tasks won | valid submissions | hit the 4 h cap |
+|:---|---:|---:|---:|---:|
+| bare Claude Code (opus) | **1.159** | **5** of 5 | 5 of 5 | **0** of 5 |
+| AutoR (opus) | 0.986 | 0 of 5 | 5 of 5 | **5** of 5 |
+
+Paired over the five tasks that is **−0.173**, and the mechanism is legible rather than
+inferred: **three of the five AutoR runs never left Stage 01**, spending 13, 18 and 20
+attempts on a literature survey for a task whose whole specification is "predict this
+column", while the bare arm's longest run finished in 3 h 20 m and its shortest in 23
+minutes. This is the ResearchClawBench result
+([§6.8](docs/framework.md#68-the-scaffold-is-currently-worth-less-than-no-scaffold))
+arriving through an instrument with no judge in it.
+
+Two caveats travel with those numbers. Five paired tasks is five paired tasks — the tool
+prints that warning itself. And **both arms are above human SOTA on three tasks** because
+an agent with a shell and a network can `snapshot_download('Qwen/Qwen3-14B')` and run
+inference; AIRS-Bench's own reference agents run in a container with no network, so the
+figures are not comparable with the published leaderboard in that direction either. The
+arms are comparable with each other: same machine, same access, same brief, same cap.
+Every stream log was audited for the held-out labels, in text and separately inside the
+agents' own tool calls — **zero tool-call hits in all ten runs**.
+
+The adapter, the arm harness, the three defects running it surfaced in the benchmark
+itself, and the one it surfaced in this adapter are in
+[docs/airsbench.md](docs/airsbench.md).
+
 ### FrontierScience-Research
 
 `python fs_agent.py --task fs:043 --profile ideate` answers one of the sixty questions of

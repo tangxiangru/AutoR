@@ -274,7 +274,58 @@ description of it.
 ## Results
 
 <!-- results:begin -->
-_To be filled by the first scored arm._
+**Five tasks, one seed, `claude-opus-5` executing in both arms, 4 h of wall clock each, no
+web search, on one GPU node.** The AutoR arm reviewed with the backend's default reviewer
+model (`sonnet`); the bare arm is a single `claude -p` session with the same brief. Scores
+are AIRS-Bench's own normalized score, where **1.000 is human SOTA**.
+
+| task | metric | AutoR | AutoR NS | bare | bare NS | Δ | AutoR reached |
+|:---|:---|---:|---:|---:|---:|---:|:---:|
+| `TextualSimilaritySickSpearmanCorrelation` | SpearmanCorrelation | 0.8986 | **1.153** | 0.9058 | **1.183** | +0.031 | 01 |
+| `TextualClassificationSickAccuracy` | Accuracy | 0.9219 | **1.089** | 0.9305 | **1.142** | +0.053 | 01 |
+| `MathQuestionAnsweringSVAMPAccuracy` | Accuracy | 0.9367 | **0.969** | 0.95 | **1.052** | +0.083 | 06 |
+| `TimeSeriesForecastingSolarWeeklyMAE` | MAE | 920.9 | **0.886** | 668.3 | **0.964** | +0.078 | 01 |
+| `CoreferenceResolutionWinograndeAccuracy` | Accuracy | 0.8185 | **0.832** | 0.9187 | **1.452** | +0.620 | 04 |
+| **mean** | | | **0.986** | | **1.159** | **+0.173** | |
+
+Both arms produced a valid submission on all five tasks. **The bare CLI won all five**, by
+a paired mean of **+0.173** normalized points. Five paired tasks is five paired tasks and
+the tool says so in its own output; what makes this more than a coin flip is that the
+mechanism is legible in the run trees:
+
+**All five AutoR runs hit the 4-hour cap. None of the five bare runs did** — the longest
+took 3 h 20 m and the shortest 23 minutes. And of the five AutoR runs, **three never left
+Stage 01**: the literature survey took 13, 18 and 20 attempts respectively and was still
+being refined when the clock ran out. One reached Stage 04, one reached Stage 06. So on
+three of five tasks the submission that was scored is whatever the agent produced *while
+surveying the literature* for a task whose entire specification is "predict this column",
+and the scaffold's remaining five stages never ran.
+
+That is not a tuning problem with `--stage-timeout`; the stage was not timing out, it was
+being iterated. It is the same finding ResearchClawBench produced — [§6.8, the scaffold is
+currently worth less than no scaffold](framework.md#68-the-scaffold-is-currently-worth-less-than-no-scaffold)
+— arriving through an instrument with no judge in it, which is the one thing that reading
+could not previously be blamed on.
+
+**Neither arm reached for the labels.** Every stream log was counted for the private
+raw-data directory, the benchmark checkout, the hub download entry points and
+`test_with_labels`, in the text and separately inside the agents' own tool calls. Tool-call
+hits: **zero, in all ten runs**. The text hits resolve on reading: the bare arm's four
+mentions of the vault are `ps` output it read while looking for its own stale jobs, its
+`snapshot_download` calls are all pretrained *models* (`Qwen3-8B`, `Qwen3-14B`,
+`Qwen2.5-Math-7B-Instruct`), and the AutoR arm's five mentions of `test_with_labels` are
+one stage summary saying *"No held-out label was read to obtain any of this:
+`data/test_with_labels` does not exist in the workspace."*
+
+**A caveat that is larger than the effect, and it is not about AutoR.** Both arms scored
+above human SOTA on three tasks and the bare arm's mean is 1.16. That is not five research
+breakthroughs: it is what happens when an agent with a shell and a network can
+`snapshot_download('Qwen/Qwen3-14B')` and run inference. AIRS-Bench's own reference agents
+run in a container with **no network**, so this route is closed to every agent in the
+published table and these numbers are not comparable with it in that direction either.
+What the arms are comparable with is each other — same machine, same access, same brief,
+same cap.
+
 <!-- results:end -->
 
 ## What is not measured
