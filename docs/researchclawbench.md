@@ -332,7 +332,7 @@ python3 tools/web_search.py "diffusion model scaling laws" --json --max-results 
 | Auth | Application Default Credentials | API key |
 | Project | `AUTOR_VERTEX_PROJECT`, `GOOGLE_CLOUD_PROJECT`, or `ANTHROPIC_VERTEX_PROJECT_ID` | — |
 | Location | `AUTOR_VERTEX_LOCATION`, `GOOGLE_CLOUD_LOCATION`, default `global` | — |
-| Default model | `gemini-3.6-flash` | `gemini-2.5-flash` |
+| Default model | `gemini-3.7-flash` | `gemini-2.5-flash` |
 
 An explicit API key wins over Vertex, because setting one is deliberate whereas the Vertex
 project is often inherited from the host's Claude Code configuration. Force the choice with
@@ -395,7 +395,7 @@ that every citation must come from a URL the tool actually returned. `auto` degr
 native rather than advertising a tool that would fail on first use.
 
 The search model defaults per backend — `gemini-2.5-flash` on the Developer API,
-`gemini-3.6-flash` on Vertex, as in the table above — and `resolve_search_model` lets an
+`gemini-3.7-flash` on Vertex, as in the table above — and `resolve_search_model` lets an
 explicit `--model` win over `AUTOR_WEB_SEARCH_MODEL` or `GEMINI_MODEL`, which in turn win over
 both defaults.
 
