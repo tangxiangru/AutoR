@@ -395,3 +395,94 @@ class TheGateIsNotWhereThisLivesTest(CompletionTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheClosingSentenceIsDerivedTest(unittest.TestCase):
+    """"All stages approved." was written on every walk that reached the terminal.
+
+    `settled` is `approved or skipped`, so a run whose writing stage exhausted its
+    attempts and was auto-skipped reached the end and closed by saying every stage had
+    been approved. About two in five archived runs contain an auto-skip, so this was not
+    a rare wrong sentence -- and the obligation ledger, which records what a reviewer said
+    a later stage still owed, had no reader at the close at all.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.paths = build_run_paths(Path(self._tmp.name) / "run")
+        ensure_run_layout(self.paths)
+        write_text(self.paths.user_input, "goal")
+        from src.manifest import ensure_run_manifest
+
+        ensure_run_manifest(self.paths)
+        self.manager = ResearchManager(
+            project_root=Path(__file__).resolve().parent.parent,
+            runs_dir=Path(self._tmp.name) / "runs",
+            operator=None,
+            ui=TerminalUI(output_stream=io.StringIO(), interactive=False),
+        )
+
+    def _sentence(self) -> str:
+        return self.manager._completion_sentence(self.paths)
+
+    def test_a_clean_run_says_exactly_what_it_said_before(self) -> None:
+        """The control. The sentence only moves where it would have been false."""
+        self.assertEqual(self._sentence(), "All stages approved.")
+
+    def test_a_skipped_stage_is_named_rather_than_called_approved(self) -> None:
+        from src.manifest import mark_stage_skipped_manifest
+        from src.utils import STAGES
+
+        mark_stage_skipped_manifest(self.paths, STAGES[6], 5, [], kind="auto",
+                                    reason="attempts exhausted")
+        sentence = self._sentence()
+        self.assertNotIn("All stages approved", sentence)
+        self.assertIn("07_writing", sentence)
+        self.assertIn("without being accepted", sentence)
+
+    def test_an_open_obligation_is_named(self) -> None:
+        """The ledger's first reader at the close: `note_deferrals` counted, nobody asked."""
+        from src.obligations import record_obligations
+        from src.utils import STAGES
+
+        record_obligations(
+            self.paths, stage=STAGES[0],
+            entries=["State a power analysis and justify the sample size before running anything."],
+        )
+        sentence = self._sentence()
+        self.assertIn("obligation(s) still open", sentence)
+        self.assertNotIn("All stages approved", sentence)
+
+    def test_a_discharged_obligation_does_not_count(self) -> None:
+        from src.obligations import discharge_obligations, record_obligations
+        from src.utils import STAGES
+
+        added = record_obligations(
+            self.paths, stage=STAGES[0],
+            entries=["State a power analysis and justify the sample size before running anything."],
+        )
+        discharge_obligations(self.paths, stage=STAGES[2],
+                              obligation_ids=[added[0].obligation_id])
+        self.assertEqual(self._sentence(), "All stages approved.")
+
+    def test_the_sentence_reaches_the_log_and_the_closing_line(self) -> None:
+        """Wiring, not just the helper. A sentence nothing prints is not a correction.
+
+        `_completion_sentence` is private, so `test_declared_symbols_are_wired` would not
+        notice if `_complete_run` stopped calling it -- and the whole defect was a closing
+        line nobody had re-derived.
+        """
+        from src.manifest import mark_stage_skipped_manifest
+        from src.utils import STAGES, read_text as _read
+
+        mark_stage_skipped_manifest(self.paths, STAGES[6], 5, [], kind="auto",
+                                    reason="attempts exhausted")
+        stream = io.StringIO()
+        self.manager.ui = TerminalUI(output_stream=stream, interactive=False)
+        self.manager._complete_run(self.paths)
+
+        logged = _read(self.paths.logs)
+        self.assertIn("07_writing", logged)
+        self.assertIn("without being accepted", logged)
+        self.assertNotIn("All stages approved", logged)
