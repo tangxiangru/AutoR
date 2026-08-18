@@ -65,8 +65,9 @@ The image criterion asking for the reproduced triangle plot carries 0.4 of the t
 **neither arm drew one**. The AutoR run scored **6.7 out of 100** on it and a bare agent
 **16.0**, but that 16.0 is one draw of 48 beside two of 0, and the 48 describes contours
 that are not in the bare agent's report either — it opens "The AI's triangle plot clearly
-shows", while the string `triangle` occurs zero times in that report's 20,101 characters
-and neither `getdist` nor `corner plot` matches any file in that workspace. So this skill
+shows", while the string `triangle` occurs zero times in that report's 20,101 characters,
+`corner plot` matches nothing in that workspace at all, and the five files that do contain
+`getdist` are its score files and its agent transcript — nothing it produced. So this skill
 is not written from an arm that got it right. It is written because the criterion is
 worth 0.4 of the task, AutoR left 93 of its 100 points on it, and the object it asks for
 is a short call once chains exist.
