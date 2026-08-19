@@ -1830,6 +1830,23 @@ class FsTrialPlan:
     max_refusal_rate_for_publication: float = FS_MAX_REFUSAL_RATE
     dedupe_pairs: bool = True
     stage_timeout_seconds: int = 3600
+    #: Seconds the ``direct`` arm gets for its single call, and the reason it is a plan
+    #: field rather than the front end's default.
+    #:
+    #: The two arms were not on the same clock. ``stage_timeout_seconds`` reaches the
+    #: pipeline arm as a per-stage allowance and the driver passed nothing to the control,
+    #: which therefore ran on ``fs_agent.py``'s 1,800 s default -- half the pipeline's
+    #: allowance, for the whole run. Measured on the sixty-task trial of 2026-08-19:
+    #: **three of the sixty control runs stopped at exactly 1,800 s and all three were
+    #: refused**, and the same shape refused four of sixty on the trial before it. Those
+    #: are the runs where the model wrote longest, and length correlates with score on
+    #: this rubric, so the cap does not slow the control down -- it deletes its best
+    #: answers and biases the arm downward.
+    #:
+    #: Default 1,800 so that replaying an existing plan reproduces what it measured. A new
+    #: plan should set it equal to ``stage_timeout_seconds``; a plan that leaves the two
+    #: unequal is declaring a handicap, which is legitimate only if it says so.
+    answer_timeout_seconds: int = 1800
     max_attempts: int = FS_MAX_ATTEMPTS
     state_dir: str = ""
     #: ``counterbalanced`` here, where ``src.rcb_trial`` defaults to ``control_first``.

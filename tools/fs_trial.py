@@ -319,6 +319,11 @@ def agent_argv(plan: FsTrialPlan, task: str, arm: str, workspace: Path, attempt:
         "--review-model", spec.review_model or spec.model,
         "--operator", plan.operator,
         "--stage-timeout", str(plan.stage_timeout_seconds),
+        # Passed to both arms, and it only binds one: `fs_agent.py` reads the stage timeout
+        # for an `ideate` run and this for a `direct` one. Sending it unconditionally keeps
+        # the two clocks in one place in the plan instead of leaving the control's on a
+        # default nobody reading the plan would see.
+        "--answer-timeout", str(plan.answer_timeout_seconds),
         "--attempt-index", str(attempt - 1),
         "--disallowed-tools", *plan.disallowed_tools,
     ]
