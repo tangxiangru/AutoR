@@ -35,9 +35,10 @@ a per-task difference under about 8 points is not readable. Only the paired mean
 | 1 | AutoR `3ef61e5` — before the reviewer-chain fix | 22.72 | −4.72 |
 | 2 | AutoR `1069e77` — skill pack + coverage fixes (#217, #219, #220) | **27.23** | −0.22 |
 | 3 | AutoR `f16878b` — bounded reviewer loop (#230–#233) | 24.09 | −3.35 |
-| 4 | AutoR `9e6aadd` — 75 task-written skills + pin routing (#264, #257) | **36.08\*** | **+9.50\*** |
+| 4 | AutoR `9e6aadd` — 75 task-written skills + pin routing (#264, #257) | **36.08\*** | **+8.63\*** |
 
-\* 32 of 40 tasks. The other eight are re-running; see [what is incomplete](#what-is-incomplete).
+\* 39 of 40. `Math_002` burned two consecutive 30-minute stage timeouts at stage 01 and approved no
+stage; see [what is incomplete](#what-is-incomplete).
 
 Paired, on the 40 tasks all of 0–3 completed:
 
@@ -48,13 +49,16 @@ Paired, on the 40 tasks all of 0–3 completed:
 | #3 − #2 | **−3.13** | −1.90 | 16/40 |
 | #3 − bare | **−3.35** | −2.25 | 18/40 |
 
-Paired, on the 32 tasks #4 has finished:
+Paired, on the 39 tasks #4 finished:
 
 | Comparison | Δ | t | won |
 | --- | ---: | ---: | ---: |
-| #4 − #3 | **+12.59** | +5.84 | 30/32 |
-| #4 − #2 | **+9.22** | +4.63 | 26/32 |
-| #4 − bare | **+9.50** | +4.73 | 27/32 |
+| #4 − #3 | **+12.29** | +6.76 | 37/39 |
+| #4 − #2 | **+8.87** | +5.25 | 32/39 |
+| #4 − bare | **+8.63** | +4.95 | 31/39 |
+
+On those 39 the other four configurations score 27.45 / 22.38 / 27.21 / 23.79 — within 0.3 of
+their 40-task figures, so the one missing task is not carrying the comparison.
 
 ## #1 → #2: the parser, the coverage, and a control that should have existed first
 
@@ -168,27 +172,35 @@ The projection before the run was 7.6 reads per run, from 10 pins at the 78% rat
 when a prompt names *one* skill. Measured at 7.88 with prompts naming 4.5 — so the rate per
 named skill does fall as more are named, and not by much.
 
-**Score: 36.08 on 32 tasks, +9.50 against the bare agent, t = 4.73, winning 27 of 32.** The
+**Score: 36.08 on 39 tasks, +8.63 against the bare agent, t = 4.95, winning 31 of 39.** The
 first configuration to beat the bare agent rather than draw with it. Four tasks cleared 50,
-which is the published paper's own level.
+which is the published paper's own level: Math_000 at 65, Physics_000 at 57, Information_002
+at 51, Astronomy_000 at 50. Physics_000 scored 31.8 under #2 and Information_002 scored 14.7.
+
+The advantage did shrink as the stragglers landed — +9.50 at 32 tasks, +8.63 at 39 — which is
+the direction predicted when they were outstanding, and about a point of it.
 
 ## What is incomplete
 
-Eight of #4's tasks are not in its number, and they are not missing at random — they are the
-slowest eight. Five (Astronomy_000, Chemistry_000, Information_000, Information_001,
-Information_003) lost their launcher mid-stage with a zero-byte report and are re-running
-from scratch; two (Material_000, Math_001) are being finished by a separate job; one
-(Math_002) burned two consecutive 30-minute stage timeouts at stage 01 and failed with no
-stage approved.
+One task is missing. `Math_002` burned two consecutive 30-minute stage timeouts at stage 01,
+approved no stage, and shipped only the deterministic fallback report. Its 39 siblings put
+the other four configurations within 0.3 of their 40-task means, so the gap it leaves is not
+load-bearing.
 
-On those same 32 tasks the bare agent scores 26.58 against its 40-task 27.44, so the subset
-is mildly harder for the control. Whether it is harder for #4 is unknown until they finish.
-**The +9.50 should be read as provisional until the table says 40.**
+Six tasks lost their launcher mid-stage with a zero-byte report and were **re-run from
+scratch** (Astronomy_000, Chemistry_000, Information_000, Information_001, Information_003,
+Material_000).
 
-Two of #4's runs were **salvaged rather than re-run**: their launcher ended after
-`report.md` was written but before the status was flipped. Both were checked head and tail
-for truncation and marked complete in place, with the reason recorded in their
-`_meta.json` under `_salvaged`. No stage was re-executed.
+Four were **salvaged rather than re-run**, because the deliverable already existed: their
+process ended after `report.md` was written and before anything flipped the status.
+`Information_003` is the clearest — it walked the full route to `finish` through all seven
+stages, wrote its scorecard, published 15 figures, and then exited 1. Each was checked head
+and tail for truncation and marked complete in place with the reason recorded in its
+`_meta.json` under `_salvaged`. No stage was re-executed for any of them.
+
+`Information_003`'s route is worth reading on its own: `01 → 02 → 03 → 04 ↩ 03 → 04 → 05 →
+06 → 07 → finish`. That backward move is the router departing from the default, which #230
+set out to make possible and which the batch it shipped in did 16 times in 252 decisions.
 
 #4 also ran at a different concurrency from the others — 20 tasks to a node rather than 5,
 after another session relaunched it. Stage-01 wall time is 8.7 min against 7.2, and the
