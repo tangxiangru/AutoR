@@ -6,8 +6,21 @@ useful part: both were invisible in the artifacts — every cell produced a plau
 conclusion and a plausible score — and both were found by diffing the adapter against the
 official implementation rather than by anything going wrong.
 
-Dates are 2026-08-18. Executing and reviewing model is `opus` (`claude-opus-5[1m]` via
-Vertex) throughout. Every arm in every run is held to FIRE-Bench's own 3600 s wall clock.
+Dates are 2026-08-18/19. Executing and reviewing model is `opus` (`claude-opus-5[1m]` via
+Vertex) throughout, and within any one run every arm is held to the same wall clock.
+
+| | tasks | budget | search | pipeline walk completed | best arm's F1 |
+|:---|---:|---:|:---|---:|---:|
+| Run 1 | 6 | 3600 s | AutoR: none · stock: built-ins | 0/6 | **withdrawn** |
+| Run 2 | 35 | 3600 s | AutoR: none · stock: built-ins | 0/35 | direct 41.5 |
+| Run 3 | 35 | 3600 s | shared Gemini 3.7 Flash | 0/35 | direct 40.2 |
+| Run 4 | 35 | 3 h | shared Gemini 3.7 Flash | **13/34** | direct 44.0 |
+| Run 5 | 35 | 8 h + raised retry limits | shared Gemini 3.7 Flash | *in flight* | *in flight* |
+
+**The one result that has not moved across every condition**: `autor-direct` — one agentic
+call with the same goal, model, tools and clock — beats `autor-pipeline` on every one of
+them, by a median of +8.9, +7.1 and +6.2 F1. The gap narrows as the pipeline is given more
+room, which is the reason Run 5 exists.
 
 ---
 
@@ -91,27 +104,62 @@ number measures a missing deadline in the prompt, not missing knowledge.
 
 ---
 
-## Run 3 — 35 tasks, shared search — *in flight*
+## Run 3 — 35 tasks, shared search, harness budget
 
-Same three arms, same clock, same everything, with one change: **all three arms reach the
-web through the same tool and only that one.**
+35 tasks × 3 arms = 105 cells · deadline **3600 s** · adapter defaults
 
-| | |
-| --- | --- |
-| search tool | `mcp__autor-search__web_search` |
-| backend | `gemini-3.7-flash` on Vertex AI, location `global`, Google Search grounding |
-| denied in every arm | `WebSearch`, `WebFetch` |
-| `--strict-mcp-config` | always, in both arms |
+All three arms on `mcp__autor-search__web_search` (`gemini-3.7-flash` on Vertex), Claude Code's built-ins denied, `--strict-mcp-config` always. The stock arm is additionally told the wall clock and asked to write `conclusion.md` early. **This is the only condition whose budget matches the published baselines'.**
 
-Browsing is on because the published baselines had it: Claude Code ships `WebSearch`, and a
-run that denies it is not the run the leaderboard describes. What a paired comparison needs
-is not that the arms cannot search but that they search identically.
+The stock arm goes from 11/35 scoreable in Run 2 to **35/35** here. Two sentences of prompt and a `conclusion.md` fallback, not a better agent: its F1 rises from 9.4 to 16.7 because runs that used to be killed with nothing now say something, and what they say is mediocre.
 
-Verified before launch rather than assumed: `gemini-3.7-flash` answers on Vertex and its
-grounding fires with real queries and real sources; the stock arm's helper reports
-`vertex / gemini-3.7-flash`; a CLI given that config called `mcp__autor-search__web_search`
-and returned a grounded answer; and at launch all 35 stock sandboxes held the shared server
-config while every AutoR run tree held it alongside `autor-write`.
+The pipeline arm completed its walk on **0 of 35** tasks, exactly as in Run 2.
+
+| arm | scoreable | Prec. | Recall | F1 |
+|:---|---:|---:|---:|---:|
+| `autor-pipeline` | 35/35 | 30.2 ± 28.4 | 39.7 ± 30.3 | 29.9 ± 25.9 |
+| `autor-direct` | 35/35 | 38.2 ± 28.8 | 53.9 ± 35.3 | 40.2 ± 27.1 |
+| `claude-stock` | 35/35 | 13.8 ± 13.3 | 37.6 ± 32.7 | 16.7 ± 17.4 |
+
+Counting an unscoreable run as 0, which is what upstream's scorer does:
+
+| arm | Prec. | Recall | F1 |
+|:---|---:|---:|---:|
+| `autor-pipeline` | 30.2 ± 28.4 | 39.7 ± 30.3 | 29.9 ± 25.9 |
+| `autor-direct` | 38.2 ± 28.8 | 53.9 ± 35.3 | 40.2 ± 27.1 |
+| `claude-stock` | 13.8 ± 13.3 | 37.6 ± 32.7 | 16.7 ± 17.4 |
+
+`autor-direct − autor-pipeline`: 35 complete pairs, median **+7.1 F1**, 20 wins / 8 losses / 7 ties.
+
+
+---
+
+## Run 4 — 35 tasks, shared search, three-hour budget
+
+35 tasks × 3 arms = 105 cells · deadline **10800 s** · adapter defaults
+
+Run 3 with the wall clock tripled and nothing else changed.
+
+**Not one pipeline cell was stopped by the clock**: `deadline_hit` is False on all thirty-five. They ran 1.4–2.5 h and the walk ended on its own — a stage exhausted `--max-attempts 2`, was auto-skipped, and the second skip spent `--max-auto-skips 1`. Seventeen approved exactly one stage, and the run tree shows `03_study_design.md` and `04_implementation.md` written but never approved. Tripling the budget still raised walk completion from 0/35 to **13/34**, which is what more retries inside a longer clock buys; Run 5 raises the retry limits themselves.
+
+| arm | scoreable | Prec. | Recall | F1 |
+|:---|---:|---:|---:|---:|
+| `autor-pipeline` | 34/35 | 31.4 ± 24.4 | 48.5 ± 30.9 | 33.4 ± 24.5 |
+| `autor-direct` | 35/35 | 42.5 ± 24.8 | 55.8 ± 29.8 | 44.0 ± 23.5 |
+| `claude-stock` | 33/35 | 15.2 ± 16.9 | 41.8 ± 33.3 | 18.0 ± 16.7 |
+
+Counting an unscoreable run as 0, which is what upstream's scorer does:
+
+| arm | Prec. | Recall | F1 |
+|:---|---:|---:|---:|
+| `autor-pipeline` | 30.5 ± 24.6 | 47.1 ± 31.5 | 32.4 ± 24.8 |
+| `autor-direct` | 42.5 ± 24.8 | 55.8 ± 29.8 | 44.0 ± 23.5 |
+| `claude-stock` | 14.3 ± 16.7 | 39.4 ± 33.8 | 17.0 ± 16.8 |
+
+`autor-direct − autor-pipeline`: 34 complete pairs, median **+6.2 F1**, 21 wins / 8 losses / 5 ties.
+
+`autor-pipeline` produced no scoreable conclusion on 1 task(s): `counterfactual_simulatability`.
+
+`claude-stock` produced no scoreable conclusion on 2 task(s): `premise_order_effects`, `prompt_formatting_sensitivity`.
 
 ---
 
