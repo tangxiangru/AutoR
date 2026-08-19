@@ -178,5 +178,75 @@ class RefusalTests(unittest.TestCase):
         self.assertIn("quota is exhausted", log)
 
 
+class ResearchProseIsNotAnOutageTests(unittest.TestCase):
+    """The two gates are supposed to be independent evidence. For four tokens they were not.
+
+    `classify` requires a line to look like a reported error *and* to carry a recognised
+    signature. But `RESOURCE_EXHAUSTED`, `PERMISSION_DENIED`, `UNAUTHENTICATED` and
+    `UNAVAILABLE` were in *both* lists and both were matched with `re.IGNORECASE`, so for
+    those four the requirement collapsed to "the text contains this English word once".
+    ``\\bstatus\\b`` in the error-line gate and a bare ``\\b5\\d{2}\\b`` in the upstream
+    signature composed the same way: `520\t  - Status: carried` is a line of AutoR's own
+    stage prose and it satisfied both.
+
+    Measured over 1,110 real stage outputs from the topology ablation's four run trees --
+    model-written research prose, not backend output -- the old classifier reads **263 of
+    them (23.7%) as a dead backend**, 257 `upstream` and 6 `auth`. The new one reads none.
+    Trigger lines look like this one, from a stage summary:
+
+        stress-tests delayed and unavailable Scotland-England boundary expansion
+
+    That 23.7% is an *exposure*, not a fire rate: `classify` only runs from
+    `_materialize_missing_stage_draft`, when the primary attempt and its repair both
+    produced nothing. It was reached once in the first 3.7 hours of an 80-run ablation --
+    and it fired, aborting `topo_linear/Chemistry_001` at 1 of 8 approved stages. That run
+    then exited "completed" with exit code 0 and was scored 0.3 as if it were an attempt.
+    The text that fired is not recoverable: the log preserves `truncate_text(..., 2000)`
+    and the match was past the cut.
+    """
+
+    def test_an_english_sentence_using_the_word_unavailable_is_not_an_outage(self) -> None:
+        self.assertIsNone(classify(
+            "stress-tests delayed and unavailable Scotland-England boundary expansion "
+            "among its scenarios, and Error: bars are omitted from Figure 4."))
+
+    def test_a_prompt_echo_with_a_line_number_is_not_an_outage(self) -> None:
+        """`520` is the line number and `Status:` is AutoR's own stage formatting."""
+        self.assertIsNone(classify("520\t  - Status: carried | Tested by: H2; H3"))
+
+    def test_the_word_internal_in_prose_is_not_an_outage(self) -> None:
+        self.assertIsNone(classify(
+            "Error: the internal representation is unavailable in this build."))
+
+    def test_a_five_hundred_in_prose_is_not_an_outage(self) -> None:
+        """No HTTP framing on the line, so the number is a number."""
+        self.assertIsNone(classify("Error: 512 residues exceeded the context window."))
+
+    def test_a_number_and_an_error_word_on_different_lines_do_not_compose(self) -> None:
+        """Classification is per line. Joining them let two unrelated fragments add up."""
+        self.assertIsNone(classify("Error: the fit did not converge\nn = 503 samples"))
+
+    def test_the_grpc_constants_still_fire_in_upper_case(self) -> None:
+        for text, expected in (
+            ('API Error: 403 [{"error":{"code":403,"status":"PERMISSION_DENIED"}}]', AUTH),
+            ("API Error: Request rejected (429) RESOURCE_EXHAUSTED", QUOTA),
+            ('{"error":{"code":503,"status":"UNAVAILABLE"}}', UPSTREAM),
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(classify(text), expected)
+
+    def test_a_real_403_from_this_box_still_fires(self) -> None:
+        """The exact shape the eval-w nodes emit; 18 of 18 archived captures classify auth."""
+        self.assertEqual(classify(
+            "Failed to authenticate. API Error: 403 [{\"error\":{\"code\":403,"
+            "\"message\":\"Request had insufficient authentication scopes.\","
+            "\"status\":\"PERMISSION_DENIED\",\"details\":[{\"reason\":"
+            "\"ACCESS_TOKEN_SCOPE_INSUFFICIENT\"}]}}]"), AUTH)
+
+    def test_an_http_code_still_fires_where_the_line_frames_it_as_one(self) -> None:
+        self.assertEqual(classify("API Error: 500 internal server error"), UPSTREAM)
+        self.assertEqual(classify('{"type":"error","error":{"type":"overloaded_error"}}'), UPSTREAM)
+
+
 if __name__ == "__main__":
     unittest.main()

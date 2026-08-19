@@ -35,19 +35,44 @@ UPSTREAM = "upstream"
 #: Anchored on the shapes a CLI actually emits — ``API Error``, an HTTP status, a named
 #: gRPC status — rather than on bare words. "quota" and "429" appear in ordinary research
 #: prose, and a Stage 01 summary discussing rate limits must not read as a dead backend.
-_SIGNATURES: tuple[tuple[str, re.Pattern[str]], ...] = (
-    (QUOTA, re.compile(r"RESOURCE_EXHAUSTED|Quota exceeded|rate[_ ]limit_error|\b429\b", re.IGNORECASE)),
+#:
+#: **gRPC status names are matched case-sensitively.** They are SCREAMING_SNAKE constants
+#: on the wire, and the lowercase English words they are spelled from are ordinary research
+#: prose. Over 1,110 real stage outputs from the topology ablation's run trees — text the
+#: model wrote, not backend output — the case-insensitive version reads 263 (23.7%) as a
+#: dead backend, on lines like "stress-tests delayed and unavailable Scotland-England
+#: boundary expansion". The case-sensitive version reads none of them, and still classifies
+#: all 18 archived `403 ACCESS_TOKEN_SCOPE_INSUFFICIENT` captures as `auth`.
+_TOKENS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (QUOTA, re.compile(r"RESOURCE_EXHAUSTED|(?i:Quota exceeded|rate[_ ]limit_error)")),
     (AUTH, re.compile(
-        r"\b40[13]\b|PERMISSION_DENIED|UNAUTHENTICATED|authentication_error|invalid[_ ]api[_ ]key",
-        re.IGNORECASE)),
-    (UPSTREAM, re.compile(
-        r"\b5\d{2}\b|UNAVAILABLE|INTERNAL|overloaded_error|api_error|Connection error",
-        re.IGNORECASE)),
+        r"PERMISSION_DENIED|UNAUTHENTICATED|(?i:authentication_error|invalid[_ ]api[_ ]key)")),
+    (UPSTREAM, re.compile(r"UNAVAILABLE|INTERNAL|(?i:overloaded_error|api_error|Connection error)")),
 )
 
+#: Numeric statuses, which mean nothing on their own. A bare ``\b5\d{2}\b`` matched the
+#: line number in a prompt echo — ``520\t  - Status: carried | Tested by: H2; H3`` — so a
+#: three-digit number only counts where the same line also frames it as a status.
+_CODES: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (QUOTA, re.compile(r"\b429\b")),
+    (AUTH, re.compile(r"\b40[13]\b")),
+    (UPSTREAM, re.compile(r"\b5\d{2}\b")),
+)
+
+#: What has to be on the line before a bare number is read as an HTTP status.
+_CODE_CONTEXT = re.compile(r"(?i:API Error|HTTP/|status[_ ]code)|\"(?:code|status)\"\s*:")
+
 #: A line has to look like a reported error before its status code counts for anything.
-_ERROR_LINE = re.compile(r"API Error|error[\"']?\s*:|Error:|\bstatus\b|RESOURCE_EXHAUSTED|"
-                         r"PERMISSION_DENIED|UNAUTHENTICATED|UNAVAILABLE", re.IGNORECASE)
+#:
+#: ``\bstatus\b`` used to be in here, which made every ``- Status: carried`` line of
+#: AutoR's own stage formatting an "error line"; with the bare 5xx pattern above, two pieces
+#: of ordinary formatting were enough to declare the provider down. The gRPC names stay
+#: case-sensitive here for the same reason they are above — and note that a name in *both*
+#: lists is a token that satisfies the error-line gate and the signature gate by itself,
+#: which is the two-gate design collapsing to one. That is tolerable for a SCREAMING_SNAKE
+#: wire constant and was not tolerable for an English word.
+_ERROR_LINE = re.compile(r"(?i:API Error|error[\"']?\s*:|Error:)|RESOURCE_EXHAUSTED|"
+                         r"PERMISSION_DENIED|UNAUTHENTICATED|UNAVAILABLE")
 
 _CAUSE_TEXT = {
     QUOTA: (
@@ -72,13 +97,19 @@ def classify(text: str) -> str | None:
     """
     if not text:
         return None
-    lines = [line for line in text.splitlines() if _ERROR_LINE.search(line)]
-    if not lines:
-        return None
-    haystack = "\n".join(lines)
-    for cause, pattern in _SIGNATURES:
-        if pattern.search(haystack):
-            return cause
+    # Line by line, not over the joined lines. Joining let a bare "520" on one line be read
+    # together with the word "Error:" on another, so two unrelated fragments of a stage
+    # summary could compose into a provider outage that appeared nowhere in the text.
+    for line in text.splitlines():
+        if not _ERROR_LINE.search(line):
+            continue
+        for cause, pattern in _TOKENS:
+            if pattern.search(line):
+                return cause
+        if _CODE_CONTEXT.search(line):
+            for cause, pattern in _CODES:
+                if pattern.search(line):
+                    return cause
     return None
 
 
