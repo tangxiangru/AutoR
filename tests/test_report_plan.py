@@ -982,6 +982,40 @@ class TaskOutputCoverageTest(ReportPlanTestCase):
         )
         self.assertTrue(any("without saying why" in p for p in self.problems()))
 
+    def test_an_entry_under_other_key_names_is_told_which_keys_were_wrong(self) -> None:
+        """The refusal has to name the defect, because rewording cannot repair it.
+
+        A missing key parses to `""`, so an entry written under another vocabulary
+        arrives fully blank and reads to the gate exactly like an empty one. Told it
+        "states nothing", the agent opens a file whose entries are full sentences,
+        concludes the gate is wrong, and rewrites the sentences — which fails
+        identically, because the sentences were never read. Measured over a forty-task
+        benchmark arm: 62 attempts across 25 runs, and eleven skipped stages, on one
+        `task_item`/`produced_by`/`note` spelling.
+        """
+        self.write_plan(
+            task_outputs=[
+                {
+                    "task_item": "predicted material properties",
+                    "produced_by": "figure:1",
+                    "note": "R2 and MAE across three split regimes",
+                }
+            ]
+        )
+        problems = [p for p in self.problems() if "task output" in p]
+        self.assertTrue(problems)
+        self.assertTrue(any("`task_item`" in p and "`stated`" in p for p in problems))
+        self.assertFalse(any("states nothing" in p for p in problems))
+
+    def test_an_entry_that_answered_some_keys_is_still_read_as_blank(self) -> None:
+        """The alias report is for a wholly foreign entry, not a partly filled one.
+
+        An entry carrying `stated` and nothing else is a genuine omission, and saying
+        "none of your keys are read" about it would be false.
+        """
+        self.write_plan(task_outputs=[{"stated": "", "covered_by": "prose"}])
+        self.assertTrue(any("empty `stated`" in p for p in self.problems()))
+
     def test_an_object_the_task_names_can_be_covered_by_the_object(self) -> None:
         """`figure:` was the only home a non-statistical deliverable had.
 

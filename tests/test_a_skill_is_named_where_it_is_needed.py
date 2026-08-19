@@ -177,6 +177,12 @@ class SkillNamingTest(unittest.TestCase):
             "latex-repair",
             "reproducibility-check",
             "venue-checklist",
+            # Named imperatively, but by a seat rather than by a file: `PanelRole.skill`
+            # renders "A skill named `X` is installed in this run. Use it" into the
+            # Adversarial Reviewer's prompt at every gate. Writing it into a stage prompt
+            # instead would hand the stopping rule to the agent being reviewed, which is
+            # the one party it is not addressed to. Same route as `reproducibility-check`.
+            "refuse-what-is-wrong-carry-what-is-improvable",
         }
         rendered = _rendered_prompt_files()
         named_rendered: set[str] = set()

@@ -299,6 +299,10 @@ DEFAULT_PANEL: tuple[PanelRole, ...] = (
             "without the claimed effect, and say what evidence in the run rules it in or out.",
             "What would an unsympathetic reviewer attack first?",
         ),
+        # The seat that is asked to find a reason to reject is the seat that will always
+        # find one, and it is the only seat whose charter gives it no reason to stop. The
+        # skill is the stopping rule: which objections are worth what a refusal costs.
+        skill="refuse-what-is-wrong-carry-what-is-improvable",
         # The seat whose whole job is to not go along with the room is the seat that must
         # not be shown the room.
         exposure="none",
@@ -1220,7 +1224,22 @@ class ReviewPanel:
             "the obligations earlier approvals attached to this stage. Check the stage against "
             "every one of them, not only against your own charter. An inherited obligation "
             "this stage neither discharged nor reasonably deferred is grounds to refuse, and "
-            "any seat may refuse on one.\n\n"
+            "any seat may refuse on one.\n"
+            "- **Another round is not free, and refusing is not the safe default.** A stage "
+            "that runs out of attempts is not held back for more work — it is skipped, and "
+            "everything in it is replaced by a stub that later stages must treat as absent. "
+            "Across forty benchmark runs, 56 of 67 skipped stages were skipped with no "
+            "validation error outstanding: the artifacts were sound and the room kept finding "
+            "one more defensible improvement. Most of those stages were nearer approval on "
+            "the attempt that was thrown away than on the one before it.\n"
+            "- So separate **wrong** from **improvable**. Wrong — a claim the artifacts do not "
+            "support, a number that disagrees with the file it cites, a deliverable the task "
+            "named and this stage was meant to produce — refuse, and say which artifact "
+            "settles it. Improvable — a sharper framing, a further check, a second estimator, "
+            "a caveat worth stating — is what `carry_forward` is for, and a stage held back "
+            "for one is a stage you have chosen to risk losing whole. If your objection is "
+            "one you could equally have raised against the previous attempt, it is not what "
+            "is stopping this one.\n\n"
             "## Return Format\n\n"
             "Return JSON only, with no prose outside the JSON object:\n"
             '{"decision":"approve|suggestion_1|suggestion_2|suggestion_3|custom_feedback|abort",'

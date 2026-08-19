@@ -251,6 +251,16 @@ class TaskOutput:
     stated: str
     covered_by: str
     why_not: str = ""
+    #: The keys this entry actually carried, kept only when none of the three above
+    #: were among them. A missing key parses to ``""``, so an entry written under
+    #: other names — ``task_item``/``produced_by``/``note`` is the observed one —
+    #: arrives here fully blank and the gate can only report it as blank. The agent
+    #: then reads "states nothing" against a file whose entries are visibly full
+    #: sentences, concludes the gate is wrong, and rewords instead of renaming: 62
+    #: attempts across 25 of 40 benchmark runs, 11 of them ending in a skipped
+    #: stage. Carrying the keys forward is what lets the gate name the real defect.
+    #: Excluded from :meth:`to_dict`, so it reaches neither the file nor the digest.
+    unrecognised_keys: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, str]:
         return {"stated": self.stated, "covered_by": self.covered_by, "why_not": self.why_not}
@@ -301,6 +311,30 @@ def _entries(payload: dict, key: str) -> list:
     """
     value = payload.get(key)
     return value if isinstance(value, list) else []
+
+
+#: The keys a ``task_outputs`` entry is read from. Named once so the parser and the
+#: gate that reports a mismatch cannot drift apart.
+TASK_OUTPUT_KEYS = ("stated", "covered_by", "why_not")
+
+
+def _task_output(item: dict) -> TaskOutput:
+    """One ``task_outputs`` entry, remembering its keys when none of ours are there.
+
+    Reading an absent key as ``""`` is right for an entry that answered two of the
+    three; it is wrong for one written under a different vocabulary entirely, which
+    is indistinguishable from an empty entry by the time the gate sees it.
+    """
+    return TaskOutput(
+        stated=_text(item.get("stated")),
+        covered_by=_text(item.get("covered_by")),
+        why_not=_text(item.get("why_not")),
+        unrecognised_keys=(
+            ()
+            if any(key in item for key in TASK_OUTPUT_KEYS)
+            else tuple(str(key) for key in item)
+        ),
+    )
 
 
 def load_report_plan(paths: RunPaths) -> ReportPlan | None:
@@ -361,11 +395,7 @@ def load_report_plan(paths: RunPaths) -> ReportPlan | None:
         digest=_text(payload.get("digest")),
         no_figures_because=_text(payload.get("no_figures_because")),
         task_outputs=[
-            TaskOutput(
-                stated=_text(item.get("stated")),
-                covered_by=_text(item.get("covered_by")),
-                why_not=_text(item.get("why_not")),
-            )
+            _task_output(item)
             for item in _entries(payload, "task_outputs")
             if isinstance(item, dict)
         ],
@@ -622,8 +652,25 @@ def _task_output_problems(plan: "ReportPlan", paths: RunPaths | None = None) -> 
     numbers = range(len(plan.headline_numbers))
     for index, output in enumerate(plan.task_outputs, start=1):
         label = output.stated[:60] or f"task output {index}"
+        if output.unrecognised_keys:
+            # Say which key was wrong. The same message for a blank entry and for a
+            # full one under other key names sends the agent to reword prose that
+            # was never the problem, and the reword cannot succeed: every retry
+            # writes the same vocabulary and reads the same refusal.
+            problems.append(
+                f"report_plan.json task output {index} is written under keys "
+                + ", ".join(f"`{key}`" for key in output.unrecognised_keys)
+                + ", none of which this plan is read from. Rename them to `stated` (what "
+                "the task asked for), `covered_by` (`figure:<slot>`, `number:<index>`, "
+                "`artifact:<path>`, `prose` or `not_attempted`) and `why_not`. The content "
+                "may well be right — only the key names are read."
+            )
+            continue
         if not output.stated.strip():
-            problems.append(f"report_plan.json task output {index} states nothing.")
+            problems.append(
+                f"report_plan.json task output {index} has an empty `stated`. Quote the "
+                "deliverable the task named, in its own words."
+            )
             continue
         if output.kind not in COVERAGE_KINDS:
             problems.append(

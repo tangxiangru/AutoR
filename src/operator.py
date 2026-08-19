@@ -364,6 +364,11 @@ Required completion behavior:
 4. Ensure there is no `[In progress]`, `[Pending]`, `[TODO]`, `[TBD]`, or similar unfinished marker anywhere in the file.
 5. After writing, respond only with a short confirmation that you rewrote the file.
 
+If the refusal that sent you here is one you have already tried to answer once, and the
+content it names looks correct to you, read the skill `the-same-refusal-twice-is-a-shape-error`
+before rewriting anything. A gate complaining that a field is absent, empty or unnamed is
+reading a key you did not write, and no amount of rewording the value will satisfy it.
+
 Current draft stage file contents:
 {current_draft_text}
 

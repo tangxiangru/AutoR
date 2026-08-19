@@ -114,6 +114,18 @@ Write `{{WORKSPACE_NOTES_DIR}}/report_plan.json` before the design stage ends:
       "unit": "percentage points",
       "source_artifact": "results/accuracy_by_length.json"
     }
+  ],
+  "task_outputs": [
+    {
+      "stated": "accuracy against context length for both methods",
+      "covered_by": "figure:1",
+      "why_not": ""
+    },
+    {
+      "stated": "a per-document latency table",
+      "covered_by": "not_attempted",
+      "why_not": "the supplied archive carries no timing column and the runs that produced it cannot be re-timed, so a latency table would be fabricated rather than measured."
+    }
   ]
 }
 ```
@@ -166,6 +178,12 @@ Rules:
   comparisons, distributions or tables expected — and list each one, with what in this plan
   produces it: `figure:<slot>`, `number:<index>`, `artifact:<workspace-relative path>`,
   `prose`, or `not_attempted` with a reason.
+  **Three keys, spelled exactly as above: `stated`, `covered_by`, `why_not`** — the
+  deliverable in the task's words, what produces it, and, for `not_attempted` only, why not.
+  Nothing else in the entry is read. An entry under any other names parses as an empty one,
+  and the refusal you get back will be about a blank field rather than about a spelling.
+  If a gate here refuses this file twice and you believe its contents are right, read
+  `the-same-refusal-twice-is-a-shape-error` before you rewrite a single sentence.
   This is the closest thing to a specification of the deliverable that exists, and a
   deliverable the task named which the report never mentions is the cheapest thing there is
   to lose. Splitting it finely is better than one line saying "everything".
