@@ -63,7 +63,10 @@ from src.deliberation import DEFAULT_MAX_DELIBERATIONS  # noqa: E402
 from src.rigor import DEFAULT_LEVEL, LEVELS, feature_flags  # noqa: E402
 from src.rigor import help_text as rigor_help_text  # noqa: E402
 from src.rigor import resolve as resolve_rigor  # noqa: E402
+from src.stage_graph import StageGraph  # noqa: E402
 from src.utils import (  # noqa: E402
+    DEFAULT_STAGE_GRAPH,
+    STAGE_GRAPH_CHOICES,
     BENCHMARK_MIN_REPORT_FIGURES,
     DEFAULT_OUTPUT_FORMAT,
     MAX_STAGE_ATTEMPTS,
@@ -129,6 +132,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=["claude", "codex"],
         default="claude",
         help="Execution backend for the research stages. Defaults to claude.",
+    )
+    parser.add_argument(
+        "--stage-graph",
+        choices=list(STAGE_GRAPH_CHOICES),
+        default=DEFAULT_STAGE_GRAPH,
+        help=(
+            "How the run moves between stages, the same choice `main.py` offers. "
+            f"Defaults to '{DEFAULT_STAGE_GRAPH}'. 'linear' restores the strict 01-through-08 "
+            "sequence and is the control arm for the topology this system's stated "
+            "contribution is: `docs/framework.md` §6.7 says the ablation is 'one flag and has "
+            "still never been passed', and it could not be passed here, because this entry "
+            "point did not have it. Every one of the 398 archived benchmark run configs reads "
+            "`adaptive`, and none of them chose it."
+        ),
     )
     parser.add_argument("--model", help="Model for the execution backend. Defaults to the backend default.")
     parser.add_argument(
@@ -621,6 +638,11 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
         # gate while forfeiting criteria it never addressed.
         min_report_figures=BENCHMARK_MIN_REPORT_FIGURES,
         cross_reviewer=resolve_cross_reviewer(args.cross_review, args.cross_review_model),
+        # `StageGraph.named` rather than `main.py`'s `resolve_graph`, which additionally
+        # lets the cross-run archive pick a topology. A benchmark arm must be the
+        # configuration it says it is: an archive that steered one run's topology and not
+        # another's would put a variable in the comparison that no flag records.
+        stage_graph=StageGraph.named(args.stage_graph),
     )
 
     if args.ideation_panel:

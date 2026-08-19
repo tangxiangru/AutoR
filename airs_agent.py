@@ -399,11 +399,22 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
                                    stage_timeout=args.stage_timeout, unattended=True)
         )
 
-    # No field-specific skills. AutoR's eleven skill disciplines are ResearchClawBench's
-    # fields -- astronomy, chemistry, materials, and so on -- and none of them is what an
-    # AIRS-Bench task is about. Mapping "Text Extraction and Matching" onto one of them
-    # would be a guess dressed as routing, and the general pack is offered either way.
-    manager.skill_discipline = None
+    # The task's own declared category, normalised -- *not* `None`.
+    #
+    # AutoR's eleven skill disciplines are ResearchClawBench's fields, and none of them is
+    # what an AIRS-Bench task is about, so the first version of this line set `None` to mean
+    # "no field skills". It means the opposite: `select_run_skills` reads a falsy discipline
+    # as "do not apply the field filter", so an AIRS run was offered **124** skills where a
+    # ResearchClawBench run is offered 16. Measured on a pre-flight before the arm that would
+    # have used it. That is not a cosmetic difference -- the pack's own measured failure is
+    # that a run opens about 1.75 of the descriptions it is shown, so seven skills written for
+    # this benchmark were being buried under eighty-nine written for other fields.
+    #
+    # A category like "Text Extraction and Matching" is truthy and matches none of the eleven
+    # prefixes, which filters every field skill out and keeps the general pack -- the
+    # behaviour the first version intended. It is also the honest value: it is the field the
+    # benchmark itself assigns, rather than a sentinel chosen to make a filter behave.
+    manager.skill_discipline = (task.category or task.research_problem or task.name).casefold().replace(" ", "-")
     # The pin seam stays wired even though no AIRS task is pinned today, so a pin derived
     # from a scored AIRS arm lands the same way an RCB one does, and announces itself in
     # the run config the same way.

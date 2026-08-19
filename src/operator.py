@@ -30,6 +30,58 @@ from .utils import (
 )
 
 
+def _head(text: str, max_chars: int) -> str:
+    """The opening of *text*, saying how much it dropped. ``(empty)`` for nothing."""
+
+    body = (text or "").strip()
+    if not body:
+        return "(empty)"
+    if len(body) <= max_chars:
+        return body
+    return body[:max_chars].rstrip() + f"\n\n[... {len(body) - max_chars} character(s) dropped from the end]"
+
+
+def _tail(text: str, max_chars: int) -> str:
+    """The end of *text*, saying how much it dropped. ``(empty)`` for nothing."""
+
+    body = (text or "").strip()
+    if not body:
+        return "(empty)"
+    if len(body) <= max_chars:
+        return body
+    return f"[... {len(body) - max_chars} character(s) dropped from the start ...]\n\n" + body[-max_chars:].lstrip()
+
+
+#: What a repair may be told about the attempt it is repairing.
+#:
+#: The repair prompt is the narrowest task in the system -- "overwrite this one markdown
+#: file, do not browse, do not continue the workflow" -- and it was handed the largest
+#: prompt. Measured over 2,166 archived repair prompts, it runs to a median of 354 KB
+#: against the attempt prompt's 156 KB: **1.84x its own attempt at the median, 6.55x at
+#: p90**, and a third of all repairs exceed 500 KB where 0.14% of attempt prompts do.
+#:
+#: Two blocks are all of it. The whole original prompt (median 147 KB, max 3.17 MB) and
+#: the whole original stdout (median 93 KB, p90 907 KB). The objects the task actually
+#: rewrites are small -- the draft is 17 KB at the median and the promoted file 10 bytes
+#: -- and stderr is 8 bytes, so those three stay whole and a ceiling on them would be a
+#: mechanism with nothing to do.
+#:
+#: **Nothing measurable is lost.** Repair success over 2,157 recorded outcomes is flat
+#: across two orders of magnitude of prompt size: 98.1% below 150 KB, 100% at 150-300 KB,
+#: 98.6%, 98.2%, 98.9% above. The 645 repairs that already got a small prompt are the
+#: control group, and they succeed at the same rate as the ones given a megabyte.
+#:
+#: The directions differ because the blocks differ. The prompt is kept from the head:
+#: `# Stage Instructions` is its first section and is what a rewrite needs, while the
+#: accumulated channels and memory at the end are what it does not. 80,000 is above that
+#: section's own p90 of 78.6 KB, so a typical repair still sees the whole instruction set.
+#: The stdout is kept from the *tail*: what matters is what the attempt ended up doing,
+#: which is also why `_write_attempt_state` records `stdout_text[-2000:]` rather than the
+#: first 2,000 characters. 40,000 is twenty times that excerpt.
+REPAIR_PROMPT_EXCERPT_CHARS = 80_000
+REPAIR_STDOUT_EXCERPT_CHARS = 40_000
+
+
 class ClaudeOperator:
     backend_name = "claude"
 
@@ -319,10 +371,10 @@ Current promoted stage file contents:
 {current_final_text}
 
 Original prompt:
-{original_prompt}
+{_head(original_prompt, REPAIR_PROMPT_EXCERPT_CHARS)}
 
 Original stdout:
-{original_result.stdout or "(empty)"}
+{_tail(original_result.stdout, REPAIR_STDOUT_EXCERPT_CHARS)}
 
 Original stderr:
 {original_result.stderr or "(empty)"}
