@@ -1365,6 +1365,50 @@ class WhatTheRunAppliedIsWhatTheRecordSaysTests(unittest.TestCase):
         self.assertEqual(meta["disallowed_tools_requested"], ["Bash", "WebFetch"])
         self.assertEqual(meta["disallowed_tools"], ["Bash", "WebFetch"])
 
+    def test_the_record_names_the_skills_the_pipeline_arm_was_given(self) -> None:
+        """`run_config.json` said this and nothing a trial reads did.
+
+        The forced set is the arm, not a detail of it: the adapter's own log tells the
+        reader that a score from a forced run is not comparable to one from a run without
+        them, and the file a paired trial opens is `_meta.json`.
+        """
+        _code, meta = self.run_agent("--profile", "ideate")
+        self.assertEqual(meta["skill_forced"], sorted(fs_agent.FS_FORCED_SKILLS))
+        self.assertEqual(meta["skill_withheld"], [])
+
+    def test_the_control_arm_records_an_empty_set_and_names_what_it_lost(self) -> None:
+        _code, meta = self.run_agent("--profile", "ideate", "--no-forced-skills")
+        self.assertEqual(meta["skill_forced"], [])
+        self.assertEqual(meta["skill_withheld"], sorted(fs_agent.FS_FORCED_SKILLS))
+
+    def test_the_direct_arm_records_neither(self) -> None:
+        """Not a control arm and not a treatment one: an arm with no run directory to
+        install a skill into installs nothing and is denied nothing, which is what lets it
+        be paired against a forced pipeline arm at all."""
+        _code, meta = self.run_agent("--profile", "direct")
+        self.assertEqual(meta["skill_forced"], [])
+        self.assertEqual(meta["skill_withheld"], [])
+
+    def test_the_record_is_read_off_what_was_installed_and_not_off_the_request(
+        self,
+    ) -> None:
+        """The whole point of reading it off the manager, made to fire.
+
+        `select_run_skills` filters the pack by name, so a forced name that has been
+        renamed out of it is asked for by the flag and installed by nothing. A record
+        copied from `FS_FORCED_SKILLS` would describe an arm carrying a skill its model
+        never saw, and the withheld half would be empty on a run that lost one.
+        """
+        from unittest.mock import patch
+
+        real = sorted(fs_agent.FS_FORCED_SKILLS)[0]
+        with patch.object(
+            fs_agent, "FS_FORCED_SKILLS", frozenset({real, "no-such-skill"})
+        ):
+            _code, meta = self.run_agent("--profile", "ideate")
+        self.assertEqual(meta["skill_forced"], [real])
+        self.assertEqual(meta["skill_withheld"], ["no-such-skill"])
+
     def test_the_record_carries_the_digest_of_the_instruction_that_was_sent(self) -> None:
         _code, meta = self.run_agent("--profile", "direct")
         self.assertEqual(meta["task_instruction_sha256"], FS_TASK_INSTRUCTION_SHA256)

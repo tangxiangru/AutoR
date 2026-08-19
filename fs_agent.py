@@ -696,6 +696,33 @@ def tools_denied_on_every_seat(seats: Mapping[str, Sequence[str]]) -> tuple[str,
     return tuple(tool for tool in ordered if all(tool in tools for tools in seats.values()))
 
 
+def skills_this_run_got(manager: ResearchManager | None) -> tuple[list[str], list[str]]:
+    """``(forced and installed, forced and withheld)``, for the record and for the digest.
+
+    Read off ``Manager._forced_skills``, which is the set the installer intersected with
+    what it actually wrote into the run's ``.claude/skills/``, and never off
+    ``args.no_forced_skills`` or off :data:`FS_FORCED_SKILLS`. The flag says what was
+    asked for; a name that has been renamed out of the pack, or withheld by a filter the
+    front end does not know about, is asked for by the flag and installed by nothing --
+    and the arm would then be described in its own metadata as carrying five skills it
+    never saw. The same rule as ``disallowed_tools``: what the seats are carrying, not
+    what the flags requested.
+
+    The second half is a subtraction rather than a copy of ``manager.skill_withhold``, for
+    the same reason: what a comparison needs to know is which of this benchmark's forced
+    names did not reach the model, whatever stopped them.
+
+    ``None`` covers the two runs that have no manager -- the ``direct`` arm, which makes
+    one call with no run directory to install a skill into, and ``--export-only``, which
+    observed no walk at all. Both get ``([], [])``: nothing was installed and, since this
+    front end forces nothing on a run without a manager, nothing was withheld either.
+    """
+    if manager is None:
+        return [], []
+    installed = frozenset(getattr(manager, "_forced_skills", None) or frozenset())
+    return sorted(installed), sorted(FS_FORCED_SKILLS - installed)
+
+
 def run(args: argparse.Namespace) -> FsRunResult:
     started_at = time.monotonic()
     guidance = resolve_answer_guidance(args.answer_guidance)
@@ -847,6 +874,7 @@ def run(args: argparse.Namespace) -> FsRunResult:
     # asked for is `disallowed_tools`; what the seven seats are carrying is this, and the
     # two disagree on any backend without the knob.
     seats = operator_seats(operator, manager)
+    forced_skills, withheld_skills = skills_this_run_got(manager)
     meta = build_fs_meta(
         workspace=workspace,
         task=row.key,
@@ -862,6 +890,8 @@ def run(args: argparse.Namespace) -> FsRunResult:
         disallowed_tools=tools_denied_on_every_seat(seats),
         disallowed_tools_requested=disallowed_tools,
         disallowed_tools_by_seat=seats,
+        skill_forced=forced_skills,
+        skill_withheld=withheld_skills,
         witness=read_transcript_witness(paths),
         dataset_path=dataset_path,
         dataset_sha256=dataset_sha256,

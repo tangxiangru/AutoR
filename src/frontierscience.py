@@ -1887,6 +1887,8 @@ def build_fs_meta(
     fake_operator: bool = False,
     disallowed_tools_requested: Sequence[str] | None = None,
     disallowed_tools_by_seat: Mapping[str, Sequence[str]] | None = None,
+    skill_forced: Sequence[str] = (),
+    skill_withheld: Sequence[str] = (),
     witness: Mapping[str, Any] | None = None,
     extra: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -1911,6 +1913,18 @@ def build_fs_meta(
     :func:`read_transcript_witness`, they are ``None`` when there is no transcript, and an
     admission clause reading ``browsing_tool_calls == 0`` therefore refuses a run that
     produced no evidence rather than admitting it.
+
+    **Two fields about the forced skills, and the second is the one a trial compares.**
+    ``skill_forced`` is what a front end's ``Manager.skill_force`` actually put in front of
+    the model -- the caller reads it off the manager after installation, not off its own
+    flag, because a name that was renamed out of the pack is forced by the flag and
+    installed by nothing. ``skill_withheld`` is the other side: the names that front end
+    forces on this benchmark and this run did not get. Both, and not just the first,
+    because an empty installed set means two different things -- an arm with no run
+    directory to install a skill into never had any, and an arm launched with
+    ``--no-forced-skills`` was denied the ones its sibling got. Only the second is a
+    difference between two configurations of one producer, so it is the one the paired
+    trial folds into its environment digest.
     """
     payload: dict[str, Any] = {
         "schema": FS_META_SCHEMA,
@@ -1937,6 +1951,12 @@ def build_fs_meta(
         "disallowed_tools_by_seat": {
             seat: list(tools) for seat, tools in (disallowed_tools_by_seat or {}).items()
         },
+        # Sorted here rather than at the call sites: both come from a set, a set has no
+        # order, and the trial hashes this list into a comparability digest -- two runs
+        # that installed the same five skills must not be told they were measured in two
+        # environments because a set iterated differently.
+        "skill_forced": sorted(skill_forced),
+        "skill_withheld": sorted(skill_withheld),
         "pipeline_completed": bool(pipeline_completed),
         "auto_skipped_stages": list(auto_skipped_stages),
         "stages_approved": list(stages_approved),
