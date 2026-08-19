@@ -758,14 +758,55 @@ def fence_research_task(description: str) -> str:
     return f"{TASK_BEGIN_MARKER}\n{text}\n{TASK_END_MARKER}"
 
 
-def describe_environment(*, python: str, extra: str = "") -> str:
+#: Phrases that mean the caller's ``extra`` note is telling the agent it is offline.
+#: Used only to *detect a contradiction*, never to infer the setting: guessing the
+#: environment from prose is how the contradiction got written in the first place.
+_OFFLINE_CLAIMS = (
+    "no access to the public internet",
+    "no internet access",
+    "package indexes and model hubs",
+)
+
+
+def describe_environment(*, python: str, extra: str = "", network: bool = True) -> str:
+    """Describe the execution environment, refusing to describe it two ways at once.
+
+    ``network`` decides what is said about PyPI and the Hugging Face hub. It is an
+    explicit argument rather than something sniffed out of ``extra`` because the
+    caller knows and the prose does not.
+
+    The guard below exists because the obvious failure already happened. A
+    no-network arm was launched by *appending* "this machine has NO access to the
+    public internet" through ``extra`` while this function went on asserting "You
+    have network access for PyPI and the Hugging Face hub" two lines above it. All
+    57 prompts in that set carried both sentences; a handful of runs went and
+    discovered the truth by watching pip fail. Appending cannot override, so a
+    mismatch is raised rather than rendered.
+    """
+    said_offline = any(claim in extra.casefold() for claim in _OFFLINE_CLAIMS)
+    if network and said_offline:
+        raise ValueError(
+            "environment note says the machine is offline but network=True, so the "
+            "brief would claim both. Pass network=False to describe_environment "
+            "(the note is appended, it cannot override what is written above it)."
+        )
+    if network:
+        install = (
+            f"- Install anything else you need into that environment with "
+            f"`{python} -m pip install <package>`. You have network access for PyPI "
+            "and the Hugging Face hub."
+        )
+    else:
+        install = (
+            f"- Only packages already installed in that environment are available. "
+            f"`{python} -m pip install` will fail: this machine has no route to PyPI "
+            "or the Hugging Face hub, and no pretrained-model cache is present."
+        )
     lines = [
         f"- Python interpreter for all task code: `{python}`. Use it explicitly — "
         "`python` on `PATH` is a different interpreter and does not have the task's "
         "packages.",
-        f"- Install anything else you need into that environment with "
-        f"`{python} -m pip install <package>`. You have network access for PyPI and the "
-        "Hugging Face hub.",
+        install,
         "- Check for GPUs with `nvidia-smi` before assuming CPU. If several are visible, "
         "others are using them too: pin one with `CUDA_VISIBLE_DEVICES` rather than "
         "taking the machine.",
@@ -797,6 +838,7 @@ def build_task_brief(
     workspace: Path,
     python: str = sys.executable,
     environment_notes: str = "",
+    network: bool = True,
     expected_rows: int | None = None,
     declared_rows_note: tuple[int, int] | None = None,
 ) -> str:
@@ -906,7 +948,7 @@ def build_task_brief(
                 "not a result you have."
             ),
             "## Execution Environment",
-            describe_environment(python=python, extra=environment_notes),
+            describe_environment(python=python, extra=environment_notes, network=network),
             "## What Counts As Done",
             (
                 f"A run is finished when `{submission}` exists, has the right number of rows, "
@@ -924,6 +966,7 @@ def build_airs_goal(
     workspace: Path,
     python: str = sys.executable,
     environment_notes: str = "",
+    network: bool = True,
 ) -> str:
     """The goal AutoR walks its stage graph against: the shared brief plus one paragraph.
 
@@ -935,6 +978,7 @@ def build_airs_goal(
         workspace=workspace,
         python=python,
         environment_notes=environment_notes,
+        network=network,
         expected_rows=expected_rows_for(task, workspace),
         declared_rows_note=rows_disagreement(task, workspace),
     )

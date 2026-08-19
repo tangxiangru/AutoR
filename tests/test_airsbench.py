@@ -51,6 +51,7 @@ from src.airsbench import (
     MetadataError,
     available_tasks,
     build_airs_goal,
+    describe_environment,
     build_task_brief,
     expected_rows_for,
     export_submission,
@@ -1334,6 +1335,52 @@ class SkillDisciplineTest(unittest.TestCase):
             )
         }
         self.assertNotIn("the-submission-is-the-only-artifact-that-scores", offered)
+
+
+class EnvironmentNetworkClaimTest(unittest.TestCase):
+    """The brief must not describe the network two ways at once.
+
+    A no-network arm was launched by appending "this machine has NO access to the
+    public internet" to the environment note while ``describe_environment`` went on
+    asserting "You have network access for PyPI and the Hugging Face hub" two lines
+    above it. All 57 prompts in that set carried both sentences. Appending cannot
+    override what is written above it, so the mismatch has to be refused.
+    """
+
+    def test_network_true_says_pypi_is_reachable(self) -> None:
+        text = describe_environment(python="/v/bin/python")
+        self.assertIn("You have network access for PyPI", text)
+
+    def test_network_false_says_pip_will_fail(self) -> None:
+        text = describe_environment(python="/v/bin/python", network=False)
+        self.assertNotIn("You have network access", text)
+        self.assertIn("no route to PyPI", text)
+
+    def test_offline_note_with_network_true_is_refused(self) -> None:
+        note = ("It also has NO access to the public internet: package indexes and "
+                "model hubs including Hugging Face are unreachable.")
+        with self.assertRaises(ValueError):
+            describe_environment(python="/v/bin/python", extra=note)
+
+    def test_offline_note_with_network_false_is_accepted(self) -> None:
+        note = "This machine has no access to the public internet."
+        text = describe_environment(
+            python="/v/bin/python", extra=note, network=False)
+        self.assertIn(note, text)
+        self.assertNotIn("You have network access", text)
+
+    def test_the_goal_itself_carries_only_one_claim(self) -> None:
+        """The guard has to hold through build_airs_goal, not just the helper."""
+        note = "It has NO access to the public internet: package indexes are unreachable."
+        with tempfile.TemporaryDirectory() as tmp:
+            task = fixture_task(Path(tmp))
+            with self.assertRaises(ValueError):
+                build_airs_goal(task=task, workspace=Path(tmp) / "ws",
+                                python="/v/bin/python", environment_notes=note)
+            goal = build_airs_goal(task=task, workspace=Path(tmp) / "ws",
+                                   python="/v/bin/python", environment_notes=note,
+                                   network=False)
+        self.assertNotIn("You have network access", goal)
 
 
 if __name__ == "__main__":
