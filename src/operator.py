@@ -119,6 +119,42 @@ def _assistant_text_blocks(payload: Any) -> list[str]:
     return blocks
 
 
+#: Process-wide default for :attr:`ClaudeOperator.isolate_auto_memory`.
+#:
+#: An isolation that reaches one seat is not an isolation. Threading the flag through the
+#: front end's own operator left **every reviewer unisolated**, because
+#: `AutomatedReviewer` builds a second `ClaudeOperator` of its own and `ReviewPanel` builds
+#: one per role. Measured on the topology ablation on 2026-08-19, 9.5 hours in: of 4,513
+#: recorded CLI invocations, 2,752 carried the flag and 1,761 did not, and the 1,761 were
+#: *exactly* the reviewer calls -- every `review_start` and `review_verdict_start`, none of
+#: the stage calls. Their `init` events reported the shared store; the flagged ones had no
+#: `memory_paths` key. All 80 workspaces of both arms reached the store, and the traffic
+#: was one-directional: the adaptive arm wrote 10 times, the linear arm 0.
+#:
+#: So the default lives here rather than in a parameter each seat has to remember to
+#: forward. A front end that is running a measurement sets it once with
+#: :func:`isolate_auto_memory_by_default`; every operator built anywhere in that process
+#: inherits it, including ones constructed inside a reviewer, a panel role or the validity
+#: review. The per-instance argument still wins where it is passed explicitly.
+_AUTO_MEMORY_ISOLATED_BY_DEFAULT = False
+
+
+def isolate_auto_memory_by_default(value: bool = True) -> None:
+    """Cut every Claude Code seat built after this call off from the memory store.
+
+    For a benchmark front end, called once before anything is constructed. Not for
+    AutoR's ordinary use: a researcher's own project wants notes carried between
+    sessions, and only a measurement needs every run to start from the same state.
+    """
+    global _AUTO_MEMORY_ISOLATED_BY_DEFAULT
+    _AUTO_MEMORY_ISOLATED_BY_DEFAULT = bool(value)
+
+
+def auto_memory_isolated_by_default() -> bool:
+    """What a seat built with no explicit choice will do. Readable so a test can pin it."""
+    return _AUTO_MEMORY_ISOLATED_BY_DEFAULT
+
+
 class ClaudeOperator:
     backend_name = "claude"
 
@@ -132,7 +168,7 @@ class ClaudeOperator:
         stage_timeout: int = 14400,
         web_search_mcp: bool = False,
         disallowed_tools: Sequence[str] | None = None,
-        isolate_auto_memory: bool = False,
+        isolate_auto_memory: bool | None = None,
     ) -> None:
         self.command = command
         self.model = model
@@ -173,7 +209,11 @@ class ClaudeOperator:
         # measurement wants each run to start from the same state as every other. Benchmark
         # front ends opt in, and `build_operator_meta` records which way it was set so a run
         # can say whether the channel was open rather than leaving a reader to assume.
-        self.isolate_auto_memory = isolate_auto_memory
+        self.isolate_auto_memory = (
+            auto_memory_isolated_by_default()
+            if isolate_auto_memory is None
+            else bool(isolate_auto_memory)
+        )
 
     def run_stage(
         self,

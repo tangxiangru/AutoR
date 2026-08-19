@@ -118,7 +118,10 @@ from src.frontierscience import (  # noqa: E402
     write_fs_meta,
 )
 from src.manager import ResearchManager  # noqa: E402
-from src.operator import ClaudeOperator  # noqa: E402
+from src.operator import (  # noqa: E402
+    ClaudeOperator,
+    isolate_auto_memory_by_default,
+)
 from src.operator_codex import CodexOperator  # noqa: E402
 from src.rcb import emit_event  # noqa: E402
 from src.stage_graph import StageGraph  # noqa: E402
@@ -957,6 +960,11 @@ def _fresh_run_tree(runs_dir: Path, goal: str):
 
 
 def main(argv: list[str] | None = None) -> int:
+    # #298 isolated this front end's stage operator and stopped there, which left every
+    # reviewer seat reading the shared store -- `AutomatedReviewer` builds a second
+    # `ClaudeOperator` of its own. Setting the process default reaches the seats a
+    # constructor argument cannot. See `src.operator.isolate_auto_memory_by_default`.
+    isolate_auto_memory_by_default(True)
     args = parse_args(argv)
     try:
         result = run(args)

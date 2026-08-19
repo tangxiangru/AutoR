@@ -77,6 +77,51 @@ keyhole.** Arms remain comparable to each other; none is comparable to an upstre
 
 ---
 
+## The second measurement fault: the arms shared a memory store
+
+Every arm above ran with Claude Code's auto-memory store open. The store is keyed on an
+**ancestor of the working directory**, not on the run root, so every run under
+`/rmeng_data/robtang` read and wrote one `MEMORY.md`, loaded into each agent's context at
+session start. Probed from that directory against the real binary (2.1.229) on 2026-08-19:
+
+```
+no flag:  memory_paths.auto = ~/.claude/projects/-rmeng-data-robtang/memory/
+--settings '{"autoMemoryEnabled": false}':  no memory_paths key at all
+```
+
+**What hides it is that the transcripts *are* isolated.** Each run gets its own project
+directory — `-rmeng-data-robtang-rcb-runs-topo-adaptive-Math-000-...` — and those
+directories hold `.jsonl` files and no `memory/`. Per-run isolation looks done from a
+directory listing. The memory store resolves separately, and upward.
+
+For the single-arm rows above this is a channel from one run into the next. **For the
+paired topology ablation it is a channel between the two things being compared**, because
+both arms run the same forty tasks: whichever arm reaches a task first writes notes filed
+under that task's name and the other reads them before it starts. Measured while the first
+attempt was in flight, the store held 1,531 files / 9.1 MB, took 378 writes on 2026-08-19
+alone, and 29 of that day's files are named after a specific task in `tasks40.txt` —
+`math-000-score-mixture-disables-track-initialisation.md`,
+`energy-001-ships-a-20-bus-two-region-ladder-not-29-nodes.md`, and so on.
+
+The direction matters more than the size. A channel that makes each arm partly a copy of
+the other **shrinks the difference the ablation exists to measure**: a real topology effect
+would present as absent, and the run would read as a clean null result rather than as a
+broken one. That is why the first attempt was cancelled at roughly two hours rather than
+footnoted at forty.
+
+Closed for the RCB front end by this change, which passes
+`--settings '{"autoMemoryEnabled": false}'` — the mechanism #298 verified for
+FrontierScience and did not wire here. Confirmed live rather than by inspection: on a
+sampled compute node all three `claude` processes carry the flag and none is without it,
+and the shared store took **zero** writes in the period after the relaunch while 27 runs
+were active, against 27 in the twelve minutes before it.
+
+The first attempt's 58 workspaces are kept at
+`rcb_runs/topo_{adaptive,linear}_v1_shared_memory`. They are evidence, not an arm; nothing
+in them should be scored as the ablation.
+
+---
+
 ## The arms
 
 Paired against the control. `diff` is AutoR − control in benchmark points; the interval is

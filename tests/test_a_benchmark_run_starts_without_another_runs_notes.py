@@ -85,6 +85,10 @@ class TheFlagTests(unittest.TestCase):
         it. Note the shape -- the key is omitted, not nulled, so a reader that does
         `init["memory_paths"] is None` raises `KeyError` on exactly the run it is checking
         for, and `.get()` cannot distinguish isolation from a malformed event.
+
+        Re-probed 2026-08-19 against 2.1.229 from a compute node with cwd inside the live
+        run tree (`/rmeng_data/robtang/rcb_runs/topo_adaptive`), which is the case that
+        matters here and is not the case the FrontierScience probe covered.
         """
         self.assertEqual(
             list(settings_payloads(command_for(isolate_auto_memory=True))[0]), ["autoMemoryEnabled"]
@@ -174,6 +178,133 @@ class WhatTheFrontEndAsksForTests(unittest.TestCase):
         from fs_agent import auto_memory_isolation_for
 
         self.assertIs(auto_memory_isolation_for(object(), "claude"), False)
+
+
+class EverySeatOrItIsNotAnIsolationTests(unittest.TestCase):
+    """The reviewer builds its own operator, and forwarding a flag did not reach it.
+
+    Measured on the running topology ablation 9.5 hours in, from the recorded `command` of
+    every CLI invocation across all 80 workspaces of both arms:
+
+        4,513 invocations recorded
+        2,752 carried --settings {"autoMemoryEnabled": false}   -- every stage call
+        1,761 did not                                            -- every reviewer call
+
+    The split was exact: 0 of 1,761 `review_start`/`review_verdict_start` calls had the
+    flag and 0 of 2,752 stage calls lacked it. All 80 workspaces reached the store, and
+    the traffic was one-directional -- the adaptive arm wrote 10 times, the linear arm 0 --
+    on notes about the review mechanism itself, read by the seat that decides whether a
+    stage is approved. `approval_agent.py`'s own comment already said why this matters:
+    "a protocol that denies a tool has to reach every seat or it is not the protocol."
+
+    So the choice moved from a parameter each seat must remember to forward, to a
+    process-wide default every seat inherits. These tests pin that, and they are the ones
+    that were missing: the front-end tests below all passed while every reviewer in the
+    system read the shared store.
+    """
+
+    def setUp(self) -> None:
+        from src.operator import isolate_auto_memory_by_default
+
+        self.addCleanup(isolate_auto_memory_by_default, False)
+
+    def reviewer_operator(self):
+        from src.approval_agent import AutomatedReviewer
+
+        return AutomatedReviewer("claude", model="opus", fake_mode=True)._operator  # noqa: SLF001
+
+    def command_of(self, operator) -> list[str]:
+        return operator._build_cli_command(Path("/tmp/p.md"), "sess-1", resume=False)  # noqa: SLF001
+
+    def test_the_reviewer_seat_is_isolated_too(self) -> None:
+        from src.operator import isolate_auto_memory_by_default
+
+        isolate_auto_memory_by_default(True)
+        self.assertEqual(
+            settings_payloads(self.command_of(self.reviewer_operator())),
+            [{"autoMemoryEnabled": False}],
+        )
+
+    def test_the_stage_seat_is_isolated_by_the_same_switch(self) -> None:
+        from src.operator import isolate_auto_memory_by_default
+
+        isolate_auto_memory_by_default(True)
+        self.assertEqual(
+            settings_payloads(self.command_of(ClaudeOperator(model="opus", fake_mode=True))),
+            [{"autoMemoryEnabled": False}],
+        )
+
+    def test_a_researchers_own_reviewer_keeps_its_memory(self) -> None:
+        """The control on the blast radius, for the seat this change adds.
+
+        Without it, moving the default into the process would silently take the feature
+        away from interactive use, where carrying notes between sessions is the point.
+        """
+        from src.operator import auto_memory_isolated_by_default
+
+        self.assertIs(auto_memory_isolated_by_default(), False)
+        self.assertEqual(settings_payloads(self.command_of(self.reviewer_operator())), [])
+
+    def test_an_explicit_argument_still_wins_over_the_default(self) -> None:
+        from src.operator import isolate_auto_memory_by_default
+
+        isolate_auto_memory_by_default(True)
+        opt_out = ClaudeOperator(model="opus", fake_mode=True, isolate_auto_memory=False)
+        self.assertIs(opt_out.isolate_auto_memory, False)
+        self.assertEqual(settings_payloads(self.command_of(opt_out)), [])
+
+    def test_both_front_ends_set_it(self) -> None:
+        """Reading the source, because calling `main()` would start a benchmark run."""
+        for name in ("rcb_agent.py", "fs_agent.py"):
+            source = (Path(__file__).resolve().parents[1] / name).read_text()
+            self.assertIn(
+                "isolate_auto_memory_by_default(True)",
+                source,
+                f"{name} runs measurements and must cut every seat off from the store",
+            )
+
+
+class WhatTheResearchClawBenchFrontEndAsksForTests(unittest.TestCase):
+    """The sibling benchmark, whose paired ablation is the worst case for the channel.
+
+    FrontierScience runs one arm per task. ResearchClawBench's topology ablation runs
+    *two* arms over the same forty tasks under one results directory, so the store is not
+    a channel from last week's run into this one -- it is a channel between the two things
+    being compared, carrying notes filed under the name of the task both arms are working
+    on right now. Measured on 2026-08-19 while the first attempt was in flight: 378 writes
+    to `-rmeng-data-robtang/memory/` that day, 29 of them named after a specific task in
+    `tasks40.txt`.
+
+    The direction is the damaging one. A channel that makes each arm partly a copy of the
+    other shrinks the difference the ablation exists to measure, so a real topology effect
+    would present as absent, and the run would look like a clean null result.
+    """
+
+    def operator_for(self, backend: str):
+        from rcb_agent import create_operator
+
+        return create_operator(
+            backend=backend, model="opus", fake_mode=True, ui=None, stage_timeout=60,
+            disallowed_tools=["WebSearch"], codex_sandbox="danger-full-access",
+            codex_command="codex",
+        )
+
+    def test_the_researchclawbench_front_end_isolates(self) -> None:
+        self.assertIs(self.operator_for("claude").isolate_auto_memory, True)
+
+    def test_the_command_it_builds_carries_the_flag(self) -> None:
+        """Not just the attribute: the argument that reaches the binary.
+
+        The attribute assertion above passes on a front end that sets the field on an
+        operator whose command builder never reads it. This one fails there.
+        """
+        command = self.operator_for("claude")._build_cli_command(  # noqa: SLF001
+            Path("/tmp/p.md"), "sess-1", resume=False
+        )
+        self.assertEqual(settings_payloads(command), [{"autoMemoryEnabled": False}])
+
+    def test_a_codex_seat_is_untouched_here_too(self) -> None:
+        self.assertIs(self.operator_for("codex").isolate_auto_memory, False)
 
 
 class WhatTheRecordSaysTests(unittest.TestCase):

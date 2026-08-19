@@ -42,7 +42,10 @@ from src.review_panel import (
     resolve_roles,
 )  # noqa: E402
 from src.manager import ResearchManager  # noqa: E402
-from src.operator import ClaudeOperator  # noqa: E402
+from src.operator import (  # noqa: E402
+    ClaudeOperator,
+    isolate_auto_memory_by_default,
+)
 from src.operator_codex import CodexOperator  # noqa: E402
 from src.rcb import (  # noqa: E402
     BenchmarkResult,
@@ -425,6 +428,13 @@ def create_operator(
         stage_timeout=stage_timeout,
         web_search_mcp=web_search_mcp,
         disallowed_tools=disallowed_tools,
+        # A benchmark run must not start from another run's notes. #298 closed this for
+        # FrontierScience and left ResearchClawBench open; the store is keyed on an
+        # ancestor of the working directory, so every RCB run under one results directory
+        # shared one `MEMORY.md`. That is worse for a paired ablation than for a single
+        # arm: both arms run the same forty tasks, so whichever arm reaches a task first
+        # writes notes about that exact task and the other reads them at session start.
+        isolate_auto_memory=True,
     )
 
 
@@ -787,6 +797,13 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # A benchmark run must not start from another run's notes, and the isolation has to
+    # reach every seat: the stage operator, the reviewer's own operator, each panel role
+    # and the validity review all build their own `ClaudeOperator`. Set once here rather
+    # than forwarded through four constructors -- forwarding is what left 1,761 of 4,513
+    # calls unisolated on the first attempt at the topology ablation, all of them reviewer
+    # calls. See `src.operator.isolate_auto_memory_by_default`.
+    isolate_auto_memory_by_default(True)
     args = parse_args(argv)
     try:
         result = run(args)
