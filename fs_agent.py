@@ -174,6 +174,34 @@ DEFAULT_FS_MAX_ATTEMPTS = 2
 #: nothing while reporting that it finished. There is no budget here to spend.
 DEFAULT_FS_MAX_AUTO_SKIPS = 0
 
+#: The five skills every ``ideate`` run of this benchmark is given, unless
+#: ``--no-forced-skills`` says otherwise.
+#:
+#: Forced rather than routed, for two reasons that are both about this adapter and not
+#: about skills in general. The first is a live failure mode: ``select_run_skills`` fails
+#: closed on an empty brief and refuses *every* task-scoped skill silently, so a run whose
+#: ``user_input.txt`` has not landed yet gets none of them and says nothing about it. The
+#: second is that the decision behind these five is not a claim about the shape of one
+#: task -- it is a claim about a sixty-task population, measured on a paired trial of it,
+#: which is neither what an ``applies_when`` predicate says nor what a pin says.
+#:
+#: They are written against that trial's measured losses. See each SKILL.md's "Why this is
+#: here" for the task ids, the rubric item numbers and the per-item deltas. Not set for
+#: the ``direct`` profile: the control arm is one operator call with no run directory to
+#: install a skill into, and giving one arm guidance is the difference being measured.
+FS_FORCED_SKILLS = frozenset({
+    "bind-every-deliverable-to-the-file-that-is-graded",
+    "every-printed-part-gets-its-own-answered-section",
+    "grant-the-expected-reading-before-you-depart-from-it",
+    "answer-in-the-symbols-the-problem-printed",
+    "one-visible-line-per-quantity-the-answer-owes",
+})
+
+#: What ``skill_force_source`` records in ``run_config.json``. The symbol, not a prose
+#: description of it: a reader who finds this string in a run config can grep the tree for
+#: the set that produced it, which is the whole point of recording who forced them.
+FS_FORCED_SKILLS_SOURCE = "fs_agent:FS_FORCED_SKILLS"
+
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -401,6 +429,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "the workspace. Useful after an interrupted run.",
     )
     parser.add_argument(
+        "--no-forced-skills",
+        action="store_true",
+        help="Run the ideate arm without the five skills this adapter installs on every "
+             "run of this benchmark. This is the control arm and it is not optional: a "
+             "run with the skills and a run without them are two configurations, and "
+             "both arms have to come out of the same binary for the difference between "
+             "them to be a measurement. Has no effect on the direct profile, which has "
+             "no run directory to install a skill into.",
+    )
+    parser.add_argument(
         "--fake-operator",
         action="store_true",
         help="Use the fake operator instead of a real backend. For smoke-testing the "
@@ -587,6 +625,24 @@ def build_manager(
             ideas_per_proposer=args.ideas_per_proposer,
             disallowed_tools=disallowed_tools,
         )
+    # Set after construction for the same reason the panel is: these are attributes of the
+    # manager rather than constructor keywords. `skill_discipline` is deliberately left
+    # unset -- FrontierScience's `biology` is not one of `DISCIPLINE_PREFIXES` (the pack
+    # spells that field `life`), so assigning the subject straight through would withhold
+    # every `life-*` skill from a biology run and install no field skills at all. Mapping
+    # `biology` to `life` is a separate decision with its own evidence, and it must not
+    # ride along on this one.
+    #
+    # Both attributes, and clearing `skill_force` alone would not have been enough. The
+    # five carry `applies_when: intermediate derivations`, which is a phrase in this
+    # benchmark's own closing instruction and occurs in 60 of its 60 task statements -- so
+    # with the force cleared the shape filter installs exactly the same five and announces
+    # them under the shape banner. Measured on a `--fake-operator` run: the control arm
+    # differed from the treatment arm by one paragraph of prompt. `skill_withhold` is what
+    # makes `--no-forced-skills` an arm rather than a rewording.
+    manager.skill_force = frozenset() if args.no_forced_skills else FS_FORCED_SKILLS
+    manager.skill_force_source = FS_FORCED_SKILLS_SOURCE
+    manager.skill_withhold = FS_FORCED_SKILLS if args.no_forced_skills else frozenset()
     return manager
 
 

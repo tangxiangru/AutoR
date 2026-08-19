@@ -888,8 +888,108 @@ class TheIdeateArmIsOneStageAndNothingElseTests(unittest.TestCase):
                 ideation_panel=object(),
             )
 
+    def test_the_five_skills_are_forced_by_default_and_say_who_forced_them(self) -> None:
+        """The seam exists to put five descriptions in front of the Stage 02 model.
+
+        Routed selection cannot be relied on to do it: `select_run_skills` fails closed
+        on an empty brief and refuses every task-scoped skill silently, so a run whose
+        `user_input.txt` has not landed yet would get none of them and say nothing.
+        """
+        manager = self.a_manager()
+        self.assertEqual(manager.skill_force, fs_agent.FS_FORCED_SKILLS)
+        self.assertEqual(manager.skill_force_source, "fs_agent:FS_FORCED_SKILLS")
+        self.assertEqual(len(fs_agent.FS_FORCED_SKILLS), 5)
+
+    def test_every_forced_name_is_a_skill_that_exists(self) -> None:
+        """Silent otherwise. `select_run_skills` filters by name, so a renamed skill
+        forces nothing and the arm runs as its own control while reporting that it did
+        not."""
+        from src.run_skills import read_skill_pack
+
+        pack = {entry.name for entry in read_skill_pack(REPO / "src" / "skills")}
+        self.assertEqual(sorted(fs_agent.FS_FORCED_SKILLS - pack), [])
+
+    def test_every_forced_skill_names_the_only_stage_this_arm_runs(self) -> None:
+        """A forced skill that names another stage is announced nowhere in this arm, and
+        the whole seam would be green and dead."""
+        from src.run_skills import read_skill_pack
+
+        entries = {
+            entry.name: entry
+            for entry in read_skill_pack(REPO / "src" / "skills")
+            if entry.name in fs_agent.FS_FORCED_SKILLS
+        }
+        for name, entry in sorted(entries.items()):
+            with self.subTest(skill=name):
+                self.assertEqual(sorted(entry.stages), [fs_agent.FS_IDEATE_STAGE])
+
+    def test_the_control_arm_comes_out_of_the_same_binary(self) -> None:
+        """Without `--no-forced-skills` the next trial has no control arm at all: the
+        two arms would be two checkouts, and a difference between them would be a
+        difference between two trees rather than between two configurations."""
+        manager = self.a_manager(["--no-forced-skills"])
+        self.assertEqual(manager.skill_force, frozenset())
+        self.assertEqual(manager.skill_force_source, "fs_agent:FS_FORCED_SKILLS")
+
+    def test_the_control_arm_withholds_the_five_and_does_not_merely_unforce_them(
+        self,
+    ) -> None:
+        """Clearing the force is not enough and this is the assertion that says so.
+
+        All five carry `applies_when: intermediate derivations`, and that phrase is in
+        this benchmark's own closing instruction to the model — 60 of its 60 task
+        statements. So with the force cleared the shape filter reinstalls exactly the
+        same five and announces them under a different banner, which was the state a
+        `--fake-operator` run of both arms was in before `skill_withhold` existed.
+        """
+        self.assertEqual(self.a_manager().skill_withhold, frozenset())
+        self.assertEqual(
+            self.a_manager(["--no-forced-skills"]).skill_withhold, fs_agent.FS_FORCED_SKILLS
+        )
+
+    def test_the_predicate_the_five_carry_matches_this_benchmarks_own_instruction(
+        self,
+    ) -> None:
+        """The control for the test above: if the predicate stopped matching, withholding
+        would be belt and braces rather than the thing that makes the arm an arm — and
+        the reason written into `build_manager` would be describing something else."""
+        from src.frontierscience import build_fs_goal
+        from src.run_skills import read_skill_pack, routing_text
+
+        entries = [
+            entry
+            for entry in read_skill_pack(REPO / "src" / "skills")
+            if entry.name in fs_agent.FS_FORCED_SKILLS
+        ]
+        self.assertEqual(len(entries), 5)
+        brief = routing_text(
+            build_fs_goal(
+                "Question: (a) derive the thing. Think step by step and solve the problem "
+                "below. In your answer, you should include all intermediate derivations, "
+                "formulas, important steps, and justifications.",
+                workspace=REPO,
+            )
+        )
+        for entry in entries:
+            with self.subTest(skill=entry.name):
+                self.assertTrue(entry.applies_to(brief))
+
+    def test_the_subject_is_not_passed_through_as_a_discipline(self) -> None:
+        """FrontierScience spells its third subject `biology` and the pack spells that
+        field `life`, which is not in `DISCIPLINE_PREFIXES`. Assigning the subject
+        straight through would withhold every `life-*` skill from a biology run and
+        install no field skills at all, and mapping one to the other is a separate
+        decision with its own evidence."""
+        from src.frontierscience import FS_DATASET_SUBJECT_ROWS
+        from src.run_skills import DISCIPLINE_PREFIXES
+
+        self.assertIsNone(self.a_manager().skill_discipline)
+        self.assertNotIn("biology", DISCIPLINE_PREFIXES)
+        self.assertIn("biology", FS_DATASET_SUBJECT_ROWS)
+
     def test_the_defaults_that_are_load_bearing_are_the_measured_ones(self) -> None:
         args = fs_agent.parse_args([])
+        self.assertFalse(args.no_forced_skills)
         self.assertEqual(args.stage_timeout, 3600)
         self.assertEqual(args.max_attempts, 2)
         self.assertEqual(args.max_auto_skips, 0)

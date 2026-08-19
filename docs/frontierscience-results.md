@@ -175,6 +175,69 @@ it — and it is also the one least flattering to the pipeline.
 
 ---
 
+## A defect in the control arm, found after publication
+
+**Fifty-five of the control arm's sixty answers carry the answer twice. None of the pipeline arm's
+do.** Forty are an exact byte-for-byte halving; fifteen more arrived in several streamed blocks so
+the copy is not symmetric, and only five are clean. The judge prompt is a fixed template plus the
+whole file, so on all but five tasks the control's answer was handed to the judge twice and the
+pipeline's once. **Forty-two of the forty-three paired tasks are affected.** None of this was known
+when the numbers above were first published.
+
+The cause is in the shared streaming reader, not in the model's output. The Claude CLI's stream
+emits the reply as assistant text and then emits a terminal result event whose payload is the same
+reply again; the fragment extractor harvests strings under a key set that includes both, so a
+consumer that keeps the whole reply gets it twice. Stage-shaped consumers are immune because they
+parse a delimited section rather than the raw stream — which is why the pipeline arm is clean, and
+why **all forty ResearchClawBench reports on this box are clean too.** The blast radius is the
+FrontierScience `direct` path, which by design keeps the reply rather than a file the model was
+asked to write.
+
+### What it did to the score
+
+Measured rather than argued: eleven doubled control answers, spread across the recorded score range,
+cut back to a single copy and re-judged with the same prompt and the same model.
+
+| | |
+|:---|---:|
+| mean change from de-duplicating | **−0.307 points** |
+| sd | 0.606 |
+| median | 0.000 |
+| negative / zero / positive | 5 / 5 / 1 |
+
+**Duplication flattered the control by about three tenths of a point** on the tasks where it
+happened. Applied to the forty-two of forty-three paired tasks whose control answer carried a copy,
+the correction to the paired mean difference is **+0.300 in the pipeline's favour**, moving the
+published +0.085 to roughly **+0.384**.
+
+At n = 11 the effect is not itself distinguishable from zero — standard error 0.183, and a sign test
+over the six non-zero deltas gives p ≈ 0.22. One of the eleven crossed the pass threshold: `fs:014`
+went 7.000 → 5.5, so the control's accuracy would fall slightly if every answer were de-duplicated.
+
+### What that means for the numbers on this page
+
+The correction runs **in the pipeline's favour**, which is the opposite of the direction a reader
+would guess from a bug in the control arm's plumbing. It does not make the difference resolvable:
++0.384 is still below the 0.654 this sample could detect at 80% power, and its standard error is
+0.233. But it is no longer near zero, and it is close to the 0.500 declared as the minimum effect of
+interest — so "the pipeline makes no difference" is not a conclusion this trial supports either.
+
+It does change what may be said about the sign. **The confound and the effect are the same size.**
+A trial cannot report a difference of +0.085 while carrying an arm-asymmetric artifact worth 0.31,
+and no amount of caveat repairs that — the honest statement is that the paired difference is not
+quotable in either direction until the writer is fixed and the control arm re-run. The per-subject
+result is unaffected in shape, because the duplication is spread across subjects, but every
+per-subject difference inherits the same caveat.
+
+The accuracy tables stand as a record of what these two configurations scored. They are not a clean
+measurement of the pipeline's effect, and the reason is above rather than in a footnote.
+
+The writer is fixed on this branch, and the control arm has to be re-run before the paired
+difference means anything. `tests/test_the_reply_is_captured_once.py` holds the repair, and
+reverting it fails three of its eight tests.
+
+---
+
 ## Corrections to earlier claims on this branch
 
 **A three-task calibration is not a result, and this trial is the demonstration.** The calibration
