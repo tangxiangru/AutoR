@@ -97,15 +97,15 @@ specific form ... is not written. Score: 0/0.5`; on item 6 the control's summary
 table gave the printed form with its rate variable intact and was marked `This
 matches exactly` for the full 0.5, while the pipeline substituted the rate away
 and produced an algebraically equivalent pair that does not contain it. On
-item 13 the pipeline solved a different differential equation, because its
-notion of the limiting case set the substitute symbol to zero rather than the
-printed one — so the structure the criterion asks for could not appear at all,
-and one function in the printed set appears **0 times** in the answer.
+item 13 the pipeline solved a different differential equation, because it took
+its limiting case in the substituted variable rather than in the printed one —
+so the structure the criterion asks for could not appear at all, and one
+function in the printed set appears **0 times** in the answer.
 
 Record the counter-evidence: fs:006 is not monotone. On item 8, worth 1.0, the
-control was marked `The specific seven equations ... are not written anywhere in
-the answer. Score: 0/1.0` while the pipeline wrote four of them with the
-constraint. This skill is about which symbols, not about how much.
+control was marked `The specific [equations that item names] are not written
+anywhere in the answer. Score: 0/1.0` while the pipeline wrote part of that set.
+This skill is about which symbols, not about how much.
 
 **fs:009, −3.000, inferred, and the inference is flagged.** The pipeline arm's
 per-item reasoning was overwritten on disk and cannot be quoted; what follows
@@ -116,8 +116,8 @@ is present in the pipeline answer at 26% of the document — and 400 characters
 later it is replaced by a boxed limiting form, under a principal section
 heading naming the approximation, with the exact solution carried through only
 under a route labelled a cross-check at 69% of the document. The
-approximation's name appears 9 times against the control's 2, and item 5 awards
-a point for **not** taking that limit. The pipeline scored 1.0 of 10. The
+approximation's name appears 9 times against the control's 2. The pipeline
+scored 1.0 of 10. The
 placement is measured; the causal link to item 3 is not, because the reasoning
 file is gone.
 
@@ -129,9 +129,11 @@ gap coming from two tasks that write their formulas in plain text blocks).
 
 **Checked against what chemistry pays for.** Every instruction here adds a line
 and removes none: the printed form *in addition to* your own, the general result
-*before* the limit. That is the same granularity chemistry is paid for — on
-fs:020 the criteria asked for intermediate quantities in the units the sheet
-uses and **both** arms worked in the other unit system and lost four items. On
-fs:036 the control merged two opposing contributions into one cancelling row and
-scored 0.0/1.0; nothing here licenses that merge. The rule against renaming is
-the same rule chemistry needs.
+*before* the limit. That is the same granularity chemistry is paid for. Where a
+sheet's criteria ask for intermediate quantities in the units the sheet itself
+works in, an answer that silently carries them in another unit system loses
+those items; the trial has one task where that happened to **both** arms at
+once, so it is an observation about the failure mode and not a gain either arm
+made, and no advice here is designed against it. On fs:036 the control merged
+two opposing contributions into one row and scored 0.0/1.0; nothing here
+licenses that merge. The rule against renaming is the same rule chemistry needs.

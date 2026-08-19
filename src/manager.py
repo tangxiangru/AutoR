@@ -5165,10 +5165,16 @@ class ResearchManager:
         for problem in validate_task_pins(pin_table, self.skills_dir):
             append_log_entry(paths.logs, "skills pin_table_problem", problem)
         pinned = pins_for(self.skill_task_id, pin_table)
-        # Narrowed to the pack before it is used, so a front end naming a skill that has
-        # been renamed forces nothing rather than putting a name into the run config that
-        # no directory answers to. `install_run_skills` would ignore it either way; what
-        # this buys is that the *declaration* below names only skills that arrived.
+        # Narrowed twice on the way in: to the names the pack answers to, and against the
+        # withhold set. **Neither narrowing changes what this method does today** -- both
+        # were measured as equivalent mutations, because `install_run_skills` applies
+        # `withheld` last and `self._forced_skills` is intersected with what was actually
+        # installed a few lines below, so a renamed or withheld name cannot reach the
+        # declaration by either route. They are kept because the two guards that do the
+        # work are in a different function and a different statement, and a reader of this
+        # line should not have to find both to know that `forced` never names a skill the
+        # run did not get. Anything relying on that invariant must be tested against
+        # `_forced_skills`, not against this local.
         forced = self.skill_force & {entry.name for entry in read_skill_pack(self.skills_dir)}
         forced -= self.skill_withhold
         try:

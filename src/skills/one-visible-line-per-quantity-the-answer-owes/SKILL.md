@@ -78,9 +78,11 @@ Measured on the sixty-task FrontierScience-Research trial, one draw per task,
 judged by gpt-5.1 at high effort. Chemistry is the one subject where the
 pipeline arm beat the control — 80.0% against 60.0%, mean +0.799 points per task
 over sixteen pairs, +0.586 after removing one task whose four-point gap is
-judge sampling variance rather than any content difference. Surface features do
-not separate the arms at all: character ratio 1.21, table ratio 0.96, heading
-ratio 0.93, boxed-result ratio 0.41. **The separation is this constraint**, and
+judge sampling variance rather than any content difference. Three of the four
+surface features measured do not separate the arms — character ratio 1.21,
+table ratio 0.96, heading ratio 0.93 — and the fourth, boxed-result ratio 0.41,
+does separate them and is not the thing being claimed here. **The separation
+this section claims is the constraint**, and
 in sixty tasks it was recorded exactly once — as a typed claim from one ideation
 lens on one task, which then survived into the writing stage. This skill exists
 to stop that from being luck.
@@ -95,29 +97,36 @@ counts are displayed on separate lines throughout rather than folded into a
 total. The rule is traceable from a lens output through the stage's locked
 decisions into the synthesis prompt, where the phrase appears twice.
 
-**fs:036, +1.500, both points attributable.** The control's own step table
-merged two opposing requirements into one row ending `(cancellation)` and was
-scored `their net conclusion is opposite to what the rubric specifies. Score:
-0.0 / 1.0`. The pipeline split the same physics into two rows with separate
-signed magnitudes and took the point — while reaching a net conclusion no closer
-to the expected one. Granularity, not correctness. The second point came from
-naming the cycle as its own step sequence where the control was scored `Score:
-0.5 / 1.0` for using a different one in its main line.
+**fs:036, +1.500, two items attributed, and the attribution is one-sided.** Only
+the control arm's per-item judgement survives on disk here; the pipeline's was
+overwritten, so what is quoted below is the control's and what is said about the
+pipeline is its recorded total against a reading of its answer. The control's own
+step table merged two opposing requirements into one row and lost the item,
+`0.0 / 1.0`. The pipeline split the same physics into two rows with separate
+signed magnitudes — while its net conclusion was no closer to the expected one
+than the control's, so if it took that item it was paid for by the display and
+not by the physics. Granularity, not correctness. The second item is the cycle
+named as its own step sequence, where the control was scored `Score: 0.5 / 1.0`
+for using a different one in its main line.
 
-**fs:034, +2.500.** Item 3 asks for a plain verdict. The control was scored `The
-student states ... "[the verdict the part asks for]," but then devotes a long
-section to ways in which [the stated interval] can fail ... and concludes: "...
-a probabilistic, not deterministic, loss." This explicitly asserts there *can*
-be consequences. Score: 0.0`. The pipeline put a bolded unhedged verdict at the
-top of a dedicated Answer subsection for each of the five parts and qualified
-afterwards.
+**fs:034, +2.500.** Item 3 asks for a plain verdict. The control stated the
+verdict the part asks for and then spent a long section on the ways it can
+fail; the judgement quotes that section's closing sentence as the position it
+took, and scored the item `0.0`. The pipeline put a bolded unhedged verdict at
+the top of a dedicated Answer subsection for each of the five parts and
+qualified afterwards.
 
 **This is the guardrail on the other four skills.** Three chemistry passes sit
 at exactly 7.0 against a 7.0 threshold, and the recorded single-draw judge noise
-is about ±0.33 — larger than the margin. Any advice that shortens, merges,
-simplifies before displaying, or moves a verdict into a closing summary takes
-chemistry from 93.8% on complete pairs to 75%. Nothing in this skill can lower
-a physics or biology score: it adds rows and moves a sentence earlier.
+is about ±0.33 — larger than the margin. So advice that shortens, merges,
+simplifies before displaying, or moves a verdict into a closing summary is
+advice with three tasks inside the noise band of a fail. If all three dropped,
+chemistry would go from 93.8% on complete pairs to 75% — that is the arithmetic
+of 15/16 against 12/16, a bound on the exposure and not a measurement of any
+run. In the other direction nothing here was measured to lower a physics or
+biology score, and no counterfactual can be: what is checkable is that every
+instruction in this skill adds a row or moves a sentence earlier, and none of
+them removes anything.
 
 It differs from `information-transformation-ledger-for-a-multi-step-derivation`,
 which builds one ledger for a whole chain at study design and analysis: this one

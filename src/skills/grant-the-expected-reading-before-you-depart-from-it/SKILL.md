@@ -68,6 +68,12 @@ move a cell — say so and leave it.
 - "**I record this reading but do not take it as primary**" → state the reading
   as an answer in its own labelled section, then rank.
 
+None of these three rewrites applies when the sheet asked for the exclusion. A
+part that says why a competing pathway is not observed, not favoured or not
+necessary owes exactly the sentence this section removes; there, the rewrite is
+to add the conventional statement in front of it, and to leave the exclusion
+standing behind it word for word.
+
 ## Before you close the stage
 
 - Every eliminated candidate that is a conventional reading has a granted-reading
@@ -77,7 +83,14 @@ move a cell — say so and leave it.
 - Every reassignment across a set is shown against the conventional assignment,
   cell by cell.
 - Searching your own text for "not", "eliminated", "excluded", "rather than" and
-  "minority" returns no sentence whose only job is to remove a named mechanism.
+  "minority" returns no sentence whose only job is to remove a named mechanism —
+  **except where the sheet asked for that sentence.** When a part or a criterion
+  asks *why* a competing path does not operate, does not dominate, or is not
+  detected, the exclusion is the answer and deleting it deletes a scored item.
+  Put the granted-reading paragraph **before** it, never in place of it: state
+  the competing path straight, then give the argument that rules it out. The
+  sentence this checklist is hunting is the one that removes a mechanism nobody
+  asked you to remove.
 
 ## Why this is here
 
@@ -85,8 +98,11 @@ Measured on the sixty-task FrontierScience-Research trial, judged by gpt-5.1 at
 high effort. The pipeline arm's per-item reasoning was re-obtained by re-judging
 under the same prompt template; four of eight biology re-judgements reproduced
 the recorded totals digit for digit, and the rest were within 1.0 with a mean
-absolute difference of 0.29. **This is the only mechanism in the trial with
-quoted per-item reasoning on both arms.**
+absolute difference of 0.29. **On its four biology tasks this is the only
+mechanism in the trial with quoted per-item reasoning on both arms.** Its two
+chemistry tasks are not in that position — only the control arm's judgement
+survives on disk for either — and the chemistry section below says where that
+makes the attribution an inference.
 
 Four biology tasks, **7.0 points**, all the same shape:
 
@@ -95,8 +111,8 @@ Four biology tasks, **7.0 points**, all the same shape:
   different node] ... Points: 0.0`, and the criterion for the motif scan was
   marked `the motif scan is generic and tied to the student's proposed target
   ... Points: 0.0`. The commitment is traceable: a contrarian lens statement
-  ends with a clause that explicitly rules out the axis carried over from Part 1,
-  it was scored relevance 6 into the stage, and the reviewer endorsed it.
+  ends with a clause that explicitly rules one reading out, it was scored
+  relevance 6 into the stage, and the reviewer endorsed it.
 - **fs:054**, items 3 and 9, −2.0. The two criteria pin one technique to one
   scenario. Control: `Scenario 2 is explicitly assigned to ... Score: 1.0`.
   Pipeline: `Scenario 2 ... is answered with [another technique] ... Score: 0.0`
@@ -104,9 +120,9 @@ Four biology tasks, **7.0 points**, all the same shape:
   combined score is 0.833 against 0.750`. No-reuse across scenarios turned one
   swap into two lost points.
 - **fs:058**, −1.0. Control hedged and scored: `"If [the stated condition]
-  holds, the intended answer is ..." Score: 1`. Pipeline wrote `... is eliminated
-  by Part 3's own design.` and was scored `explicitly eliminating ... Score:
-  0.0`.
+  holds, the intended answer is ..." Score: 1`. The pipeline wrote instead that
+  the reading was eliminated by another part's own design, and was scored
+  `explicitly eliminating ... Score: 0.0`.
 - **fs:056**, −1.0. Pipeline: `The explanation directly rejects [the rationale
   the criterion asks for] ... 0.0/1.0` — **and it was scientifically right**.
   Correcting the expected rationale cost exactly one point.
@@ -119,15 +135,33 @@ pipeline's 1.25/1.25. Across the twenty biology answers, explicit-elimination
 phrasing runs at 0.28 per ten thousand characters in the pipeline arm against
 0.10 in the control — 2.8 times.
 
-**Checked against what chemistry pays for — this skill repairs chemistry.** The
-two chemistry losses in the trial are the same shape. fs:024, −1.000, item 4:
-the control was given `Partial credit: 0.5/1.0` because it mentioned the wide
-conventional ladder among its variants; the pipeline committed to a
-well-argued cap below it, and the conventional upper value appears **0 times**
-in its answer against 1 in the control. fs:033, −1.170, items 4 and 5: the
-pipeline named the mechanism the criteria ask for and then wrote `But the
-geometry does not transfer ... I therefore treat the coupled mechanism as a
-plausible minority channel`. Granting the reading first would have kept both
-without changing either judgement. Nothing here compresses a ledger, merges an
-opposing pair, or moves a verdict sentence later; it adds one paragraph per
-elimination.
+**Checked against what chemistry pays for — and this is the one skill of the
+five with a known risk surface in chemistry.** Take the benefit first. The two
+chemistry losses in the trial are the same shape as the four biology ones.
+fs:024, −1.000, item 4: the control was given `Partial credit: 0.5/1.0` for
+keeping the conventional reading alongside its own variants; the pipeline
+replaced it with a single committed value, and the conventional reading appears
+**0 times** in its answer against 1 in the control. fs:033, −1.170 as a task
+total (8.17 to 7.00): here the attribution to items 4 and 5 is **inferred, and
+the inference is flagged** — the pipeline arm's per-item reasoning for this task
+was overwritten on disk and both arms' score records now point at the surviving
+judgement of the other arm, so what is checkable is the two totals and the fact
+that the pipeline's own answer names the mechanism the criteria ask for and then
+demotes it in the following sentence. No grader sentence about that demotion
+exists to quote. Granting the reading first would have kept both statements
+without changing either commitment.
+
+Now the risk. Three chemistry criteria across two tasks, one rubric point each,
+pay for an exclusion: they ask the answer to say why a competing pathway is not
+the operative one, and the sentence that does that is exactly the sentence the
+closing checklist tells a writer to hunt for. One of those two tasks is fs:033
+itself, which passed at exactly 7.0 against a 7.0 threshold, inside the ±0.33
+single-draw noise band; the other is fs:036, a +1.500 chemistry win for the
+pipeline. Applied mechanically — delete
+every sentence whose job is to remove a named mechanism — this skill would take
+points off both. That is why the checklist carries the carve-out above and why
+the three rewrites are stated as *add in front of*, never *replace*. This is the
+skill to withdraw first if the next trial's chemistry number moves down.
+
+Beyond that surface, nothing here compresses a ledger, merges an opposing pair,
+or moves a verdict sentence later; it adds one paragraph per elimination.

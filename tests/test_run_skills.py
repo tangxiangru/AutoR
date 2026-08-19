@@ -1045,6 +1045,111 @@ class TheForcedRecordSurvivesTest(unittest.TestCase):
             self.assertEqual(after.get("venue"), "neurips_2025", "a managed field still wins")
 
 
+class TheDeclarationSurvivesAFreshRunTest(unittest.TestCase):
+    """The half the two `...RecordSurvives` tests above cannot reach: a *new* run.
+
+    Both of those call `ensure_run_config` directly, which is the resume path, and
+    `ensure_run_config` preserves keys it does not manage. So both were green for the
+    whole period `skill_pins` was being dropped from every fresh run in production:
+    `Manager._create_run` installed the skills and *then* called
+    `initialize_run_config`, which does not preserve anything — it builds the config
+    from scratch and writes it whole, over the keys `_install_skills` had just written.
+    The log banner survived that and the config did not, which is the worse half to
+    lose, because the log is prose and the config is what a later reader parses when
+    they are deciding which arm a score came from.
+
+    The repair is an ordering, and an ordering is exactly the kind of fix a suite does
+    not hold: move `self._install_skills(paths)` back above `initialize_run_config` and
+    every other test in this repository still passes. This one does not. It drives the
+    real `_create_run` and reads the config off disk afterwards, and it covers both
+    declarations at once because they are one defect — `skill_pins` is the half that was
+    broken in production and `skill_forced` is the half that would have been broken next.
+    """
+
+    class _Operator:
+        model = "test-model"
+        backend_name = "claude"
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.pack = self.root / "pack"
+        # None of the three can be selected by the shape filter: the brief written below
+        # matches no predicate here, so anything that arrives arrived by pin or by force.
+        for name in ("forced-one", "forced-two", "pinned-one"):
+            (self.pack / name).mkdir(parents=True)
+            (self.pack / name / "SKILL.md").write_text(
+                f"---\nname: {name}\ndescription: Use when a situation arises, at some "
+                f"stage.\napplies_when: nothing in this brief\n"
+                f"stages: 02_hypothesis_generation\n---\n\nbody\n",
+                encoding="utf-8",
+            )
+        (self.root / "configs").mkdir(parents=True, exist_ok=True)
+        (self.root / "configs" / DEFAULT_PINS_FILENAME).write_text(
+            json.dumps({"T_000": ["pinned-one"]}), encoding="utf-8"
+        )
+
+    def _manager(self):
+        from src.manager import ResearchManager
+        from src.terminal_ui import TerminalUI
+
+        manager = ResearchManager(
+            project_root=self.root,
+            runs_dir=self.root / "runs",
+            operator=self._Operator(),
+            ui=TerminalUI(interactive=False, output_stream=io.StringIO()),
+        )
+        manager.skills_dir = self.pack
+        return manager
+
+    def test_a_fresh_run_writes_both_declarations_into_the_config_it_keeps(self) -> None:
+        from src.utils import load_run_config, read_text
+
+        manager = self._manager()
+        manager.skill_task_id = "T_000"
+        manager.skill_force = frozenset({"forced-one", "forced-two"})
+        manager.skill_force_source = "fs_agent:FS_FORCED_SKILLS"
+
+        paths = manager._create_run("Scientific Objective: measure the widget.")
+
+        config = load_run_config(paths)
+        self.assertEqual(
+            config.get("skill_forced"),
+            ["forced-one", "forced-two"],
+            "a fresh run lost `skill_forced`: the config was rebuilt after the skills "
+            "were installed, so the run says it was in the control arm",
+        )
+        self.assertEqual(config.get("skill_forced_by"), "fs_agent:FS_FORCED_SKILLS")
+        self.assertEqual(
+            config.get("skill_pins"),
+            ["pinned-one"],
+            "a fresh run lost `skill_pins`: this is the half that was silently broken "
+            "in production for every run between the pin landing and its repair",
+        )
+        self.assertEqual(config.get("skill_pin_task_id"), "T_000")
+
+        # The pack really did arrive, so the config is describing a run that happened.
+        for name in ("forced-one", "forced-two", "pinned-one"):
+            self.assertTrue((paths.skills_dir / name / "SKILL.md").is_file(), name)
+
+        # Both banners too: the failure mode this guards against kept the log and lost
+        # the config, so a test that only read the log would have stayed green.
+        log = read_text(paths.logs)
+        self.assertIn("skills forced_by_front_end", log)
+        self.assertIn("skills pinned_by_task_id", log)
+
+    def test_a_fresh_unforced_unpinned_run_declares_neither(self) -> None:
+        """The control. Without it the four assertions above could be the template."""
+        from src.utils import load_run_config
+
+        paths = self._manager()._create_run("Scientific Objective: measure the widget.")
+
+        config = load_run_config(paths)
+        self.assertNotIn("skill_forced", config)
+        self.assertNotIn("skill_pins", config)
+
+
 class WithholdingIsWhatBuildsAControlArmTest(unittest.TestCase):
     """The one input that is not a routing decision, and why clearing `skill_force`
     could not do the job on its own.

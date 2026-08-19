@@ -70,7 +70,27 @@ SKILL_PACK = REPO / "src" / "skills"
 #: English stops colliding with a rubric by accident, so it is the shortest span at which
 #: a hit is evidence rather than noise. Six with one name exempted would be the same gate
 #: with an exemption for an ordinary phrase, which is a gate switched off.
+#:
+#: That measurement is asserted, not only written here:
+#: :meth:`TheScanWouldCatchALeakTests.test_seven_is_the_measured_boundary_and_not_a_free_parameter`
+#: reproduces the 6-and-7 counts on the pack as it stands and holds that this constant is
+#: the *shortest* clean length. Without it the floor was pinned and the ceiling was free —
+#: 6 and 4 went red, 8 and 20 and 40 stayed green, and 40 is the scan switched off.
 PHRASE_WORDS = 7
+
+#: A run of exactly seven words taken verbatim out of the split, hard-coded.
+#:
+#: The phrase control below used to build its leak with ``phrases()`` at ``PHRASE_WORDS``,
+#: so the leak was always exactly as long as the scan: true at 7, true at 40, true at any
+#: threshold anyone set. A control that cannot fail is a green line. This is the anchor
+#: that fixes it, and it has to be a literal for the same reason.
+#:
+#: It is the rubric grammar's own item head rather than a criterion, because an anchor
+#: only has to be *in the split at seven words* — putting an actual criterion in this file
+#: to prove the gate works would be the thing the gate exists to prevent, one directory
+#: over. ``phrases()`` drops the digits and the punctuation, so what this contributes is
+#: ``points item assign points as follows pts``, which is in three of the sixty rubrics.
+A_SEVEN_WORD_RUN_FROM_THE_SPLIT = "Points: 1.5, Item: Assign points as follows: - (0.375pts)"
 
 #: Significant digits before a number is specific enough to be an answer.
 #:
@@ -87,6 +107,12 @@ SIGNIFICANT_DIGITS = 3
 #: against ``2023`` in a rubric, and neither is a measurement of anything. Bounded rather
 #: than open-ended so that a four-digit *value* — an energy, a count, a wavenumber — is not
 #: waved through by a rule about dates.
+#:
+#: Both halves are asserted, because an exemption with no test is a hole with a comment on
+#: it: ``test_a_four_digit_value_is_not_waved_through_as_a_year`` names the two four-digit
+#: graded quantities the split actually contains and holds that this range does not reach
+#: them, and ``test_the_year_exemption_is_still_earning_its_place`` holds that ``2023`` is
+#: still a live collision, so the exemption can be deleted the day it stops being one.
 YEAR_RANGE = range(1900, 2100)
 
 #: Rubric tokens the identifier scan drops before it starts. Both are markup rather than
@@ -265,6 +291,72 @@ class TheScanWouldCatchALeakTests(unittest.TestCase):
             "the phrase scan did not catch a rubric sentence pasted into a skill body",
         )
 
+    def _phrase_collisions(self, length: int) -> set[tuple[str, str]]:
+        corpus: set[str] = set()
+        for rubric in self.rubrics:
+            corpus |= phrases(rubric, length)
+        return {
+            (name, phrase)
+            for name, body in skill_bodies().items()
+            for phrase in phrases(body, length) & corpus
+        }
+
+    def test_a_hard_coded_rubric_run_is_caught_at_whatever_threshold_is_in_force(self) -> None:
+        """The anchor the synthesised control above does not provide.
+
+        The test above pastes a leak built at ``PHRASE_WORDS`` and is therefore true at
+        every value of it. This one pastes seven fixed words, so the scan has to still be
+        looking at spans of seven for it to pass.
+        """
+        corpus: set[str] = set()
+        for rubric in self.rubrics:
+            corpus |= phrases(rubric)
+        self.assertEqual(
+            len(_WORD.findall(A_SEVEN_WORD_RUN_FROM_THE_SPLIT.casefold())),
+            7,
+            "the anchor stopped being seven words long",
+        )
+        body = (
+            "# A skill that explains too much\n\nThe grader's own head line for this item "
+            f"reads {A_SEVEN_WORD_RUN_FROM_THE_SPLIT} and the criterion under it is the "
+            "one this section is about.\n"
+        )
+        self.assertTrue(
+            phrases(body) & corpus,
+            f"at PHRASE_WORDS={PHRASE_WORDS} the phrase scan no longer sees seven words "
+            "taken verbatim out of the split, which means it has been raised past the "
+            "length it was measured at and is not scanning for quotations any more",
+        )
+
+    def test_seven_is_the_measured_boundary_and_not_a_free_parameter(self) -> None:
+        """The constant's docstring, as assertions. Both directions, because only one of
+        them was held: 6 and 4 went red on their own, and 8, 20 and 40 did not.
+
+        A span length is clean when nothing in the pack collides with a rubric at that
+        length, and the right constant is the *shortest* clean one. Anything longer is
+        also clean and scans for less; at 40 it scans for nothing at all.
+        """
+        self.assertEqual(
+            self._phrase_collisions(PHRASE_WORDS),
+            set(),
+            "the pack collides with a rubric at the length the gate runs at",
+        )
+        self.assertTrue(
+            self._phrase_collisions(PHRASE_WORDS - 1),
+            f"PHRASE_WORDS={PHRASE_WORDS} is longer than it needs to be: the pack is "
+            f"already clean at {PHRASE_WORDS - 1} words, so every span between them is "
+            "being scanned for and nothing is being found. Lower it to the shortest "
+            "clean length or the scan is switched off by degrees.",
+        )
+        self.assertEqual(self._phrase_collisions(7), set())
+        six = self._phrase_collisions(6)
+        self.assertEqual(
+            sorted(six),
+            [("paper-writing/reference.md", "at least one of the following")],
+            "the six-word measurement in PHRASE_WORDS' comment no longer holds; re-derive "
+            f"it and rewrite the comment. Collisions: {sorted(six)}",
+        )
+
     def test_a_body_carrying_a_rubric_quantity_is_caught(self) -> None:
         corpus = graded_quantities(self.rubrics)
         leaked = sorted(corpus)[0]
@@ -289,6 +381,72 @@ class TheScanWouldCatchALeakTests(unittest.TestCase):
             "45.36",
             corpus,
             "a graded value written inside brackets was swallowed as if it were a weight",
+        )
+
+    def test_a_four_digit_value_is_not_waved_through_as_a_year(self) -> None:
+        """The cost side of the year exemption, which had no test at all.
+
+        ``YEAR_RANGE`` is the one place in this file where a rubric literal is allowed
+        through unexamined, and the way an exemption like that dies is by widening: open
+        it to every four-digit number and the ten tests here stay green while two graded
+        quantities the split really states walk straight past the scan. So they are named.
+        """
+        corpus = graded_quantities(self.rubrics)
+        for literal in ("1638", "2559"):
+            self.assertFalse(
+                is_a_year(literal),
+                f"{literal} is a value the split grades, and YEAR_RANGE now reaches it: "
+                "the date exemption has been widened into an exemption for quantities",
+            )
+            self.assertIn(
+                literal,
+                corpus,
+                f"{literal} has left the graded-quantity corpus; if the split changed, "
+                "find the four-digit values it states now and pin those instead",
+            )
+
+    def test_the_year_exemption_is_still_earning_its_place(self) -> None:
+        """The other half of the rule this repository keeps for exemptions: every one of
+        them owes a test that fails when it stops being needed.
+
+        Without ``YEAR_RANGE`` the quantity scan fires on ``2023`` in a shipped skill's
+        prose against ``2023`` in a rubric, and neither is a measurement of anything. The
+        day that stops being true this test goes red and the exemption comes out.
+        """
+
+        def ignoring_the_year_rule(text: str) -> set[str]:
+            return {
+                literal
+                for literal in _NUMBER.findall(text)
+                if significant_digits(literal) >= SIGNIFICANT_DIGITS
+            }
+
+        rubric_numbers: set[str] = set()
+        weights: set[str] = set()
+        for rubric in self.rubrics:
+            rubric_numbers |= ignoring_the_year_rule(rubric)
+            weights |= rubric_weights(rubric)
+        rubric_numbers -= weights
+
+        waved_through = {
+            (name, literal)
+            for name, body in skill_bodies().items()
+            for literal in ignoring_the_year_rule(body) & rubric_numbers
+        }
+        self.assertTrue(
+            waved_through,
+            "nothing in the pack collides with a four-digit rubric literal any more, so "
+            "YEAR_RANGE is an exemption with no cases: delete it and this test",
+        )
+        self.assertTrue(
+            all(is_a_year(literal) for _, literal in waved_through),
+            "the year exemption is hiding a literal that is not year-shaped: "
+            f"{sorted(waved_through)}",
+        )
+        self.assertIn(
+            "2023",
+            {literal for _, literal in waved_through},
+            "the one collision the exemption was written for is gone; re-derive it",
         )
 
     def test_a_body_carrying_a_rubric_identifier_is_caught(self) -> None:
