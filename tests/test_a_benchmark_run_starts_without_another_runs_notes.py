@@ -80,8 +80,11 @@ class TheFlagTests(unittest.TestCase):
         This is the failure mode with no symptom: the CLI does not reject a settings blob it
         does not recognise, so a misspelling produces a run that looks isolated in its own
         metadata, reads the shared store anyway, and reports nothing unusual. The spelling
-        was taken off the binary's own symbol table and confirmed by probing
-        `memory_paths` -- `null` with the flag, the shared path without it.
+        was taken off the binary's own symbol table and confirmed by probing a real run's
+        `init` event: **no `memory_paths` key at all** with the flag, the shared path without
+        it. Note the shape -- the key is omitted, not nulled, so a reader that does
+        `init["memory_paths"] is None` raises `KeyError` on exactly the run it is checking
+        for, and `.get()` cannot distinguish isolation from a malformed event.
         """
         self.assertEqual(
             list(settings_payloads(command_for(isolate_auto_memory=True))[0]), ["autoMemoryEnabled"]

@@ -16,10 +16,14 @@ What it cost, measured on the sixty-task FrontierScience trial: **fifty-five of 
 arm's sixty answers carried the answer twice** -- forty an exact byte-for-byte halving, fifteen
 more asymmetric because the reply arrived in several streamed blocks -- against **none** of the
 pipeline arm's, because only the control arm keeps the reply. Forty-two of the forty-three
-paired tasks were affected. Re-judging eleven of them cut back to a single copy moved the score
-by **-0.307 points on average** (sd 0.606, five of eleven negative and one positive), so the
-duplication flattered the arm that had it by about the size of the effect the trial existed to
-measure.
+paired tasks were affected. Re-judging twelve of them cut back to a single copy moved the score
+by **+0.033 points on average** (sd 0.633, four negative, five unchanged, three positive), so the
+duplication did not measurably flatter the arm that had it -- the reason to repair this is that an
+arm-asymmetric artifact should not be in a paired comparison, not that it was worth points.
+
+An earlier revision of this docstring reported that re-judging as -0.307 over eleven answers. That
+figure is not in `~/fs-runs/dedup_recheck.json` and is not reachable from it by dropping any record;
+see the correction note in `docs/frontierscience-results.md`.
 
 The three tests below are the three things that have to stay true: the reply is captured once,
 the result event is still the reply when nothing else produced one, and a caller that keeps the

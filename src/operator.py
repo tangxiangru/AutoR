@@ -806,9 +806,12 @@ Original stderr:
         nobody was watching -- measured on the sixty-task FrontierScience trial, **fifty-five
         of the control arm's sixty answers carried the answer twice** (forty of them an exact
         byte-for-byte halving) against none of the pipeline arm's, because only the control
-        arm keeps the reply. That asymmetry sat inside a paired comparison: re-judging eleven
-        of them once de-duplicated moved the score by -0.307 points on average, which is the
-        same size as the effect the trial was measuring.
+        arm keeps the reply. That asymmetry sat inside a paired comparison, which is reason
+        enough to repair it -- and note that it is the *asymmetry* that is the reason, not a
+        price: re-judging twelve of them once de-duplicated moved the score by +0.033 points
+        on average (sd 0.633, seven unchanged), so the doubling bought the arm that had it
+        nothing measurable. An earlier revision of this docstring said -0.307 over eleven,
+        which is not in the array it cited; see `docs/frontierscience-results.md`.
 
         So the result event is a fallback, not a contribution. It is the reply only when
         nothing else captured one -- a turn that emitted no assistant text at all, which is
@@ -1805,7 +1808,13 @@ Original stderr:
             # `--settings` adds to the settings already in force rather than replacing them,
             # so this turns off one feature and leaves the user's auth, model and env alone
             # -- checked against the real binary (2.1.229), where a run carrying this flag
-            # still reached its configured backend and reported `memory_paths: null`.
+            # still reached its configured backend.
+            #
+            # How to check a transcript for it, and the trap: the isolated run's `init` event
+            # **omits `memory_paths` entirely** rather than setting it to null. So
+            # `init["memory_paths"] is None` raises `KeyError` on precisely the run the check
+            # exists to recognise, and `init.get("memory_paths")` cannot tell an isolated run
+            # from a malformed event. Test `"memory_paths" not in init`.
             command.extend(["--settings", json.dumps({"autoMemoryEnabled": False})])
         if mcp_config is not None:
             # Not --strict-mcp-config: that would also drop whatever servers the user has

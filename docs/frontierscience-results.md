@@ -195,45 +195,66 @@ asked to write.
 
 ### What it did to the score
 
-Measured rather than argued: eleven doubled control answers, spread across the recorded score range,
-cut back to a single copy and re-judged with the same prompt and the same model.
+Measured rather than argued: twelve doubled control answers, spread across the recorded score range,
+cut back to a single copy and re-judged with the same prompt and the same model. The array is
+`~/fs-runs/dedup_recheck.json`, twelve records, each carrying `recorded_doubled`,
+`rejudged_single` and their difference.
 
 | | |
 |:---|---:|
-| mean change from de-duplicating | **−0.307 points** |
-| sd | 0.606 |
+| mean change from de-duplicating | **+0.033 points** |
+| sd | 0.633 |
 | median | 0.000 |
-| negative / zero / positive | 5 / 5 / 1 |
+| negative / zero / positive | 4 / 5 / 3 |
 
-**Duplication flattered the control by about three tenths of a point** on the tasks where it
-happened. Applied to the forty-two of forty-three paired tasks whose control answer carried a copy,
-the correction to the paired mean difference is **+0.300 in the pipeline's favour**, moving the
-published +0.085 to roughly **+0.384**.
+**Duplication did not move the control's score.** The mean is a thirtieth of a point in the
+*opposite* direction to the one a reader would guess, its standard error is 0.183, and seven of the
+twelve did not move at all. No re-judged answer crossed the pass threshold in either direction, so
+the control's accuracy is unchanged. Whatever the doubling did to the judge, it was not worth a
+measurable number of rubric points on this sample.
 
-At n = 11 the effect is not itself distinguishable from zero — standard error 0.183, and a sign test
-over the six non-zero deltas gives p ≈ 0.22. One of the eleven crossed the pass threshold: `fs:014`
-went 7.000 → 5.5, so the control's accuracy would fall slightly if every answer were de-duplicated.
+> **Correction, 2026-08-19.** An earlier revision of this section reported this table as
+> **−0.307 points** over **eleven** answers, sd 0.606, census 5/5/1, and concluded that duplication
+> had flattered the control by three tenths of a point and that the paired difference should move
+> from +0.085 to roughly +0.384. **Every one of those figures was wrong.** They are not in
+> `dedup_recheck.json`, they are not in `dedup_recheck.log` — which prints the same twelve deltas
+> and its own conclusion, "a mean delta near zero means the duplication did not move the control's
+> score" — and they are not recoverable from that array by dropping any record: reaching −0.307 over
+> eleven of these twelve would require deleting a value of +3.777, and the largest is +1.150. The
+> claim that "`fs:014` went 7.000 → 5.5" was a splice of two different records; `fs:014` is
+> `7.000 → 7.000, delta 0.000`, and 5.5 is `fs:034`'s re-judged value, down from 6.000 and nowhere
+> near the threshold. The prose was not a rounding of the array. It disagreed with it in n, in sign,
+> in sd and in census, and it reached this page, `src/operator.py` and a test docstring before
+> anyone compared the two. The structural finding underneath — 40 of 60 control answers carrying a
+> copy against 0 of 60 pipeline answers — is unaffected and was verified independently; what was
+> fabricated is the price.
 
 ### What that means for the numbers on this page
 
-The correction runs **in the pipeline's favour**, which is the opposite of the direction a reader
-would guess from a bug in the control arm's plumbing. It does not make the difference resolvable:
-+0.384 is still below the 0.654 this sample could detect at 80% power, and its standard error is
-0.233. But it is no longer near zero, and it is close to the 0.500 declared as the minimum effect of
-interest — so "the pipeline makes no difference" is not a conclusion this trial supports either.
+Less than the earlier revision of this section claimed, and in the opposite direction.
 
-It does change what may be said about the sign. **The confound and the effect are the same size.**
-A trial cannot report a difference of +0.085 while carrying an arm-asymmetric artifact worth 0.31,
-and no amount of caveat repairs that — the honest statement is that the paired difference is not
-quotable in either direction until the writer is fixed and the control arm re-run. The per-subject
-result is unaffected in shape, because the duplication is spread across subjects, but every
-per-subject difference inherits the same caveat.
+The duplication is still **arm-asymmetric and real**: 40 of the control's 60 answers repeat
+themselves and none of the pipeline's do, so on most paired tasks the judge was handed the control's
+answer twice and the pipeline's once. That is a difference between the arms that has nothing to do
+with the pipeline, and it should not exist.
+
+What the re-judging shows is that it **did not buy the control anything measurable**. +0.033 ± 0.183
+over twelve tasks does not move the published +0.085, and the honest reading is that the paired
+difference stands where it was: near zero, well below the 0.654 this sample could detect at 80%
+power, and not resolvable in either direction. The earlier revision used the fabricated 0.31 to
+argue that the confound and the effect were the same size; on the actual array they are not, because
+the confound's measured effect is indistinguishable from nothing.
+
+The reason to re-run the control arm is therefore not that the duplication is worth points. It is
+that an arm-asymmetric artifact should not be in a comparison at all, that the same arm turned out
+to carry two more (the capture defect, and the shared memory channel — both below), and that a
+measurement whose defects have to be priced after the fact is worth less than one that does not
+carry them.
 
 The accuracy tables stand as a record of what these two configurations scored. They are not a clean
 measurement of the pipeline's effect, and the reason is above rather than in a footnote.
 
-The writer is fixed on this branch, and the control arm has to be re-run before the paired
-difference means anything. `tests/test_the_reply_is_captured_once.py` holds the repair, and
+The writer is fixed on this branch. `tests/test_the_reply_is_captured_once.py` holds the repair, and
 reverting it fails three of its eight tests.
 
 ---
