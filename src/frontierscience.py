@@ -1417,7 +1417,7 @@ class _OperatorCall:
             paths=paths,
             resume=False,
         )
-        exit_code, stdout, _stderr, _session, _meta = self.operator._run_streaming_command(  # noqa: SLF001
+        exit_code, stdout, _stderr, _session, meta = self.operator._run_streaming_command(  # noqa: SLF001
             command=command,
             cwd=cwd,
             stage=FS_ANSWER_STAGE,
@@ -1426,7 +1426,21 @@ class _OperatorCall:
             mode=label,
             stdin_text=stdin_text,
         )
-        return exit_code, stdout or ""
+        # The assistant's own words when the reader offers them, the whole stream otherwise.
+        #
+        # This class is the one seam in the tree that keeps a *reply* rather than parsing a
+        # section out of it, and the whole stream is not the reply: a `tool_result` block is
+        # text under `content`, so a directory listing the model ran for itself arrives in
+        # `stdout` ahead of the answer. Six of twenty-eight `direct` answers in the sixty-task
+        # trial began that way, the answer intact underneath, and a content-refusal clause
+        # reading the top of the file refused all six.
+        #
+        # Falling back rather than requiring the field keeps a backend that does not label
+        # its events working: `CodexOperator` goes through the same seam, and an operator
+        # that reports no assistant blocks should produce a whole-stream answer rather than
+        # an empty one.
+        assistant = str((meta or {}).get("assistant_text") or "").strip()
+        return exit_code, assistant or (stdout or "")
 
 
 class DirectAnswerWriter(_OperatorCall):
