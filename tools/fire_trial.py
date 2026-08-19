@@ -42,6 +42,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import statistics
 import subprocess
 import sys
@@ -80,6 +81,14 @@ def make_plan(args: argparse.Namespace) -> dict[str, Any]:
         "model": args.model,
         "deadline_seconds": args.deadline_seconds,
         "repeats": args.repeats,
+        # Extra flags for the AutoR arms, frozen into the plan rather than passed at
+        # launch. A campaign's limits are part of what it measured: the first 35-task run
+        # was capped at `--max-attempts 2 --max-auto-skips 1`, chosen for a one-hour
+        # budget and never revisited, and *not one* of its pipeline cells was stopped by
+        # the clock -- 21 of 35 ended because a stage exhausted two attempts, was
+        # auto-skipped, and the second skip spent the budget. A limit that decides the
+        # result has to be recoverable from the artifact.
+        "agent_args": shlex.split(args.agent_args or ""),
         "autor_root": str(REPO_ROOT),
         "cells": [
             {
@@ -145,6 +154,7 @@ def launch(plan: dict, cell: dict) -> dict:
             "--workspace", str(root / "ws"),
             "--log-file", str(log_file),
         ]
+        command += list(plan.get("agent_args") or [])
         cwd = plan["bench_root"]
     else:
         command = [sys.executable, str(Path(plan["bench_root"]) / "agents" / arm["agent"] / "run.py")]
@@ -578,6 +588,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     plan_cmd.add_argument("--model", default="opus")
     plan_cmd.add_argument("--deadline-seconds", type=int, default=DEFAULT_DEADLINE)
     plan_cmd.add_argument("--repeats", type=int, default=1)
+    plan_cmd.add_argument("--agent-args", default="",
+                          help="Extra flags for fire_agent.py as ONE quoted string, e.g. "
+                               "--agent-args '--max-attempts 6 --max-auto-skips 3'. A list "
+                               "here would be eaten by this parser: argparse reads a bare "
+                               "--max-attempts after nargs='*' as its own unknown flag.")
 
     run_cmd = sub.add_parser("run")
     run_cmd.add_argument("--plan", required=True)
