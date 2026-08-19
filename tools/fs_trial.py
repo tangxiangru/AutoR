@@ -54,6 +54,7 @@ import json
 import os
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -600,36 +601,66 @@ def fake_score(plan: FsTrialPlan, state: Mapping[str, Any], out: Path) -> bool:
     return True
 
 
-def final_pass(plan: FsTrialPlan) -> None:
-    """Grade every finished, unrefused workspace, back to back, at the end.
+def _grade_one_draw(plan: FsTrialPlan, state: Mapping[str, Any], draw: int) -> tuple[str, str]:
+    """One draw, retried, returning ``(status_line, lost_name)`` with an empty name on success.
 
-    One continuous pass with one judge, serially, because that is the only arrangement
-    under which the published totals of the first task and the last were produced by the
-    same instrument. Progress is printed per file: the judge is the one part of this
-    trial nothing can warn about early, so an operator watching a wrong endpoint refuse
-    every call should see it on the second line rather than in the report.
+    Split out of :func:`final_pass` so the pass can run several at once. It returns its line
+    rather than printing it, because interleaved prints from a pool are how a progress log
+    stops being readable in the order things happened.
     """
-    lost: list[str] = []
-    for state in all_states(plan):
-        if state.get("phase") != "finished" or state.get("classification") != "ok":
-            continue
-        task, arm = str(state["task_key"]), str(state["arm"])
-        for draw in range(plan.judge_replicates):
-            out = score_path(plan, task, arm, int(state.get("attempt") or 1), draw)
-            if out.exists():
-                continue
-            for _try in range(JUDGE_TRIES):
-                if score_once(plan, state, out):
-                    break
-            else:
-                # Giving up quietly is how an arm scored once is published as an arm
-                # scored three times. The count reaches the report through
-                # `FsRunEnvironment.judge_replicates`; this is the operator's copy.
-                lost.append(out.name)
-                print(f"  LOST DRAW: {out.name} could not be scored in {JUDGE_TRIES} tries")
-                continue
+    task, arm = str(state["task_key"]), str(state["arm"])
+    out = score_path(plan, task, arm, int(state.get("attempt") or 1), draw)
+    if out.exists():
+        return "", ""
+    for _try in range(JUDGE_TRIES):
+        if score_once(plan, state, out):
             payload = read_json(out)
-            print(f"  scored {task}/{arm} draw {draw}: {payload.get('total_score')}")
+            return f"  scored {task}/{arm} draw {draw}: {payload.get('total_score')}", ""
+    # Giving up quietly is how an arm scored once is published as an arm scored three
+    # times. The count reaches the report through `FsRunEnvironment.judge_replicates`;
+    # this is the operator's copy.
+    return f"  LOST DRAW: {out.name} could not be scored in {JUDGE_TRIES} tries", out.name
+
+
+def final_pass(plan: FsTrialPlan) -> None:
+    """Grade every finished, unrefused workspace at the end, ``judge_concurrency`` at a time.
+
+    **This pass used to be serial, and the reason given for it was backwards.** The argument
+    was that one continuous serial pass is the only arrangement under which the first task's
+    total and the last task's were produced by the same instrument. But a pass that takes ten
+    hours straddles *more* of whatever drift a hosted judge deployment has than one that takes
+    forty minutes; serialising widens the window it was meant to close. Measured on the trial
+    of 2026-08-19: ninety-five answers at one draw each, one at a time, was still running six
+    hours after the last run finished.
+
+    ``judge_concurrency`` existed as a plan field the whole time and reached nothing but a
+    metadata line in the fake scorer -- a field recorded and never used, which is the same
+    defect this module's own arm validation refuses a plan for. It is now what it says.
+
+    Default 1, so an existing plan replays exactly what it measured, one call at a time.
+
+    Two properties the pool must not cost, both of which are what the serial version was
+    actually buying. Progress is still printed one line per draw as each finishes, because
+    the judge is the one part of this trial nothing can warn about early and an operator
+    watching a wrong endpoint refuse every call should see it on the second line rather than
+    in the report. And a lost draw is still named in ``final_pass.json`` rather than dropped,
+    because a draw that failed silently is an arm published as replicated when it was not.
+    """
+    work = [
+        (state, draw)
+        for state in all_states(plan)
+        if state.get("phase") == "finished" and state.get("classification") == "ok"
+        for draw in range(plan.judge_replicates)
+    ]
+    lost: list[str] = []
+    with ThreadPoolExecutor(max_workers=max(1, plan.judge_concurrency)) as pool:
+        futures = [pool.submit(_grade_one_draw, plan, state, draw) for state, draw in work]
+        for future in as_completed(futures):
+            line, lost_name = future.result()
+            if line:
+                print(line, flush=True)
+            if lost_name:
+                lost.append(lost_name)
     write_json(
         Path(plan.state_dir) / "final_pass.json",
         {"done": True, "at": time.time(), "unscored_draws": sorted(lost)},
