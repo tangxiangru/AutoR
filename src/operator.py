@@ -82,6 +82,43 @@ REPAIR_PROMPT_EXCERPT_CHARS = 80_000
 REPAIR_STDOUT_EXCERPT_CHARS = 40_000
 
 
+def _assistant_text_blocks(payload: Any) -> list[str]:
+    """The text the assistant itself wrote in one stream event, and nothing else.
+
+    `extract_stream_text_fragments` harvests every string under `text`, `content`,
+    `message`, `delta`, `summary` or `result`, wherever it sits. That is the right rule for
+    a caller that parses a delimited section out of the whole text and the wrong one for a
+    caller that keeps the reply, because a `tool_result` block is text under `content` too:
+    the output of a shell command the model ran lands in the reply beside the reply.
+
+    Measured on the sixty-task FrontierScience trial, where the `direct` arm is the caller
+    that keeps the reply. Six of twenty-eight of its answers began with a directory listing
+    the model had run for itself, the whole answer still present underneath -- one of them
+    62,491 characters ending in a complete chemistry conclusion. The same shape appeared in
+    three of sixty answers on the previous trial and was scored normally, so the behaviour is
+    not new; what is new is that a content-refusal clause now reads the top of the file and
+    refuses the run. The answer was never the problem. The capture was.
+
+    So this reads only `assistant` events, and inside them only `text` blocks. Tool calls,
+    tool results, system events and the terminal result restatement are all somebody else's
+    text. It is additive: `stdout_text` is composed exactly as before, so stages and the
+    sibling benchmark's report path see no change at all.
+    """
+    if not isinstance(payload, dict) or payload.get("type") != "assistant":
+        return []
+    message = payload.get("message")
+    if not isinstance(message, dict):
+        return []
+    blocks: list[str] = []
+    for block in message.get("content") or []:
+        if not isinstance(block, dict) or block.get("type") != "text":
+            continue
+        text = block.get("text")
+        if isinstance(text, str) and text.strip():
+            blocks.append(text.strip())
+    return blocks
+
+
 class ClaudeOperator:
     backend_name = "claude"
 
@@ -573,6 +610,11 @@ Original stderr:
         terminal_fragments: list[str] = []
         raw_lines: list[str] = []
         non_json_lines: list[str] = []
+        # The assistant's own words, kept apart from everything else in the stream. A caller
+        # that keeps a *reply* wants these; a caller that parses a delimited section out of
+        # the whole text does not care and still gets `stdout_text` unchanged. Collected here
+        # rather than reconstructed from `logs_raw.jsonl` afterwards, so the two cannot drift.
+        assistant_blocks: list[str] = []
         ended_with_newline = True
         observed_session_id: str | None = None
         tool_names: dict[str, str] = {}
@@ -638,6 +680,7 @@ Original stderr:
                     terminal_fragments.extend(extract_stream_text_fragments(payload))
                 else:
                     extracted_fragments.extend(extract_stream_text_fragments(payload))
+                assistant_blocks.extend(_assistant_text_blocks(payload))
                 self.ui.show_stream_event(payload, tool_names)
         except KeyboardInterrupt:
             elapsed = time.monotonic() - start_time
@@ -698,6 +741,7 @@ Original stderr:
                 "non_json_line_count": len(non_json_lines),
                 "malformed_json_count": malformed_json_count,
                 "observed_session_id": observed_session_id,
+                "assistant_text": "\n\n".join(assistant_blocks).strip(),
                 "timed_out": True,
                 RECORD_FIELD: spend.to_dict(),
             }
@@ -718,6 +762,7 @@ Original stderr:
             "non_json_line_count": len(non_json_lines),
             "malformed_json_count": malformed_json_count,
             "observed_session_id": observed_session_id,
+            "assistant_text": "\n\n".join(assistant_blocks).strip(),
             RECORD_FIELD: spend.to_dict(),
         }
 
