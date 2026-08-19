@@ -516,6 +516,9 @@ Original stderr:
             stdin_thread.start()
 
         extracted_fragments: list[str] = []
+        # The terminal result event's text, kept apart from the turn's own. See
+        # `_compose_stdout_text` for why it is a fallback rather than more content.
+        terminal_fragments: list[str] = []
         raw_lines: list[str] = []
         non_json_lines: list[str] = []
         ended_with_newline = True
@@ -579,7 +582,10 @@ Original stderr:
                     spend = spend + CallCost.from_result_event(payload)
                 if observed_session_id is None:
                     observed_session_id = self._extract_session_id(payload)
-                extracted_fragments.extend(extract_stream_text_fragments(payload))
+                if is_result_event(payload):
+                    terminal_fragments.extend(extract_stream_text_fragments(payload))
+                else:
+                    extracted_fragments.extend(extract_stream_text_fragments(payload))
                 self.ui.show_stream_event(payload, tool_names)
         except KeyboardInterrupt:
             elapsed = time.monotonic() - start_time
@@ -627,6 +633,7 @@ Original stderr:
             )
             stdout_text = self._compose_stdout_text(
                 extracted_fragments=extracted_fragments,
+                terminal_fragments=terminal_fragments,
                 non_json_lines=non_json_lines,
                 raw_lines=raw_lines,
             )
@@ -650,6 +657,7 @@ Original stderr:
 
         stdout_text = self._compose_stdout_text(
             extracted_fragments=extracted_fragments,
+            terminal_fragments=terminal_fragments,
             non_json_lines=non_json_lines,
             raw_lines=raw_lines,
         )
@@ -664,10 +672,30 @@ Original stderr:
     def _compose_stdout_text(
         self,
         extracted_fragments: list[str],
+        terminal_fragments: list[str],
         non_json_lines: list[str],
         raw_lines: list[str],
     ) -> str:
+        """Everything the turn said, once.
+
+        The terminal result event restates the whole reply, so harvesting it alongside the
+        assistant text hands every caller that keeps the raw stream two copies. Stage-shaped
+        callers never noticed: they parse a delimited section out of the text and a second
+        copy of it changes nothing. The callers that keep the whole reply did notice, and
+        nobody was watching -- measured on the sixty-task FrontierScience trial, **fifty-five
+        of the control arm's sixty answers carried the answer twice** (forty of them an exact
+        byte-for-byte halving) against none of the pipeline arm's, because only the control
+        arm keeps the reply. That asymmetry sat inside a paired comparison: re-judging eleven
+        of them once de-duplicated moved the score by -0.307 points on average, which is the
+        same size as the effect the trial was measuring.
+
+        So the result event is a fallback, not a contribution. It is the reply only when
+        nothing else captured one -- a turn that emitted no assistant text at all, which is
+        the case the harvest was presumably added for.
+        """
         fragment_text = "\n".join(fragment for fragment in extracted_fragments if fragment).strip()
+        if not fragment_text:
+            fragment_text = "\n".join(f for f in terminal_fragments if f).strip()
         non_json_text = "\n".join(line for line in non_json_lines if line).strip()
         raw_text = "\n".join(line for line in raw_lines if line).strip()
 
