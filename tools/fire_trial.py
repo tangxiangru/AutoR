@@ -61,6 +61,12 @@ ARMS = {
     "autor-pipeline": {"kind": "autor", "profile": "pipeline"},
     "autor-direct": {"kind": "autor", "profile": "direct"},
     "claude-stock": {"kind": "stock", "agent": "claude"},
+    # Upstream's agent with none of this file's task-facing additions: no wall-clock
+    # sentence, no request for a conclusion file, and Claude Code's own `WebSearch`
+    # instead of the shared Gemini server. It keeps only the fixes that decide whether a
+    # run can be *recorded*, because a baseline that cannot be scored is a gap in the
+    # table rather than a measurement.
+    "claude-bare": {"kind": "stock", "agent": "claude", "env": {"FIREBENCH_BARE": "1"}},
 }
 
 #: Matches ``FIRE-Bench/run_agent.py``'s own ``TIME_LIMIT``. Every arm gets the same one,
@@ -159,6 +165,7 @@ def launch(plan: dict, cell: dict) -> dict:
     else:
         command = [sys.executable, str(Path(plan["bench_root"]) / "agents" / arm["agent"] / "run.py")]
         env.update({"AGENT_ID": cell["arm"], "TASK_ID": cell["task"], "LLM_MODEL": plan["model"]})
+        env.update(arm.get("env") or {})
         # So the stock arm can build the same search-server config the AutoR arms use.
         # Without it the two arms reach the web through different tools, and the
         # difference lands in the score as if it were a difference in reasoning.

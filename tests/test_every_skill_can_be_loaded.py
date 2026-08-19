@@ -16,17 +16,21 @@ Dead weight is not the only cost. The pack's own measured failure is that a run 
 1.75 skills out of roughly thirty offered, so every description that cannot pay for itself
 makes the ones that can slightly less likely to be read.
 
-**Scope.** ResearchClawBench's forty briefs are the corpus, because they are the only task
-statements this repository has in bulk. A skill can be legitimately unreachable over them
-and useful on a real research goal — so this asserts reachability over the corpus and names
-the exemption list for skills that are deliberately outside it. The list is empty today, and
-an entry needs a reason.
+**Scope.** The corpus is every set of task statements this box has in bulk:
+ResearchClawBench's forty, and FIRE-Bench's thirty-five when that checkout is present. It
+was ResearchClawBench alone until a skill written for the claim-counted family failed here
+— correctly unreachable over forty checklist briefs, and reachable over thirty-four of
+thirty-five of the other kind. Exempting it would have recorded a routing success as a
+routing hole, and the next such skill would have been exempted by precedent. A skill can
+still be legitimately unreachable over both corpora and useful on a real research goal, so
+the exemption list stays and an entry needs a reason.
 """
 
 from __future__ import annotations
 
 import collections
 import json
+import os
 import unittest
 from pathlib import Path
 
@@ -34,6 +38,11 @@ from src.run_skills import read_skill_pack, select_run_skills
 
 REPO = Path(__file__).resolve().parent.parent
 BENCH = Path("/home/robtang_google_com/RCB/tasks")
+
+#: The second corpus, used when it is on disk. Its briefs are a different research shape --
+#: rediscover a published finding under a clock, deliverable a two-sentence conclusion --
+#: so a predicate that selects nothing here and everything there is doing its job.
+FIRE = Path(os.environ.get("FIREBENCH_ROOT", Path.home() / "FIRE-Bench")).expanduser()
 
 #: Skills that no benchmark brief selects, and the reason that is correct. A skill written
 #: for a research shape the forty tasks do not contain belongs here rather than in a regex
@@ -43,10 +52,17 @@ UNREACHABLE_ON_PURPOSE: dict[str, str] = {}
 
 def briefs() -> dict[str, str]:
     out: dict[str, str] = {}
-    for directory in sorted(BENCH.iterdir()):
-        info = directory / "task_info.json"
-        if info.is_file():
-            out[directory.name] = json.loads(info.read_text(encoding="utf-8"))["task"]
+    if BENCH.is_dir():
+        for directory in sorted(BENCH.iterdir()):
+            info = directory / "task_info.json"
+            if info.is_file():
+                out[directory.name] = json.loads(info.read_text(encoding="utf-8"))["task"]
+    papers = FIRE / "benchmark" / "papers"
+    if papers.is_dir():
+        for statement in sorted(papers.glob("*/instruction/instruction.txt")):
+            # Prefixed so `task.split("_")[0]` -- which the selector reads as a discipline --
+            # cannot collide with a ResearchClawBench field name.
+            out["fire_" + statement.parent.parent.name] = statement.read_text(encoding="utf-8")
     return out
 
 
