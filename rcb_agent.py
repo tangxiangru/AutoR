@@ -425,6 +425,13 @@ def create_operator(
         stage_timeout=stage_timeout,
         web_search_mcp=web_search_mcp,
         disallowed_tools=disallowed_tools,
+        # A benchmark run must not start from another run's notes. #298 closed this for
+        # FrontierScience and left ResearchClawBench open; the store is keyed on an
+        # ancestor of the working directory, so every RCB run under one results directory
+        # shared one `MEMORY.md`. That is worse for a paired ablation than for a single
+        # arm: both arms run the same forty tasks, so whichever arm reaches a task first
+        # writes notes about that exact task and the other reads them at session start.
+        isolate_auto_memory=True,
     )
 
 

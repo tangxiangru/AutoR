@@ -81,7 +81,11 @@ class TheFlagTests(unittest.TestCase):
         does not recognise, so a misspelling produces a run that looks isolated in its own
         metadata, reads the shared store anyway, and reports nothing unusual. The spelling
         was taken off the binary's own symbol table and confirmed by probing
-        `memory_paths` -- `null` with the flag, the shared path without it.
+        `memory_paths`: the shared path without the flag, and with it **no `memory_paths`
+        key at all** rather than a `null` one. Re-probed from `/rmeng_data/robtang` on
+        2026-08-19 against 2.1.229, because the difference matters to whoever reads an
+        init event next -- a check written as `init["memory_paths"] is None` raises
+        `KeyError` on exactly the run it exists to recognise.
         """
         self.assertEqual(
             list(settings_payloads(command_for(isolate_auto_memory=True))[0]), ["autoMemoryEnabled"]
@@ -171,6 +175,49 @@ class WhatTheFrontEndAsksForTests(unittest.TestCase):
         from fs_agent import auto_memory_isolation_for
 
         self.assertIs(auto_memory_isolation_for(object(), "claude"), False)
+
+
+class WhatTheResearchClawBenchFrontEndAsksForTests(unittest.TestCase):
+    """The sibling benchmark, whose paired ablation is the worst case for the channel.
+
+    FrontierScience runs one arm per task. ResearchClawBench's topology ablation runs
+    *two* arms over the same forty tasks under one results directory, so the store is not
+    a channel from last week's run into this one -- it is a channel between the two things
+    being compared, carrying notes filed under the name of the task both arms are working
+    on right now. Measured on 2026-08-19 while the first attempt was in flight: 378 writes
+    to `-rmeng-data-robtang/memory/` that day, 29 of them named after a specific task in
+    `tasks40.txt`.
+
+    The direction is the damaging one. A channel that makes each arm partly a copy of the
+    other shrinks the difference the ablation exists to measure, so a real topology effect
+    would present as absent, and the run would look like a clean null result.
+    """
+
+    def operator_for(self, backend: str):
+        from rcb_agent import create_operator
+
+        return create_operator(
+            backend=backend, model="opus", fake_mode=True, ui=None, stage_timeout=60,
+            disallowed_tools=["WebSearch"], codex_sandbox="danger-full-access",
+            codex_command="codex",
+        )
+
+    def test_the_researchclawbench_front_end_isolates(self) -> None:
+        self.assertIs(self.operator_for("claude").isolate_auto_memory, True)
+
+    def test_the_command_it_builds_carries_the_flag(self) -> None:
+        """Not just the attribute: the argument that reaches the binary.
+
+        The attribute assertion above passes on a front end that sets the field on an
+        operator whose command builder never reads it. This one fails there.
+        """
+        command = self.operator_for("claude")._build_cli_command(  # noqa: SLF001
+            Path("/tmp/p.md"), "sess-1", resume=False
+        )
+        self.assertEqual(settings_payloads(command), [{"autoMemoryEnabled": False}])
+
+    def test_a_codex_seat_is_untouched_here_too(self) -> None:
+        self.assertIs(self.operator_for("codex").isolate_auto_memory, False)
 
 
 class WhatTheRecordSaysTests(unittest.TestCase):
