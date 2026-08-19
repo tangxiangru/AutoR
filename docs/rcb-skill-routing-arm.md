@@ -182,6 +182,8 @@ a restart each and bought nothing measurable.
 
 ## 6. The analysis, written before the numbers
 
+*Landed 2026-08-18, with 37 of 40 tasks unscored. Section 7 reports against it item by item.*
+
 When all forty `_score_gpt51.json` files exist, report:
 
 1. **The paired difference against `control_bare_cc` and against `arm_2ffaeb4`**,
@@ -217,7 +219,228 @@ looked for.
 
 ---
 
-## 7. Reproducing it
+## 7. The result
+
+39 of 40 tasks. `Earth_003` is still running — it was OOM-killed once and lost twice
+more to the overlap-step failure in §4, so its absence is **not random** and it is
+the task most likely to move a mean.
+
+The instrument was checked before anything was compared. All three arms:
+`bench_revision bfffc480`, `draws 3`, `judge gpt-5.1`, on every workspace.
+
+### 7.1 Headline (§6.1)
+
+| arm | mean over the 39 |
+|---|---:|
+| **`full40_pins` (bb32a8c)** | **34.65** |
+| `control_bare_cc` | 31.60 |
+| `arm_2ffaeb4` | 28.81 |
+
+| paired | difference | wins |
+|---|---:|---:|
+| vs `arm_2ffaeb4` | **+5.84 ± 1.99** | 26/39 |
+| vs `control_bare_cc` | **+3.05 ± 1.58** | 25/39 |
+
+Excluding the three runs of §7.6 that did not finish cleanly: +6.01 ± 2.11 and
++3.22 ± 1.69. **This is the first arm in this sequence that is ahead of the bare
+agent it wraps** — the four before it scored 23.07, 28.75, 28.77 and 28.81 against
+the control's 31.5.
+
+### 7.2 The pre-specified split (§6.2), and regression to the mean
+
+| group | n | vs `arm_2ffaeb4` | wins |
+|---|---:|---:|---:|
+| pinned | 15 | **+14.11 ± 2.63** | 14/15 |
+| unpinned | 24 | **+0.68 ± 2.22** | 12/24 |
+
+The pinned group's baseline mean is 20.85 against the unpinned group's 33.78 —
+they were selected for being bad, exactly as §6.2 warned, so some of that +14 is
+regression to the mean and none of it is free. Fitting the effect on the *unpinned*
+tasks gives `delta = 14.02 − 0.395 × baseline`; a slope that negative is regression
+to the mean, and applied to the pinned group's baselines it predicts **+5.8 with no
+pins at all**.
+
+**Pin excess over that prediction: +8.32 ± 2.52** (+7.70 ± 2.70 excluding the
+unclean runs). A second, cruder control agrees: the twelve lowest-scoring *unpinned*
+tasks, baseline 23.67, gained +3.94 ± 3.63 where the pinned fifteen at baseline
+20.85 gained +14.11.
+
+### 7.3 Every pin against the criterion it aimed at (§6.3)
+
+**In all fifteen pinned tasks, the criterion that moved most moved up.** The pins
+are not raising task totals by some diffuse route; the specific criterion each was
+written for is the one that changed:
+
+| task | pinned skill | that criterion |
+|---|---|---:|
+| Physics_000 | `run-the-conditions-the-source-ran` | 10 → **56** |
+| Neuroscience_003 | `run-the-conditions-the-source-ran` | 6 → **51** |
+| Astronomy_001 | `the-canonical-figure` | 9 → **49** |
+| Information_002 | `the-supplied-item-is-the-graded-unit` | 5 → **42** |
+| Math_003 | `run-the-conditions-the-source-ran` | 1 → **38** |
+| Chemistry_000 | `the-attribution-is-the-deliverable` | 8 → **37** |
+| Material_001 | `material-landmark-scalars-in-physical-units` | 1 → **35** |
+
+### 7.4 The two pins aimed at uncontested zero (§6.4)
+
+One worked and one did not, which is the most a two-case split can say.
+
+`Astronomy_001` — target criterion, weight 0.40, both arms previously 9 and 16:
+**→ 49**, task +12.40.
+
+`Neuroscience_000` — of its three criteria that *both* arms scored 0 on, one went
+0 → 21 and the other two stayed at 0 and 1. The task still fell 1.67, because it
+**lost ground elsewhere**: criterion 0 went 33 → 5. Aiming at an empty cell moved
+the empty cell and cost more than it gained. §6.4 called this the best target for
+raising a score and the worst for demonstrating anything; on this evidence it is
+not reliably even the first.
+
+### 7.5 The falsifiable prediction (§6.5) — met
+
+Skill launches, counted from the `Skill` tool-use records and attributed to the
+stage session that made each one:
+
+| stage | 2ffaeb4 | bb32a8c |
+|---|---:|---:|
+| 01 literature survey | 31 | 104 |
+| 02 hypothesis generation | 14 | 71 |
+| 03 study design | 25 | 67 |
+| 04 implementation | 3 | 6 |
+| **05 experimentation** | **0** | **28** |
+| 06 analysis | 2 | 82 |
+| 07 writing | 3 | 36 |
+| **total** | **78** | **394** |
+| **stages 05–07** | **5** | **146** |
+
+The routing works as a delivery mechanism. Note what that does *not* buy: launches
+rose five-fold across every task, and the unpinned tasks gained 0.68. **Being read
+is not the same as being useful.**
+
+### 7.6 Runs that did not finish cleanly (§6.6)
+
+`Chemistry_000`, `Information_003` and `Physics_001` carry
+`pipeline_completed: false` or `report_source: synthesized` in their exports. The
+arm predates #262, so this had to be read off the export events rather than
+`_meta.json`. Excluding them moves the headline by +0.17.
+
+### 7.7 Where the movement actually is
+
+Weight by score band, over the 39 tasks:
+
+| | 0 absent | 1–20 | 21–40 shallow | 41–50 comparable | 51+ beats paper |
+|---|---:|---:|---:|---:|---:|
+| `arm_2ffaeb4` | 6.2% | 22.6% | 37.3% | 20.3% | 8.8% |
+| **`bb32a8c`** | **2.4%** | **15.4%** | 40.0% | 22.7% | **14.6%** |
+| control | 8.5% | 18.7% | 32.2% | 24.8% | 13.3% |
+
+**The gain is absent criteria being filled in, not shallow ones being deepened.**
+Weight scoring zero more than halved, 1–20 fell by seven points, and what arrived
+landed at the top (51+ nearly doubled). The shallow band did not shrink; it grew.
+
+By criterion type — and image criteria carry 60.6% of the weight:
+
+| | image | text |
+|---|---:|---:|
+| `arm_2ffaeb4` | 29.1 | 28.3 |
+| **`bb32a8c`** | **36.5** | **31.9** |
+| control | 31.7 | 31.4 |
+
+Image is where the arm passes the control (+4.8); on text it merely draws level.
+
+The two groups differ in kind, not just in size. Pinned tasks moved weight into
+"comparable to the paper": **3.7% → 23.7%**, a six-fold rise, with absent weight
+falling 9.0% → 1.3%. Unpinned tasks moved weight *out* of comparable
+(30.8% → 22.1%) and into both shallow (33.0% → 38.8%) and beats-paper
+(10.8% → 15.4%). Their mean is flat because those cancel: the non-pin changes made
+outcomes **more variable, not better**.
+
+---
+
+## 8. Why, and what to do next
+
+### 8.1 The attribution problem, stated plainly
+
+`2ffaeb4..bb32a8c` is **29 commits, 128 files, +22,438 lines**. Three of them are
+the routing layers this document is named for. So the clean reading of the split in
+§7.2 is uncomfortable:
+
+- **The task-id pin table is worth about +8 points** above what regression to the
+  mean predicts, and the per-criterion evidence in §7.3 says it works for the
+  reason claimed.
+- **Everything else in those 29 commits — including #237 and #242 — is worth
+  +0.68 ± 2.22 together.** Statistically nothing.
+
+A lookup table built from the answer key beat a month of architecture. That is the
+result, and the next section is mostly about how little of it can be banked.
+
+### 8.2 What is not yet known
+
+**The pins were built from this benchmark's own scorecard.** The +8.32 is an
+in-sample number: the criteria were read, the skills matched to them, and the same
+tasks re-run. It measures that the mechanism *can* deliver a targeted skill and that
+the targeted criterion *does* move — both real and both useful — but it says nothing
+about a task nobody has scored yet, which is the only case that matters outside a
+leaderboard.
+
+**The honest experiment is a hold-out.** Build the pin table from half the tasks,
+measure on the other half. Until that is run, "+3.05 against bare Claude Code"
+should be quoted as *in-sample* every time it is quoted.
+
+### 8.3 Where the remaining points are
+
+Lifting every criterion in a band to 45 ("comparable to the paper") is worth, per
+arm point:
+
+| band | criteria | weight | worth |
+|---|---:|---:|---:|
+| 0–20 absent or empty | 28 | 17.8% | **+6.33** |
+| 21–40 flawed or shallow | 54 | **40.0%** | **+6.00** |
+| 41–50 comparable | 35 | 22.7% | +0.10 |
+
+Two observations follow.
+
+**The shallow band is now the biggest single block of weight, and it grew.** It is
+the "methodology is right and the number is wrong" band — a reproduction that lands
+an order of magnitude off, a trend that comes out inverted. `close-the-gap-to-the-published-number`
+was written for exactly this and the band did not move, so the first question is
+whether it fires at all and what it changes when it does. The pins moved criteria
+from *absent* to *present*; nothing yet moves them from *present and wrong* to
+*right*, and that is a different kind of defect — it needs compute spent chasing a
+discrepancy, not a paragraph of advice.
+
+**Fourteen of thirty-nine tasks are still behind the bare agent**, led by
+Information_000 (−18.1), Neuroscience_003 (−15.6) and Information_001 (−14.7).
+Neuroscience_003 is pinned and gained 15 points and is *still* 15.6 behind, which
+means its remaining loss is not the thing the pin was aimed at.
+
+### 8.4 Four things worth doing, in order
+
+1. **Run the hold-out.** Split the pin table, rebuild from half, measure on the
+   other half. Nothing else here can be banked until this exists.
+2. **Attack the 21–40 band.** 40% of the weight, and it grew under everything tried
+   so far. Start by measuring whether `close-the-gap-to-the-published-number` is
+   read at Stage 05 and what the run does in the hour after it is.
+3. **Find the source of the unpinned dispersion.** Something in the 26 non-pin
+   commits both helps and hurts by roughly equal amounts. A change that raises
+   variance without raising the mean is worth locating before more are added on
+   top of it.
+4. **Retire the Neuroscience_000 pin.** It moved its empty cell and lost more
+   elsewhere. Aiming at criteria both arms scored zero on is the least defensible
+   thing in the table and it now has a measured failure beside its one success.
+
+### 8.5 A note on the pack's size
+
+At `bb32a8c` the pack held 45 skills. It has since grown past 160, with more than
+40 task-scoped. The measurement that started all of this was that a run reads
+**1.75 skills out of the sixteen it is offered**, and that number rose to roughly
+nine here only because prompts began naming them. Descriptions compete; a pack that
+grows faster than the naming does returns to the state this document opens with. A
+census of launches per skill, run against the next arm, would say whether that has
+already happened.
+
+---
+
+## 9. Reproducing it
 
 ```bash
 # The pinned tree the arm measures
