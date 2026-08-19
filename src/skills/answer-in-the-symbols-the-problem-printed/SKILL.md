@@ -85,41 +85,44 @@ So:
 Measured on the sixty-task FrontierScience-Research trial, one draw per task,
 judged by gpt-5.1 at high effort. Two physics tasks carry **4.575 of the 5.100**
 points the pipeline arm lost across eleven complete physics pairs; the other
-nine average −0.058.
+nine average −0.058. Bracketed material inside a quoted judgement is a redaction
+and not the grader's words.
 
-**fs:006, −1.575, confirmed.** The sheet's Hamiltonian is printed with two
-symbols. The pipeline's Stage 02 stage document uses a substitute symbol 30
-times and the sheet's two symbols **0 times each**; its answer inherits the
-substitution 72 times against a single use of the printed symbol, while the
-control uses the printed symbol 25 times and the substitute 0. The renaming
-touches six separate criteria. On item 3 the grader wrote of the control `the
-specific form ... is not written. Score: 0/0.5`; on item 6 the control's summary
-table gave the printed form with its rate variable intact and was marked `This
-matches exactly` for the full 0.5, while the pipeline substituted the rate away
-and produced an algebraically equivalent pair that does not contain it. On
-item 13 the pipeline solved a different differential equation, because it took
-its limiting case in the substituted variable rather than in the printed one —
-so the structure the criterion asks for could not appear at all, and one
-function in the printed set appears **0 times** in the answer.
+**fs:006, physics, −1.575 against the pipeline arm, confirmed.** The sheet
+prints its own symbols for the quantities it asks about. The pipeline's Stage 02
+stage document uses a substitute symbol 30 times and the printed notation **not
+at all**; its answer inherits the substitution 72 times against a single use of
+a printed symbol, while the control uses the printed symbol 25 times and the
+substitute 0. The renaming reaches criteria spread across the whole sheet rather
+than one corner of it. The grader's judgements on the affected items run in both
+directions: on one, `the specific form ... is not written. Score: 0/0.5` against
+the control; on another, `This matches exactly` for full credit where the
+control had kept the printed form intact and the pipeline had substituted it
+away for an algebraically equivalent expression. On a third the pipeline
+answered a different question from the one asked, having carried its own
+variable into a step the criterion was checked against in the printed one; the
+structure the criterion asks for could not appear at all, and one of the printed
+quantities appears **0 times** in the answer.
 
-Record the counter-evidence: fs:006 is not monotone. On item 8, worth 1.0, the
-control was marked `The specific [equations that item names] are not written
-anywhere in the answer. Score: 0/1.0` while the pipeline wrote part of that set.
-This skill is about which symbols, not about how much.
+Record the counter-evidence: fs:006 is not monotone. On one item worth 1.0 the
+control was marked `The specific [expressions that item names] are not written
+anywhere in the answer. Score: 0/1.0` while the pipeline wrote part of what was
+asked for. This skill is about which symbols, not about how much.
 
-**fs:009, −3.000, inferred, and the inference is flagged.** The pipeline arm's
-per-item reasoning was overwritten on disk and cannot be quoted; what follows
-is a comparison of the two answers against the criteria. Item 3 carries 3.0 of
-the task's 10 and the control was scored `This is the complete solution for [the
-dynamics item 3 names] ... Score: 3.0/3.0`. The structurally identical solution
-is present in the pipeline answer at 26% of the document — and 400 characters
-later it is replaced by a boxed limiting form, under a principal section
-heading naming the approximation, with the exact solution carried through only
-under a route labelled a cross-check at 69% of the document. The
-approximation's name appears 9 times against the control's 2. The pipeline
-scored 1.0 of 10. The
-placement is measured; the causal link to item 3 is not, because the reasoning
-file is gone.
+**fs:009, physics, −3.000 against the pipeline arm, inferred, and the inference
+is flagged.** The pipeline arm's per-item reasoning was overwritten on disk and
+cannot be quoted; what follows is a comparison of the two answers against the
+criteria. The heaviest single item on the sheet went to the control at full
+marks, on a judgement of the shape `This is the complete solution ... full
+marks` — one of several shapes seen in the trial wherever an exact result was
+written out on the main line. The structurally identical solution is present in
+the pipeline answer at 26% of the document — and 400 characters later it is
+replaced by a boxed limiting form, under a principal section heading naming the
+approximation, with the exact solution carried through only under a route
+labelled a cross-check at 69% of the document. The approximation's name appears
+9 times against the control's 2. The pipeline took a tenth of the available
+points. The placement is measured; the causal link to that item is not, because
+the reasoning file is gone.
 
 Two candidate explanations are excluded quantitatively and must not be designed
 against: the pipeline's physics answers are **not shorter** (unique-content ratio
@@ -134,6 +137,7 @@ sheet's criteria ask for intermediate quantities in the units the sheet itself
 works in, an answer that silently carries them in another unit system loses
 those items; the trial has one task where that happened to **both** arms at
 once, so it is an observation about the failure mode and not a gain either arm
-made, and no advice here is designed against it. On fs:036 the control merged
-two opposing contributions into one row and scored 0.0/1.0; nothing here
-licenses that merge. The rule against renaming is the same rule chemistry needs.
+made, and no advice here is designed against it. On fs:036 the control collapsed
+content the criteria credited separately into a single row and scored 0.0/1.0
+for it; nothing here licenses that collapse. The rule against renaming is the
+same rule chemistry needs.
