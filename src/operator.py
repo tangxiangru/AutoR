@@ -132,6 +132,7 @@ class ClaudeOperator:
         stage_timeout: int = 14400,
         web_search_mcp: bool = False,
         disallowed_tools: Sequence[str] | None = None,
+        isolate_auto_memory: bool = False,
     ) -> None:
         self.command = command
         self.model = model
@@ -150,6 +151,29 @@ class ClaudeOperator:
         # `disallowed_tools_for` is the only thing that fills it today, for a run whose
         # protocol says it must not browse.
         self.disallowed_tools = tuple(disallowed_tools or ())
+        # Whether to cut the agent off from Claude Code's cross-session memory store.
+        #
+        # The store is keyed on an ancestor of the run's working directory, not on the run:
+        # measured on this box, a probe in `/rmeng_data/robtang/memprobe` and a stage whose
+        # cwd was `/rmeng_data/robtang/fs-trial-skills/workspaces/fs024_.../.autor/<ts>`
+        # both reported the same `memory_paths.auto`. Every run under one benchmark's
+        # results directory therefore shares one store, and its `MEMORY.md` index is loaded
+        # into each agent's context at session start.
+        #
+        # That is a channel between runs of a benchmark, and it is used. On the sixty-task
+        # FrontierScience trial the two most-read files in a 1,456-file store were notes an
+        # earlier run had written about the harness's own scoring mechanics -- 92 and 56
+        # reads -- and in the chemistry block the read was the *first* tool call of the run,
+        # in both arms, before the agent looked at the problem. It is also asymmetric: 32 of
+        # 37 pipeline runs reached the store against 8 of 37 direct ones, so it does not
+        # cancel out of a paired comparison.
+        #
+        # Default off, and deliberately. AutoR's ordinary use is a researcher's own project
+        # where carrying notes between sessions is the feature working as intended; only a
+        # measurement wants each run to start from the same state as every other. Benchmark
+        # front ends opt in, and `build_operator_meta` records which way it was set so a run
+        # can say whether the channel was open rather than leaving a reader to assume.
+        self.isolate_auto_memory = isolate_auto_memory
 
     def run_stage(
         self,
@@ -782,9 +806,12 @@ Original stderr:
         nobody was watching -- measured on the sixty-task FrontierScience trial, **fifty-five
         of the control arm's sixty answers carried the answer twice** (forty of them an exact
         byte-for-byte halving) against none of the pipeline arm's, because only the control
-        arm keeps the reply. That asymmetry sat inside a paired comparison: re-judging eleven
-        of them once de-duplicated moved the score by -0.307 points on average, which is the
-        same size as the effect the trial was measuring.
+        arm keeps the reply. That asymmetry sat inside a paired comparison, which is reason
+        enough to repair it -- and note that it is the *asymmetry* that is the reason, not a
+        price: re-judging twelve of them once de-duplicated moved the score by +0.033 points
+        on average (sd 0.633, seven unchanged), so the doubling bought the arm that had it
+        nothing measurable. An earlier revision of this docstring said -0.307 over eleven,
+        which is not in the array it cited; see `docs/frontierscience-results.md`.
 
         So the result event is a fallback, not a contribution. It is the reply only when
         nothing else captured one -- a turn that emitted no assistant text at all, which is
@@ -1777,6 +1804,18 @@ Original stderr:
             "bypassPermissions",
             "--dangerously-skip-permissions",
         ]
+        if self.isolate_auto_memory:
+            # `--settings` adds to the settings already in force rather than replacing them,
+            # so this turns off one feature and leaves the user's auth, model and env alone
+            # -- checked against the real binary (2.1.229), where a run carrying this flag
+            # still reached its configured backend.
+            #
+            # How to check a transcript for it, and the trap: the isolated run's `init` event
+            # **omits `memory_paths` entirely** rather than setting it to null. So
+            # `init["memory_paths"] is None` raises `KeyError` on precisely the run the check
+            # exists to recognise, and `init.get("memory_paths")` cannot tell an isolated run
+            # from a malformed event. Test `"memory_paths" not in init`.
+            command.extend(["--settings", json.dumps({"autoMemoryEnabled": False})])
         if mcp_config is not None:
             # Not --strict-mcp-config: that would also drop whatever servers the user has
             # configured for their own environment, which is not AutoR's call to make.

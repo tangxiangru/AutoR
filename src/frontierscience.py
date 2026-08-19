@@ -1903,6 +1903,7 @@ def build_fs_meta(
     disallowed_tools_by_seat: Mapping[str, Sequence[str]] | None = None,
     skill_forced: Sequence[str] = (),
     skill_withheld: Sequence[str] = (),
+    auto_memory_isolated: bool | None = None,
     witness: Mapping[str, Any] | None = None,
     extra: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -1939,6 +1940,15 @@ def build_fs_meta(
     ``--no-forced-skills`` was denied the ones its sibling got. Only the second is a
     difference between two configurations of one producer, so it is the one the paired
     trial folds into its environment digest.
+
+    **``auto_memory_isolated`` is tri-state, and the third state is the point.** ``True``
+    means the run was cut off from Claude Code's cross-session memory store, ``False`` that
+    it was not, and ``None`` that this record predates the field -- which is the honest
+    answer for the sixty-task trials already on disk, where the store was open and nobody
+    had asked. Defaulting the missing case to ``True`` would let those runs claim an
+    isolation they did not have; defaulting it to ``False`` would assert a channel was used
+    by runs nobody measured. A reader comparing across trials has to be able to tell "not
+    isolated" from "not recorded", because only the first is a fact about the run.
     """
     payload: dict[str, Any] = {
         "schema": FS_META_SCHEMA,
@@ -1969,6 +1979,9 @@ def build_fs_meta(
         # order, and the trial hashes this list into a comparability digest -- two runs
         # that installed the same five skills must not be told they were measured in two
         # environments because a set iterated differently.
+        "auto_memory_isolated": (
+            None if auto_memory_isolated is None else bool(auto_memory_isolated)
+        ),
         "skill_forced": sorted(skill_forced),
         "skill_withheld": sorted(skill_withheld),
         "pipeline_completed": bool(pipeline_completed),

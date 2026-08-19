@@ -452,6 +452,24 @@ def default_model_for(backend: str) -> str:
     return "default" if backend == "codex" else "sonnet"
 
 
+def auto_memory_isolation_for(operator: object, backend: str) -> bool | None:
+    """Whether this run was cut off from Claude Code's cross-session memory store.
+
+    Read off the operator that ran the stages rather than off the flags that built it, and
+    only when that operator is the one the field is about.
+
+    The second half is the trap. :class:`CodexOperator` subclasses :class:`ClaudeOperator`,
+    so it inherits ``isolate_auto_memory`` and a plain attribute read reports ``False`` for
+    a codex run -- "Claude Code's memory store was reachable", asserted of a run that never
+    started Claude Code. The store is not a fact about that run in either direction, and
+    ``None`` is the state that says so. It reads the same as a record written before the
+    field existed, which is the right reading: in both cases nobody measured this.
+    """
+    if backend != "claude":
+        return None
+    return bool(getattr(operator, "isolate_auto_memory", False))
+
+
 def create_operator(
     backend: str,
     *,
@@ -494,6 +512,12 @@ def create_operator(
         stage_timeout=stage_timeout,
         web_search_mcp=False,
         disallowed_tools=disallowed_tools,
+        # A benchmark run must not read the notes another run left behind. Not hypothetical
+        # here: measured on the sixty-task trial, the store this cuts off held two notes an
+        # earlier run had written about how to satisfy this harness's own exit clauses, and
+        # in the chemistry block reading them was the first thing runs in *both* arms did.
+        # See `ClaudeOperator.isolate_auto_memory` for the measurement.
+        isolate_auto_memory=True,
     )
 
 
@@ -892,6 +916,7 @@ def run(args: argparse.Namespace) -> FsRunResult:
         disallowed_tools_by_seat=seats,
         skill_forced=forced_skills,
         skill_withheld=withheld_skills,
+        auto_memory_isolated=auto_memory_isolation_for(operator, operator_backend),
         witness=read_transcript_witness(paths),
         dataset_path=dataset_path,
         dataset_sha256=dataset_sha256,

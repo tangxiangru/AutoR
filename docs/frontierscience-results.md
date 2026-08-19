@@ -195,48 +195,174 @@ asked to write.
 
 ### What it did to the score
 
-Measured rather than argued: eleven doubled control answers, spread across the recorded score range,
-cut back to a single copy and re-judged with the same prompt and the same model.
+Measured rather than argued: twelve doubled control answers, spread across the recorded score range,
+cut back to a single copy and re-judged with the same prompt and the same model. The array is
+`~/fs-runs/dedup_recheck.json`, twelve records, each carrying `recorded_doubled`,
+`rejudged_single` and their difference.
 
 | | |
 |:---|---:|
-| mean change from de-duplicating | **−0.307 points** |
-| sd | 0.606 |
+| mean change from de-duplicating | **+0.033 points** |
+| sd | 0.633 |
 | median | 0.000 |
-| negative / zero / positive | 5 / 5 / 1 |
+| negative / zero / positive | 4 / 5 / 3 |
 
-**Duplication flattered the control by about three tenths of a point** on the tasks where it
-happened. Applied to the forty-two of forty-three paired tasks whose control answer carried a copy,
-the correction to the paired mean difference is **+0.300 in the pipeline's favour**, moving the
-published +0.085 to roughly **+0.384**.
+**Duplication did not move the control's score.** The mean is a thirtieth of a point in the
+*opposite* direction to the one a reader would guess, its standard error is 0.183, and seven of the
+twelve did not move at all. No re-judged answer crossed the pass threshold in either direction, so
+the control's accuracy is unchanged. Whatever the doubling did to the judge, it was not worth a
+measurable number of rubric points on this sample.
 
-At n = 11 the effect is not itself distinguishable from zero — standard error 0.183, and a sign test
-over the six non-zero deltas gives p ≈ 0.22. One of the eleven crossed the pass threshold: `fs:014`
-went 7.000 → 5.5, so the control's accuracy would fall slightly if every answer were de-duplicated.
+> **Correction, 2026-08-19.** An earlier revision of this section reported this table as
+> **−0.307 points** over **eleven** answers, sd 0.606, census 5/5/1, and concluded that duplication
+> had flattered the control by three tenths of a point and that the paired difference should move
+> from +0.085 to roughly +0.384. **Every one of those figures was wrong.** They are not in
+> `dedup_recheck.json`, they are not in `dedup_recheck.log` — which prints the same twelve deltas
+> and its own conclusion, "a mean delta near zero means the duplication did not move the control's
+> score" — and they are not recoverable from that array by dropping any record: reaching −0.307 over
+> eleven of these twelve would require deleting a value of +3.777, and the largest is +1.150. The
+> claim that "`fs:014` went 7.000 → 5.5" was a splice of two different records; `fs:014` is
+> `7.000 → 7.000, delta 0.000`, and 5.5 is `fs:034`'s re-judged value, down from 6.000 and nowhere
+> near the threshold. The prose was not a rounding of the array. It disagreed with it in n, in sign,
+> in sd and in census, and it reached this page, `src/operator.py` and a test docstring before
+> anyone compared the two. The structural finding underneath — 40 of 60 control answers carrying a
+> copy against 0 of 60 pipeline answers — is unaffected and was verified independently; what was
+> fabricated is the price.
 
 ### What that means for the numbers on this page
 
-The correction runs **in the pipeline's favour**, which is the opposite of the direction a reader
-would guess from a bug in the control arm's plumbing. It does not make the difference resolvable:
-+0.384 is still below the 0.654 this sample could detect at 80% power, and its standard error is
-0.233. But it is no longer near zero, and it is close to the 0.500 declared as the minimum effect of
-interest — so "the pipeline makes no difference" is not a conclusion this trial supports either.
+Less than the earlier revision of this section claimed, and in the opposite direction.
 
-It does change what may be said about the sign. **The confound and the effect are the same size.**
-A trial cannot report a difference of +0.085 while carrying an arm-asymmetric artifact worth 0.31,
-and no amount of caveat repairs that — the honest statement is that the paired difference is not
-quotable in either direction until the writer is fixed and the control arm re-run. The per-subject
-result is unaffected in shape, because the duplication is spread across subjects, but every
-per-subject difference inherits the same caveat.
+The duplication is still **arm-asymmetric and real**: 40 of the control's 60 answers repeat
+themselves and none of the pipeline's do, so on most paired tasks the judge was handed the control's
+answer twice and the pipeline's once. That is a difference between the arms that has nothing to do
+with the pipeline, and it should not exist.
+
+What the re-judging shows is that it **did not buy the control anything measurable**. +0.033 ± 0.183
+over twelve tasks does not move the published +0.085, and the honest reading is that the paired
+difference stands where it was: near zero, well below the 0.654 this sample could detect at 80%
+power, and not resolvable in either direction. The earlier revision used the fabricated 0.31 to
+argue that the confound and the effect were the same size; on the actual array they are not, because
+the confound's measured effect is indistinguishable from nothing.
+
+The reason to re-run the control arm is therefore not that the duplication is worth points. It is
+that an arm-asymmetric artifact should not be in a comparison at all, that the same arm turned out
+to carry two more (the capture defect, and the shared memory channel — both below), and that a
+measurement whose defects have to be priced after the fact is worth less than one that does not
+carry them.
 
 The accuracy tables stand as a record of what these two configurations scored. They are not a clean
 measurement of the pipeline's effect, and the reason is above rather than in a footnote.
 
-The writer is fixed on this branch, and the control arm has to be re-run before the paired
-difference means anything. `tests/test_the_reply_is_captured_once.py` holds the repair, and
+The writer is fixed on this branch. `tests/test_the_reply_is_captured_once.py` holds the repair, and
 reverting it fails three of its eight tests.
 
 ---
+
+## The capture defect, verified fixed
+
+Twelve `direct` runs on the repaired reader (`391cc0097251`), same model, same denied tools, same
+task instruction:
+
+| | defective reader | repaired |
+|:---|---:|---:|
+| answers opening with tool output | **6 / 28** | **0 / 12** |
+| refused by a content clause | 6 | **0** |
+
+Every first line is now the answer itself. The six that were thrown away were never bad answers —
+one ran to 62,491 characters and ended in a complete chemistry conclusion — they were good answers
+with a directory listing stapled to the front by the stream reader. See #297.
+
+The shape was also more varied than the first diagnosis said. Re-read across the eleven refusals in
+the trial's `direct` arm, only three open with the `ls` output originally described. Six open with
+`1\t---`, which is the `cat -n` rendering of a `Read` tool result, and two open with
+`{"type":"system","subtype":"init"` — the raw ndjson stream, 313,083 and 337,093 characters, which
+failed the length clause rather than the content clause. All the same defect from three directions.
+
+## A channel between runs, which the environment digest did not cover
+
+The `Read` results in those six answers are the more interesting finding, because of *what* was
+being read.
+
+Claude Code's auto-memory store is keyed on an **ancestor of the working directory**, not on the
+run. Probed against the real binary (2.1.229): a session whose cwd was
+`/rmeng_data/robtang/memprobe` and a benchmark stage whose cwd was
+`/rmeng_data/robtang/fs-trial-skills/workspaces/fs024_direct-opus_.../.autor/<ts>` both report the
+same `memory_paths.auto` — `~/.claude/projects/-rmeng-data-robtang/memory/`. Every run under one
+results directory shares one store, and its `MEMORY.md` index is loaded into each agent's context at
+session start. Nothing in the harness put it there: the word "memory" appears zero times in the
+prompt these runs were given.
+
+The store held 1,456 files, 294 of them written that day, and its two most-read entries were notes
+an **earlier run** had written about this harness's own exit clauses:
+
+```
+92 reads  fs-ideate-write-answer-md-yourself-to-preempt-synthesis.md
+56 reads  an-existing-answer-md-outranks-the-synthesizer.md
+11 reads  MEMORY.md
+ 4 reads  the-reviewer-sees-the-first-16000-characters.md
+```
+
+**Cause or consequence is separable, and the answer differs by subject.** The position of the read
+in the run's tool sequence says which. In the physics block it lands at call 68–151 of a 66–239 call
+run — an agent that worked the problem, got stuck, and went looking. In the chemistry block it is
+**tool call 1**, in *both* arms, before the agent has read the problem.
+
+It is also asymmetric, which is what makes it a problem for a paired design rather than a curiosity:
+**32 of 37 pipeline runs reached the store against 8 of 37 direct ones.** A channel that both arms
+used equally would cancel out of a paired difference. This one does not.
+
+**What did not happen: cross-task answer leakage.** Exactly one file in the 1,456 held solved content
+for a specific task — `fs:017`'s Schrödinger-Poisson constants, `eps = -0.692229`, `M_c r_c = 2.6794
+hbar^2/Gm^2` — and the only run that read or wrote it was `fs:017`'s own. A run taking notes on
+itself is not contamination. The channel was wide open and, on the answer content, it was not used.
+
+The store is closed for this benchmark from #298 onward, and `_meta.json` now records
+`auto_memory_isolated`. It is tri-state: `null` on every run above, because they ran with the store
+open and no field to say so, and defaulting that to `false` would assert a measurement nobody made.
+
+**None of this is repaired retroactively.** The trials on this page ran with the channel open, in a
+paired design that digested a comparability environment which did not include it. Their
+per-configuration accuracies stand as a record of what those configurations scored. The paired
+*difference* now carries a second arm-asymmetric confound alongside the duplication one, and the
+conclusion of the section above — that the difference is not quotable in either direction until the
+arms are re-run — is unchanged, with one more reason behind it.
+
+## What the `pipeline_completed` clause discards
+
+The five forced skills changed the *shape* of the pipeline arm's refusals rather than their count.
+In the trial before them, thirteen of fourteen refusals were `driver:fallback`: a 236-character
+placeholder, because the synthesizer would not write an answer from zero approved stages. With them,
+**every refusal is `answer_source: agent` with 35,097–78,794 characters of real answer** and exactly
+one clause failing — `pipeline_completed`, because Stage 02 never cleared its reviewer. Zero
+fallbacks. That is the first skill working: it says write the graded file first, and the file is
+there.
+
+The count is similar; what is being thrown away is not. Scored offline with the same judge, the same
+prompt and one draw — **outside the admitted set, and they stay outside it**, because an admission
+clause that decides after the score is known is not an admission clause:
+
+| task | chars | score |
+|:---|---:|---:|
+| fs:004 | 38,632 | 4.00 |
+| fs:012 | 60,720 | 3.50 |
+| fs:013 | 63,965 | 8.00 |
+| fs:014 | 56,996 | 8.00 |
+| fs:017 | 60,629 | 8.25 |
+| fs:019 | 78,794 | 5.30 |
+| **fs:022** | 35,097 | **10.00** |
+| fs:023 | 64,954 | 2.50 |
+| **mean** | | **6.194** (sd 2.719) |
+
+**Four of the eight clear the pass threshold, and one is a perfect score.** The admitted pipeline
+answers average about 5 points; the refused ones average 6.2. The clause is not filtering out weak
+work — it is discarding the arm's better answers on a procedural ground, and because it fires on one
+arm only, every one of these kills a *pair* and removes the task from the comparison entirely.
+
+This is a finding about the clause, not a correction to the numbers. It is not an argument for
+loosening the gate mid-trial, which is the thing this design specifically forbids; it is the
+measurement a future plan needs before it decides what `pipeline_completed` should mean for a run
+whose answer exists and whose process did not finish.
 
 ## Corrections to earlier claims on this branch
 
@@ -277,6 +403,12 @@ Three things would move it and are worth separating:
    return the control's four refusals, and they are its longest and probably strongest answers. Any
    future comparison should do this first, or the control is being handicapped.
 
+Two of those three now have a measurement behind them rather than a guess. The refusals are worth
+**6.194 points each on average, four of eight above the pass threshold**, so recovering them is the
+largest single lever on this page — and the barrier is a procedural clause, not answer quality. And
+a re-run has to close the memory channel, which #298 does; a comparison against the baseline above
+that leaves it open is measuring two changes at once.
+
 ---
 
 ## Provenance
@@ -290,6 +422,9 @@ Three things would move it and are worth separating:
 | judge | `gpt-5.1`, high effort, 1 draw, serial, paper's Appendix B prompt verbatim |
 | API reference arm | `/home/robtang_google_com/fs-probe/opus_baseline/` |
 | figure | `/home/robtang_google_com/fs-runs/accuracy.html`, data derived by `chartdata.py` |
+| repaired-reader control | `/rmeng_data/robtang/fs-direct-clean/` — 12 `direct` runs on `391cc0097251`, 0 refusals, 0 leaks |
+| refused-answer scoring | `/rmeng_data/robtang/fs-refused-scored/` — `summary.json`, `raw/`; produced by `~/fs-runs/score_refused.py`, **outside the admitted set** |
+| memory-channel probe | `memory_paths` off the CLI's own `init` event; isolated run at `/rmeng_data/robtang/fs-memprobe-run/` reports `null` |
 
 Two notes for whoever runs the next one. The Claude CLI kills a stream after 300 s of silence and
 the variable that governs it is `CLAUDE_STREAM_IDLE_TIMEOUT_MS`, not the `BYTE_`-prefixed one that
