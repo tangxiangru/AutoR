@@ -433,6 +433,67 @@ class TheEnvironmentDigestExcludesAConfoundedPairTests(unittest.TestCase):
         self.assertEqual(compare_fs_arms(evidence(CONTROL), evidence(TREATMENT)), [])
 
 
+#: The five names, in the shape ``_meta.json`` records them.
+FORCED = ("bind-every-deliverable", "one-visible-line", "answer-in-the-symbols")
+
+
+class ARunWithTheForcedSkillsAndOneWithoutAreTwoConfigurationsTests(unittest.TestCase):
+    """The pair that must never be averaged, and the pair that must survive.
+
+    ``fs_agent.py`` forces five skills onto every ``ideate`` run and
+    ``--no-forced-skills`` denies them. A run that had them and a run that did not are two
+    configurations of one producer -- the adapter's own log says so in the sentence it
+    writes into every forced run -- so a difference taken across them is a difference
+    between two things, and the arm that was held back is the one nobody would notice.
+
+    The field in the digest is the *withheld* set, and the second test here is why. An
+    installed set separates a ``direct`` arm from a forced ``ideate`` arm exactly as
+    firmly as it separates a forced arm from a withheld one, because an arm with no run
+    directory to install a skill into installs nothing -- and the trial this benchmark
+    actually runs pairs those two kinds, sixty times.
+    """
+
+    def test_a_pair_whose_arms_disagree_about_the_forced_skills_is_excluded(self) -> None:
+        trial = trial_of(
+            evidence(CONTROL),
+            evidence(TREATMENT, environment=env(skill_withheld=FORCED)),
+        )
+        self.assertEqual(trial.result.n, 0)
+        self.assertIn("skill_withheld", dict(trial.result.excluded)["fs:000"])
+
+    def test_two_arms_that_agree_about_them_are_a_pair(self) -> None:
+        """The control. Without it the assertion above holds for any two arms at all."""
+        for withheld in ((), FORCED):
+            with self.subTest(withheld=withheld):
+                trial = trial_of(
+                    evidence(CONTROL, environment=env(skill_withheld=withheld)),
+                    evidence(TREATMENT, environment=env(skill_withheld=withheld)),
+                )
+                self.assertEqual(trial.result.n, 1)
+                self.assertEqual(dict(trial.result.excluded), {})
+
+    def test_an_arm_that_lost_one_of_the_five_is_not_the_arm_that_kept_them(self) -> None:
+        """The half-application no plan can declare, and the reason the field is observed.
+
+        A forced name renamed out of the skill pack is forced by the flag and installed by
+        nothing, so both arms' plans agree and one arm's model saw four descriptions where
+        the other saw five. Read off the request, this pair would be averaged.
+        """
+        trial = trial_of(
+            evidence(CONTROL, environment=env(skill_withheld=())),
+            evidence(TREATMENT, environment=env(skill_withheld=FORCED[:1])),
+        )
+        self.assertEqual(trial.result.n, 0)
+
+    def test_the_exclusion_line_names_the_field_and_not_the_stage_intersection(self) -> None:
+        """"The two arms measured no stage in common" is true here and tells nobody why."""
+        reasons = compare_fs_arms(
+            evidence(CONTROL), evidence(TREATMENT, environment=env(skill_withheld=FORCED))
+        )
+        self.assertTrue(any("skill_withheld" in reason for reason in reasons))
+        self.assertEqual(compare_fs_arms(evidence(CONTROL), evidence(TREATMENT)), [])
+
+
 class TheByteIdenticalRowsBecomeOnePairTests(unittest.TestCase):
     """Rows 6 and 11 of the split are the same question, so they are one observation."""
 
@@ -1092,6 +1153,120 @@ class ThePlanIsFrozenAndRefusesWhatWouldSpendATrialTests(unittest.TestCase):
         ):
             with self.subTest(field=name):
                 self.assertNotEqual(base.digest, plan(**{name: value}).digest)
+
+
+#: A second `autor` arm, so that the withheld configuration can be written as a plan at
+#: all: an arm that holds the five back may only be paired with another arm that does, and
+#: a `direct` arm never holds anything back.
+OTHER_SHA = "9e7dd2c14f0ba5386c1e4d90f7b2a1c3d5e60718"
+SECOND_AUTOR = FsArmSpec(
+    label=f"{OTHER_SHA[:7]}-autor-ideate",
+    kind="autor",
+    model="opus",
+    answer_guidance="minimal",
+    worktree="/tmp/worktree-b",
+    sha=OTHER_SHA[:7],
+    review_model="opus",
+    profile="ideate",
+)
+
+
+class ThePlanCarriesWhichArmGetsTheForcedSkillsTests(unittest.TestCase):
+    """The control arm ``fs_agent.py`` has had since #295 and no plan could ask for.
+
+    Both arms of a trial were launched with the same command but for the model and the
+    worktree, so both got the five skills whatever the trial was said to be measuring, and
+    the flag written to be a control arm was reachable only by hand.
+    """
+
+    def test_an_arm_that_says_nothing_gets_the_skills_the_binary_installs(self) -> None:
+        """The default is the load-bearing half: it has to describe what will happen.
+
+        Every plan written before this field existed is silent about it, and
+        ``fs_agent.py`` with no flag installs the five.
+        """
+        self.assertTrue(FsArmSpec.from_dict(TREATMENT.to_dict()).forced_skills)
+        self.assertTrue(plan().treatment.forced_skills)
+
+    def test_the_setting_survives_a_round_trip_through_the_file(self) -> None:
+        withheld = {**TREATMENT.to_dict(), "forced_skills": False}
+        self.assertFalse(FsArmSpec.from_dict(withheld).forced_skills)
+        self.assertFalse(FsArmSpec.from_dict(withheld).to_dict()["forced_skills"])
+        frozen = plan(
+            control=SECOND_AUTOR.to_dict() | {"forced_skills": False}, treatment=withheld
+        )
+        self.assertFalse(frozen.treatment.forced_skills)
+        self.assertFalse(frozen.control.forced_skills)
+
+    def test_an_unknown_field_beside_it_is_still_refused(self) -> None:
+        """The control for the round trip: a reader that accepts the new key is not a
+        reader that accepts anything."""
+        with self.assertRaises(ValueError) as caught:
+            FsArmSpec.from_dict({**TREATMENT.to_dict(), "forced_skils": False})
+        self.assertIn("unknown arm fields: forced_skils", str(caught.exception))
+
+    def test_a_quoted_false_is_refused_rather_than_coerced(self) -> None:
+        """``bool("false")`` is ``True``, so the coercion would install the five skills on
+        the arm that exists to be without them and nothing would say so."""
+        with self.assertRaises(ValueError) as caught:
+            FsArmSpec.from_dict({**TREATMENT.to_dict(), "forced_skills": "false"})
+        self.assertIn("JSON boolean", str(caught.exception))
+
+    def test_it_moves_the_plan_digest(self) -> None:
+        """An apparatus that changed while it ran is what the digest exists to catch."""
+        self.assertNotEqual(
+            plan().digest,
+            plan(
+                control=SECOND_AUTOR.to_dict() | {"forced_skills": False},
+                treatment={**TREATMENT.to_dict(), "forced_skills": False},
+            ).digest,
+        )
+
+    def test_one_arm_withholding_them_and_one_keeping_them_is_refused_at_freeze(
+        self,
+    ) -> None:
+        """The twelve-runs shape again, and this time it costs a hundred and twenty.
+
+        ``skill_withheld`` is in the environment digest, so this plan would launch both
+        arms of all sixty tasks, admit them, and then exclude every pair with "the two
+        arms measured no stage in common".
+        """
+        with self.assertRaises(ValueError) as caught:
+            plan(
+                control=SECOND_AUTOR.to_dict() | {"forced_skills": False},
+                treatment=TREATMENT.to_dict(),
+            )
+        self.assertIn("withholds the front end's forced skills", str(caught.exception))
+
+    def test_both_arms_withholding_them_is_a_trial(self) -> None:
+        """The control for the refusal above, and the shape a whole withheld trial has."""
+        frozen = plan(
+            control=SECOND_AUTOR.to_dict() | {"forced_skills": False},
+            treatment={**TREATMENT.to_dict(), "forced_skills": False},
+        )
+        self.assertTrue(frozen.control.withholds_forced_skills)
+        self.assertTrue(frozen.treatment.withholds_forced_skills)
+
+    def test_the_shipped_plan_is_still_a_plan_that_can_produce_a_pair(self) -> None:
+        """The blast radius, measured rather than assumed.
+
+        A `direct` arm installs nothing and withholds nothing; a forced `ideate` arm
+        installs five and withholds nothing. They agree, which is why sixty pairs survive
+        a field whose whole job is to separate two configurations.
+        """
+        self.assertFalse(plan().control.withholds_forced_skills)
+        self.assertFalse(plan().treatment.withholds_forced_skills)
+        self.assertEqual(
+            trial_of(evidence(CONTROL), evidence(TREATMENT)).result.n, 1
+        )
+
+    def test_a_direct_arm_may_not_be_written_as_the_control_without_them(self) -> None:
+        """It has no run directory to install a skill into, so the flag it would render
+        does nothing -- and a plan pairing it with a withheld `ideate` arm is the one
+        comparison the digest field exists to refuse."""
+        with self.assertRaises(ValueError) as caught:
+            plan(control={**CONTROL.to_dict(), "forced_skills": False})
+        self.assertIn("`direct` and sets `forced_skills: false`", str(caught.exception))
 
 
 class ThePlanMayNotImplyAScheduleNobodyMeasuredTests(unittest.TestCase):

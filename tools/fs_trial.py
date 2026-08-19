@@ -191,6 +191,10 @@ def harvest(workspace: Path, *, task_key: str) -> dict[str, Any]:
         "meta_task_instruction_sha256": meta.get("task_instruction_sha256"),
         "meta_dataset_sha256": meta.get("dataset_sha256"),
         "meta_disallowed_tools": meta.get("disallowed_tools"),
+        # The withheld set and not the installed one: `FsRunEnvironment.skill_withheld`
+        # says why, and the short version is that a `direct` arm installs nothing without
+        # being denied anything.
+        "meta_skill_withheld": meta.get("skill_withheld"),
         "meta_run_id": meta.get("run_id"),
         "answer_path": str(answer),
         "answer_chars": meta.get("answer_chars"),
@@ -270,6 +274,12 @@ def agent_argv(plan: FsTrialPlan, task: str, arm: str, workspace: Path, attempt:
     reviewer's model resolves independently of the operator's, so an arm that passes one
     and not the other leaves the review panels on whatever the backend defaults to, where
     they die without ever being classified as anything.
+
+    ``--no-forced-skills`` is rendered by **both** branches and spelt the same way in
+    each. The dry run is the only place the withheld configuration can be exercised end
+    to end -- no real AutoR run of this benchmark exists -- so a fake branch that could
+    not express it would leave the arm this driver was extended to launch reachable only
+    from a unit test holding a hand-written argv.
     """
     spec = plan.arm_for(arm)
     if plan.operator == "fake":
@@ -288,6 +298,8 @@ def agent_argv(plan: FsTrialPlan, task: str, arm: str, workspace: Path, attempt:
             "--attempt-index", str(attempt - 1),
             "--quality", str(plan.fake_quality if arm == plan.treatment.label else 0.0),
         ]
+        if not spec.forced_skills:
+            argv.append("--no-forced-skills")
         # The treatment arm, like `fake_quality`, because a fault injected into both
         # arms would produce two refusals and no pair, which exercises the ledger and
         # not the asymmetry the ledger exists to disclose.
@@ -310,6 +322,8 @@ def agent_argv(plan: FsTrialPlan, task: str, arm: str, workspace: Path, attempt:
         "--attempt-index", str(attempt - 1),
         "--disallowed-tools", *plan.disallowed_tools,
     ]
+    if not spec.forced_skills:
+        argv.append("--no-forced-skills")
     return argv
 
 
@@ -660,6 +674,7 @@ def evidence_for(plan: FsTrialPlan, state: Mapping[str, Any]) -> FsArmEvidence |
 
     judge = first.get("judge") if isinstance(first.get("judge"), dict) else {}
     tools = state.get("meta_disallowed_tools")
+    withheld = state.get("meta_skill_withheld")
     env = FsRunEnvironment(
         dataset_sha256=str(state.get("meta_dataset_sha256") or ""),
         judge_model=str(judge.get("model") or ""),
@@ -668,6 +683,11 @@ def evidence_for(plan: FsTrialPlan, state: Mapping[str, Any]) -> FsArmEvidence |
         answer_guidance=str(state.get("meta_answer_guidance") or ""),
         task_instruction_sha256=str(state.get("meta_task_instruction_sha256") or ""),
         disallowed_tools=tuple(sorted(str(item) for item in tools)) if isinstance(tools, list) else (),
+        # Sorted again on the way in. The writer sorts too, and this is the reader that
+        # would otherwise carry a JSON file's order into a comparability digest.
+        skill_withheld=(
+            tuple(sorted(str(item) for item in withheld)) if isinstance(withheld, list) else ()
+        ),
         # One, always, and a constant rather than an observation -- there is nothing on
         # disk to read it off, because this driver produces one evidence per run and pools
         # nothing. Writing `plan.answer_attempts` here instead would make the field agree
@@ -858,6 +878,12 @@ def fake_run(args: argparse.Namespace) -> int:
     write_text(answer, body)
 
     stages = [FS_IDEATE_STAGE] if args.kind == "autor" else []
+    # The same shape a real run records, from the same two inputs: the profile decides
+    # whether there is anything to force at all, and the flag decides whether it arrived.
+    # A `direct` fake arm records both as empty because a direct run has no run directory
+    # to install a skill into, which is the asymmetry the digest field is built around.
+    forced = list(_FAKE_FORCED_SKILLS) if args.kind == "autor" and not args.no_forced_skills else []
+    withheld = list(_FAKE_FORCED_SKILLS) if args.kind == "autor" and args.no_forced_skills else []
     meta = build_fs_meta(
         workspace=workspace,
         task=args.task,
@@ -877,6 +903,8 @@ def fake_run(args: argparse.Namespace) -> int:
         auto_skipped_stages=[],
         stages_approved=stages,
         disallowed_tools=list(args.disallowed_tools),
+        skill_forced=forced,
+        skill_withheld=withheld,
         dataset_path=None,
         dataset_sha256=args.dataset_sha256,
         run_id=paths.run_root.name,
@@ -897,6 +925,18 @@ def fake_run(args: argparse.Namespace) -> int:
     write_fs_meta(workspace, meta)
     print(json.dumps({"type": "result", "status": meta["status"]}), flush=True)
     return 0 if meta["status"] == "completed" else 1
+
+
+#: What the dry run records as an ``autor`` arm's forced-skill set, and as a withheld
+#: arm's. Fabricated, like the subjects and the duplicate row and for the same reason: the
+#: dry run installs no skills and must not claim the five real names, but a fake that
+#: recorded the same thing whatever the flag said would leave ``skill_withheld`` -- the
+#: field the environment digest compares two arms on -- exercised by nothing but a unit
+#: test holding a hand-written dictionary. Two names, and deliberately not in the order
+#: they sort into: the record is canonicalised on the way out and on the way in so that a
+#: set's iteration order can never read as two environments, and a one-element fixture
+#: would leave both of those sorts holding nothing.
+_FAKE_FORCED_SKILLS = ("dry-run-forced-skill-two", "dry-run-forced-skill-one")
 
 
 #: The split's real layout: rows 0-19 physics, 20-39 chemistry, 40-59 biology. Copied
@@ -1165,6 +1205,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     faker.add_argument("--quality", type=float, default=0.0, metavar="POINTS",
                        help="How many rubric points better than the floor the fake judge "
                             "should grade this answer. Defaults to 0.0.")
+    faker.add_argument("--no-forced-skills", action="store_true",
+                       help="Record this fake run as having been denied the skills the "
+                            "front end forces on an ideate arm, the way `fs_agent.py`'s "
+                            "flag of the same name makes a real one. Ignored for the "
+                            "direct kind, which has nothing to be denied.")
     faker.add_argument("--no-transcript", action="store_true",
                        help="Write no stream-json transcript, so the browsing witness is "
                             "null and the pair must be refused rather than admitted.")

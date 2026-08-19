@@ -611,8 +611,8 @@ An **arm is an answer producer**, not a git revision. The sibling trial compares
 of AutoR running one entry point, so an arm is a commit and the revision check is the whole of
 arm identity. Here one arm is a pipeline in a worktree at a commit and the other is a single
 call to a model, with no worktree and no commit at all — so `FsArmSpec` carries `kind`, `model`
-and `answer_guidance` for both and `worktree`/`sha`/`review_model`/`profile` only for the
-`autor` side.
+and `answer_guidance` for both and `worktree`/`sha`/`review_model`/`profile`/`forced_skills`
+only for the `autor` side.
 
 | | control | treatment |
 | --- | --- | --- |
@@ -621,6 +621,7 @@ and `answer_guidance` for both and `worktree`/`sha`/`review_model`/`profile` onl
 | model | `opus` | `opus` (reviewing with `opus`) |
 | guidance | `minimal` | `minimal` |
 | profile | — | `ideate` |
+| forced skills | — (nothing to install) | the five, unless the plan says `forced_skills: false` |
 | approved stages | none | exactly `02_hypothesis_generation` |
 
 `_refuse_a_label_that_is_not_the_producer` runs at **freeze** time, and the timing is the whole
@@ -634,19 +635,32 @@ plan that freezes cannot fail admission on this ground.
 
 The same freeze-time pass refuses two arms with the same label, an empty or duplicated task
 list, a key that is not `fs:NNN`, a task instruction whose digest is not this tree's, two arms
-naming different answer models, two arms given different guidance, and the out-of-range
+naming different answer models, two arms given different guidance, one arm withholding the
+front end's forced skills while the other keeps them, and the out-of-range
 parameters. Each of those is otherwise discovered at report time, after the trial has been paid
 for, under the message "the two arms measured no stage in common".
 
 ### The environment digest
 
-`FsRunEnvironment` carries nine fields. Eight are **observed off the artifacts** rather than
+`FsRunEnvironment` carries ten fields. Nine are **observed off the artifacts** rather than
 copied from the plan — a field filled from the plan agrees by construction and is therefore not
 the field the contract names. They are: `dataset_sha256`, `judge_model`,
 `judge_reasoning_effort`, `answer_model`, `answer_guidance`, `task_instruction_sha256`,
-`disallowed_tools` and `judge_replicates`.
+`disallowed_tools`, `skill_withheld` and `judge_replicates`.
 
-The ninth, `answer_attempts`, is not observed and never was: it is the literal `1`. Rather than
+`skill_withheld` is the one that reads backwards on purpose. `fs_agent.py` forces five skills
+onto every `ideate` run and `--no-forced-skills` denies them, and `_meta.json` records both
+sides — `skill_forced`, read off the manager after installation rather than off the flag, and
+`skill_withheld`, the forced names that did not reach the model. It is the *withheld* set that
+goes into the digest, because the installed set separates the `direct` arm from a forced
+`ideate` arm as firmly as it separates a forced arm from a withheld one: an arm with no run
+directory to install a skill into installs nothing without having been denied anything.
+Digesting the installed set would refuse all sixty pairs of the trial this benchmark actually
+runs, after they were paid for. Being observed, it also catches the half-application no plan
+can declare: a forced skill renamed out of the pack is installed by nothing, and the arm that
+lost it separates from the arm that kept it instead of being averaged with it.
+
+The tenth, `answer_attempts`, is not observed and never was: it is the literal `1`. Rather than
 let a constant sit in a list whose stated property is that nothing in it is a constant, the
 freeze refuses any plan declaring another value, and both the field and the record that fills
 it say so. A driver that produced one evidence per run while accepting `answer_attempts: 3`

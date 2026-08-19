@@ -79,7 +79,8 @@
     "worktree": "/home/robtang_google_com/AutoR-fs-treatment",
     "sha": "0b64ab8",
     "review_model": "opus",
-    "profile": "ideate"
+    "profile": "ideate",
+    "forced_skills": true
   },
   "task_instruction_sha256": "cae42a4c27402b4387ba83722dcb938b4af446ef2b285fefff0076e71a81fbd7",
   "disallowed_tools": [

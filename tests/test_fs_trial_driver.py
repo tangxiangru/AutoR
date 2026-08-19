@@ -870,6 +870,154 @@ class TheRealScorerIsToldWhatThePlanDeclaredTests(DryRunCase):
                 self.assertEqual(built[index + 1: index + 3], ["WebSearch", "WebFetch"])
 
 
+class TheControlArmReachesTheChildCommandTests(DryRunCase):
+    """``--no-forced-skills`` exists to be an arm, and an arm has to be launchable.
+
+    Both command builders are checked, because there are two and the dry run uses the one
+    that is easier to forget: a real trial of the withheld configuration cannot be
+    rehearsed on this box -- no real AutoR run of this benchmark exists -- so a fake
+    branch that could not express it would leave the arm reachable only from a hand-written
+    argv in a test.
+    """
+
+    def _withheld(self, **overrides):
+        """A plan whose `autor` arm is launched without the five skills.
+
+        Both arms have to agree about it, so the control becomes a second `autor` arm --
+        a `direct` arm has no run directory to install a skill into and can never be the
+        one holding them back.
+        """
+        return self._plan(
+            control={
+                "label": "aaaaaaa-autor-ideate", "kind": "autor", "model": "opus",
+                "answer_guidance": "minimal", "worktree": str(self.worktree),
+                "sha": "aaaaaaa", "review_model": "opus", "profile": "ideate",
+                "forced_skills": False,
+            },
+            treatment={
+                "label": f"{self.sha[:7]}-autor-ideate", "kind": "autor", "model": "opus",
+                "answer_guidance": "minimal", "worktree": str(self.worktree),
+                "sha": self.sha[:7], "review_model": "opus", "profile": "ideate",
+                "forced_skills": False,
+            },
+            **overrides,
+        )
+
+    def test_the_flag_is_rendered_when_the_arm_withholds_the_skills(self) -> None:
+        for operator in ("claude", "fake"):
+            with self.subTest(operator=operator):
+                plan = self.tool.load_plan(self._withheld(operator=operator))
+                argv = self.tool.agent_argv(
+                    plan, "fs:000", plan.treatment.label, self.root, 1
+                )
+                self.assertIn("--no-forced-skills", argv)
+
+    def test_the_flag_is_absent_when_the_arm_keeps_them(self) -> None:
+        """The control. A driver that always passed it would run two control arms and
+        report the difference between them as the effect of the pipeline."""
+        for operator in ("claude", "fake"):
+            with self.subTest(operator=operator):
+                plan = self.tool.load_plan(self._plan(operator=operator))
+                for arm in (self.control_arm, self.treatment_arm):
+                    argv = self.tool.agent_argv(plan, "fs:000", arm, self.root, 1)
+                    self.assertNotIn("--no-forced-skills", argv)
+
+    def test_the_flag_is_the_last_word_after_the_denied_tool_list(self) -> None:
+        """``--disallowed-tools`` takes as many values as it is given, and a flag appended
+        behind it has to end the list rather than join it."""
+        plan = self.tool.load_plan(self._withheld(operator="claude"))
+        argv = self.tool.agent_argv(plan, "fs:000", plan.treatment.label, self.root, 1)
+        import fs_agent
+
+        index = argv.index("--disallowed-tools")
+        self.assertEqual(argv[index + 1: index + 3], ["WebSearch", "WebFetch"])
+        # Parsed by the binary that will receive it, not by this test's idea of it.
+        parsed = fs_agent.parse_args(argv[2:])
+        self.assertTrue(parsed.no_forced_skills)
+        self.assertEqual(parsed.disallowed_tools, ["WebSearch", "WebFetch"])
+        self.assertFalse(
+            fs_agent.parse_args(
+                self.tool.agent_argv(
+                    self.tool.load_plan(self._plan(operator="claude")),
+                    "fs:000", self.treatment_arm, self.root, 1,
+                )[2:]
+            ).no_forced_skills
+        )
+
+    def test_a_fabricated_run_records_what_it_was_and_was_not_given(self) -> None:
+        """The dry run's own metadata, through the real builder, in all three shapes."""
+        cases = {
+            "forced": (["--kind", "autor"], list(self.tool._FAKE_FORCED_SKILLS), []),
+            "withheld": (
+                ["--kind", "autor", "--no-forced-skills"],
+                [],
+                list(self.tool._FAKE_FORCED_SKILLS),
+            ),
+            "direct": (["--kind", "direct"], [], []),
+        }
+        for name, (argv, forced, withheld) in cases.items():
+            with self.subTest(arm=name):
+                workspace = self.root / f"fake-{name}"
+                self.drive(
+                    "fake-run", "--workspace", str(workspace), "--task", "fs:000",
+                    "--arm", name, *argv,
+                )
+                meta = json.loads((workspace / "_meta.json").read_text(encoding="utf-8"))
+                self.assertEqual(meta["skill_forced"], sorted(forced))
+                self.assertEqual(meta["skill_withheld"], sorted(withheld))
+
+    def test_the_recorded_set_is_canonical_and_not_the_order_it_was_built_in(self) -> None:
+        """The control for the two `sorted` calls: a set has no order, and an order
+        carried into the digest would report one configuration as two."""
+        self.assertNotEqual(
+            list(self.tool._FAKE_FORCED_SKILLS), sorted(self.tool._FAKE_FORCED_SKILLS)
+        )
+
+    def test_the_withheld_set_reaches_the_environment_the_pairs_are_keyed_on(self) -> None:
+        """End to end: the driver reads it off `_meta.json` and folds it into the digest."""
+        path = self._withheld(tasks=("fs:000",))
+        self.drive("plan", "--plan", str(path))
+        self.drive("run", "--plan", str(path))
+        plan = self.tool.load_plan(path)
+        for state in self._states():
+            with self.subTest(arm=state["arm"]):
+                self.assertEqual(
+                    state["meta_skill_withheld"], sorted(self.tool._FAKE_FORCED_SKILLS)
+                )
+                evidence = self.tool.evidence_for(plan, state)
+                self.assertEqual(
+                    evidence.env.skill_withheld,
+                    tuple(sorted(self.tool._FAKE_FORCED_SKILLS)),
+                )
+
+    def test_the_shipped_shape_still_pairs_with_the_field_in_the_digest(self) -> None:
+        """The blast radius of putting a skill set in the environment digest, measured.
+
+        The trial this benchmark runs pairs a `direct` control against a forced `ideate`
+        treatment. The control installs nothing without having been denied anything, so
+        the two agree and the pair survives -- which is the whole reason the *withheld*
+        set is the field and the installed one is not.
+        """
+        path = self._plan(tasks=("fs:000",))
+        self.drive("plan", "--plan", str(path))
+        self.drive("run", "--plan", str(path))
+        metas = {}
+        for state in self._states():
+            metas[state["arm"]] = json.loads(
+                (Path(state["workspace"]) / "_meta.json").read_text(encoding="utf-8")
+            )
+        self.assertEqual(
+            metas[self.treatment_arm]["skill_forced"],
+            sorted(self.tool._FAKE_FORCED_SKILLS),
+        )
+        self.assertEqual(metas[self.control_arm]["skill_forced"], [])
+        for arm, meta in metas.items():
+            with self.subTest(arm=arm):
+                self.assertEqual(meta["skill_withheld"], [])
+        report = (self.root / "state" / "report.md").read_text(encoding="utf-8")
+        self.assertIn("pairs: **1**", report)
+
+
 class TheDriverReadsWhatTheGateAsksAboutTests(DryRunCase):
     def test_harvest_reads_every_fact_a_clause_consults(self) -> None:
         path = self._plan(tasks=("fs:000",))

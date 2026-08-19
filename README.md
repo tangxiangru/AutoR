@@ -702,8 +702,12 @@ the same tasks today and generalise to nothing.
    routing decision — it is an experimenter saying which arm this run is.
    **A forced run writes `skill_forced` and `skill_forced_by` into its
    `run_config.json` and a `skills forced_by_front_end` line into its log**, saying in the same
-   sentence that a score from it is not comparable to one from a run without them. Announced in the
-   prompt under its own banner, never the pin's: the pin sentence earns its force by being precise
+   sentence that a score from it is not comparable to one from a run without them. `fs_agent.py`
+   writes the same fact where a *trial* can read it — `skill_forced` and `skill_withheld` in the
+   workspace's `_meta.json`, both taken off the manager's installed set rather than off the flag
+   — and the paired trial folds the withheld set into the environment digest, so that sentence
+   about comparability is enforced rather than only printed.
+   Announced in the prompt under its own banner, never the pin's: the pin sentence earns its force by being precise
    about a scored run of this exact task, and reusing it here would be a claim that is false of
    every run that reads it.
 
