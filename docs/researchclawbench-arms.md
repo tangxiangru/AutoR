@@ -106,6 +106,14 @@ and 45 workspace *directories*, which is what the denominator said here before �
 copies, and for skills five `*_DEAD_launcher_gone` stubs. Counting directories understates
 completion and hides that both arms are pairing against the control's 39 scoreable tasks.
 
+As of 2026-08-19 `full40_pins` is at **39 of 40**; only `Earth_003` is still running, on its
+third launch, and the row above has not been re-scored to include the three tasks that
+landed since. It is still a snapshot. What the finished 39 look like under a *second,
+independent* instrument is [its own section below](#three-instruments-over-the-same-39-workspaces),
+and the answer is that the instrument is worth more points than the arm is: on the pass the
+baselines were built with, the arm separates from `arm_2ffaeb4` and still does not separate
+from the control.
+
 **`full40_skills` is the first arm whose interval excludes zero.** Before reading it as a
 result, two checks that were run:
 
@@ -146,8 +154,10 @@ Kept because a refuted hypothesis is cheaper to read than to re-run.
   (0 and 3 against 36 and 45 was the same pair of criteria at the superseded cap 5.)
 - **`--stage-timeout 1800`.** Four arms carry it — `full40`, `full40_v220`, `full40_head`,
   `full40_skills` — and they completed 40/40, 39/40, 40/40 and 32/40 tasks; the two arms
-  that do not carry it, `arm_2ffaeb4` and `full40_pins`, completed 39/40 and 37/40. (Both
-  the "two arms" and the 34/40 and 23/40 written here before were wrong: no arm on disk has
+  that do not carry it, `arm_2ffaeb4` and `full40_pins`, completed 39/40 and 37/40 —
+  `full40_pins` has since reached 39/40, which strengthens the bullet rather than changing
+  it. (Both the "two arms" and the 34/40 and 23/40 written here before were wrong: no arm
+  on disk has
   either completion count, and the two figures came from two different metrics.) Not the
   driver, and the flag's spread across the arms makes that a stronger statement than the
   version it replaces, not a weaker one.
@@ -207,11 +217,170 @@ differences have sd 6.17 and a maximum of 21.2 points (`Astronomy_000`, 54.8 aga
 which puts a single draw's sd at 4.36 and its 95% band at 8.5. The same arithmetic is where
 the ~1.0 re-draw noise on an arm mean comes from.
 
+## Three instruments over the same 39 workspaces
+
+The section above measures how much a *re-draw* of one scorer moves an arm. This one
+measures two things the document had not: how much the **number of draws** moves it, and
+how much the **choice of scoring program** moves it. Both move it further than any arm in
+the table above moves, and the first one changes a verdict.
+
+### The draw count decides whether the arm separates from the previous head
+
+`tools/score_rcb_run.py --judge reference --draws 3` writes `_score_gpt51.json` beside each
+workspace, averaging three judge draws per criterion. That is the instrument the baseline
+arms were scored with, and `/rmeng_data/robtang/rescore_pins/run.sh` exists specifically to
+say so: *"one draw carries about ±4 points of judge sampling noise per task … a comparison
+across the two is not a smaller number, it is an incomparable one."*
+
+Both sets exist on disk for all four arms. They give different answers:
+
+| paired, `full40_pins` against | n | **3 draws** | 1 SE | t | **1 draw** | 1 SE | t |
+|:---|---:|---:|---:|---:|---:|---:|---:|
+| `arm_2ffaeb4` | 39 | **+5.84** | 1.99 | **2.94** | +3.23 | 2.05 | 1.58 |
+| `full40` (pre-repair) | 39 | +11.57 | 1.75 | 6.59 | +11.00 | 1.98 | 5.57 |
+| control, bare Claude Code | 39 | +3.05 | 1.58 | 1.93 | +2.97 | 1.76 | 1.69 |
+
+**Read on its own instrument the arm separates from the previous head and does not separate
+from the control.** On one draw it separates from neither. The verdict on the row that the
+whole arm exists to settle depends on the draw count, and the draw count is not visible in
+a score file's name.
+
+Arm means, three draws: `full40_pins` **34.65** (n=39), `arm_2ffaeb4` **28.75**,
+`full40` **23.07**, control **31.48**.
+
+**Almost all of the movement is in the baseline, not the arm.** Over the same 39 tasks
+`full40_pins` reads 34.55 at one draw and 34.65 at three — a tenth of a point — while
+`arm_2ffaeb4` reads 31.32 and 28.81, two and a half points apart. An arm re-scored at a
+different draw count is not the number that moved; its comparator is. Checking the draw
+count of *both* sides is the cheap step that was skipped, and it is cheap: a multi-draw
+result carries a **`draws`** field, a single-draw one has no such key at all. Failing that,
+`judge_calls ÷ len(items)` reads **1.0** on the one-draw sets and **6.0** on the three-draw
+ones — six, not three, because the pass makes two calls per criterion per draw. Neither the
+filename nor the directory name carries it, which is how two instruments ended up in one
+comparison.
+
+The three-draw files also record what a single draw was hiding. `total_spread` is the range
+of the three draws' totals for one task:
+
+| arm | tasks | median spread | mean | worst task |
+|:---|---:|---:|---:|:---|
+| `full40_pins` | 39 | 7.55 | 8.01 | `Math_003` **30.5** — 44.5, 14.0, 23.25 |
+| `arm_2ffaeb4` | 40 | 5.48 | 6.32 | `Information_000` 20.5 — 32.0, 31.0, 51.5 |
+| control | 40 | 4.60 | 7.37 | `Physics_000` 26.3 — 34.9, 55.9, 61.2 |
+
+Seven of 39 pins tasks, seven of 40 `arm_2ffaeb4` tasks and nine of 40 control tasks have
+three draws spanning more than ten points on unchanged artifacts. The ~8.5-point single-draw
+band this document quotes is not an outside citation any more — it is measurable from these
+files, and the worst cases are three to four times it.
+
+### The program matters too, and by about as much
+
+`full40_pins` has also been scored by two different programs, over the same workspaces:
+the 39 `run_id`s match one by one with zero mismatches, and no `report.md` or figure under
+any of the 39 was written after the earlier of the two scorings, so both programs were
+handed the same artifacts. (Scores read 2026-08-19 08:45 UTC; `cap15_pins` is still being
+appended to by another session, so re-derive before quoting.)
+
+| | pipeline | judge | scores in |
+|:--|:--|:--|:--|
+| **A** | `tools/score_rcb_run.py`, driven by `pins-watch/watch_pins.py` | `gpt-5.1` | `/rmeng_data/robtang/pins-watch/scores` |
+| **B** | `~/rcb_tools/score_arm.py` + `gpt51_judge.py` | `gpt-5.1` | `~/rcb_results/cap15_pins`, `…_preview` |
+
+Both are nominally at the corrected fifteen-image window. They do not agree.
+
+| comparison | n | paired mean | 1 SE | t | sd | A/first wins |
+|:---|---:|---:|---:|---:|---:|---:|
+| **B against B′** — same pipeline, two draws | 37 | +0.54 | 0.99 | 0.55 | 6.04 | 16–21 |
+| **A against B** — different pipelines | 39 | **+2.37** | 0.72 | **3.29** | 4.49 | 26–13 |
+| **A against B′** — different pipelines | 37 | **+2.75** | 0.93 | **2.95** | 5.67 | 26–11 |
+
+**The within-pipeline difference is unsigned and consistent with zero. The cross-pipeline
+difference is signed, three standard errors from zero, and reproduces against both of the
+other pipeline's independent draws.** That is not judge noise. It is an offset carried by
+the scorer, and at +2.4 to +2.8 points it is the size of every arm effect in the table
+above: `full40_pins`'s own +3.33, `arm_2ffaeb4`'s +0.39, `full40_head`'s −0.70.
+
+Arm means over the same 39 tasks: **A 34.55, B 32.19, B′ 31.90**, and the superseded cap-5
+pass `gpt51_pins` **28.94**. The disagreement is not concentrated in one task — the four
+largest gaps are `Chemistry_000` +10.4, `Material_003` +9.0, `Astronomy_002` +8.8 and
+`Astronomy_000` −8.3, and it changes sign. What does survive is the *ordering*: 88.4% of
+the 741 task pairs rank the same way under both pipelines. The pipelines agree about which
+tasks are hard and disagree about what the arm is worth.
+
+**Consequence for everything above.** The table in [The arms](#the-arms) is built entirely
+from pipeline B, so its rows remain comparable to each other. A number from pipeline A may
+not be dropped into it — which is the same failure this document opens with, one layer
+further out: the first time it was one scorer clipping images, this time it is two scorers
+that both look correct, and a third difference — the draw count — hiding inside one of them.
+
+### What the arm is worth
+
+On its own instrument (three draws, `_score_gpt51.json`, the pass the baselines were built
+with), over the 39 tasks finished so far:
+
+| against | paired mean | 1 SE | t | W–L |
+|:---|---:|---:|---:|:---|
+| `arm_2ffaeb4` | **+5.84** | 1.99 | 2.94 | 26–13 |
+| `full40` (pre-repair) | +11.57 | 1.75 | 6.59 | 34–5 |
+| control, bare Claude Code | +3.05 | 1.58 | 1.93 | 25–14 |
+
+**`full40_pins` is the second arm whose interval excludes zero, and the first to do it
+against the previous head rather than against the control.** It still does not separate from
+bare Claude Code: +3.05 at 1.93 SE is the same inconclusive three points every recent arm
+has produced, and the pooled instrument does not resolve it. So the honest reading is
+*better than the AutoR it replaced, still not distinguishable from no scaffold at all.*
+
+Three cautions on the +5.84 before it is quoted:
+
+- The arm is at 39/40. The missing task is `Earth_003`, which has now failed to complete on
+  three launches, so it is missing for a reason that correlates with difficulty. The paired
+  set is selected on this arm's own success — the same trap recorded above for
+  `full40_skills`, and no balance check on the comparator side can see it.
+- +11.57 against the pre-repair arm is the `--stage-timeout 1800` confound this file
+  already documents. Upper bound, not measurement.
+- One draw of the same comparison reads +3.23 and does not clear its own noise. The
+  three-draw number is the better instrument, not a second opinion to be averaged with the
+  first.
+
+Two blemishes found while checking, neither load-bearing:
+
+- One task of the 40 in `arm_2ffaeb4` — `Astronomy_002` — was scored against benchmark
+  revision `595f318`, before the five-to-fifteen image change; the other 39 are on
+  `bfffc48`. Dropping it moves the comparison from +3.23 to **+3.64 ± 2.06**, still inside
+  the floor. A `bench_revision` field mixed inside one arm is worth checking for by default;
+  nothing warns about it.
+- Eleven of the 39 pins runs publish 14 images and ten publish 15, so about half the arm
+  sits at or above the window. The off-by-one in `gpt51_judge.py` noted above — fifteen
+  minus the target leaves fourteen workspace images — therefore bites on roughly half of
+  pipeline B's runs and none of pipeline A's, which is one mechanism available to explain
+  the sign of the offset. It is a hypothesis, not a measurement: it was not tested by
+  re-scoring at a matched count.
+
+`full40_pins` was still one task short when this was written. `Earth_003` is on its third
+launch and had reached `04_implementation` at 11 h 48 m.
+
 ## Reproducing the table
 
 ```bash
+# Pipeline B, which every row in "The arms" is built from.
 # score an arm at the corrected cap; the tool caches on the output name, so a
 # name that already has results is never re-scored — use a fresh one to re-measure
 python3 ~/rcb_tools/score_arm.py <arm> <out_name>
 python3 ~/rcb-watch/table.py          # paired table, skips arms not yet scored
 ```
+
+Pipeline A is a different program and its numbers do not belong in that table — see
+[Three instruments over the same 39 workspaces](#three-instruments-over-the-same-39-workspaces). It
+scores one workspace at a time and is driven by a watcher that waits for a task to be
+recorded finished, because `collect_figures` trims `report/images/` to the referenced set
+only at export:
+
+```bash
+python3 <AutoR>/tools/score_rcb_run.py \
+  --workspace /rmeng_data/robtang/rcb_runs/<arm>/<Task>_<ts> \
+  --bench ~/RCB --out <dir>/<Task>.json
+```
+
+Its output carries `total_weight`, `judge_model`, `judge_failures` and `bench_revision`;
+pipeline B's does not. That is the quickest way to tell which program produced a score file
+you have found on disk.
