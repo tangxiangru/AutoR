@@ -14,6 +14,7 @@ detail behind it.
 | Run AutoR unattended, or benchmark it on ResearchClawBench | [ResearchClawBench](researchclawbench.md) |
 | See what every full benchmark run scored, and which predictions it broke | [RCB Experiment Log](rcb-experiment-log.md) |
 | Answer and score a written science exam question | [FrontierScience-Research](frontierscience.md) |
+| See what AutoR scores on that benchmark | [FrontierScience results](frontierscience-results.md) |
 | Rediscover a published finding by running experiments, under a one-hour clock | [FIRE-Bench](firebench.md) |
 | Understand what a run leaves on disk | [Run Artifacts](run-artifacts.md) |
 | Know exactly what a stage must produce to be accepted | [Stage Contract](stage-contract.md) |
@@ -75,6 +76,10 @@ detail behind it.
   other agents on the ResearchClawBench leaderboard score, which of their
   published numbers reproduce from the public data, and the same-model baseline
   any AutoR result has to be quoted against.
+- **[researchclawbench-arms.md](researchclawbench-arms.md)** — the lab notebook:
+  every full-benchmark arm AutoR has run, what changed between them, what each
+  scored against bare Claude Code, and the scorer fault that invented four points
+  of deficit before anyone noticed it was the instrument.
 - **[frontierscience.md](frontierscience.md)** — the second benchmark: sixty
   written science examination questions graded against a ten-point rubric by a
   judge model, with no data, no reference paper and no reference answer. The
@@ -85,6 +90,10 @@ detail behind it.
 
 ### Internals
 
+- **[frontierscience-results.md](frontierscience-results.md)** — the experiment
+  record for that benchmark: a sixty-task paired trial of the pipeline against one
+  bare model call, its accuracy by subject, what it cost, the two kinds of refusal
+  it produced, and the earlier claims on this branch that it overturns.
 - **[self-improvement.md](self-improvement.md)** — the stage graph and its
   guards, routing, the rigour rubric and the champion ratchet, the cross-run
   archive and its comparability basis, paired trials — and the constraints that
@@ -126,6 +135,10 @@ detail behind it.
   [round-loop-and-stage-graph.md](iclr/round-loop-and-stage-graph.md) reads
   AMAP-ML's LongHorizon-Harness against it and records what the stage graph
   should take from a round loop, and what it should not.
+  [what-the-comparison-changed.md](iclr/what-the-comparison-changed.md) is the
+  implementation record behind that reading: what landed, what was refused and by
+  what, every figure with the command that reproduces it, and the four places a
+  measurement said the wrong thing.
 
 ### Project notices
 

@@ -30,6 +30,95 @@ from .utils import (
 )
 
 
+def _head(text: str, max_chars: int) -> str:
+    """The opening of *text*, saying how much it dropped. ``(empty)`` for nothing."""
+
+    body = (text or "").strip()
+    if not body:
+        return "(empty)"
+    if len(body) <= max_chars:
+        return body
+    return body[:max_chars].rstrip() + f"\n\n[... {len(body) - max_chars} character(s) dropped from the end]"
+
+
+def _tail(text: str, max_chars: int) -> str:
+    """The end of *text*, saying how much it dropped. ``(empty)`` for nothing."""
+
+    body = (text or "").strip()
+    if not body:
+        return "(empty)"
+    if len(body) <= max_chars:
+        return body
+    return f"[... {len(body) - max_chars} character(s) dropped from the start ...]\n\n" + body[-max_chars:].lstrip()
+
+
+#: What a repair may be told about the attempt it is repairing.
+#:
+#: The repair prompt is the narrowest task in the system -- "overwrite this one markdown
+#: file, do not browse, do not continue the workflow" -- and it was handed the largest
+#: prompt. Measured over 2,166 archived repair prompts, it runs to a median of 354 KB
+#: against the attempt prompt's 156 KB: **1.84x its own attempt at the median, 6.55x at
+#: p90**, and a third of all repairs exceed 500 KB where 0.14% of attempt prompts do.
+#:
+#: Two blocks are all of it. The whole original prompt (median 147 KB, max 3.17 MB) and
+#: the whole original stdout (median 93 KB, p90 907 KB). The objects the task actually
+#: rewrites are small -- the draft is 17 KB at the median and the promoted file 10 bytes
+#: -- and stderr is 8 bytes, so those three stay whole and a ceiling on them would be a
+#: mechanism with nothing to do.
+#:
+#: **Nothing measurable is lost.** Repair success over 2,157 recorded outcomes is flat
+#: across two orders of magnitude of prompt size: 98.1% below 150 KB, 100% at 150-300 KB,
+#: 98.6%, 98.2%, 98.9% above. The 645 repairs that already got a small prompt are the
+#: control group, and they succeed at the same rate as the ones given a megabyte.
+#:
+#: The directions differ because the blocks differ. The prompt is kept from the head:
+#: `# Stage Instructions` is its first section and is what a rewrite needs, while the
+#: accumulated channels and memory at the end are what it does not. 80,000 is above that
+#: section's own p90 of 78.6 KB, so a typical repair still sees the whole instruction set.
+#: The stdout is kept from the *tail*: what matters is what the attempt ended up doing,
+#: which is also why `_write_attempt_state` records `stdout_text[-2000:]` rather than the
+#: first 2,000 characters. 40,000 is twenty times that excerpt.
+REPAIR_PROMPT_EXCERPT_CHARS = 80_000
+REPAIR_STDOUT_EXCERPT_CHARS = 40_000
+
+
+def _assistant_text_blocks(payload: Any) -> list[str]:
+    """The text the assistant itself wrote in one stream event, and nothing else.
+
+    `extract_stream_text_fragments` harvests every string under `text`, `content`,
+    `message`, `delta`, `summary` or `result`, wherever it sits. That is the right rule for
+    a caller that parses a delimited section out of the whole text and the wrong one for a
+    caller that keeps the reply, because a `tool_result` block is text under `content` too:
+    the output of a shell command the model ran lands in the reply beside the reply.
+
+    Measured on the sixty-task FrontierScience trial, where the `direct` arm is the caller
+    that keeps the reply. Six of twenty-eight of its answers began with a directory listing
+    the model had run for itself, the whole answer still present underneath -- one of them
+    62,491 characters ending in a complete chemistry conclusion. The same shape appeared in
+    three of sixty answers on the previous trial and was scored normally, so the behaviour is
+    not new; what is new is that a content-refusal clause now reads the top of the file and
+    refuses the run. The answer was never the problem. The capture was.
+
+    So this reads only `assistant` events, and inside them only `text` blocks. Tool calls,
+    tool results, system events and the terminal result restatement are all somebody else's
+    text. It is additive: `stdout_text` is composed exactly as before, so stages and the
+    sibling benchmark's report path see no change at all.
+    """
+    if not isinstance(payload, dict) or payload.get("type") != "assistant":
+        return []
+    message = payload.get("message")
+    if not isinstance(message, dict):
+        return []
+    blocks: list[str] = []
+    for block in message.get("content") or []:
+        if not isinstance(block, dict) or block.get("type") != "text":
+            continue
+        text = block.get("text")
+        if isinstance(text, str) and text.strip():
+            blocks.append(text.strip())
+    return blocks
+
+
 class ClaudeOperator:
     backend_name = "claude"
 
@@ -43,6 +132,7 @@ class ClaudeOperator:
         stage_timeout: int = 14400,
         web_search_mcp: bool = False,
         disallowed_tools: Sequence[str] | None = None,
+        isolate_auto_memory: bool = False,
     ) -> None:
         self.command = command
         self.model = model
@@ -61,6 +151,29 @@ class ClaudeOperator:
         # `disallowed_tools_for` is the only thing that fills it today, for a run whose
         # protocol says it must not browse.
         self.disallowed_tools = tuple(disallowed_tools or ())
+        # Whether to cut the agent off from Claude Code's cross-session memory store.
+        #
+        # The store is keyed on an ancestor of the run's working directory, not on the run:
+        # measured on this box, a probe in `/rmeng_data/robtang/memprobe` and a stage whose
+        # cwd was `/rmeng_data/robtang/fs-trial-skills/workspaces/fs024_.../.autor/<ts>`
+        # both reported the same `memory_paths.auto`. Every run under one benchmark's
+        # results directory therefore shares one store, and its `MEMORY.md` index is loaded
+        # into each agent's context at session start.
+        #
+        # That is a channel between runs of a benchmark, and it is used. On the sixty-task
+        # FrontierScience trial the two most-read files in a 1,456-file store were notes an
+        # earlier run had written about the harness's own scoring mechanics -- 92 and 56
+        # reads -- and in the chemistry block the read was the *first* tool call of the run,
+        # in both arms, before the agent looked at the problem. It is also asymmetric: 32 of
+        # 37 pipeline runs reached the store against 8 of 37 direct ones, so it does not
+        # cancel out of a paired comparison.
+        #
+        # Default off, and deliberately. AutoR's ordinary use is a researcher's own project
+        # where carrying notes between sessions is the feature working as intended; only a
+        # measurement wants each run to start from the same state as every other. Benchmark
+        # front ends opt in, and `build_operator_meta` records which way it was set so a run
+        # can say whether the channel was open rather than leaving a reader to assume.
+        self.isolate_auto_memory = isolate_auto_memory
 
     def run_stage(
         self,
@@ -319,10 +432,10 @@ Current promoted stage file contents:
 {current_final_text}
 
 Original prompt:
-{original_prompt}
+{_head(original_prompt, REPAIR_PROMPT_EXCERPT_CHARS)}
 
 Original stdout:
-{original_result.stdout or "(empty)"}
+{_tail(original_result.stdout, REPAIR_STDOUT_EXCERPT_CHARS)}
 
 Original stderr:
 {original_result.stderr or "(empty)"}
@@ -516,8 +629,16 @@ Original stderr:
             stdin_thread.start()
 
         extracted_fragments: list[str] = []
+        # The terminal result event's text, kept apart from the turn's own. See
+        # `_compose_stdout_text` for why it is a fallback rather than more content.
+        terminal_fragments: list[str] = []
         raw_lines: list[str] = []
         non_json_lines: list[str] = []
+        # The assistant's own words, kept apart from everything else in the stream. A caller
+        # that keeps a *reply* wants these; a caller that parses a delimited section out of
+        # the whole text does not care and still gets `stdout_text` unchanged. Collected here
+        # rather than reconstructed from `logs_raw.jsonl` afterwards, so the two cannot drift.
+        assistant_blocks: list[str] = []
         ended_with_newline = True
         observed_session_id: str | None = None
         tool_names: dict[str, str] = {}
@@ -579,7 +700,11 @@ Original stderr:
                     spend = spend + CallCost.from_result_event(payload)
                 if observed_session_id is None:
                     observed_session_id = self._extract_session_id(payload)
-                extracted_fragments.extend(extract_stream_text_fragments(payload))
+                if is_result_event(payload):
+                    terminal_fragments.extend(extract_stream_text_fragments(payload))
+                else:
+                    extracted_fragments.extend(extract_stream_text_fragments(payload))
+                assistant_blocks.extend(_assistant_text_blocks(payload))
                 self.ui.show_stream_event(payload, tool_names)
         except KeyboardInterrupt:
             elapsed = time.monotonic() - start_time
@@ -627,6 +752,7 @@ Original stderr:
             )
             stdout_text = self._compose_stdout_text(
                 extracted_fragments=extracted_fragments,
+                terminal_fragments=terminal_fragments,
                 non_json_lines=non_json_lines,
                 raw_lines=raw_lines,
             )
@@ -639,6 +765,7 @@ Original stderr:
                 "non_json_line_count": len(non_json_lines),
                 "malformed_json_count": malformed_json_count,
                 "observed_session_id": observed_session_id,
+                "assistant_text": "\n\n".join(assistant_blocks).strip(),
                 "timed_out": True,
                 RECORD_FIELD: spend.to_dict(),
             }
@@ -650,6 +777,7 @@ Original stderr:
 
         stdout_text = self._compose_stdout_text(
             extracted_fragments=extracted_fragments,
+            terminal_fragments=terminal_fragments,
             non_json_lines=non_json_lines,
             raw_lines=raw_lines,
         )
@@ -658,16 +786,40 @@ Original stderr:
             "non_json_line_count": len(non_json_lines),
             "malformed_json_count": malformed_json_count,
             "observed_session_id": observed_session_id,
+            "assistant_text": "\n\n".join(assistant_blocks).strip(),
             RECORD_FIELD: spend.to_dict(),
         }
 
     def _compose_stdout_text(
         self,
         extracted_fragments: list[str],
+        terminal_fragments: list[str],
         non_json_lines: list[str],
         raw_lines: list[str],
     ) -> str:
+        """Everything the turn said, once.
+
+        The terminal result event restates the whole reply, so harvesting it alongside the
+        assistant text hands every caller that keeps the raw stream two copies. Stage-shaped
+        callers never noticed: they parse a delimited section out of the text and a second
+        copy of it changes nothing. The callers that keep the whole reply did notice, and
+        nobody was watching -- measured on the sixty-task FrontierScience trial, **fifty-five
+        of the control arm's sixty answers carried the answer twice** (forty of them an exact
+        byte-for-byte halving) against none of the pipeline arm's, because only the control
+        arm keeps the reply. That asymmetry sat inside a paired comparison, which is reason
+        enough to repair it -- and note that it is the *asymmetry* that is the reason, not a
+        price: re-judging twelve of them once de-duplicated moved the score by +0.033 points
+        on average (sd 0.633, seven unchanged), so the doubling bought the arm that had it
+        nothing measurable. An earlier revision of this docstring said -0.307 over eleven,
+        which is not in the array it cited; see `docs/frontierscience-results.md`.
+
+        So the result event is a fallback, not a contribution. It is the reply only when
+        nothing else captured one -- a turn that emitted no assistant text at all, which is
+        the case the harvest was presumably added for.
+        """
         fragment_text = "\n".join(fragment for fragment in extracted_fragments if fragment).strip()
+        if not fragment_text:
+            fragment_text = "\n".join(f for f in terminal_fragments if f).strip()
         non_json_text = "\n".join(line for line in non_json_lines if line).strip()
         raw_text = "\n".join(line for line in raw_lines if line).strip()
 
@@ -1652,6 +1804,18 @@ Original stderr:
             "bypassPermissions",
             "--dangerously-skip-permissions",
         ]
+        if self.isolate_auto_memory:
+            # `--settings` adds to the settings already in force rather than replacing them,
+            # so this turns off one feature and leaves the user's auth, model and env alone
+            # -- checked against the real binary (2.1.229), where a run carrying this flag
+            # still reached its configured backend.
+            #
+            # How to check a transcript for it, and the trap: the isolated run's `init` event
+            # **omits `memory_paths` entirely** rather than setting it to null. So
+            # `init["memory_paths"] is None` raises `KeyError` on precisely the run the check
+            # exists to recognise, and `init.get("memory_paths")` cannot tell an isolated run
+            # from a malformed event. Test `"memory_paths" not in init`.
+            command.extend(["--settings", json.dumps({"autoMemoryEnabled": False})])
         if mcp_config is not None:
             # Not --strict-mcp-config: that would also drop whatever servers the user has
             # configured for their own environment, which is not AutoR's call to make.

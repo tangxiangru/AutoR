@@ -174,6 +174,34 @@ DEFAULT_FS_MAX_ATTEMPTS = 2
 #: nothing while reporting that it finished. There is no budget here to spend.
 DEFAULT_FS_MAX_AUTO_SKIPS = 0
 
+#: The five skills every ``ideate`` run of this benchmark is given, unless
+#: ``--no-forced-skills`` says otherwise.
+#:
+#: Forced rather than routed, for two reasons that are both about this adapter and not
+#: about skills in general. The first is a live failure mode: ``select_run_skills`` fails
+#: closed on an empty brief and refuses *every* task-scoped skill silently, so a run whose
+#: ``user_input.txt`` has not landed yet gets none of them and says nothing about it. The
+#: second is that the decision behind these five is not a claim about the shape of one
+#: task -- it is a claim about a sixty-task population, measured on a paired trial of it,
+#: which is neither what an ``applies_when`` predicate says nor what a pin says.
+#:
+#: They are written against that trial's measured losses. See each SKILL.md's "Why this is
+#: here" for the task ids, the rubric item numbers and the per-item deltas. Not set for
+#: the ``direct`` profile: the control arm is one operator call with no run directory to
+#: install a skill into, and giving one arm guidance is the difference being measured.
+FS_FORCED_SKILLS = frozenset({
+    "bind-every-deliverable-to-the-file-that-is-graded",
+    "every-printed-part-gets-its-own-answered-section",
+    "grant-the-expected-reading-before-you-depart-from-it",
+    "answer-in-the-symbols-the-problem-printed",
+    "one-visible-line-per-quantity-the-answer-owes",
+})
+
+#: What ``skill_force_source`` records in ``run_config.json``. The symbol, not a prose
+#: description of it: a reader who finds this string in a run config can grep the tree for
+#: the set that produced it, which is the whole point of recording who forced them.
+FS_FORCED_SKILLS_SOURCE = "fs_agent:FS_FORCED_SKILLS"
+
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -401,6 +429,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "the workspace. Useful after an interrupted run.",
     )
     parser.add_argument(
+        "--no-forced-skills",
+        action="store_true",
+        help="Run the ideate arm without the five skills this adapter installs on every "
+             "run of this benchmark. This is the control arm and it is not optional: a "
+             "run with the skills and a run without them are two configurations, and "
+             "both arms have to come out of the same binary for the difference between "
+             "them to be a measurement. Has no effect on the direct profile, which has "
+             "no run directory to install a skill into.",
+    )
+    parser.add_argument(
         "--fake-operator",
         action="store_true",
         help="Use the fake operator instead of a real backend. For smoke-testing the "
@@ -412,6 +450,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def default_model_for(backend: str) -> str:
     return "default" if backend == "codex" else "sonnet"
+
+
+def auto_memory_isolation_for(operator: object, backend: str) -> bool | None:
+    """Whether this run was cut off from Claude Code's cross-session memory store.
+
+    Read off the operator that ran the stages rather than off the flags that built it, and
+    only when that operator is the one the field is about.
+
+    The second half is the trap. :class:`CodexOperator` subclasses :class:`ClaudeOperator`,
+    so it inherits ``isolate_auto_memory`` and a plain attribute read reports ``False`` for
+    a codex run -- "Claude Code's memory store was reachable", asserted of a run that never
+    started Claude Code. The store is not a fact about that run in either direction, and
+    ``None`` is the state that says so. It reads the same as a record written before the
+    field existed, which is the right reading: in both cases nobody measured this.
+    """
+    if backend != "claude":
+        return None
+    return bool(getattr(operator, "isolate_auto_memory", False))
 
 
 def create_operator(
@@ -456,6 +512,12 @@ def create_operator(
         stage_timeout=stage_timeout,
         web_search_mcp=False,
         disallowed_tools=disallowed_tools,
+        # A benchmark run must not read the notes another run left behind. Not hypothetical
+        # here: measured on the sixty-task trial, the store this cuts off held two notes an
+        # earlier run had written about how to satisfy this harness's own exit clauses, and
+        # in the chemistry block reading them was the first thing runs in *both* arms did.
+        # See `ClaudeOperator.isolate_auto_memory` for the measurement.
+        isolate_auto_memory=True,
     )
 
 
@@ -587,6 +649,24 @@ def build_manager(
             ideas_per_proposer=args.ideas_per_proposer,
             disallowed_tools=disallowed_tools,
         )
+    # Set after construction for the same reason the panel is: these are attributes of the
+    # manager rather than constructor keywords. `skill_discipline` is deliberately left
+    # unset -- FrontierScience's `biology` is not one of `DISCIPLINE_PREFIXES` (the pack
+    # spells that field `life`), so assigning the subject straight through would withhold
+    # every `life-*` skill from a biology run and install no field skills at all. Mapping
+    # `biology` to `life` is a separate decision with its own evidence, and it must not
+    # ride along on this one.
+    #
+    # Both attributes, and clearing `skill_force` alone would not have been enough. The
+    # five carry `applies_when: intermediate derivations`, which is a phrase in this
+    # benchmark's own closing instruction and occurs in 60 of its 60 task statements -- so
+    # with the force cleared the shape filter installs exactly the same five and announces
+    # them under the shape banner. Measured on a `--fake-operator` run: the control arm
+    # differed from the treatment arm by one paragraph of prompt. `skill_withhold` is what
+    # makes `--no-forced-skills` an arm rather than a rewording.
+    manager.skill_force = frozenset() if args.no_forced_skills else FS_FORCED_SKILLS
+    manager.skill_force_source = FS_FORCED_SKILLS_SOURCE
+    manager.skill_withhold = FS_FORCED_SKILLS if args.no_forced_skills else frozenset()
     return manager
 
 
@@ -638,6 +718,33 @@ def tools_denied_on_every_seat(seats: Mapping[str, Sequence[str]]) -> tuple[str,
         return ()
     ordered = list(dict.fromkeys(tool for tools in seats.values() for tool in tools))
     return tuple(tool for tool in ordered if all(tool in tools for tools in seats.values()))
+
+
+def skills_this_run_got(manager: ResearchManager | None) -> tuple[list[str], list[str]]:
+    """``(forced and installed, forced and withheld)``, for the record and for the digest.
+
+    Read off ``Manager._forced_skills``, which is the set the installer intersected with
+    what it actually wrote into the run's ``.claude/skills/``, and never off
+    ``args.no_forced_skills`` or off :data:`FS_FORCED_SKILLS`. The flag says what was
+    asked for; a name that has been renamed out of the pack, or withheld by a filter the
+    front end does not know about, is asked for by the flag and installed by nothing --
+    and the arm would then be described in its own metadata as carrying five skills it
+    never saw. The same rule as ``disallowed_tools``: what the seats are carrying, not
+    what the flags requested.
+
+    The second half is a subtraction rather than a copy of ``manager.skill_withhold``, for
+    the same reason: what a comparison needs to know is which of this benchmark's forced
+    names did not reach the model, whatever stopped them.
+
+    ``None`` covers the two runs that have no manager -- the ``direct`` arm, which makes
+    one call with no run directory to install a skill into, and ``--export-only``, which
+    observed no walk at all. Both get ``([], [])``: nothing was installed and, since this
+    front end forces nothing on a run without a manager, nothing was withheld either.
+    """
+    if manager is None:
+        return [], []
+    installed = frozenset(getattr(manager, "_forced_skills", None) or frozenset())
+    return sorted(installed), sorted(FS_FORCED_SKILLS - installed)
 
 
 def run(args: argparse.Namespace) -> FsRunResult:
@@ -791,6 +898,7 @@ def run(args: argparse.Namespace) -> FsRunResult:
     # asked for is `disallowed_tools`; what the seven seats are carrying is this, and the
     # two disagree on any backend without the knob.
     seats = operator_seats(operator, manager)
+    forced_skills, withheld_skills = skills_this_run_got(manager)
     meta = build_fs_meta(
         workspace=workspace,
         task=row.key,
@@ -806,6 +914,9 @@ def run(args: argparse.Namespace) -> FsRunResult:
         disallowed_tools=tools_denied_on_every_seat(seats),
         disallowed_tools_requested=disallowed_tools,
         disallowed_tools_by_seat=seats,
+        skill_forced=forced_skills,
+        skill_withheld=withheld_skills,
+        auto_memory_isolated=auto_memory_isolation_for(operator, operator_backend),
         witness=read_transcript_witness(paths),
         dataset_path=dataset_path,
         dataset_sha256=dataset_sha256,

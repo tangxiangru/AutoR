@@ -13,9 +13,9 @@ asked is different: does a no-browsing AutoR run entered at Stage 02 write a bet
 answer than one long call to the same underlying model? One arm is a pipeline in a
 worktree at a commit; the other is a single call to a model, with no worktree and no
 commit at all. So :class:`FsArmSpec` carries ``kind``, ``model`` and ``answer_guidance``
-for both, and ``worktree``/``sha``/``review_model``/``profile`` only for the ``autor``
-side, and :func:`_refuse_a_label_that_is_not_the_producer` runs at *freeze* time. That
-timing is the lesson and not a nicety: the sibling trial accepted a plan labelled
+for both, and ``worktree``/``sha``/``review_model``/``profile``/``forced_skills`` only for
+the ``autor`` side, and :func:`_refuse_a_label_that_is_not_the_producer` runs at *freeze*
+time. That timing is the lesson and not a nicety: the sibling trial accepted a plan labelled
 ``{"label": "off", "sha": "621566b"}`` -- the obvious way to write an on/off trial --
 launched it, and had every arm refused by the clause that reads the label. Twelve runs,
 twelve refusals, zero pairs, and a report whose exclusion lines named the clause but not
@@ -266,7 +266,7 @@ def _digest(payload: object) -> str:
 class FsRunEnvironment:
     """Everything that changes the number without changing the thing under test.
 
-    Eight fields that two arms must agree on to be comparable, and a ninth that is a
+    Nine fields that two arms must agree on to be comparable, and a tenth that is a
     plan-level constant today and is recorded anyway. Every one is *observed* off the
     artifacts rather than copied from the plan: a field filled from the plan agrees by
     construction and is therefore not the field the contract names, and the confounds
@@ -302,6 +302,23 @@ class FsRunEnvironment:
     #: that it denied nothing, and a run-level sentence that cannot be falsified by one
     #: seat is the intersection.
     disallowed_tools: tuple[str, ...] = ()
+    #: The front end's forced skills that this run did **not** get, as a sorted tuple.
+    #:
+    #: The withheld set and not the installed one, and the choice is the whole of this
+    #: field. ``fs_agent.py`` forces five skills onto every ``ideate`` run and
+    #: ``--no-forced-skills`` denies them, so the installed set separates those two
+    #: configurations correctly -- and separates the ``direct`` arm from *both*, because
+    #: an arm with no run directory to install a skill into installs nothing. Digesting
+    #: the installed set would therefore refuse every pair of the trial this benchmark
+    #: actually runs, sixty of them, after they were paid for. What the withheld set says
+    #: instead is "this run was denied what its front end gives a run of its kind", which
+    #: is empty for a ``direct`` arm and for a forced ``ideate`` arm alike and non-empty
+    #: for exactly the arm that was held back.
+    #:
+    #: Observed, so it also catches the half-application no plan can declare: a forced
+    #: skill renamed out of the pack is installed by nothing, and the arm that lost it
+    #: separates from the arm that kept it instead of being averaged with it.
+    skill_withheld: tuple[str, ...] = ()
     #: How many answer runs this arm's total is the mean over. One today, for every arm,
     #: because the driver produces one evidence per run and pools nothing -- and it is in
     #: the digest so that an arm pooled over three attempts can never be averaged against
@@ -369,6 +386,18 @@ class FsArmSpec:
     #: ``autor`` only: ``ideate``. Recorded rather than assumed so that a second pipeline
     #: profile is a plan edit and not a code edit.
     profile: str = ""
+    #: ``autor`` only: does this arm get the five skills ``fs_agent.py`` forces onto every
+    #: run of this benchmark? ``False`` renders ``--no-forced-skills`` into the child
+    #: command.
+    #:
+    #: Default ``True`` because that is what the binary does when nobody says otherwise,
+    #: and an arm whose plan file is silent must describe the run that will actually
+    #: happen. It is here rather than in :class:`FsTrialPlan` for the same reason
+    #: ``answer_guidance`` is: it is a property of a producer, both arms have to be
+    #: described in the same vocabulary, and
+    #: :func:`_refuse_a_plan_that_cannot_produce_a_pair` is where "and they must agree"
+    #: is said once, out loud, with the reason attached.
+    forced_skills: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
@@ -380,6 +409,11 @@ class FsArmSpec:
         The same rule as :meth:`FsTrialPlan.from_dict` and for the same reason: a
         misspelled ``review_model`` that is silently dropped is a reviewer running on the
         backend default for the length of the trial, and nothing says so.
+
+        ``forced_skills`` is read as the boolean it is and never coerced, because the
+        coercion is the trap: ``bool("false")`` is ``True``, so a plan file that spelt the
+        control arm ``"forced_skills": "false"`` would be accepted and would install the
+        five skills on the arm that exists to be without them.
         """
         known = {spec.name for spec in dataclasses.fields(cls)}
         unknown = sorted(set(payload) - known)
@@ -388,12 +422,35 @@ class FsArmSpec:
                 f"unknown arm fields: {', '.join(unknown)}. An arm is the description of a "
                 "producer, and a field nobody reads is a producer nobody described."
             )
-        values = {key: str(payload.get(key, "")) for key in known}
-        return cls(**values)
+        forced = payload.get("forced_skills", True)
+        if not isinstance(forced, bool):
+            raise ValueError(
+                f"`forced_skills` is {forced!r} and has to be a JSON boolean. Every "
+                "non-empty string is true in Python, so a coerced `\"false\"` would launch "
+                "the control arm with the five skills the arm exists to be without, and "
+                "the trial would report a difference between two identical configurations."
+            )
+        values: dict[str, Any] = {
+            key: str(payload.get(key, "")) for key in known - {"forced_skills"}
+        }
+        return cls(forced_skills=forced, **values)
 
     @property
     def expected_stages_approved(self) -> tuple[str, ...]:
         return FS_STAGES_APPROVED_BY_KIND.get(self.kind, ())
+
+    @property
+    def withholds_forced_skills(self) -> bool:
+        """Will a run of this arm record a non-empty ``skill_withheld``?
+
+        The predicate the freeze compares the two arms on, written once here so that it
+        cannot drift from what the runs will do. ``kind`` is half of it: a ``direct`` arm
+        has no manager and no run directory, so this front end forces nothing on it and
+        there is nothing for it to be denied -- ``forced_skills`` on a ``direct`` arm is
+        inert, which is why the freeze refuses one that sets it rather than quietly
+        reading it as a control.
+        """
+        return self.kind == "autor" and not self.forced_skills
 
     def describe(self) -> str:
         """One line a reader can check the arm against, with nothing left implicit."""
@@ -402,7 +459,12 @@ class FsArmSpec:
                 f"`{self.label}` -- AutoR `{self.profile or '<no profile>'}` at "
                 f"`{self.sha or '<no sha>'}` in `{self.worktree or '<no worktree>'}`, "
                 f"answering with `{self.model}`, reviewing with "
-                f"`{self.review_model or self.model}`, guidance `{self.answer_guidance}`"
+                f"`{self.review_model or self.model}`, guidance `{self.answer_guidance}`, "
+                # Both directions in words. "forced skills: True" beside a line of prose
+                # reads as a fact about the harness; a reader checking the arm against the
+                # run needs the sentence that is false if the flag went the other way.
+                + ("with" if self.forced_skills else "WITHOUT")
+                + " the skills the front end forces on this benchmark"
             )
         return (
             f"`{self.label}` -- one direct call to `{self.model}`, guidance "
@@ -1768,6 +1830,23 @@ class FsTrialPlan:
     max_refusal_rate_for_publication: float = FS_MAX_REFUSAL_RATE
     dedupe_pairs: bool = True
     stage_timeout_seconds: int = 3600
+    #: Seconds the ``direct`` arm gets for its single call, and the reason it is a plan
+    #: field rather than the front end's default.
+    #:
+    #: The two arms were not on the same clock. ``stage_timeout_seconds`` reaches the
+    #: pipeline arm as a per-stage allowance and the driver passed nothing to the control,
+    #: which therefore ran on ``fs_agent.py``'s 1,800 s default -- half the pipeline's
+    #: allowance, for the whole run. Measured on the sixty-task trial of 2026-08-19:
+    #: **three of the sixty control runs stopped at exactly 1,800 s and all three were
+    #: refused**, and the same shape refused four of sixty on the trial before it. Those
+    #: are the runs where the model wrote longest, and length correlates with score on
+    #: this rubric, so the cap does not slow the control down -- it deletes its best
+    #: answers and biases the arm downward.
+    #:
+    #: Default 1,800 so that replaying an existing plan reproduces what it measured. A new
+    #: plan should set it equal to ``stage_timeout_seconds``; a plan that leaves the two
+    #: unequal is declaring a handicap, which is legitimate only if it says so.
+    answer_timeout_seconds: int = 1800
     max_attempts: int = FS_MAX_ATTEMPTS
     state_dir: str = ""
     #: ``counterbalanced`` here, where ``src.rcb_trial`` defaults to ``control_first``.
@@ -1891,6 +1970,23 @@ def _refuse_a_plan_that_cannot_produce_a_pair(plan: FsTrialPlan) -> None:
             "intervention and it is in the digest: applied to one arm it is the thing "
             "being measured, not the thing being held fixed."
         )
+    if plan.control.withholds_forced_skills != plan.treatment.withholds_forced_skills:
+        raise ValueError(
+            f"one arm withholds the front end's forced skills and the other does not "
+            f"(control `{plan.control.label}`: "
+            f"{'withheld' if plan.control.withholds_forced_skills else 'installed'}; "
+            f"treatment `{plan.treatment.label}`: "
+            f"{'withheld' if plan.treatment.withholds_forced_skills else 'installed'}). "
+            "`skill_withheld` is observed off each run and folded into the environment "
+            "digest, so every pair of this plan would be excluded with 'the two arms "
+            "measured no stage in common' -- after both arms of every task had been "
+            "launched, run and judged. A `direct` arm counts as *installed*: it has no run "
+            "directory to install a skill into, so it is never the one holding a skill "
+            "back, and pairing it against a withheld `ideate` arm is this same refusal "
+            "wearing the other costume. Measuring the forced skills as the treatment is a "
+            "different trial and needs this field taken out of the digest deliberately, "
+            "the way a cross-model comparison needs `answer_model` taken out of it."
+        )
     if plan.arm_order_mode not in ("control_first", "counterbalanced"):
         raise ValueError(f"unknown arm_order_mode {plan.arm_order_mode!r}")
     if plan.answer_attempts < 1 or plan.judge_replicates < 1:
@@ -1990,6 +2086,16 @@ def _refuse_a_label_that_is_not_the_producer(side: str, spec: FsArmSpec) -> None
                     "profile, and a field that is recorded and never used is a description "
                     "of a producer that does not exist."
                 )
+        if not spec.forced_skills:
+            raise ValueError(
+                f"the {side} arm is `direct` and sets `forced_skills: false`. The flag it "
+                "renders has no effect on a run with no run directory to install a skill "
+                "into, so this describes a control that does not exist -- and it is the "
+                "reading that matters, because a plan whose two arms are a `direct` arm "
+                "and an `ideate` arm without the forced skills is the one comparison this "
+                "field is in the digest to refuse. Leave it at the default and say which "
+                "configuration the `autor` arm ran in."
+            )
         return
     sha = spec.sha.strip()
     if not sha:

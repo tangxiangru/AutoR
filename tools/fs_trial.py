@@ -54,6 +54,7 @@ import json
 import os
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -191,6 +192,10 @@ def harvest(workspace: Path, *, task_key: str) -> dict[str, Any]:
         "meta_task_instruction_sha256": meta.get("task_instruction_sha256"),
         "meta_dataset_sha256": meta.get("dataset_sha256"),
         "meta_disallowed_tools": meta.get("disallowed_tools"),
+        # The withheld set and not the installed one: `FsRunEnvironment.skill_withheld`
+        # says why, and the short version is that a `direct` arm installs nothing without
+        # being denied anything.
+        "meta_skill_withheld": meta.get("skill_withheld"),
         "meta_run_id": meta.get("run_id"),
         "answer_path": str(answer),
         "answer_chars": meta.get("answer_chars"),
@@ -270,6 +275,12 @@ def agent_argv(plan: FsTrialPlan, task: str, arm: str, workspace: Path, attempt:
     reviewer's model resolves independently of the operator's, so an arm that passes one
     and not the other leaves the review panels on whatever the backend defaults to, where
     they die without ever being classified as anything.
+
+    ``--no-forced-skills`` is rendered by **both** branches and spelt the same way in
+    each. The dry run is the only place the withheld configuration can be exercised end
+    to end -- no real AutoR run of this benchmark exists -- so a fake branch that could
+    not express it would leave the arm this driver was extended to launch reachable only
+    from a unit test holding a hand-written argv.
     """
     spec = plan.arm_for(arm)
     if plan.operator == "fake":
@@ -288,6 +299,8 @@ def agent_argv(plan: FsTrialPlan, task: str, arm: str, workspace: Path, attempt:
             "--attempt-index", str(attempt - 1),
             "--quality", str(plan.fake_quality if arm == plan.treatment.label else 0.0),
         ]
+        if not spec.forced_skills:
+            argv.append("--no-forced-skills")
         # The treatment arm, like `fake_quality`, because a fault injected into both
         # arms would produce two refusals and no pair, which exercises the ledger and
         # not the asymmetry the ledger exists to disclose.
@@ -307,9 +320,16 @@ def agent_argv(plan: FsTrialPlan, task: str, arm: str, workspace: Path, attempt:
         "--review-model", spec.review_model or spec.model,
         "--operator", plan.operator,
         "--stage-timeout", str(plan.stage_timeout_seconds),
+        # Passed to both arms, and it only binds one: `fs_agent.py` reads the stage timeout
+        # for an `ideate` run and this for a `direct` one. Sending it unconditionally keeps
+        # the two clocks in one place in the plan instead of leaving the control's on a
+        # default nobody reading the plan would see.
+        "--answer-timeout", str(plan.answer_timeout_seconds),
         "--attempt-index", str(attempt - 1),
         "--disallowed-tools", *plan.disallowed_tools,
     ]
+    if not spec.forced_skills:
+        argv.append("--no-forced-skills")
     return argv
 
 
@@ -581,36 +601,66 @@ def fake_score(plan: FsTrialPlan, state: Mapping[str, Any], out: Path) -> bool:
     return True
 
 
-def final_pass(plan: FsTrialPlan) -> None:
-    """Grade every finished, unrefused workspace, back to back, at the end.
+def _grade_one_draw(plan: FsTrialPlan, state: Mapping[str, Any], draw: int) -> tuple[str, str]:
+    """One draw, retried, returning ``(status_line, lost_name)`` with an empty name on success.
 
-    One continuous pass with one judge, serially, because that is the only arrangement
-    under which the published totals of the first task and the last were produced by the
-    same instrument. Progress is printed per file: the judge is the one part of this
-    trial nothing can warn about early, so an operator watching a wrong endpoint refuse
-    every call should see it on the second line rather than in the report.
+    Split out of :func:`final_pass` so the pass can run several at once. It returns its line
+    rather than printing it, because interleaved prints from a pool are how a progress log
+    stops being readable in the order things happened.
     """
-    lost: list[str] = []
-    for state in all_states(plan):
-        if state.get("phase") != "finished" or state.get("classification") != "ok":
-            continue
-        task, arm = str(state["task_key"]), str(state["arm"])
-        for draw in range(plan.judge_replicates):
-            out = score_path(plan, task, arm, int(state.get("attempt") or 1), draw)
-            if out.exists():
-                continue
-            for _try in range(JUDGE_TRIES):
-                if score_once(plan, state, out):
-                    break
-            else:
-                # Giving up quietly is how an arm scored once is published as an arm
-                # scored three times. The count reaches the report through
-                # `FsRunEnvironment.judge_replicates`; this is the operator's copy.
-                lost.append(out.name)
-                print(f"  LOST DRAW: {out.name} could not be scored in {JUDGE_TRIES} tries")
-                continue
+    task, arm = str(state["task_key"]), str(state["arm"])
+    out = score_path(plan, task, arm, int(state.get("attempt") or 1), draw)
+    if out.exists():
+        return "", ""
+    for _try in range(JUDGE_TRIES):
+        if score_once(plan, state, out):
             payload = read_json(out)
-            print(f"  scored {task}/{arm} draw {draw}: {payload.get('total_score')}")
+            return f"  scored {task}/{arm} draw {draw}: {payload.get('total_score')}", ""
+    # Giving up quietly is how an arm scored once is published as an arm scored three
+    # times. The count reaches the report through `FsRunEnvironment.judge_replicates`;
+    # this is the operator's copy.
+    return f"  LOST DRAW: {out.name} could not be scored in {JUDGE_TRIES} tries", out.name
+
+
+def final_pass(plan: FsTrialPlan) -> None:
+    """Grade every finished, unrefused workspace at the end, ``judge_concurrency`` at a time.
+
+    **This pass used to be serial, and the reason given for it was backwards.** The argument
+    was that one continuous serial pass is the only arrangement under which the first task's
+    total and the last task's were produced by the same instrument. But a pass that takes ten
+    hours straddles *more* of whatever drift a hosted judge deployment has than one that takes
+    forty minutes; serialising widens the window it was meant to close. Measured on the trial
+    of 2026-08-19: ninety-five answers at one draw each, one at a time, was still running six
+    hours after the last run finished.
+
+    ``judge_concurrency`` existed as a plan field the whole time and reached nothing but a
+    metadata line in the fake scorer -- a field recorded and never used, which is the same
+    defect this module's own arm validation refuses a plan for. It is now what it says.
+
+    Default 1, so an existing plan replays exactly what it measured, one call at a time.
+
+    Two properties the pool must not cost, both of which are what the serial version was
+    actually buying. Progress is still printed one line per draw as each finishes, because
+    the judge is the one part of this trial nothing can warn about early and an operator
+    watching a wrong endpoint refuse every call should see it on the second line rather than
+    in the report. And a lost draw is still named in ``final_pass.json`` rather than dropped,
+    because a draw that failed silently is an arm published as replicated when it was not.
+    """
+    work = [
+        (state, draw)
+        for state in all_states(plan)
+        if state.get("phase") == "finished" and state.get("classification") == "ok"
+        for draw in range(plan.judge_replicates)
+    ]
+    lost: list[str] = []
+    with ThreadPoolExecutor(max_workers=max(1, plan.judge_concurrency)) as pool:
+        futures = [pool.submit(_grade_one_draw, plan, state, draw) for state, draw in work]
+        for future in as_completed(futures):
+            line, lost_name = future.result()
+            if line:
+                print(line, flush=True)
+            if lost_name:
+                lost.append(lost_name)
     write_json(
         Path(plan.state_dir) / "final_pass.json",
         {"done": True, "at": time.time(), "unscored_draws": sorted(lost)},
@@ -660,6 +710,7 @@ def evidence_for(plan: FsTrialPlan, state: Mapping[str, Any]) -> FsArmEvidence |
 
     judge = first.get("judge") if isinstance(first.get("judge"), dict) else {}
     tools = state.get("meta_disallowed_tools")
+    withheld = state.get("meta_skill_withheld")
     env = FsRunEnvironment(
         dataset_sha256=str(state.get("meta_dataset_sha256") or ""),
         judge_model=str(judge.get("model") or ""),
@@ -668,6 +719,11 @@ def evidence_for(plan: FsTrialPlan, state: Mapping[str, Any]) -> FsArmEvidence |
         answer_guidance=str(state.get("meta_answer_guidance") or ""),
         task_instruction_sha256=str(state.get("meta_task_instruction_sha256") or ""),
         disallowed_tools=tuple(sorted(str(item) for item in tools)) if isinstance(tools, list) else (),
+        # Sorted again on the way in. The writer sorts too, and this is the reader that
+        # would otherwise carry a JSON file's order into a comparability digest.
+        skill_withheld=(
+            tuple(sorted(str(item) for item in withheld)) if isinstance(withheld, list) else ()
+        ),
         # One, always, and a constant rather than an observation -- there is nothing on
         # disk to read it off, because this driver produces one evidence per run and pools
         # nothing. Writing `plan.answer_attempts` here instead would make the field agree
@@ -858,6 +914,12 @@ def fake_run(args: argparse.Namespace) -> int:
     write_text(answer, body)
 
     stages = [FS_IDEATE_STAGE] if args.kind == "autor" else []
+    # The same shape a real run records, from the same two inputs: the profile decides
+    # whether there is anything to force at all, and the flag decides whether it arrived.
+    # A `direct` fake arm records both as empty because a direct run has no run directory
+    # to install a skill into, which is the asymmetry the digest field is built around.
+    forced = list(_FAKE_FORCED_SKILLS) if args.kind == "autor" and not args.no_forced_skills else []
+    withheld = list(_FAKE_FORCED_SKILLS) if args.kind == "autor" and args.no_forced_skills else []
     meta = build_fs_meta(
         workspace=workspace,
         task=args.task,
@@ -877,6 +939,8 @@ def fake_run(args: argparse.Namespace) -> int:
         auto_skipped_stages=[],
         stages_approved=stages,
         disallowed_tools=list(args.disallowed_tools),
+        skill_forced=forced,
+        skill_withheld=withheld,
         dataset_path=None,
         dataset_sha256=args.dataset_sha256,
         run_id=paths.run_root.name,
@@ -897,6 +961,18 @@ def fake_run(args: argparse.Namespace) -> int:
     write_fs_meta(workspace, meta)
     print(json.dumps({"type": "result", "status": meta["status"]}), flush=True)
     return 0 if meta["status"] == "completed" else 1
+
+
+#: What the dry run records as an ``autor`` arm's forced-skill set, and as a withheld
+#: arm's. Fabricated, like the subjects and the duplicate row and for the same reason: the
+#: dry run installs no skills and must not claim the five real names, but a fake that
+#: recorded the same thing whatever the flag said would leave ``skill_withheld`` -- the
+#: field the environment digest compares two arms on -- exercised by nothing but a unit
+#: test holding a hand-written dictionary. Two names, and deliberately not in the order
+#: they sort into: the record is canonicalised on the way out and on the way in so that a
+#: set's iteration order can never read as two environments, and a one-element fixture
+#: would leave both of those sorts holding nothing.
+_FAKE_FORCED_SKILLS = ("dry-run-forced-skill-two", "dry-run-forced-skill-one")
 
 
 #: The split's real layout: rows 0-19 physics, 20-39 chemistry, 40-59 biology. Copied
@@ -1165,6 +1241,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     faker.add_argument("--quality", type=float, default=0.0, metavar="POINTS",
                        help="How many rubric points better than the floor the fake judge "
                             "should grade this answer. Defaults to 0.0.")
+    faker.add_argument("--no-forced-skills", action="store_true",
+                       help="Record this fake run as having been denied the skills the "
+                            "front end forces on an ideate arm, the way `fs_agent.py`'s "
+                            "flag of the same name makes a real one. Ignored for the "
+                            "direct kind, which has nothing to be denied.")
     faker.add_argument("--no-transcript", action="store_true",
                        help="Write no stream-json transcript, so the browsing witness is "
                             "null and the pair must be refused rather than admitted.")

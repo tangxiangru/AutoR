@@ -35,6 +35,7 @@ from __future__ import annotations
 import csv
 import importlib.util
 import json
+import math
 import os
 import sys
 import tempfile
@@ -1051,6 +1052,288 @@ class WallClockKillsTheTreeTest(unittest.TestCase):
                 )
         self.assertFalse(hit)
         self.assertEqual(exit_code, 3)
+
+
+class BenchmarkConventionTest(unittest.TestCase):
+    """The three rules only the benchmark's own notebook states, and one of them cost a number.
+
+    ``notebooks/create_summary_plots.ipynb`` is the code that drew the published Figure 4.
+    Its ``normalize_score_log`` ends ``.fillna(0).replace([inf,-inf], 100).clip(lower=0)``,
+    and its ``phi`` substitutes ``|0.999 - optimal|`` when a score hits the optimum exactly.
+    Each of those three is a decision this adapter would otherwise have made differently.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.task = fixture_task(Path(self.tmp.name))   # sota 0.9, worst 0.1, optimal 1.0
+
+    def test_an_exact_optimum_transforms_as_the_notebook_does(self) -> None:
+        """3.0, not infinity and not a floor of this adapter's choosing.
+
+        An earlier version used a 1e-12 epsilon, which would have reported 12 where the
+        benchmark reports 3. No run has hit an optimum, so this fixes a number nobody has
+        seen yet -- which is the only time it is cheap to fix.
+        """
+        self.assertAlmostEqual(self.task.phi(1.0), 3.0, places=12)
+
+    def test_a_run_with_no_submission_is_zero_not_absent(self) -> None:
+        """The rule that changes the answer.
+
+        ``fillna(0)`` puts a run with no scoreable submission into the mean as 0 and leaves
+        its task in the denominator. Dropping the task instead removes an arm's worst
+        outcome from its own average.
+        """
+        self.assertEqual(self.task.reported(None), 0.0)
+
+    def test_the_reported_score_is_clipped_below_and_not_above(self) -> None:
+        self.assertAlmostEqual(self.task.reported(self.task.sota_score), 1.0, places=12)
+        self.assertAlmostEqual(self.task.reported(self.task.worst_score), 0.0, places=12)
+        # Below the estimated worst: real information, but the benchmark clips it.
+        self.assertEqual(self.task.reported(0.01), 0.0)
+        self.assertLess(self.task.normalized(0.01), 0.0)
+        # Above SOTA: not clipped, because the published figure calls those out.
+        self.assertGreater(self.task.reported(0.99), 1.0)
+
+
+class ArmAggregationTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.report = _load_tool("airs_report")
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.task = fixture_task(Path(self.tmp.name))
+
+    def _arm(self, values: dict[str, float | None]):
+        return self.report.arm_metrics(
+            "a", {name: (self.task, value) for name, value in values.items()}
+        )
+
+    def test_an_invalid_run_lowers_the_mean_rather_than_leaving_it_alone(self) -> None:
+        """The regression this whole convention exists to prevent.
+
+        Two arms, identical on the tasks both scored; one of them additionally failed to
+        produce a submission on a third. Under the benchmark's rule that arm's mean drops.
+        Under "score the tasks both scored" the two arms are indistinguishable, and the
+        arm that failed is the one that benefits.
+        """
+        both = self._arm({"x": 0.9, "y": 0.5})
+        failed = self._arm({"x": 0.9, "y": 0.5, "z": None})
+        self.assertAlmostEqual(both.mean, failed.mean * 3 / 2, places=12)
+        self.assertLess(failed.mean, both.mean)
+        self.assertEqual(failed.valid_submission_rate, 100 * 2 / 3)
+        self.assertEqual(both.valid_submission_rate, 100.0)
+
+    def test_the_failed_task_is_in_the_denominator(self) -> None:
+        arm = self._arm({"x": 0.9, "z": None})
+        self.assertEqual(len(arm.scores), 2)
+        self.assertEqual(arm.scores[arm.tasks.index("z")], 0.0)
+
+    def test_median_and_iqm_are_not_the_mean(self) -> None:
+        """One extreme task must be able to carry the mean and not the other two.
+
+        This is the property that makes reporting all three worth the column width: on the
+        real arm `CodeGenerationAPPSPassAt5` moves the mean by 0.35 and the median by
+        nothing.
+        """
+        arm = self._arm({"a": 0.5, "b": 0.5, "c": 0.5, "d": 0.99999})
+        self.assertGreater(arm.mean, arm.median)
+        self.assertAlmostEqual(arm.median, arm.iqm, places=6)
+
+    def test_an_empty_arm_reports_zeros_rather_than_dividing_by_zero(self) -> None:
+        arm = self._arm({})
+        self.assertEqual((arm.mean, arm.median, arm.iqm, arm.valid_submission_rate),
+                         (0.0, 0.0, 0.0, 0.0))
+
+
+class EloTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.report = _load_tool("airs_report")
+
+    def test_an_invalid_run_loses_to_a_valid_one(self) -> None:
+        self.assertEqual(self.report._outcome(None, 0.5, False), 0.0)
+        self.assertEqual(self.report._outcome(0.5, None, False), 1.0)
+        self.assertEqual(self.report._outcome(None, None, False), 0.5)
+
+    def test_the_winner_follows_the_metric_direction(self) -> None:
+        self.assertEqual(self.report._outcome(0.9, 0.5, False), 1.0)   # higher is better
+        self.assertEqual(self.report._outcome(0.9, 0.5, True), 0.0)    # lower is better
+        self.assertEqual(self.report._outcome(0.5, 0.5, False), 0.5)
+
+    def test_an_agent_that_wins_everything_rates_above_one_that_wins_nothing(self) -> None:
+        """And the winless agent gets a finite floor, because its MLE is minus infinity.
+
+        The first version of the solver let its strength shrink until ``log(0)`` raised.
+        The notebook never sees this only because an unpenalised logistic fit stops at its
+        tolerance with a large finite coefficient -- a stopping point, not an estimate.
+        """
+        ratings = self.report.elo_ratings({("a", "b"): 20.0, ("b", "a"): 0.0})
+        self.assertGreater(ratings["a"], ratings["b"])
+        for rating in ratings.values():
+            self.assertTrue(math.isfinite(rating))
+
+    def test_two_agents_that_split_every_battle_rate_equally(self) -> None:
+        ratings = self.report.elo_ratings({("a", "b"): 10.0, ("b", "a"): 10.0})
+        self.assertAlmostEqual(ratings["a"], ratings["b"], places=6)
+        self.assertAlmostEqual(ratings["a"], self.report.ELO_INIT_RATING, places=6)
+
+    def test_the_ratings_are_centred_on_the_initial_rating(self) -> None:
+        """Their unpenalised logistic fit is identified only up to a constant and lands
+        centred; the MM solve here is centred explicitly so the two agree."""
+        ratings = self.report.elo_ratings(
+            {("a", "b"): 7.0, ("b", "a"): 3.0, ("b", "c"): 6.0, ("c", "b"): 4.0,
+             ("a", "c"): 8.0, ("c", "a"): 2.0}
+        )
+        self.assertAlmostEqual(sum(ratings.values()) / len(ratings),
+                               self.report.ELO_INIT_RATING, places=4)
+
+
+class ObservedWorstAnchorTest(unittest.TestCase):
+    """Why this tool does not follow the notebook's own choice of anchor.
+
+    The notebook takes each task's ``worst_score`` from the runs in the analysis. With
+    fourteen agents that is a reasonable floor; with two agents that both beat SOTA it puts
+    the worst *above* SOTA, the denominator goes negative, and every arm scores 0 on a task
+    they both won.
+    """
+
+    def setUp(self) -> None:
+        self.report = _load_tool("airs_report")
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.task = fixture_task(Path(self.tmp.name))
+
+    def test_an_anchor_worse_than_sota_is_flagged_as_degenerate(self) -> None:
+        # Both arms beat SOTA (0.9), so the observed worst is 0.95.
+        degenerate = self.report._with_worst(self.task, 0.95)
+        self.assertLess(degenerate.phi(degenerate.sota_score) - degenerate.phi(0.95), 0)
+        self.assertEqual(
+            self.report.degenerate_anchor_tasks({"widgets": degenerate}), ["widgets"]
+        )
+
+    def test_the_published_anchor_is_not_degenerate(self) -> None:
+        self.assertEqual(self.report.degenerate_anchor_tasks({"widgets": self.task}), [])
+
+    def test_a_degenerate_anchor_reports_zero_rather_than_raising(self) -> None:
+        flat = self.report._with_worst(self.task, self.task.sota_score)
+        self.assertEqual(self.report._reported(flat, 0.95), 0.0)
+
+
+class ReportFormattingTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.report = _load_tool("airs_report")
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.task = fixture_task(Path(self.tmp.name))
+
+    def test_the_comparability_note_names_what_makes_it_incomparable(self) -> None:
+        for phrase in ("20 tasks", "seeds", "no network"):
+            self.assertIn(phrase, self.report.COMPARABILITY)
+
+    def test_a_two_arm_report_prints_the_paired_difference(self) -> None:
+        left = self.report.arm_metrics("autor", {"x": (self.task, 0.5), "y": (self.task, None)})
+        right = self.report.arm_metrics("bare", {"x": (self.task, 0.8), "y": (self.task, 0.6)})
+        text = self.report.format_report([left, right], {"autor": 950.0, "bare": 1050.0})
+        self.assertIn("paired over 2 task(s)", text)
+        self.assertIn("bare - autor", text)
+        self.assertIn(self.report.COMPARABILITY, text)
+
+    def test_an_arm_manifest_reads_an_invalid_run_as_none(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "arm_manifest.json"
+            path.write_text(json.dumps({"arm": "autor", "runs": [
+                {"task": "x", "value": 0.5, "submission_valid": True},
+                {"task": "y", "value": 0.9, "submission_valid": False},
+            ]}), encoding="utf-8")
+            name, values = self.report.load_arm(path)
+        self.assertEqual(name, "autor")
+        # `value` is present on the refused run and must not be believed: the evaluator
+        # never scored it, so the arm gets a zero rather than the number beside it.
+        self.assertEqual(values, {"x": 0.5, "y": None})
+
+
+class SkillDisciplineTest(unittest.TestCase):
+    """`None` does not mean "no field skills". It means "do not filter by field".
+
+    An AIRS-Bench task is in none of AutoR's eleven skill disciplines, and the first version
+    of the adapter expressed that by setting `skill_discipline = None`. `select_run_skills`
+    reads a falsy discipline as "skip the field filter", so the run was offered **124**
+    skills where a ResearchClawBench run is offered 16 -- every field skill in the pack,
+    burying the ones written for this benchmark under eighty-nine written for other fields.
+    Caught by a pre-flight run, not by a test, which is why there is now a test.
+    """
+
+    def setUp(self) -> None:
+        from src.run_skills import DISCIPLINE_PREFIXES, discipline_of, select_run_skills
+
+        self.prefixes = DISCIPLINE_PREFIXES
+        self.discipline_of = discipline_of
+        self.select = select_run_skills
+        from src.run_skills import read_skill_pack
+
+        self.pack = read_skill_pack(REPO_ROOT / "src" / "skills")
+
+    def _airs_discipline(self, category: str) -> str:
+        """What `airs_agent.run` computes. Mirrored rather than imported: importing the
+        agent pulls in the whole manager, and the value is one expression."""
+        return category.casefold().replace(" ", "-")
+
+    def test_a_real_airs_category_is_truthy_and_matches_no_discipline(self) -> None:
+        for category in ("Text Extraction and Matching", "Time Series", "Code"):
+            with self.subTest(category=category):
+                value = self._airs_discipline(category)
+                self.assertTrue(value, "a falsy discipline disables the field filter")
+                self.assertNotIn(value, self.prefixes)
+
+    def test_that_discipline_excludes_every_field_skill(self) -> None:
+        offered = self.select(
+            self.pack,
+            discipline=self._airs_discipline("Text Extraction and Matching"),
+            brief="Your predictions will be scored against the label column of the test set.",
+        )
+        leaked = sorted(e.name for e in offered if self.discipline_of(e.name))
+        self.assertEqual(leaked, [], f"field skills reached an AIRS run: {leaked}")
+
+    def test_none_would_not_have(self) -> None:
+        """The bug, pinned. Without this the fix reads as a stylistic preference."""
+        offered = self.select(
+            self.pack,
+            discipline=None,
+            brief="Your predictions will be scored against the label column of the test set.",
+        )
+        self.assertTrue(
+            [e.name for e in offered if self.discipline_of(e.name)],
+            "if this is empty the field filter no longer needs a truthy discipline and "
+            "the comment in airs_agent.py should be retired",
+        )
+
+    def test_the_seven_airs_skills_survive_that_filter(self) -> None:
+        offered = {
+            e.name for e in self.select(
+                self.pack,
+                discipline=self._airs_discipline("Text Extraction and Matching"),
+                brief="Your predictions will be scored against the label column of the test set.",
+            )
+        }
+        for name in (
+            "a-scoreable-file-in-the-first-hour",
+            "the-row-count-comes-from-the-split-not-the-brief",
+            "assume-this-stage-is-the-last-one-you-get",
+            "the-submission-is-the-only-artifact-that-scores",
+            "your-survey-already-named-the-method-that-hits-the-number",
+            "a-model-you-can-audit-is-not-a-model-that-scores",
+            "the-audit-trail-is-not-the-deliverable-here",
+        ):
+            with self.subTest(skill=name):
+                self.assertIn(name, offered)
+
+    def test_a_brief_from_another_benchmark_gets_none_of_them(self) -> None:
+        offered = {
+            e.name for e in self.select(
+                self.pack, discipline="astronomy",
+                brief="Reproduce the exclusion curve for axion-photon coupling from the survey data.",
+            )
+        }
+        self.assertNotIn("the-submission-is-the-only-artifact-that-scores", offered)
 
 
 if __name__ == "__main__":

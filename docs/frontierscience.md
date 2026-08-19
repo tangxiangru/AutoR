@@ -511,102 +511,32 @@ standard error of it *and* reproduce its subject ordering by accident.
 
 ---
 
-## What AutoR actually costs here, and what it scored
+## What AutoR scores here
 
-The two rows this page carried as UNMEASURED were filled on 2026-08-17 by a three-task
-calibration: `fs:010`, `fs:024` and `fs:043`, one per subject, both arms, real operator, `opus`
-answering and reviewing, `--stage-timeout 3600 --max-attempts 2 --max-auto-skips 0`, judged by
-`gpt-5.1`. It is the first real AutoR run of this benchmark that has ever happened.
+A sixty-task paired trial finished on 2026-08-18 and is written up in full in
+[frontierscience-results.md](frontierscience-results.md) — the arms, the accuracy by subject, the
+cost, both kinds of refusal, and the earlier claims on this branch that it overturns. The headline,
+under a `gpt-5.1` judge at one draw per task, scoring a refused run as zero:
 
-It took two passes, and the reason is worth stating before the numbers: the first pass lost two
-of three `direct` runs to a timeout in the Claude CLI that has nothing to do with this benchmark
-or with AutoR. The table below is the second pass, with that timeout raised. The first pass is
-kept in the section after it, because a refusal that turned out to be an artifact of the harness
-is exactly the kind of thing a later reader needs to be able to tell apart from a refusal that
-was real.
+| arm | overall | physics | chemistry | biology |
+|:---|---:|---:|---:|---:|
+| `direct-opus` — one Claude CLI call | **51.7%** | **30.0%** | 60.0% | **65.0%** |
+| `58e8491-autor-ideate` — the pipeline | **50.0%** | **15.0%** | **80.0%** | 55.0% |
 
-| task | arm | wall | backend calls | output tokens | answer chars | source | points |
-| --- | --- | ---: | ---: | ---: | ---: | --- | ---: |
-| `fs:010` | `direct` | 266 s | 1 | 23,719 | 43,075 | `agent` | **9.375** |
-| `fs:010` | `ideate` | 1,962 s | 9 | 153,848 | 3,731 | `synthesized` | **2.500** |
-| `fs:024` | `direct` | 842 s | 1 | 63,370 | 122,933 | `agent` | **8.000** |
-| `fs:024` | `ideate` | 4,597 s | 16 | 335,157 | 236 | `fallback` | refused |
-| `fs:043` | `direct` | 769 s | 1 | 54,368 | 121,923 | `agent` | **4.000** |
-| `fs:043` | `ideate` | 4,333 s | 20 | 307,352 | 70,606 | `synthesized` | **4.000** |
+The totals are nearly equal and they hide two large effects in opposite directions: the pipeline
+gains chemistry and roughly halves physics. It costs 4.5× the output tokens and 5.3× the wall clock
+to do it, and over the forty-three tasks where both arms produced an answer the paired mean
+difference is **+0.085 ± 0.233** — seventeen wins, seventeen losses, nine ties.
 
-**The `ideate` arm costs 33 to 77 minutes a task**, median 72 minutes, at 9 to 20 backend calls
-and 154,000 to 335,000 output tokens. The `direct` arm costs 4 to 14 minutes, median 13, at one
-call. Sixty tasks by two arms at a concurrency of six is therefore about a day of wall clock plus
-2.4 hours of judging, which makes a full paired campaign affordable — and is the fact the
-sixty-task plan could not be frozen without.
+It also refused outright on **fourteen of sixty** tasks, thirteen of them because Stage 02 never
+passed its own reviewer, which is above the plan's 20% publication ceiling and is why the trial's
+own report declines to print a difference at all. That refusal rate, not the difference, is the
+largest thing this benchmark currently has to say about the pipeline.
 
-### No paired difference is published from this, and the harness is the reason
-
-The `ideate` arm refused on one of three tasks against a `max_refusal_rate_for_publication` of
-0.20. One refusal in three is 33%, so the report withholds the difference and so does this page.
-Refusals are not distributed at random across arms — the surviving pairs are the ones where the
-pipeline happened to converge — so a mean over them is biased by an amount nobody can estimate,
-and the bias runs in the direction that flatters the arm that refused.
-
-What can be said is the two pairs, as two observations rather than as a mean:
-
-| task | `direct` | `ideate` | difference |
-| --- | ---: | ---: | ---: |
-| `fs:010` | 9.375 | 2.500 | **−6.875** |
-| `fs:043` | 4.000 | 4.000 | 0.000 |
-
-The pipeline arm did not win a task. It lost one by twenty times the judge's sampling noise and
-drew the other, at 7.4 and 5.6 times the wall clock. Two pairs is two pairs — but it points the
-same way as the sibling benchmark, where AutoR also lands below the bare CLI it can be configured
-to run on top of, and the mechanism is legible: this rubric awards points for enumerated
-specifics, the `direct` arm wrote 43,000 to 123,000 characters of them, and the synthesizer
-compresses to between 236 and 70,606.
-
-### The first pass, and the timeout that produced it
-
-In the first pass the `direct` arm refused on two of three tasks and the numbers above for those
-two were `609 s / 2 calls / 0 output tokens / 198 characters / fallback`. Every one of those
-refusals was the Claude CLI's own `API Error: Stream idle timeout - no chunks received`, firing
-at almost exactly 302 s while the model was still thinking and had emitted nothing. Six of seven
-`direct` attempts died that way; `fs:024` reproduced it four times across two runs at two
-different concurrency levels, so it is not a load artifact; and the one that survived, `fs:010`,
-finished its call in 264 s — just under.
-
-**The knob is `CLAUDE_STREAM_IDLE_TIMEOUT_MS`, and the obvious guess is wrong.** Raising only
-`CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS` changed nothing and the next run failed again at 302.2 s;
-the function behind that error floors the *un-prefixed* variable at 300,000 ms. Both were then
-set to 1,800,000, which is the ceiling the CLI clamps to — a larger value is silently reduced,
-which is the worst kind of configuration, one that reads as set and is not. The two tasks that
-had failed four times between them then succeeded on the first attempt, and nothing else changed.
-
-Neither variable is reachable from `fs_agent.py`; both belong in the environment of whatever
-launches it, and raising them is the first thing to do before a campaign. The failure mode is
-worth remembering on its own: the process exits, a file exists, and only the metadata says the
-file is a placeholder — and because it fires on thinking time, what it removes is the hard
-questions, so a mean over the survivors reads high.
-
-### The refusal that was real
-
-**The `ideate` arm's refusal is the one this integration was designed for.** `fs:024` spent 76
-minutes and 16 backend calls, approved no stage, and came out with `pipeline_completed: false`,
-`stages_approved: []` and a `fallback` answer of 236 characters. The synthesizer refused to write
-an answer from zero approved stages rather than quietly asking the model the original question
-again — which would have produced a plausible document, a `synthesized` source and an exit code
-of 0. Two clauses named it, `answer_not_fallback` and `pipeline_completed`, and the exit code was
-1. On the sibling benchmark the same shape of run wrote `status: "completed"` thirty-nine times
-out of forty.
-
-Three further things the calibration confirmed in a real run rather than a fake one: the
-no-browsing protocol held on **all seven model seats** of the `ideate` arm, each carrying the
-denied-tool list and each witnessed at `browsing_tool_calls: 0`; the walk approved exactly
-`["02_hypothesis_generation"]` and auto-skipped nothing; and the `direct` arm through the CLI
-writes a far longer answer than the same model called through the API — 43,075 characters against
-5,822 on the same question — which is most of why it scored 9.375 where the API baseline scored
-5.75. The two things called `direct` are not the same instrument, and only the CLI one is the
-paired control.
-
-Artifacts: `fs-runs/fs0NN_{direct,ideate}/` with `_meta.json`, `answer.md` and the run tree, and
-`fs-runs/fs0NN_*.score.json` beside them.
+The three-task calibration that preceded the trial is kept in the results page rather than here,
+because what it mainly demonstrates is that three tasks cannot carry a direction: on one of them the
+pipeline swung 6.25 points between the calibration and the full trial under an unchanged
+configuration.
 
 ### Reproducing it
 
@@ -643,8 +573,13 @@ Stage 02 is a run that produced nothing while reporting that it finished.
 ### The cost, and the neighbour it used to be estimated from
 
 Judging: at a mean of 72.9 s per serial call, sixty tasks by two arms at one draw each is about
-2.4 hours. Answering, now that the calibration has run: the `ideate` arm's median is 72 minutes
-a task over three tasks, so the same sixty by two arms is roughly a day at a concurrency of six.
+2.4 hours. Answering, now that the sixty-task trial has run and the three-task calibration it
+replaced is superseded: the `ideate` arm's median is **3,916 s** a task and its range is 1,797 to
+14,816, so its whole arm cost **70.0 h** of run time and 14.08 M output tokens. The `direct` arm's
+median is **607 s**, its whole arm 13.1 h and 3.16 M tokens. At a concurrency of ten the pair took
+about nine hours of wall clock. The calibration's estimate — a 72-minute median from three tasks —
+survived contact with sixty, but its range did not: three tasks spanned two to one and sixty span
+eight to one.
 
 Before that measurement existed this section reasoned from a neighbour, and the neighbour was
 wrong by an order of magnitude in the direction that matters. Thirty-nine real
@@ -676,8 +611,8 @@ An **arm is an answer producer**, not a git revision. The sibling trial compares
 of AutoR running one entry point, so an arm is a commit and the revision check is the whole of
 arm identity. Here one arm is a pipeline in a worktree at a commit and the other is a single
 call to a model, with no worktree and no commit at all — so `FsArmSpec` carries `kind`, `model`
-and `answer_guidance` for both and `worktree`/`sha`/`review_model`/`profile` only for the
-`autor` side.
+and `answer_guidance` for both and `worktree`/`sha`/`review_model`/`profile`/`forced_skills`
+only for the `autor` side.
 
 | | control | treatment |
 | --- | --- | --- |
@@ -686,6 +621,7 @@ and `answer_guidance` for both and `worktree`/`sha`/`review_model`/`profile` onl
 | model | `opus` | `opus` (reviewing with `opus`) |
 | guidance | `minimal` | `minimal` |
 | profile | — | `ideate` |
+| forced skills | — (nothing to install) | the five, unless the plan says `forced_skills: false` |
 | approved stages | none | exactly `02_hypothesis_generation` |
 
 `_refuse_a_label_that_is_not_the_producer` runs at **freeze** time, and the timing is the whole
@@ -699,19 +635,32 @@ plan that freezes cannot fail admission on this ground.
 
 The same freeze-time pass refuses two arms with the same label, an empty or duplicated task
 list, a key that is not `fs:NNN`, a task instruction whose digest is not this tree's, two arms
-naming different answer models, two arms given different guidance, and the out-of-range
+naming different answer models, two arms given different guidance, one arm withholding the
+front end's forced skills while the other keeps them, and the out-of-range
 parameters. Each of those is otherwise discovered at report time, after the trial has been paid
 for, under the message "the two arms measured no stage in common".
 
 ### The environment digest
 
-`FsRunEnvironment` carries nine fields. Eight are **observed off the artifacts** rather than
+`FsRunEnvironment` carries ten fields. Nine are **observed off the artifacts** rather than
 copied from the plan — a field filled from the plan agrees by construction and is therefore not
 the field the contract names. They are: `dataset_sha256`, `judge_model`,
 `judge_reasoning_effort`, `answer_model`, `answer_guidance`, `task_instruction_sha256`,
-`disallowed_tools` and `judge_replicates`.
+`disallowed_tools`, `skill_withheld` and `judge_replicates`.
 
-The ninth, `answer_attempts`, is not observed and never was: it is the literal `1`. Rather than
+`skill_withheld` is the one that reads backwards on purpose. `fs_agent.py` forces five skills
+onto every `ideate` run and `--no-forced-skills` denies them, and `_meta.json` records both
+sides — `skill_forced`, read off the manager after installation rather than off the flag, and
+`skill_withheld`, the forced names that did not reach the model. It is the *withheld* set that
+goes into the digest, because the installed set separates the `direct` arm from a forced
+`ideate` arm as firmly as it separates a forced arm from a withheld one: an arm with no run
+directory to install a skill into installs nothing without having been denied anything.
+Digesting the installed set would refuse all sixty pairs of the trial this benchmark actually
+runs, after they were paid for. Being observed, it also catches the half-application no plan
+can declare: a forced skill renamed out of the pack is installed by nothing, and the arm that
+lost it separates from the arm that kept it instead of being averaged with it.
+
+The tenth, `answer_attempts`, is not observed and never was: it is the literal `1`. Rather than
 let a constant sit in a list whose stated property is that nothing in it is a constant, the
 freeze refuses any plan declaring another value, and both the field and the record that fills
 it say so. A driver that produced one evidence per run while accepting `answer_attempts: 3`

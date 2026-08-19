@@ -70,7 +70,7 @@ the answer, when it happens, is an allowlist entry naming the framework that cal
 
 Measured precision
 ------------------
-1695 public definitions over 1523 distinct names in ``src/``, and 50 referenced by
+1838 public definitions over 1644 distinct names in ``src/``, and 50 referenced by
 nothing outside ``tests/`` and ``tools/``. One of them was ``DATA_DIRNAME`` until a one-line
 wiring fix in ``src/rcb.py`` took it off the list, so reverting that line puts the population
 back up by one -- stated as a delta rather than as the absolute it used to be, because the
@@ -101,7 +101,7 @@ The census prints the rate and the evidence under it, every occurrence labelled 
 
     python3 -m tests.test_declared_symbols_are_wired --census
 
-Its header carries 1695, 1523, 50, 38 and the rate, so those drift with the
+Its header carries 1838, 1644, 50, 38 and the rate, so those drift with the
 tree and none of them has to be believed.
 :meth:`AllowlistIsHonestTests.test_the_allowlist_is_exactly_what_the_scan_finds` keeps the
 allowlist exactly the scan's output, so none of the four can go stale in one direction

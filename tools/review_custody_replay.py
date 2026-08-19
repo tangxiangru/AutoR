@@ -19,10 +19,15 @@ RUN IT:
 
 WHAT IT PRINTED when the mechanism landed, over MEASURED_RUNS:
 
-    episodes                     138
-    fire without the exclusions  138  (100%) -- the list is load-bearing, not decorative
-    fire with them                 4  (2.9%), all in Astronomy_000_20260814_175426
-    of those, approvals             2  of 27 approvals across the four runs (7.4%)
+    episodes                     152
+    fire without the exclusions  152  (100%) -- the list is load-bearing, not decorative
+    fire with them                 4  (2.6%), all in Astronomy_000_20260814_175426
+
+**The population moved once, and the tool caught it.** These were 138 and 4 when the
+census landed. `Chemistry_000_20260816_173127` was still executing when it was pinned by
+name, so the run it names kept producing episodes: 138 -> 152, while the fires stayed at
+4. That is the drift line doing its job, and it is the reason a still-running directory
+must not be pinned as a population -- see the `population:` line this prints.
 
 All four are one behaviour: the reviewer re-running the doer's producer scripts in place
 to check they reproduce. Both demoted approvals say so in their own recorded reason. None
@@ -54,7 +59,7 @@ MEASURED_TRIAL_ROOT = Path("/rmeng_data/robtang/rcb-trial-graph/workspaces")
 
 #: What the replay printed when the mechanism landed. Printed beside the live figure so a
 #: population that has drifted says so instead of quietly reporting a different number.
-MEASURED_EPISODES = 138
+MEASURED_EPISODES = 152
 MEASURED_FIRES = 4
 
 #: `src/review_custody.churn_files` spelled for an archive, where there is no `RunPaths`

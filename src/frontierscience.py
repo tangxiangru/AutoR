@@ -1417,7 +1417,7 @@ class _OperatorCall:
             paths=paths,
             resume=False,
         )
-        exit_code, stdout, _stderr, _session, _meta = self.operator._run_streaming_command(  # noqa: SLF001
+        exit_code, stdout, _stderr, _session, meta = self.operator._run_streaming_command(  # noqa: SLF001
             command=command,
             cwd=cwd,
             stage=FS_ANSWER_STAGE,
@@ -1426,7 +1426,21 @@ class _OperatorCall:
             mode=label,
             stdin_text=stdin_text,
         )
-        return exit_code, stdout or ""
+        # The assistant's own words when the reader offers them, the whole stream otherwise.
+        #
+        # This class is the one seam in the tree that keeps a *reply* rather than parsing a
+        # section out of it, and the whole stream is not the reply: a `tool_result` block is
+        # text under `content`, so a directory listing the model ran for itself arrives in
+        # `stdout` ahead of the answer. Six of twenty-eight `direct` answers in the sixty-task
+        # trial began that way, the answer intact underneath, and a content-refusal clause
+        # reading the top of the file refused all six.
+        #
+        # Falling back rather than requiring the field keeps a backend that does not label
+        # its events working: `CodexOperator` goes through the same seam, and an operator
+        # that reports no assistant blocks should produce a whole-stream answer rather than
+        # an empty one.
+        assistant = str((meta or {}).get("assistant_text") or "").strip()
+        return exit_code, assistant or (stdout or "")
 
 
 class DirectAnswerWriter(_OperatorCall):
@@ -1887,6 +1901,9 @@ def build_fs_meta(
     fake_operator: bool = False,
     disallowed_tools_requested: Sequence[str] | None = None,
     disallowed_tools_by_seat: Mapping[str, Sequence[str]] | None = None,
+    skill_forced: Sequence[str] = (),
+    skill_withheld: Sequence[str] = (),
+    auto_memory_isolated: bool | None = None,
     witness: Mapping[str, Any] | None = None,
     extra: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -1911,6 +1928,27 @@ def build_fs_meta(
     :func:`read_transcript_witness`, they are ``None`` when there is no transcript, and an
     admission clause reading ``browsing_tool_calls == 0`` therefore refuses a run that
     produced no evidence rather than admitting it.
+
+    **Two fields about the forced skills, and the second is the one a trial compares.**
+    ``skill_forced`` is what a front end's ``Manager.skill_force`` actually put in front of
+    the model -- the caller reads it off the manager after installation, not off its own
+    flag, because a name that was renamed out of the pack is forced by the flag and
+    installed by nothing. ``skill_withheld`` is the other side: the names that front end
+    forces on this benchmark and this run did not get. Both, and not just the first,
+    because an empty installed set means two different things -- an arm with no run
+    directory to install a skill into never had any, and an arm launched with
+    ``--no-forced-skills`` was denied the ones its sibling got. Only the second is a
+    difference between two configurations of one producer, so it is the one the paired
+    trial folds into its environment digest.
+
+    **``auto_memory_isolated`` is tri-state, and the third state is the point.** ``True``
+    means the run was cut off from Claude Code's cross-session memory store, ``False`` that
+    it was not, and ``None`` that this record predates the field -- which is the honest
+    answer for the sixty-task trials already on disk, where the store was open and nobody
+    had asked. Defaulting the missing case to ``True`` would let those runs claim an
+    isolation they did not have; defaulting it to ``False`` would assert a channel was used
+    by runs nobody measured. A reader comparing across trials has to be able to tell "not
+    isolated" from "not recorded", because only the first is a fact about the run.
     """
     payload: dict[str, Any] = {
         "schema": FS_META_SCHEMA,
@@ -1937,6 +1975,15 @@ def build_fs_meta(
         "disallowed_tools_by_seat": {
             seat: list(tools) for seat, tools in (disallowed_tools_by_seat or {}).items()
         },
+        # Sorted here rather than at the call sites: both come from a set, a set has no
+        # order, and the trial hashes this list into a comparability digest -- two runs
+        # that installed the same five skills must not be told they were measured in two
+        # environments because a set iterated differently.
+        "auto_memory_isolated": (
+            None if auto_memory_isolated is None else bool(auto_memory_isolated)
+        ),
+        "skill_forced": sorted(skill_forced),
+        "skill_withheld": sorted(skill_withheld),
         "pipeline_completed": bool(pipeline_completed),
         "auto_skipped_stages": list(auto_skipped_stages),
         "stages_approved": list(stages_approved),

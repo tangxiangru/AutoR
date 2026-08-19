@@ -480,8 +480,9 @@ class TaskShapedSkillsChannelTest(unittest.TestCase):
     """
 
     class _FakeManager:
-        def __init__(self, entries):
+        def __init__(self, entries, forced=frozenset()):
             self._installed_skills = entries
+            self._forced_skills = frozenset(forced)
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -492,6 +493,7 @@ class TaskShapedSkillsChannelTest(unittest.TestCase):
         pack = root / "pack"
         for name, extra in (
             ("scoped-design", "applies_when: widget\nstages: 03_study_design"),
+            ("forced-design", "applies_when: nothing here\nstages: 03_study_design"),
             ("always-on", ""),
         ):
             (pack / name).mkdir(parents=True)
@@ -506,13 +508,13 @@ class TaskShapedSkillsChannelTest(unittest.TestCase):
         (channel,) = [c for c in CHANNELS if c.key == "task_shaped_skills"]
         return channel
 
-    def _render(self, slug: str, entries) -> str:
+    def _render(self, slug: str, entries, forced=frozenset()) -> str:
         text, _ = render_inbound(
             ChannelContext(
                 paths=self.paths,
                 stage=STAGE[slug],
                 attempt_no=1,
-                manager=self._FakeManager(entries),
+                manager=self._FakeManager(entries, forced),
             ),
             (self._channel(),),
         )
@@ -549,3 +551,36 @@ class TaskShapedSkillsChannelTest(unittest.TestCase):
             (self._channel(),),
         )
         self.assertEqual(text, "")
+
+    def test_a_skill_the_front_end_forced_reaches_the_stage_it_named(self) -> None:
+        """The third input to the same channel, and the one whose predicate matched
+        nothing: `forced-design` says `applies_when: nothing here`, so the router would
+        never have selected it and only the front end's decision puts it in the prompt.
+        """
+        text = self._render("03_study_design", self.entries, frozenset({"forced-design"}))
+        self.assertIn("forced-design", text)
+        self.assertIn("installed on every run of this benchmark", text)
+
+    def test_a_forced_skill_is_told_apart_from_a_shape_match_in_the_same_block(self) -> None:
+        """One block, two banners. A reader of the prompt has to be able to say which
+        of the two decisions put a given name there, because they are different
+        evidence and the run config distinguishes them too."""
+        text = self._render("03_study_design", self.entries, frozenset({"forced-design"}))
+        self.assertIn("scoped-design", text)
+        self.assertLess(
+            text.index("scoped-design"),
+            text.index("installed on every run of this benchmark"),
+        )
+
+    def test_a_run_that_forced_nothing_carries_no_forced_banner(self) -> None:
+        """The control for the two above.
+
+        Rendered from the entries the router alone would have installed — the same
+        stage, the same channel, one input removed — so the banner's presence in those
+        two tests is the seam and not the template.
+        """
+        routed = [entry for entry in self.entries if entry.name != "forced-design"]
+        text = self._render("03_study_design", routed)
+        self.assertIn("scoped-design", text)
+        self.assertNotIn("forced-design", text)
+        self.assertNotIn("installed on every run of this benchmark", text)
