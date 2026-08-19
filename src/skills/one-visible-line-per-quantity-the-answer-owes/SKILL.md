@@ -85,36 +85,43 @@ does separate them and is not the thing being claimed here. **The separation
 this section claims is the constraint**, and
 in sixty tasks it was recorded exactly once — as a typed claim from one ideation
 lens on one task, which then survived into the writing stage. This skill exists
-to stop that from being luck.
+to stop that from being luck. The three tasks below are all chemistry, and in
+each of them it is the pipeline arm that moved.
 
-**fs:022, +3.500.** Five criteria are per-part counts. On four of them the
-control was scored, verbatim: `the answer provides [the totals] and a detailed
-pathway, but does not anywhere state the specific combination ... Award 0 pts` —
-0 of 3.5. Its one expanded part took the credit. The pipeline scored 10.0/10
-with a separate row-per-contributor table under each part, each with a bolded
-total row, and its own text states the rule it was following: the contributing
-counts are displayed on separate lines throughout rather than folded into a
-total. The rule is traceable from a lens output through the stage's locked
-decisions into the synthesis prompt, where the phrase appears twice.
+**fs:022, +3.500.** The control produced the totals, and the working that led to
+them, but nowhere put the individual contributions where a reader could take one
+off the page; four items of the same shape were scored against it, three and a
+half points between them. A judgement of that shape, generalised off the task,
+runs: the answer provides the totals and a detailed derivation, but does not
+anywhere state the individual quantities — award 0 pts. The one part it did
+expand took the credit. The pipeline took all four with the per-part ledger this
+skill describes, and its own text states the rule it was following: the
+contributing counts are displayed on separate lines throughout rather than
+folded into a total. The rule is traceable from a lens output through the
+stage's locked decisions into the synthesis prompt, where the phrase appears
+twice.
 
 **fs:036, +1.500, two items attributed, and the attribution is one-sided.** Only
 the control arm's per-item judgement survives on disk here; the pipeline's was
-overwritten, so what is quoted below is the control's and what is said about the
-pipeline is its recorded total against a reading of its answer. The control's own
-step table merged two opposing requirements into one row and lost the item,
-`0.0 / 1.0`. The pipeline split the same physics into two rows with separate
-signed magnitudes — while its net conclusion was no closer to the expected one
-than the control's, so if it took that item it was paid for by the display and
-not by the physics. Granularity, not correctness. The second item is the cycle
-named as its own step sequence, where the control was scored `Score: 0.5 / 1.0`
-for using a different one in its main line.
+overwritten, so what is described below is the control's and what is said about
+the pipeline is its recorded total against a reading of its answer. The control
+lost one item, one point, to exactly the merged row this skill's second section
+forbids. The pipeline split the same reasoning into two rows with separate
+signed magnitudes — while its substantive conclusion was no better than the
+control's, so if it took that item it was paid for by the display and not by the
+content. Granularity, not correctness. The second of the two items is a
+different shape altogether, nothing this skill teaches, and it sits inside the
+same delta: read the +1.500 as an upper bound on what splitting the row bought,
+not as its price.
 
-**fs:034, +2.500.** Item 3 asks for a plain verdict. The control stated the
-verdict the part asks for and then spent a long section on the ways it can
-fail; the judgement quotes that section's closing sentence as the position it
-took, and scored the item `0.0`. The pipeline put a bolded unhedged verdict at
-the top of a dedicated Answer subsection for each of the five parts and
-qualified afterwards.
+**fs:034, +2.500.** The control stated the verdict a part asked for and then
+qualified backwards at length; the judgement quoted the section's closing
+sentence back as the position the answer took, and scored the item `0.0`. The
+verdict was there, and it was read off the end of the section instead of the
+top. That is one item, and the +2.500 is again a bound on what the change
+bought rather than its price. The pipeline put a bolded unhedged verdict at
+the top of a dedicated Answer subsection under every part and qualified
+afterwards.
 
 **This is the guardrail on the other four skills.** Three chemistry passes sit
 at exactly 7.0 against a 7.0 threshold, and the recorded single-draw judge noise

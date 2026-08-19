@@ -89,21 +89,25 @@ were provider-side refusals of the stage prompt itself and are outside what any
 craft advice can reach. **Nine were review send-backs and summary-shape
 failures**, which is what this is for.
 
-Both send-backs on fs:007 and fs:017 are bookkeeping, verbatim. fs:007, second
-review: `Fix the paths. "Derivations: notes/typed_claims_T_and_C.json" and
-"code/pilot_fisher.py, code/pilot_bias_operator.py" do not resolve from the run
-root; there is no code/ or notes/ there. ... either populate
-derived_from/depends_on in the manifest or stop advertising "prior expectation,
-what-would-surprise-me, dependencies" for a file whose schema has no such
-fields.` fs:017, second review, carry-forward: `answer.md is the graded
-deliverable and deliverables_coverage.json binds its seven where locators to
+Both send-backs on fs:007 and fs:017 are bookkeeping. The two quotations are
+verbatim except in brackets, where three file names coined from the tasks' own
+subject matter and one count have been redacted. fs:007, second review: `Fix
+the paths. "Derivations: [a redacted notes/ path]" and "[redacted code/ paths]"
+do not resolve from the run root; there is no code/ or notes/ there. ... either
+populate derived_from/depends_on in the manifest or stop advertising "prior
+expectation, what-would-surprise-me, dependencies" for a file whose schema has
+no such fields.` fs:017, second review, carry-forward: `answer.md is the graded
+deliverable and deliverables_coverage.json binds its [n] where locators to
 report.md only. Bind them to answer.md as well.` Neither objection is about
-science. Both runs spent `sendback_count = 2` and forfeited the question.
+science, and neither would have read any differently against a different
+question — that is why they generalise. Both runs spent `sendback_count = 2`
+and forfeited the question.
 
-The control arm passed four of the forfeited tasks outright — fs:007 at 7.0,
-fs:017 at 7.6, fs:049 at 9.25, fs:057 at 8.94 against a 7.0 threshold. fs:057
-never reached review at all: two attempts, 2,827 s and 212,219 output tokens,
-and the log ends `Repair output for Stage 02 ... is still incomplete.
+The control arm passed four of the forfeited tasks outright — fs:007, fs:017,
+fs:049 and fs:057 — scoring between 7.0 and 9.25 against a 7.0 threshold, one
+of them clearing by nothing at all. One of those four never reached review in
+the pipeline arm at all: two attempts, 2,827 s and 212,219 output tokens, and
+the log ends `Repair output for Stage 02 ... is still incomplete.
 Normalizing locally... / Local normalization ... is still incomplete. Re-running
 the stage... / Stage 02 ... was stopped by the run supervisor: the auto-skip
 budget (0) is spent.`
