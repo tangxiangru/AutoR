@@ -65,6 +65,7 @@ from src.airsbench import (
     rows_disagreement,
     write_run_meta,
 )
+from src import operator  # noqa: E402
 from src.utils import build_run_paths, ensure_run_layout
 
 
@@ -1334,6 +1335,64 @@ class SkillDisciplineTest(unittest.TestCase):
             )
         }
         self.assertNotIn("the-submission-is-the-only-artifact-that-scores", offered)
+
+
+class AutoMemoryIsolationTest(unittest.TestCase):
+    # airs_arm is a tool script, not an importable package module; the suite loads it the
+    # same way every other tool test in this file does.
+    """Both arms must switch off the CLI's shared auto-memory, or neither is a draw.
+
+    Claude Code keys auto-memory on the nearest git root, not on the run. Every arm under
+    one results directory therefore shares one store: the AIRS campaign's held 3,511 notes,
+    and cells read each other's notes on how to beat the task at rates that differ by arm
+    (skills 71%, noskills 74%, bare 37%). That is a channel making each arm partly a copy
+    of the other, which biases a paired difference toward the null.
+
+    Verified against the real binary (2.1.229): with the flag the init event carries **no**
+    `memory_paths` key at all -- not a null -- so a check written as
+    `init["memory_paths"] is None` raises KeyError on exactly the run it exists to detect.
+    """
+
+    def setUp(self) -> None:
+        self.arm = _load_tool("airs_arm")
+
+    def test_bare_arm_isolates_by_default(self) -> None:
+        command = self.arm.bare_command(
+            workspace=Path("/tmp/ws"), model="opus", cli="claude", disallowed_tools=[])
+        self.assertIn("--settings", command)
+        self.assertEqual(command[command.index("--settings") + 1],
+                         operator.AUTO_MEMORY_OFF_SETTINGS)
+
+    def test_bare_arm_opt_out_omits_the_flag(self) -> None:
+        command = self.arm.bare_command(
+            workspace=Path("/tmp/ws"), model="opus", cli="claude", disallowed_tools=[],
+            isolate_auto_memory=False)
+        self.assertNotIn("--settings", command)
+
+    def test_the_settings_payload_is_valid_json_with_the_exact_key(self) -> None:
+        """A misspelled key is accepted silently by the CLI: the run then looks isolated in
+        its own metadata and reads the store anyway. Pin the spelling."""
+        self.assertEqual(json.loads(operator.AUTO_MEMORY_OFF_SETTINGS),
+                         {"autoMemoryEnabled": False})
+
+    def test_operator_default_is_off_and_toggles_process_wide(self) -> None:
+        """Off by default -- a researcher's own project wants the notes; a measurement does
+        not. And it must be process-wide: AutomatedReviewer and ReviewPanel each build their
+        own operator, so a forwarded parameter reached 2,752 of 4,513 calls and missed every
+        reviewer seat."""
+        previous = operator.auto_memory_is_isolated()
+        try:
+            operator.isolate_auto_memory_by_default(False)
+            self.assertFalse(operator.auto_memory_is_isolated())
+            operator.isolate_auto_memory_by_default(True)
+            self.assertTrue(operator.auto_memory_is_isolated())
+            op = operator.ClaudeOperator.__new__(operator.ClaudeOperator)
+            op.command, op.model = "claude", "opus"
+            built = operator.ClaudeOperator._build_cli_command(
+                op, Path("/tmp/P.md"), "sid", resume=False)
+            self.assertIn("--settings", built)
+        finally:
+            operator.isolate_auto_memory_by_default(previous)
 
 
 if __name__ == "__main__":

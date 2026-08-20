@@ -30,6 +30,40 @@ from .utils import (
 )
 
 
+#: Passed to `claude --settings` to switch off the CLI's auto-memory for a run.
+#:
+#: Claude Code keys its auto-memory store on an *ancestor* of cwd -- the nearest git root
+#: -- not on the run. Every agent under one results directory therefore shares one store:
+#: on 2026-08-20 the AIRS campaign's store held 3,511 notes, and cells were reading each
+#: other's notes on how to beat the task, at rates that differ by arm (skills 71%,
+#: noskills 74%, bare 37%). A channel that makes each arm partly a copy of the other does
+#: not cancel out of a paired difference; it biases toward the null.
+#:
+#: What hides it: transcripts ARE isolated. Each run gets its own project directory with
+#: no `memory/` in it, so per-run isolation looks done from a directory listing. Read
+#: `memory_paths` off the init event instead -- and note that an isolated run reports
+#: **no `memory_paths` key at all**, not a null, so `init["memory_paths"] is None` raises
+#: KeyError on exactly the run the check exists to recognise.
+#:
+#: `--settings` merges into the settings already in force, so Vertex auth and model
+#: selection survive it.
+AUTO_MEMORY_OFF_SETTINGS = '{"autoMemoryEnabled":false}'
+
+#: Off by default: a researcher's own project wants the notes. Only a *measurement* needs
+#: them gone, and the measurement harness is what turns this on.
+_ISOLATE_AUTO_MEMORY = False
+
+
+def isolate_auto_memory_by_default(enabled: bool) -> None:
+    """Turn auto-memory isolation on for every operator built in this process."""
+    global _ISOLATE_AUTO_MEMORY
+    _ISOLATE_AUTO_MEMORY = bool(enabled)
+
+
+def auto_memory_is_isolated() -> bool:
+    return _ISOLATE_AUTO_MEMORY
+
+
 class ClaudeOperator:
     backend_name = "claude"
 
@@ -1652,6 +1686,14 @@ Original stderr:
             "bypassPermissions",
             "--dangerously-skip-permissions",
         ]
+        if auto_memory_is_isolated():
+            # Read as a process-wide default rather than an instance parameter on
+            # purpose. AutomatedReviewer builds its own ClaudeOperator and ReviewPanel
+            # builds one per role, so a forwarded flag reaches the stage seat and misses
+            # every reviewer seat: measured 2,752 of 4,513 calls carrying it and 1,761
+            # not, the split exactly stage-vs-reviewer. Anything that constructs an
+            # operator anywhere in this process inherits the setting here.
+            command.extend(["--settings", AUTO_MEMORY_OFF_SETTINGS])
         if mcp_config is not None:
             # Not --strict-mcp-config: that would also drop whatever servers the user has
             # configured for their own environment, which is not AutoR's call to make.

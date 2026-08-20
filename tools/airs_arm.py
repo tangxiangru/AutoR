@@ -45,6 +45,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from src.operator import AUTO_MEMORY_OFF_SETTINGS  # noqa: E402
 from src.airsbench import (  # noqa: E402
     AirsTask,
     build_task_brief,
@@ -185,13 +186,25 @@ def arm_environment(base: dict[str, str] | None = None) -> dict[str, str]:
     return env
 
 
-def bare_command(*, workspace: Path, model: str, cli: str, disallowed_tools: list[str]) -> list[str]:
+def bare_command(
+    *,
+    workspace: Path,
+    model: str,
+    cli: str,
+    disallowed_tools: list[str],
+    isolate_auto_memory: bool = True,
+) -> list[str]:
     """The bare CLI invocation, mirroring what :meth:`src.operator.ClaudeOperator` builds.
 
     Mirrored deliberately rather than shared: the operator's version threads session state,
     MCP config and resume through it, none of which a single-shot control arm has. What must
     match is the flag surface the model sees, and it does — same permission mode, same
     prompt-from-file form, same stream format, same denials.
+
+    ``isolate_auto_memory`` must stay in that list of things that match. The CLI's
+    auto-memory is keyed on the nearest git root, so every arm under one results directory
+    writes into and reads from one store; leaving it on for one arm and off for the other
+    would be a difference between the arms that has nothing to do with the scaffold.
     """
     command = [
         cli,
@@ -199,6 +212,8 @@ def bare_command(*, workspace: Path, model: str, cli: str, disallowed_tools: lis
         "--permission-mode", "bypassPermissions",
         "--dangerously-skip-permissions",
     ]
+    if isolate_auto_memory:
+        command += ["--settings", AUTO_MEMORY_OFF_SETTINGS]
     if disallowed_tools:
         command += ["--disallowed-tools", ",".join(disallowed_tools)]
     command += [
@@ -230,6 +245,11 @@ def autor_command(
         "--web-search", args.web_search,
         "--no-score",
     ]
+    if not args.isolate_auto_memory:
+        # Forward the OPT-OUT only. Both arms isolate by default, so the flag appears in
+        # the recorded command exactly when someone deliberately turned it off -- which is
+        # the state a reader of arm_manifest.json needs to be able to see.
+        command += ["--no-isolate-auto-memory"]
     for tool in args.deny_tool:
         command += ["--deny-tool", tool]
     if args.review_model:
@@ -336,7 +356,9 @@ def run_one(task: AirsTask, args: argparse.Namespace) -> RunRecord:
 
     disallowed = denied_tools(args)
     command = (
-        bare_command(workspace=workspace, model=args.model, cli=args.cli, disallowed_tools=disallowed)
+        bare_command(workspace=workspace, model=args.model, cli=args.cli,
+                     disallowed_tools=disallowed,
+                     isolate_auto_memory=args.isolate_auto_memory)
         if args.arm == "bare"
         else autor_command(task=task, workspace=workspace, args=args)
     )
@@ -584,6 +606,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--raw-dir", metavar="PATH")
     parser.add_argument("--task-python", default=sys.executable, metavar="BIN")
     parser.add_argument("--cli", default="claude", metavar="BIN", help="Agent CLI binary.")
+    parser.add_argument(
+        "--no-isolate-auto-memory", dest="isolate_auto_memory", action="store_false",
+        help="Let runs share the CLI's auto-memory store. Off by default here: the store "
+             "is keyed on the nearest git root, so every arm under one results directory "
+             "reads and writes the same notes, at rates that differ by arm, and a channel "
+             "that makes each arm partly a copy of the other biases a paired difference "
+             "toward the null.")
+    parser.set_defaults(isolate_auto_memory=True)
     parser.add_argument("--model", default="opus")
     parser.add_argument("--review-model", default=None, help="AutoR arm only.")
     parser.add_argument("--wall-clock", type=int, default=10800, metavar="SECONDS",

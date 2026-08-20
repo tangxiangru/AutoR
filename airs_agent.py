@@ -50,6 +50,7 @@ if str(REPO_ROOT) not in sys.path:
 # two backends, and this repo's most repeated defect is a second front end that drifts
 # from the first -- a flag added to one entry point and not the other. One definition.
 from rcb_agent import create_operator, default_model_for  # noqa: E402
+from src.operator import isolate_auto_memory_by_default  # noqa: E402
 from src.airsbench import (  # noqa: E402
     BenchmarkResult,
     MetadataError,
@@ -131,6 +132,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="Interpreter for the benchmark's own scripts and the one the agent "
                              "is told to run its code with. It needs the task's "
                              "container_python_requirements installed.")
+    parser.add_argument(
+        "--no-isolate-auto-memory", dest="isolate_auto_memory", action="store_false",
+        help="Let this run share the CLI's auto-memory store with every other run under "
+             "the same git root. Off by default: see src.operator.AUTO_MEMORY_OFF_SETTINGS.")
+    parser.set_defaults(isolate_auto_memory=True)
     parser.add_argument("--environment-note", default="", metavar="TEXT",
                         help="One extra line about this machine for the goal's environment "
                              "block, for example a shared-GPU or wall-clock convention.")
@@ -470,6 +476,12 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    # Set BEFORE anything constructs an operator. create_operator is called here for the
+    # stage seat (line ~303) and again for the routine seat (~392), and AutomatedReviewer
+    # and ReviewPanel build their own inside the manager -- a process-wide default is the
+    # only form that reaches all of them. Forwarding a parameter reached 2,752 of 4,513
+    # calls last time and missed every reviewer.
+    isolate_auto_memory_by_default(args.isolate_auto_memory)
     if args.list_tasks:
         for name in available_tasks(Path(args.repo)):
             print(name)
