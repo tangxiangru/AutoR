@@ -9,10 +9,15 @@ consults.
 
 from __future__ import annotations
 
+import os
+import signal
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 
+from rcb_agent import Terminated, _sigterm_as_exception
 from src.rcb import MIN_REPORT_CHARS, BenchmarkResult, ExportResult
 
 
@@ -81,3 +86,102 @@ class AnAbortedRunIsNotACompletedOneTest(unittest.TestCase):
         """Which one it is matters: `failed` means it tried and produced nothing."""
         r = self._result("", aborted="MemoryError: ")
         self.assertEqual(r.status, "aborted")
+
+
+class ASchedulerKillMustLeaveAVerdictTest(unittest.TestCase):
+    """A run that is killed has to say so, or the arm loses a task instead of failing one.
+
+    The class above is about a walk that raised. This is the same defect one level out:
+    a walk that never gets to raise. `_meta.json` is written once, after the result
+    exists, so a process ended by a signal leaves the `running` the harness wrote at
+    launch -- and nothing ever revisits it. Both readers gate on that field: `run_arm.py`
+    will not resume the task and the scoring driver will not score it. The workspace
+    reads as still in flight, permanently.
+
+    Measured. On the `full40_pins` arm, Earth_003 reached its 40 h wall during Stage 07
+    holding a finished 45,132-byte report and eleven figures. The scoring pass logged
+    `scoreable workspaces: 39`, named nothing it had dropped, and the arm was written up
+    at n=39 for two days with the fortieth deliverable complete on disk. A silent drop,
+    not a failure: nothing anywhere said a task was missing.
+
+    The fix routes SIGTERM into the handler that already exists, so a kill produces the
+    same salvage-and-record path a crash does.
+    """
+
+    def test_sigterm_inside_the_block_raises_rather_than_killing(self) -> None:
+        caught = ""
+        with _sigterm_as_exception():
+            try:
+                os.kill(os.getpid(), signal.SIGTERM)
+                time.sleep(2)  # the handler fires long before this returns
+            except Terminated as exc:
+                caught = str(exc)
+        self.assertIn("SIGTERM", caught)
+        self.assertIn("scheduler", caught)
+
+    def test_it_is_an_ordinary_exception_so_the_existing_handler_catches_it(self) -> None:
+        """The whole design is to reuse `except Exception` around `manager.run`.
+
+        A `BaseException` subclass would sail past it, skip the export, and leave exactly
+        the silence this removes.
+        """
+        self.assertTrue(issubclass(Terminated, Exception))
+
+    def test_the_previous_handler_is_restored_on_the_way_out(self) -> None:
+        """Leaving the handler installed would swallow the kill that follows the export."""
+        before = signal.getsignal(signal.SIGTERM)
+        with _sigterm_as_exception():
+            self.assertIsNot(signal.getsignal(signal.SIGTERM), before)
+        self.assertIs(signal.getsignal(signal.SIGTERM), before)
+
+    def test_it_is_restored_even_when_the_body_raises(self) -> None:
+        before = signal.getsignal(signal.SIGTERM)
+        with self.assertRaises(ZeroDivisionError):
+            with _sigterm_as_exception():
+                _ = 1 / 0
+        self.assertIs(signal.getsignal(signal.SIGTERM), before)
+
+    def test_off_the_main_thread_it_is_a_no_op_rather_than_a_crash(self) -> None:
+        """`signal.signal` raises off the main thread; a run there must still proceed.
+
+        Nothing in the adapter calls `run` from a worker today. The guard is here so that
+        the day something does, the failure is a run without kill-handling rather than a
+        run that will not start.
+        """
+        outcome: list[str] = []
+
+        def body() -> None:
+            try:
+                with _sigterm_as_exception():
+                    outcome.append("ran")
+            except Exception as exc:  # noqa: BLE001 - the point of the test
+                outcome.append(f"raised {type(exc).__name__}")
+
+        thread = threading.Thread(target=body)
+        thread.start()
+        thread.join(timeout=10)
+        self.assertEqual(outcome, ["ran"])
+
+    def test_a_killed_run_holding_a_real_report_is_aborted_not_completed(self) -> None:
+        """The record the salvage path then writes, end to end on the result object.
+
+        Earth_003's report was substantive, so every `report exists` test passes on it.
+        `status` is the field that has to disagree.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            report = root / "report.md"
+            report.write_text("x" * (MIN_REPORT_CHARS + 10), encoding="utf-8")
+            result = BenchmarkResult(
+                workspace=root,
+                run_root=root / ".autor" / "r",
+                pipeline_completed=False,
+                export=ExportResult(
+                    report_path=report, report_source="stage_07", figures=[], code_files=0,
+                    output_files=0,
+                ),
+                aborted_with="Terminated: signal 15 (SIGTERM); the scheduler ended this run",
+            )
+            self.assertEqual(result.status, "aborted")
+            self.assertEqual(result.exit_code, 1)
+            self.assertTrue(result.aborted)
