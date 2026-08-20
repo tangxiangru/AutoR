@@ -491,7 +491,7 @@ The chain that runs unconditionally at every rigor level, `fast` included:
 | Every attempt from 05 | A frozen file that disagrees with the stamp, or is missing, is written back from AutoR's copy rather than re-derived | `freeze_preregistration` |
 | Stage 05+ | A protocol declares a primary metric, planned seeds, and per-baseline `why_competent` + `tuning_budget` | `validate_experimental_protocol` |
 | Stage 06+ | Exactly one verdict per frozen hypothesis, nothing unpreregistered adjudicated, every `supported`/`refuted` verdict citing an evidence file that exists | `validate_hypothesis_outcomes` |
-| Stage 06+ | A verdict carries `n_seeds`, a `dispersion_type` from a fixed vocabulary, and a written justification if a single seed settled it | `validate_outcome_statistics` |
+| Stage 06+ | A verdict carries `n_seeds`, a `dispersion_type` that starts with a known measure and may then gloss it, and a written justification if a single seed settled it | `validate_outcome_statistics` |
 | Stage 06 close | `converged` is refused when nothing came out supported, unless the round declares `negative_result: true` | `validate_round_decision` |
 | Stage 06→07 edge | The move into Writing is taken off the agent's menu until every empirical id has a verdict and a figure exists — a routing preference, not the gate; see below | `_guard_validity_chain` |
 | Stage 07+ | Every manuscript claim is `confirmatory` on a `supported` hypothesis, or labelled `exploratory` — and cites a file that exists | `validate_claim_provenance` |

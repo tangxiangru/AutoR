@@ -30,7 +30,51 @@ from .utils import RunPaths
 
 #: How a spread was computed. Reporting `0.74 ± 0.03` without saying which of
 #: these it is makes the interval unreadable, and every venue asks.
-DISPERSION_TYPES = ("std", "stderr", "ci95", "iqr", "range", "none")
+DISPERSION_TYPES = ("std", "stderr", "ci95", "iqr", "range", "var", "mad", "none")
+
+#: Spellings of a dispersion measure that name it unambiguously and are not the
+#: canonical token. Longest first, so "median absolute" is tried before "median".
+_MEASURE_ALIASES: tuple[tuple[str, str], ...] = (
+    ("median absolute", "mad"),
+    ("interquartile", "iqr"),
+    ("standard error", "stderr"),
+    ("standard deviation", "std"),
+    ("variance", "var"),
+    ("95% ci", "ci95"),
+    ("95%ci", "ci95"),
+)
+
+
+def canonical_dispersion(text: str) -> str:
+    """The measure `text` names, or "" if it names none.
+
+    The field is an enum and the agent keeps writing prose into it, because there is
+    nowhere else to say what the spread is a spread *of*: "range of the Z500 skillful
+    lead time across the complete cascades", "ci95 half-width on sigma*, bootstrap over
+    per-level repeats", "std of the relative error over independent Voronoi fields".
+    Each of those names its measure correctly in the first word and was refused for the
+    rest of the sentence. Two more, "median absolute relative deviation over 24
+    tabulated solids" and "variance", name a real measure the enum simply lacked.
+
+    Of seven distinct refusals collected across the run archive, four were a correct
+    measure plus a gloss and three were a measure with no canonical spelling. On the
+    `full40_pins` arm this cost Earth_003 four attempts at Stage 07 while a finished
+    45 KB report and eleven figures sat on disk. The gate's message is "an interval
+    whose meaning is unstated cannot be read" -- and the meaning was stated, at greater
+    length than the enum allowed.
+
+    So: read the measure out of the sentence and keep the sentence. Nothing downstream
+    computes with this field -- it is validated and displayed -- so accepting more of
+    what an author might write cannot move a number.
+    """
+    lowered = " ".join(str(text or "").casefold().split())
+    if not lowered:
+        return ""
+    for spelling, canon in _MEASURE_ALIASES:
+        if lowered.startswith(spelling):
+            return canon
+    head = lowered.split(" ", 1)[0].strip(":,;.")
+    return head if head in DISPERSION_TYPES else ""
 
 #: Below this, an effect and its noise are not separable by inspection. Not a
 #: statistical threshold — a floor under "we ran it more than once".
@@ -198,13 +242,16 @@ def validate_outcome_statistics(paths: RunPaths) -> list[str]:
             )
 
         dispersion_type = str(statistics.get("dispersion_type") or "").strip()
-        if dispersion_type not in DISPERSION_TYPES:
+        measure = canonical_dispersion(dispersion_type)
+        if not measure:
             problems.append(
                 f"hypothesis_outcomes.json outcome {identifier} has dispersion_type "
-                f"{dispersion_type!r}; expected one of {', '.join(DISPERSION_TYPES)}. "
+                f"{dispersion_type!r}, which names no measure; expected one of "
+                f"{', '.join(DISPERSION_TYPES)}, optionally followed by what the spread is "
+                "of. "
                 "An interval whose meaning is unstated cannot be read."
             )
-        elif dispersion_type == "none" and (seeds or 0) >= MIN_SEEDS_FOR_A_VERDICT:
+        elif measure == "none" and (seeds or 0) >= MIN_SEEDS_FOR_A_VERDICT:
             problems.append(
                 f"hypothesis_outcomes.json outcome {identifier} reports {seeds} runs but no "
                 "dispersion. If it was run more than once, say how much it varied."

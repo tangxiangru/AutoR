@@ -1376,9 +1376,12 @@ Stage 06's verdict on every preregistered hypothesis.
   `exploratory_findings`, never in `outcomes`.
 
 - A `supported` or `refuted` verdict needs a `statistics` block naming how many
-  runs it rests on and how the spread was measured. `dispersion_type` is one of
-  `std`, `stderr`, `ci95`, `iqr`, `range`, `none` — an interval whose meaning is
-  unstated cannot be read. A verdict from a single run is refused unless
+  runs it rests on and how the spread was measured. `dispersion_type` *starts* with
+  one of `std`, `stderr`, `ci95`, `iqr`, `range`, `var`, `mad`, `none` — an interval
+  whose meaning is unstated cannot be read — and may then say what the spread is of,
+  as in `range of the skillful lead time across the three cascades`. A common
+  spelling of a measure is read as that measure, so `standard deviation`, `variance`
+  and `median absolute deviation` are all accepted. A verdict from a single run is refused unless
   `single_run_justification` says why one run settles it.
 - `inconclusive` and `not_tested` are exempt: they are the honest verdicts when
   the evidence is thin, and requiring statistics for them would push a run
