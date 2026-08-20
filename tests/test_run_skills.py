@@ -1034,14 +1034,14 @@ class TheForcedRecordSurvivesTest(unittest.TestCase):
             ensure_run_config(paths, model="opus")
             config = load_run_config(paths)
             config["skill_forced"] = ["a-skill", "b-skill"]
-            config["skill_forced_by"] = "fs_agent:FS_FORCED_SKILLS"
+            config["skill_forced_by"] = "a_front_end:FORCED_SKILLS"
             save_run_config(paths, config)
 
             ensure_run_config(paths, model="opus", venue="neurips_2025")
 
             after = load_run_config(paths)
             self.assertEqual(after.get("skill_forced"), ["a-skill", "b-skill"])
-            self.assertEqual(after.get("skill_forced_by"), "fs_agent:FS_FORCED_SKILLS")
+            self.assertEqual(after.get("skill_forced_by"), "a_front_end:FORCED_SKILLS")
             self.assertEqual(after.get("venue"), "neurips_2025", "a managed field still wins")
 
 
@@ -1109,7 +1109,7 @@ class TheDeclarationSurvivesAFreshRunTest(unittest.TestCase):
         manager = self._manager()
         manager.skill_task_id = "T_000"
         manager.skill_force = frozenset({"forced-one", "forced-two"})
-        manager.skill_force_source = "fs_agent:FS_FORCED_SKILLS"
+        manager.skill_force_source = "a_front_end:FORCED_SKILLS"
 
         paths = manager._create_run("Scientific Objective: measure the widget.")
 
@@ -1120,7 +1120,7 @@ class TheDeclarationSurvivesAFreshRunTest(unittest.TestCase):
             "a fresh run lost `skill_forced`: the config was rebuilt after the skills "
             "were installed, so the run says it was in the control arm",
         )
-        self.assertEqual(config.get("skill_forced_by"), "fs_agent:FS_FORCED_SKILLS")
+        self.assertEqual(config.get("skill_forced_by"), "a_front_end:FORCED_SKILLS")
         self.assertEqual(
             config.get("skill_pins"),
             ["pinned-one"],
@@ -1154,8 +1154,8 @@ class WithholdingIsWhatBuildsAControlArmTest(unittest.TestCase):
     """The one input that is not a routing decision, and why clearing `skill_force`
     could not do the job on its own.
 
-    The five FrontierScience skills are force-installed by their front end *and* carry a
-    predicate that matches all sixty of that benchmark's task statements. So the first
+    A benchmark front end since removed force-installed five skills that *also* carried a
+    predicate matching all sixty of that benchmark's task statements. So the first
     version of `--no-forced-skills` cleared the force and the shape filter put the same
     five back, announced under the shape banner instead of the forced one — measured on a
     `--fake-operator` run, where the "control" arm differed from the treatment arm by one

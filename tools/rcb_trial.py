@@ -75,9 +75,10 @@ from src.rcb_trial import (  # noqa: E402
     next_action,
 )
 
-# The benchmark-agnostic half of this driver, which FrontierScience needs verbatim and
-# which is therefore one module rather than two copies -- see :mod:`src.trial_driver` for
-# why, and for the three defects each of these functions is the scar tissue of.
+# The benchmark-agnostic half of this driver, which a second benchmark's driver needed
+# verbatim and which is therefore one module rather than two copies -- see
+# :mod:`src.trial_driver` for why, and for the three defects each of these functions is
+# the scar tissue of.
 #
 # Imported into this module's own namespace on purpose, not reached through the package.
 # `tests/test_rcb_trial_driver.py` loads this file with `exec_module` and then rebinds

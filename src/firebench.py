@@ -4,20 +4,20 @@
 into agent tasks: the agent is handed a research question and a list of resources, has to
 *design and run its own experiments*, and is scored on the conclusion it states at the
 end. Thirty-five human-curated tasks, one hundred and fifty-three machine-generated ones.
-It is AutoR's third benchmark, and the third different shape:
+AutoR is wired to three benchmarks, and each scores a different shape of deliverable:
 
 ===================  =====================  =============================  ==================
 benchmark            deliverable            scored against                 execution?
 ===================  =====================  =============================  ==================
 ResearchClawBench    ``report/report.md``   a weighted checklist, images    yes
-FrontierScience      one written answer     a rubric summing to 10 points   no
 FIRE-Bench           one written conclusion a reference conclusion, by      yes
                                             atomic claim: P / R / F1
+AIRS-Bench           ``submission.csv``     a held-out split, one metric    yes
 ===================  =====================  =============================  ==================
 
 **Four measured properties of this benchmark decide the whole design of the adapter.**
 They are not preferences; each one was read out of the harness or the shipped tasks, and
-each one breaks a habit carried over from the other two adapters.
+each one breaks a habit carried over from the adapters written before it.
 
 1. **The scored text is short, and longer is strictly worse.** The thirty-five reference
    conclusions in ``benchmark/papers/*/conclusion.txt`` are one to three sentences:
@@ -39,8 +39,9 @@ each one breaks a habit carried over from the other two adapters.
 
 3. **The harness kills the agent at one hour.** ``FIRE-Bench/run_agent.py`` runs each
    agent under ``subprocess.run(..., timeout=3600)``. A measured ResearchClawBench run of
-   this pipeline took 27,005 seconds and a FrontierScience single-stage run's median was
-   4,320. So the adapter is deadline-driven rather than stage-count-driven: see
+   this pipeline took 27,005 seconds, and on a benchmark since removed from this
+   repository a single-stage run's median was 4,320 seconds -- both measured, both past
+   the hour. So the adapter is deadline-driven rather than stage-count-driven: see
    :class:`Deadline`, and :data:`DEFAULT_FINAL_STAGE`.
 
 4. **The scored artifact is the last line of a log file, and two other patterns can
@@ -70,7 +71,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
-from .frontierscience import _OperatorCall, has_refusal, stage_answer_bodies, stages_approved_in
+from .bench_call import _OperatorCall, has_refusal, stage_answer_bodies, stages_approved_in
 from .rcb import AUTOR_RUNS_DIRNAME, emit_event, fence_research_task, mirror_tree
 from .utils import (
     RunPaths,
@@ -121,9 +122,9 @@ LOG_HEADER_RULE = "=" * 40
 #: Directories created in the sandbox before the walk starts.
 #:
 #: No ``report/`` and no ``report/images/``, unlike ResearchClawBench. Nothing reads a
-#: report here, and :func:`src.frontierscience.ensure_fs_workspace` already paid for the
-#: lesson that an empty directory named after a deliverable is an invitation for a stage
-#: to fill it. ``figures/`` is absent for the same reason and one more: the figure gates
+#: report here, and an earlier adapter's workspace builder already paid for the lesson
+#: that an empty directory named after a deliverable is an invitation for a stage to
+#: fill it. ``figures/`` is absent for the same reason and one more: the figure gates
 #: in :mod:`src.utils` fire from Stage 06, and this adapter's default walk stops before
 #: them (see :data:`DEFAULT_FINAL_STAGE`).
 FIREBENCH_WORKSPACE_DIRS = ("code", "outputs")
@@ -133,7 +134,7 @@ CONCLUSION_FILENAME = "conclusion.md"
 
 #: Written beside the conclusion so a re-export can tell "the agent wrote this" from
 #: "a previous export published this". Same device, same reason, as ``.autor_export.json``
-#: in :mod:`src.rcb` and ``.fs_export.json`` in :mod:`src.frontierscience`.
+#: in :mod:`src.rcb`.
 EXPORT_MARKER_NAME = ".autor_fire_export.json"
 
 #: Floor for a publishable conclusion. Below the shortest reference conclusion (117) on
@@ -165,7 +166,7 @@ FIRE_REFUSAL_IS_A_LOG = "content:conclusion_is_a_transcript"
 
 #: The synthetic stage the one-shot calls are logged under, so their raw streams land in
 #: ``logs_raw.jsonl`` beside the pipeline's. Number 9 for the same reason
-#: :data:`src.frontierscience.FS_ANSWER_STAGE` uses it: past every real stage, so nothing
+#: :data:`src.bench_call.ANSWER_STAGE` uses it: past every real stage, so nothing
 #: that orders by number mistakes it for part of the walk.
 FIRE_CONCLUSION_STAGE = StageSpec(9, "09_fire_conclusion", "FIRE-Bench Conclusion")
 
@@ -664,12 +665,12 @@ def conclusion_length_refusals(text: str) -> list[str]:
 def conclusion_content_refusals(text: str) -> list[str]:
     """What the text is, rather than how long it is.
 
-    Deliberately *not* the FrontierScience content check. That one refuses any text
-    carrying one of ``REQUIRED_STAGE_HEADINGS`` -- 'Objective', 'Key Results' -- because a
-    FrontierScience answer that carries them is a stage summary. A FIRE-Bench conclusion
-    is three sentences of prose, so the same rule would fire on the word 'Key Results'
-    appearing inside a legitimate sentence and refuse a good answer. What is refused here
-    is a plan, a transcript, and a placeholder.
+    Deliberately *not* a stage-heading check. An adapter whose deliverable is a headed
+    answer can refuse any text carrying one of ``REQUIRED_STAGE_HEADINGS`` -- 'Objective',
+    'Key Results' -- because an answer that carries them is a stage summary that escaped.
+    A FIRE-Bench conclusion is three sentences of prose, so the same rule would fire on
+    the words 'Key Results' appearing inside a legitimate sentence and refuse a good
+    answer. What is refused here is a plan, a transcript, and a placeholder.
     """
     body = text.strip()
     reasons: list[str] = []
@@ -761,13 +762,13 @@ def result_files(*, workspace: Path, paths: RunPaths | None) -> list[str]:
 class ConclusionSynthesizer(_OperatorCall):
     """One operator call that turns approved stage work into a conclusion.
 
-    Imported seam, not a new one: :class:`src.frontierscience._OperatorCall` already wraps
+    Imported seam, not a new one: :class:`src.bench_call._OperatorCall` already wraps
     ``operator._prepare_invocation`` / ``_run_streaming_command`` -- the pair
     :class:`src.rcb.ReportSynthesizer` also uses -- so a third copy here would be a third
     place for the invocation, the MCP config and the denied-tool list to drift apart.
 
-    **It refuses when nothing was approved.** That guard is the same one
-    :class:`src.frontierscience.AnswerSynthesizer` documents, and it matters more here.
+    **It refuses when nothing was approved.** That guard belongs on any synthesis call
+    that could answer from the task statement alone, and it matters more here.
     Without it, a pipeline arm whose walk collapsed calls a model with the task statement
     and an empty memory file, gets a competent single-shot answer back, and publishes it
     as the pipeline's result -- so the paired comparison against the single-shot control
@@ -1001,8 +1002,8 @@ def export_conclusion(
 ) -> FireConclusion:
     """Find the conclusion, in priority order, and record which source produced it.
 
-    ``agent`` → ``synthesized`` → ``fallback``. There is no ``stage`` source, unlike the
-    other two adapters: a FIRE-Bench conclusion has to be two to four sentences of prose,
+    ``agent`` → ``synthesized`` → ``fallback``. There is no ``stage`` source, unlike
+    :mod:`src.rcb`: a FIRE-Bench conclusion has to be two to four sentences of prose,
     and a stage summary promoted verbatim is a document with headings that
     :func:`conclusion_content_refusals` refuses and the precision metric would shred. If
     the stages produced work but no conclusion, the honest answer is to spend one call
@@ -1156,10 +1157,10 @@ def publish_conclusion_line(log_file: Path, conclusion: FireConclusion, *, body:
 
 #: Every clause the exit code is made of, as (id, predicate) over ``_meta.json`` itself.
 #:
-#: The shape is copied from :data:`src.frontierscience.FS_EXIT_CLAUSES`, and the reason is
-#: the measurement that produced it: over forty real ResearchClawBench runs, thirty-nine
-#: wrote ``status: "completed"`` and the fortieth wrote no result line at all, while
-#: thirty-one had auto-skipped a stage and eight had auto-skipped *the stage being
+#: The shape is not invented here -- an adapter since removed used the same one -- and the
+#: reason is the measurement that produced it: over forty real ResearchClawBench runs,
+#: thirty-nine wrote ``status: "completed"`` and the fortieth wrote no result line at all,
+#: while thirty-one had auto-skipped a stage and eight had auto-skipped *the stage being
 #: scored* -- none of which appeared in the metadata. Deriving the verdict from the same
 #: dictionary that is written to disk is what makes it recomputable by anyone holding the
 #: artifact.
