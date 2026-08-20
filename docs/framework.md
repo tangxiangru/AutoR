@@ -602,7 +602,6 @@ An explicit `--flag`/`--no-flag` always beats the level. The validity chain is n
 | [`archive.py`](../src/archive.py) | Cross-run routes and edge payoffs keyed on a comparability basis; variant proposal, exploration and conservative promotion. |
 | [`decisions.py`](../src/decisions.py) | "Was offered this edge and declined" — the control arm the payoffs are computed against. |
 | [`trials.py`](../src/trials.py) | Paired A/B trials over archived runs. |
-| [`fs_trial.py`](../src/fs_trial.py) | The FrontierScience paired trial, where an arm is an answer producer rather than a commit: ten admission clauses that each refuse a *pair*, an environment digest observed off the artifacts, the byte-identical-row fold, and a refusal rate above which no difference is published. |
 | [`trial_driver.py`](../src/trial_driver.py) | The benchmark-agnostic half of both trial drivers: the lock and its three-condition liveness test, the `/proc` census that separates running an agent from mentioning one, atomic state writes, and a process-group kill. |
 | [`inference.py`](../src/inference.py) | Exact permutation tests and attainable-p floors; derives the archive's `min_observations` from the family size rather than asserting it. |
 
@@ -622,8 +621,7 @@ An explicit `--flag`/`--no-flag` always beats the level. The validity chain is n
 | --- | --- |
 | [`platform/foundry.py`](../src/platform/foundry.py) | The LaTeX paper package and the Stage 08 release bundle. |
 | [`rcb.py`](../src/rcb.py) · [`rcb_agent.py`](../rcb_agent.py) | The ResearchClawBench adapter: workspace layout, goal construction, report selection, figure publication, export. |
-| [`frontierscience.py`](../src/frontierscience.py) · [`fs_agent.py`](../fs_agent.py) | The FrontierScience-Research adapter: the pinned dataset and its strict rubric grammar, the three-block prompt contract with the fenced question first, the `direct` and `ideate` profiles, the four ranked answer sources, and an exit code computed from the metadata rather than claimed beside it. |
-| [`fs_scoring.py`](../src/fs_scoring.py) | The paper's judge prompt verbatim, the verdict grammar, and the rules that decide whether a draw is a measurement at all. A failed draw is refused, never recorded as a zero. |
+| [`bench_call.py`](../src/bench_call.py) | The seam a benchmark front end makes one operator call through, and what it reads back: one wrapper over the invocation `rcb.py` already uses, so the MCP config and the denied-tool list get no third copy, and a transcript witness whose unobserved fields are `None` rather than zero, so a run with no evidence cannot pass an admission clause that counts browsing calls. |
 | [`studio_service.py`](../src/studio_service.py) · [`backend/`](../src/backend) · [`frontend/`](../src/frontend) | The local browser workspace over the same run directories. |
 | [`terminal_ui.py`](../src/terminal_ui.py) | The terminal-first interaction layer. |
 

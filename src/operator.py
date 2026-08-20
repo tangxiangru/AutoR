@@ -91,13 +91,14 @@ def _assistant_text_blocks(payload: Any) -> list[str]:
     caller that keeps the reply, because a `tool_result` block is text under `content` too:
     the output of a shell command the model ran lands in the reply beside the reply.
 
-    Measured on the sixty-task FrontierScience trial, where the `direct` arm is the caller
-    that keeps the reply. Six of twenty-eight of its answers began with a directory listing
-    the model had run for itself, the whole answer still present underneath -- one of them
-    62,491 characters ending in a complete chemistry conclusion. The same shape appeared in
-    three of sixty answers on the previous trial and was scored normally, so the behaviour is
-    not new; what is new is that a content-refusal clause now reads the top of the file and
-    refuses the run. The answer was never the problem. The capture was.
+    Measured on the sixty-task written-answer trial of 2026-08-19 -- that benchmark's adapter
+    has since been removed from this repository, the measurement has not -- where its `direct`
+    arm is the caller that keeps the reply. Six of twenty-eight of its answers began with a
+    directory listing the model had run for itself, the whole answer still present underneath
+    -- one of them 62,491 characters ending in a complete chemistry conclusion. The same shape
+    appeared in three of sixty answers on the previous trial and was scored normally, so the
+    behaviour is not new; what is new is that a content-refusal clause now reads the top of
+    the file and refuses the run. The answer was never the problem. The capture was.
 
     So this reads only `assistant` events, and inside them only `text` blocks. Tool calls,
     tool results, system events and the terminal result restatement are all somebody else's
@@ -160,19 +161,30 @@ class ClaudeOperator:
         # results directory therefore shares one store, and its `MEMORY.md` index is loaded
         # into each agent's context at session start.
         #
-        # That is a channel between runs of a benchmark, and it is used. On the sixty-task
-        # FrontierScience trial the two most-read files in a 1,456-file store were notes an
-        # earlier run had written about the harness's own scoring mechanics -- 92 and 56
-        # reads -- and in the chemistry block the read was the *first* tool call of the run,
-        # in both arms, before the agent looked at the problem. It is also asymmetric: 32 of
-        # 37 pipeline runs reached the store against 8 of 37 direct ones, so it does not
-        # cancel out of a paired comparison.
+        # That is a channel between runs of a benchmark, and it is used. It was measured on
+        # the sixty-task trial of 2026-08-19, whose adapter has since been removed from this
+        # tree; the store it measured is Claude Code's and is still there. The two most-read
+        # files in a 1,456-file store were notes an earlier run had written about how that
+        # harness chose the answer it published -- 92 and 56 reads -- and in the chemistry block
+        # the read was the *first* tool call of the run, in both arms, before the agent
+        # looked at the problem. It is also asymmetric: 32 of 37 pipeline runs reached the
+        # store against 8 of 37 direct ones, so it does not cancel out of a paired
+        # comparison.
         #
         # Default off, and deliberately. AutoR's ordinary use is a researcher's own project
         # where carrying notes between sessions is the feature working as intended; only a
-        # measurement wants each run to start from the same state as every other. Benchmark
-        # front ends opt in, and `build_operator_meta` records which way it was set so a run
-        # can say whether the channel was open rather than leaving a reader to assume.
+        # measurement wants each run to start from the same state as every other. A benchmark
+        # front end opts in; the front end that did has since been removed, so nothing in the
+        # tree passes it today, and the parameter stays because the channel it closes belongs
+        # to Claude Code rather than to that benchmark -- the next paired measurement wants it
+        # on the day it is written. Nothing records which way it was set either, and that is
+        # a gap rather than a decision: the front end that opted in read the flag back off
+        # the operator that ran the stages -- not off the flags that built it, because
+        # `CodexOperator` subclasses `ClaudeOperator` and inherits the attribute, so a plain
+        # read asserts "the store was reachable" of a run that never started Claude Code --
+        # and wrote it into that run's metadata. It went with the benchmark. The front end
+        # that opts in next owes its metadata the same field, so a run can say whether the
+        # channel was open rather than leaving a reader to assume.
         self.isolate_auto_memory = isolate_auto_memory
 
     def run_stage(
@@ -803,15 +815,17 @@ Original stderr:
         assistant text hands every caller that keeps the raw stream two copies. Stage-shaped
         callers never noticed: they parse a delimited section out of the text and a second
         copy of it changes nothing. The callers that keep the whole reply did notice, and
-        nobody was watching -- measured on the sixty-task FrontierScience trial, **fifty-five
-        of the control arm's sixty answers carried the answer twice** (forty of them an exact
-        byte-for-byte halving) against none of the pipeline arm's, because only the control
-        arm keeps the reply. That asymmetry sat inside a paired comparison, which is reason
-        enough to repair it -- and note that it is the *asymmetry* that is the reason, not a
-        price: re-judging twelve of them once de-duplicated moved the score by +0.033 points
-        on average (sd 0.633, seven unchanged), so the doubling bought the arm that had it
-        nothing measurable. An earlier revision of this docstring said -0.307 over eleven,
-        which is not in the array it cited; see `docs/frontierscience-results.md`.
+        nobody was watching -- measured on the sixty-task trial of 2026-08-19, whose adapter
+        has since been removed from this repository: **fifty-five of the control arm's sixty
+        answers carried the answer twice** (forty of them an exact byte-for-byte halving)
+        against none of the pipeline arm's, because only the control arm keeps the reply.
+        That asymmetry sat inside a paired comparison, which is reason enough to repair it
+        -- and note that it is the *asymmetry* that is the reason, not a price: re-judging
+        twelve of them once de-duplicated moved the score by +0.033 points on average
+        (sd 0.633, seven unchanged), so the doubling bought the arm that had it nothing
+        measurable. An earlier revision of this docstring said -0.307 over eleven,
+        which is not in the array it cited; the +0.033 over twelve above is the re-derived
+        figure, and the results write-up that carried the correction went with the adapter.
 
         So the result event is a fallback, not a contribution. It is the reply only when
         nothing else captured one -- a turn that emitted no assistant text at all, which is

@@ -2,13 +2,15 @@
 
 `extract_stream_text_fragments` harvests every string under `text`, `content`, `message`,
 `delta`, `summary` or `result`, wherever it sits in the event. That is the right rule for a
-caller that parses a delimited section out of the whole text -- every stage, and the sibling
-benchmark's report path -- and the wrong one for the one seam that keeps a *reply*, because a
-`tool_result` block is text under `content` too.
+caller that parses a delimited section out of the whole text -- every stage, and
+ResearchClawBench's report path -- and the wrong one for the one seam that keeps a *reply*,
+because a `tool_result` block is text under `content` too.
 
-Measured on the sixty-task FrontierScience trial. The `direct` arm is the caller that keeps
-the reply, and **six of its twenty-eight answers began with a directory listing**, the whole
-answer still sitting underneath: one of them ran to 62,491 characters and ended in a complete
+Measured on the sixty-task trial of 2026-08-19, against a benchmark since removed from this
+repository -- the measurement stands, and a repair with no recorded reason is the next thing
+somebody reverts. The `direct` arm was the caller that kept the reply, and **six of its
+twenty-eight answers began with a directory listing**, the whole answer still sitting
+underneath: one of them ran to 62,491 characters and ended in a complete
 chemistry conclusion. Three of sixty answers on the previous trial had the same shape and were
 scored normally, so the behaviour is not new. What is new is that a content-refusal clause now
 reads the top of the file, so all six were refused -- and because only the arm that keeps a
@@ -143,7 +145,7 @@ class TheReplyTheFrontEndKeepsTests(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        from src.frontierscience import _OperatorCall
+        from src.bench_call import _OperatorCall
 
         self.calls: list[dict] = []
         outer = self

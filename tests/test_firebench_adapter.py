@@ -198,11 +198,12 @@ class ConclusionRefusalTests(unittest.TestCase):
         self.assertEqual(conclusion_content_refusals(text), [])
 
     def test_the_word_results_inside_a_sentence_is_not_a_heading(self) -> None:
-        """Why this is not FrontierScience's content check.
+        """Why this is not a stage-heading check.
 
-        That one refuses any text carrying a stage heading, 'Key Results' among them,
-        because a FrontierScience answer that carries them is a stage summary. Here the
-        deliverable is three sentences of prose and the same rule refuses a good answer.
+        An adapter whose deliverable is a headed answer can refuse any text carrying one
+        of `REQUIRED_STAGE_HEADINGS`, 'Key Results' among them, because an answer that
+        carries them is a stage summary that escaped. Here the deliverable is three
+        sentences of prose and the same rule refuses a good answer.
         """
         text = (
             "Key results held across both model tiers: accuracy fell as the number of "

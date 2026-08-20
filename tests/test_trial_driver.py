@@ -195,20 +195,24 @@ class TheSeamTests(unittest.TestCase):
         """The line the split was drawn on, asserted rather than described.
 
         ``INSTRUCTIONS.md``, ``checklist.json`` and ``target_study`` are
-        ResearchClawBench's vocabulary; ``research_test.jsonl`` and ``rubric`` are
-        FrontierScience's; ``rcb_trial.py`` is one benchmark's *driver*, which is the
-        form the violation actually took -- ``autor_pids`` matched ``"rcb_agent.py"`` and
-        ``"rcb_trial.py fake-run"`` in its body while its docstring said it answered for
-        anybody, so the kernel shipped with a second, private encoding of "what is an
-        agent run" that only knew about one benchmark.
+        ResearchClawBench's vocabulary; ``research_test.jsonl`` and ``rubric`` were a
+        second benchmark's adapter's, and that adapter has since been removed from this
+        repository. Both tokens stay in the list: the rule is about what may live in the
+        kernel, not about which adapters happen to exist this week, and a token whose
+        owner is gone is the cheapest one here to keep -- the expensive direction is a
+        scan that only knows the vocabulary of whatever shipped last. ``rcb_trial.py`` is
+        one benchmark's *driver*, which is the form the violation actually took --
+        ``autor_pids`` matched ``"rcb_agent.py"`` and ``"rcb_trial.py fake-run"`` in its
+        body while its docstring said it answered for anybody, so the kernel shipped with
+        a second, private encoding of "what is an agent run" that only knew about one
+        benchmark.
 
         Exactly one exemption, and it is the keys of
-        :data:`src.trial_driver.AGENT_SCRIPT_NAMES` -- ``rcb_agent.py``, ``fs_agent.py``
-        and ``main.py``. Recognising *both* front ends by name is the kernel's job and is
-        why that table exists; the tokens above are what a driver produces, reads or is
-        called, and none of that belongs here. Nothing else is let through: a benchmark
-        literal anywhere else in this file, including inside another function's ``if``,
-        fails.
+        :data:`src.trial_driver.AGENT_SCRIPT_NAMES`. Recognising *every* front end by name
+        is the kernel's job and is why that table exists; the tokens above are what a
+        driver produces, reads or is called, and none of that belongs here. Nothing else
+        is let through: a benchmark literal anywhere else in this file, including inside
+        another function's ``if``, fails.
 
         Over :func:`executable_source`, so the module can still say in prose which
         vocabulary it is keeping out.
@@ -261,6 +265,15 @@ class TwoDriversOnOneBoxTests(unittest.TestCase):
     means the *asker*, so the asker passes its own markers in. None of it is caught by
     anything in ``tests/test_rcb_trial_driver.py``, because that file only ever runs one
     driver.
+
+    The second driver these were written against was another benchmark's, and it went
+    when that benchmark was removed; ``tools/rcb_trial.py`` is the only caller of
+    ``acquire_lock`` in the tree today. The tests use ``other_trial.py`` -- a name no file in this
+    repository has -- rather than a surviving driver's, because that is the honest
+    subject: the property is "a driver that is not this one", and a test that named
+    whichever benchmark shipped most recently would have to be rewritten with every
+    adapter and would quietly stop holding in the window where there is only one driver,
+    which is exactly the window a second one is written in.
     """
 
     def setUp(self) -> None:
@@ -307,11 +320,12 @@ class TwoDriversOnOneBoxTests(unittest.TestCase):
     def test_each_driver_recognises_its_own_kind_of_live_lock(self) -> None:
         """The hazard, stated as the thing that has to be true.
 
-        A live ``fs_trial.py`` must read as live to another ``fs_trial.py``, and a live
-        ``rcb_trial.py`` to another ``rcb_trial.py``. Before ``marker`` was required this
-        was true of exactly one of the two, because the default said ``rcb_trial.py``.
+        A live driver must read as live to another copy of itself whatever it is called:
+        ``rcb_trial.py`` to another ``rcb_trial.py``, and ``other_trial.py`` to another
+        ``other_trial.py``. Before ``marker`` was required this was true of exactly one of
+        the two, because the default said ``rcb_trial.py``.
         """
-        for script in ("rcb_trial.py", "fs_trial.py"):
+        for script in ("rcb_trial.py", "other_trial.py"):
             with self.subTest(driver=script):
                 holder = self._live_driver(script)
                 payload = self._write_lock(holder)
@@ -320,15 +334,16 @@ class TwoDriversOnOneBoxTests(unittest.TestCase):
     def test_a_live_lock_the_other_kind_of_driver_recorded_still_reads_as_live(self) -> None:
         """Liveness is a property of the holder, so the holder's own name decides it.
 
-        A live ``fs_trial.py`` holding a lock that says ``marker: fs_trial.py`` must read
-        as live to an ``rcb_trial.py`` asking about it. Answering with the *asker's* name
-        instead returns False for every live lock the other kind of driver holds, and
+        A live ``other_trial.py`` holding a lock that says ``marker: other_trial.py`` must
+        read as live to an ``rcb_trial.py`` asking about it. Answering with the *asker's*
+        name instead returns False for every live lock the other kind of driver holds, and
         False is a takeover: ``acquire_lock`` goes straight to ``claim_stale_lock``. That
-        is the same escape the required marker closes, moved from "fs versus fs" to "fs
-        versus rcb", and one copy-pasted ``state_dir`` away from a live trial.
+        is the same escape the required marker closes, moved from a driver against another
+        copy of itself to a driver against a different benchmark's, and one copy-pasted
+        ``state_dir`` away from a live trial.
         """
-        holder = self._live_driver("fs_trial.py")
-        payload = self._write_lock(holder, marker="fs_trial.py")
+        holder = self._live_driver("other_trial.py")
+        payload = self._write_lock(holder, marker="other_trial.py")
         self.assertTrue(trial_driver.lock_is_live(payload, marker="rcb_trial.py"))
 
     def test_a_driver_will_not_take_over_a_lock_the_other_kind_recorded(self) -> None:
@@ -338,8 +353,8 @@ class TwoDriversOnOneBoxTests(unittest.TestCase):
         returning a lock while the holder is still running. The pid in the message is the
         holder's, because that is what the operator kills.
         """
-        holder = self._live_driver("fs_trial.py")
-        self._write_lock(holder, marker="fs_trial.py")
+        holder = self._live_driver("other_trial.py")
+        self._write_lock(holder, marker="other_trial.py")
         with self.assertRaises(SystemExit) as caught:
             trial_driver.acquire_lock(self.state, marker="rcb_trial.py")
         self.assertIn(str(holder.pid), str(caught.exception))
@@ -351,26 +366,26 @@ class TwoDriversOnOneBoxTests(unittest.TestCase):
         field existed, and there is nothing better to ask about it than the asker's own
         name -- which for the other kind of driver answers False, i.e. takes it over.
         That residue is bounded by the lock's lifetime rather than by an argument, and it
-        is the evaluation *every* cross-kind case used to get: it is what a second
-        FrontierScience driver performed on the first one's lock before deciding the lock
-        had been abandoned.
+        is the evaluation *every* cross-kind case used to get: it is what the second
+        driver on this box -- the one that went with the benchmark since removed --
+        performed on the first one's lock before deciding the lock had been abandoned.
         """
-        holder = self._live_driver("fs_trial.py")
+        holder = self._live_driver("other_trial.py")
         payload = self._write_lock(holder)
         self.assertNotIn("marker", payload)
         self.assertFalse(trial_driver.lock_is_live(payload, marker="rcb_trial.py"))
 
-    def test_a_second_frontierscience_driver_stands_down(self) -> None:
+    def test_a_second_driver_of_the_same_kind_stands_down(self) -> None:
         """End to end through ``acquire_lock``: the refusal, not just the predicate.
 
         Without the marker this call took the lock over and returned, and two drivers
         then spent one quota. The pid is in the message because the operator's next move
         is to look at it.
         """
-        holder = self._live_driver("fs_trial.py")
+        holder = self._live_driver("other_trial.py")
         self._write_lock(holder)
         with self.assertRaises(SystemExit) as caught:
-            trial_driver.acquire_lock(self.state, marker="fs_trial.py")
+            trial_driver.acquire_lock(self.state, marker="other_trial.py")
         self.assertIn(str(holder.pid), str(caught.exception))
 
     def test_neither_lock_function_has_a_default_marker(self) -> None:
@@ -420,16 +435,20 @@ class TwoDriversOnOneBoxTests(unittest.TestCase):
 
         The literals used to be in the kernel's body: ``rcb_agent.py`` and
         ``rcb_trial.py fake-run``, under a docstring that said the function answered for
-        anybody. A FrontierScience driver calling it would have got a set that never
+        anybody. Any other benchmark's driver calling it would have got a set that never
         contains its own children, read every live run of its own as dead, and abandoned
-        it -- fresh workspace, new opus run, beside the one still executing.
+        it -- fresh workspace, new opus run, beside the one still executing. That is a
+        counterfactual and stays one: the second driver it was written against belonged to
+        a benchmark since removed, and the literals were pulled out before it happened.
+        ``fire_agent.py`` is the front end it would happen to next, which is why it is the
+        one here.
         """
         rcb_child = self._live_driver("rcb_agent.py")
-        fs_child = self._live_driver("fs_agent.py")
+        fire_child = self._live_driver("fire_agent.py")
         self.assertIn(rcb_child.pid, trial_driver.autor_pids(markers=("rcb_agent.py",)))
-        self.assertNotIn(fs_child.pid, trial_driver.autor_pids(markers=("rcb_agent.py",)))
-        self.assertIn(fs_child.pid, trial_driver.autor_pids(markers=("fs_agent.py",)))
-        self.assertNotIn(rcb_child.pid, trial_driver.autor_pids(markers=("fs_agent.py",)))
+        self.assertNotIn(fire_child.pid, trial_driver.autor_pids(markers=("rcb_agent.py",)))
+        self.assertIn(fire_child.pid, trial_driver.autor_pids(markers=("fire_agent.py",)))
+        self.assertNotIn(rcb_child.pid, trial_driver.autor_pids(markers=("fire_agent.py",)))
 
     def test_the_child_census_has_no_markers_of_its_own(self) -> None:
         """The gate, and the reason it is stricter than the lock's.
@@ -453,15 +472,18 @@ class AgentScriptNamesTests(unittest.TestCase):
 
     ``is_backed_run`` is what ``foreign_runs`` asks about every pid on the box before a
     driver will start, and the answer is "is this process going to spend the quota I am
-    about to spend". With ``fs_agent.py`` missing from it, an RCB driver walks past six
-    live FrontierScience children, reports a clean box, and starts a seventh opus run --
-    which is the concurrency that exhausts the quota that then kills all seven.
+    about to spend". With a front end missing from the table, the ResearchClawBench
+    driver walks past six live children of a second benchmark's front end, reports a
+    clean box, and starts a seventh opus run -- which is the concurrency that exhausts
+    the quota that then kills all seven. The front end that was missing from the chain
+    has since been deleted along with its benchmark; the table is what stops the next one
+    being missed, so what these tests hold is the *table*, not any one benchmark's name.
     """
 
     def test_every_script_the_constant_names_is_recognised(self) -> None:
         """Over the constant, so the predicate has to be the thing that reads it.
 
-        A test that hard-coded ``fs_agent.py`` would go green the moment the name was
+        A test that hard-coded ``fire_agent.py`` would go green the moment the name was
         added to the tuple and stay green if the function never read the tuple -- the
         constant ``_RUN_SCRIPTS`` this replaced was declared, correct, and read by
         nothing at all for the whole life of the driver.
@@ -470,7 +492,7 @@ class AgentScriptNamesTests(unittest.TestCase):
         table generically, so a new key is recognised by construction and this test goes
         green on it -- measured, by adding ``"studio.py": ()`` and watching it pass. The
         guard for the population is
-        :meth:`test_the_constant_names_both_agents_and_the_goal_entry_point`, which is
+        :meth:`test_the_constant_names_every_agent_and_the_goal_entry_point`, which is
         the test that entry fails.
         """
         for script, required in trial_driver.AGENT_SCRIPT_NAMES.items():
@@ -479,40 +501,45 @@ class AgentScriptNamesTests(unittest.TestCase):
                 self.assertTrue(trial_driver.is_backed_run(argv))
 
     def test_the_constant_names_every_agent_and_the_goal_entry_point(self) -> None:
-        """What "every benchmark" means, pinned. Three front ends and ``main.py``.
+        """What "every benchmark" means, pinned. The front ends, and ``main.py``.
 
         This is the population guard: recognition is by construction once a key is in the
         table, so the only thing left to check is which keys are in it. A name added
         without an argument fails here, and here is the only place it fails.
 
-        It went from two front ends to three when ``fire_agent.py`` landed, and that is
-        the whole reason this test is worth its line count: a driver whose census cannot
-        see the third front end reads a live FIRE-Bench run as "nobody is spending the
-        quota" and launches beside it.
+        It went from two front ends to three when ``fire_agent.py`` landed, and back to
+        two when a benchmark was removed from this repository and its front end with it.
+        That is the whole reason this test is worth its line count, and it is worth it in
+        both directions: a driver whose census cannot see a front end reads a live run as
+        "nobody is spending the quota" and launches beside it, and a key for a script
+        nobody can run tells the next reader a front end exists that does not. Neither
+        edit to the table is visible anywhere else -- ``is_backed_run`` reads it
+        generically and goes green on any population at all -- so this assertion is the
+        record of what the census currently knows about.
         """
         self.assertEqual(
             sorted(trial_driver.AGENT_SCRIPT_NAMES),
-            ["fire_agent.py", "fs_agent.py", "main.py", "rcb_agent.py"],
+            ["fire_agent.py", "main.py", "rcb_agent.py"],
         )
 
     def test_a_firebench_run_is_a_run(self) -> None:
         argv = ["python3", "/home/u/AutoR/fire_agent.py", "--task", "cot_in_planning", "--model", "opus"]
         self.assertTrue(trial_driver.is_backed_run(argv))
 
-    def test_a_frontierscience_run_is_a_run(self) -> None:
-        argv = ["python3", "/home/u/AutoR/fs_agent.py", "--workspace", "/w", "--model", "opus"]
+    def test_a_researchclawbench_run_is_a_run(self) -> None:
+        argv = ["python3", "/home/u/AutoR/rcb_agent.py", "--workspace", "/w", "--model", "opus"]
         self.assertTrue(trial_driver.is_backed_run(argv))
 
-    def test_a_fake_operator_frontierscience_run_contends_for_nothing(self) -> None:
+    def test_a_fake_operator_run_contends_for_nothing(self) -> None:
         """What the test suite runs, constantly. It makes no backend call.
 
         A driver that stands down for the unit tests never starts on a machine anybody is
         developing on, and this box is one.
         """
-        argv = ["python3", "/home/u/AutoR/fs_agent.py", "--fake-operator", "--workspace", "/w"]
+        argv = ["python3", "/home/u/AutoR/rcb_agent.py", "--fake-operator", "--workspace", "/w"]
         self.assertFalse(trial_driver.is_backed_run(argv))
 
-    def test_a_shell_that_merely_names_the_frontierscience_agent_is_not_a_run(self) -> None:
+    def test_a_shell_that_merely_names_an_agent_is_not_a_run(self) -> None:
         """Why ``process_argv`` splits on NUL instead of joining.
 
         The diagnostic one-liner somebody types to ask whether a run is up has the script
@@ -520,10 +547,10 @@ class AgentScriptNamesTests(unittest.TestCase):
         the trial never starts at all.
         """
         self.assertFalse(
-            trial_driver.is_backed_run(["/bin/bash", "-c", 'pgrep -af "fs_agent.py" | head'])
+            trial_driver.is_backed_run(["/bin/bash", "-c", 'pgrep -af "fire_agent.py" | head'])
         )
-        self.assertFalse(trial_driver.is_backed_run(["grep", "-rn", "fs_agent.py", "/home/u"]))
-        self.assertFalse(trial_driver.is_backed_run(["/usr/bin/fs_agent.py"]))
+        self.assertFalse(trial_driver.is_backed_run(["grep", "-rn", "fire_agent.py", "/home/u"]))
+        self.assertFalse(trial_driver.is_backed_run(["/usr/bin/fire_agent.py"]))
 
     def test_main_py_still_needs_a_goal(self) -> None:
         """The one entry in the constant that carries a condition.
@@ -537,7 +564,7 @@ class AgentScriptNamesTests(unittest.TestCase):
             trial_driver.is_backed_run(["python", "main.py", "--goal-file", "/tmp/g.txt"])
         )
 
-    def test_the_census_sees_a_live_frontierscience_agent(self) -> None:
+    def test_the_census_sees_a_live_agent(self) -> None:
         """The producer, not just the predicate, against three real processes.
 
         Every other test here hands ``is_backed_run`` an argv it built. That leaves
@@ -552,24 +579,24 @@ class AgentScriptNamesTests(unittest.TestCase):
         ``/proc`` read that ``foreign_runs`` performs is what makes them refusals.
         """
         with tempfile.TemporaryDirectory() as tmp:
-            script = Path(tmp) / "fs_agent.py"
+            script = Path(tmp) / "fire_agent.py"
             script.write_text("import time; time.sleep(30)\n", encoding="utf-8")
             real = subprocess.Popen([sys.executable, str(script), "--workspace", tmp])
             faked = subprocess.Popen(
                 [sys.executable, str(script), "--fake-operator", "--workspace", tmp]
             )
             mention = subprocess.Popen(
-                ["/bin/sh", "-c", "sleep 30 # fs_agent.py --workspace x"]
+                ["/bin/sh", "-c", "sleep 30 # fire_agent.py --workspace x"]
             )
             try:
                 deadline = time.time() + 10
                 for proc in (real, faked, mention):
-                    while time.time() < deadline and "fs_agent.py" not in (
+                    while time.time() < deadline and "fire_agent.py" not in (
                         trial_driver.process_cmdline(proc.pid)
                     ):
                         time.sleep(0.05)
                     self.assertIn(
-                        "fs_agent.py",
+                        "fire_agent.py",
                         trial_driver.process_cmdline(proc.pid),
                         f"pid {proc.pid} never exec'd; an assertion about a process that "
                         "does not exist yet measures nothing",

@@ -360,12 +360,12 @@ def select_run_skills(
     ``withheld`` overrides *everything*, pins included, and it is the only input here
     that is not a routing decision at all. It is an experimenter saying "this run is
     the control arm, and these skills are the thing being measured". A control a
-    predicate can re-add is not a control: the five FrontierScience skills are
-    force-installed by their front end *and* carry a predicate that matches all sixty of
-    that benchmark's task statements, so clearing the force alone left the arm running
-    with the same five under a different banner -- measured on a ``--fake-operator`` run
-    before this parameter existed, and the difference between the two arms was one
-    paragraph of prompt rather than five skills.
+    predicate can re-add is not a control, and that is not a hypothetical: a benchmark
+    front end since removed force-installed five skills that *also* carried a predicate
+    matching all sixty of that benchmark's task statements, so clearing the force alone
+    left the arm running with the same five under a different banner -- measured on a
+    ``--fake-operator`` run before this parameter existed, where the difference between
+    the two arms came to one paragraph of prompt rather than five skills.
     """
     if discipline:
         wanted = discipline.casefold()

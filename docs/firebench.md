@@ -6,12 +6,14 @@ into tasks where an agent is given a research question and a set of resources, h
 design and run its own experiments, and is scored on the conclusion it writes at the
 end — by atomic claim, against the conclusion the paper's authors wrote.
 
-It is AutoR's third benchmark, and the third different shape.
+It is a third different shape: [ResearchClawBench](researchclawbench.md) scores a report,
+[AIRS-Bench](airsbench.md) scores a `submission.csv`, and this one scores a written
+conclusion.
 
 | | deliverable | scored against | must run experiments? | wall clock |
 | --- | --- | --- | --- | --- |
 | [ResearchClawBench](researchclawbench.md) | `report/report.md` + figures | a weighted checklist, images ≈61% of it | yes | none imposed |
-| [FrontierScience](frontierscience.md) | one written answer | a rubric summing to 10 points | no | none imposed |
+| [AIRS-Bench](airsbench.md) | `submission.csv` | held-out labels, the benchmark's own `evaluate.py` | yes | none by the benchmark |
 | **FIRE-Bench** | one written **conclusion** | one reference conclusion, claim-level P/R/F1 | yes | **3600 s, enforced** |
 
 The pieces mirror the other two: `src/firebench.py` (task reader, workspace, goal
@@ -159,7 +161,7 @@ Three things make a killed run still scoreable:
 
 `export_conclusion` looks in one order — **agent** (the agent's own `conclusion.md`, or
 the direct arm's reply) → **synthesized** (one call over approved stage work) →
-**fallback**. There is no `stage` source, unlike the other two adapters: a stage summary
+**fallback**. There is no `stage` source, unlike the ResearchClawBench adapter: a stage summary
 promoted verbatim is a document with headings, and against a precision metric computed
 over the agent's own atomic claims that is a document full of claims nobody asked for.
 
@@ -175,9 +177,10 @@ rather than scored on a placeholder, which is a zero that reads like a measureme
 
 Refusals are namespaced strings written into `_meta.json`: `length:below_floor:…`,
 `content:conclusion_is_a_plan:…`, `driver:no_approved_stage`. The content check is
-deliberately *not* FrontierScience's: that one refuses any text carrying a stage heading,
-`Key Results` among them, which on a three-sentence prose conclusion refuses good
-answers. What is refused here is a plan, a transcript, and a placeholder.
+deliberately *not* the one written for a rubric-graded written answer — a benchmark since
+removed from this repository — which refused any text carrying a stage heading, `Key
+Results` among them: on a three-sentence prose conclusion that rule refuses good answers.
+What is refused here is a plan, a transcript, and a placeholder.
 
 ## The exit code
 
@@ -193,8 +196,9 @@ the artifact can recompute the verdict without rerunning anything:
 | `no_content_refusal` | a plan, a transcript, or placeholder text |
 | `procedure_completed` | a walk that did not finish |
 
-The shape is copied from FrontierScience's, and the reason is the measurement behind it:
-over forty real ResearchClawBench runs, 39 wrote `status: "completed"` and the fortieth
+The shape is copied from an earlier adapter's — a benchmark since removed from this
+repository — and the reason is the measurement behind it: over forty real
+ResearchClawBench runs, 39 wrote `status: "completed"` and the fortieth
 wrote no result line at all, while 31 had auto-skipped a stage and 8 had auto-skipped
 *the stage being scored* — none of which appeared in the metadata.
 
