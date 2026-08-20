@@ -221,49 +221,105 @@ looked for.
 
 ## 7. The result
 
-39 of 40 tasks. `Earth_003` is still running — it was OOM-killed once and lost twice
-more to the overlap-step failure in §4, so its absence is **not random** and it is
-the task most likely to move a mean.
+**All forty tasks.** This section read 39 for two days, and the fortieth was not
+missing for any reason to do with the arm — see §7.8. `Earth_003` scores **27.27**,
+close enough to both baselines (26.5 and 26.4) to move nothing. Every figure below
+is the forty-task version.
 
 The instrument was checked before anything was compared. All three arms:
 `bench_revision bfffc480`, `draws 3`, `judge gpt-5.1`, on every workspace.
 
 ### 7.1 Headline (§6.1)
 
-| arm | mean over the 39 |
+| arm | mean over the 40 |
 |---|---:|
-| **`full40_pins` (bb32a8c)** | **34.65** |
-| `control_bare_cc` | 31.60 |
-| `arm_2ffaeb4` | 28.81 |
+| **`full40_pins` (bb32a8c)** | **34.47** |
+| `control_bare_cc` | 31.48 |
+| `arm_2ffaeb4` | 28.75 |
 
-| paired | difference | wins |
-|---|---:|---:|
-| vs `arm_2ffaeb4` | **+5.84 ± 1.99** | 26/39 |
-| vs `control_bare_cc` | **+3.05 ± 1.58** | 25/39 |
+| paired | difference (1 SE) | 95% CI | wins |
+|---|---:|:---|---:|
+| vs `arm_2ffaeb4` | **+5.72 ± 1.94** | +1.79 … +9.64 | 27/40 |
+| vs `control_bare_cc` | **+2.99 ± 1.54** | −0.12 … +6.11 | 26/40 |
 
-Excluding the three runs of §7.6 that did not finish cleanly: +6.01 ± 2.11 and
-+3.22 ± 1.69. **This is the first arm in this sequence that is ahead of the bare
-agent it wraps** — the four before it scored 23.07, 28.75, 28.77 and 28.81 against
-the control's 31.5.
+Read the two rows differently, because they say different things.
+
+**Against the arm it replaces, the result holds.** +5.72 clears its standard error
+nearly threefold and the 95% interval excludes zero.
+
+**Against the bare agent it wraps, it does not.** +2.99 clears one SE, which is the
+bar §6 pre-registered, so the claim is admissible under the stated rule — but the
+95% interval includes zero by a hair, and a reader who wants significance should be
+told it is absent rather than left to infer it. An earlier draft of this section
+said *"the first arm in this sequence that is ahead of the bare agent it wraps."*
+The point estimate is; the interval is not. The four arms before it scored 23.07,
+28.75, 28.77 and 28.81 against the control's 31.5, so the defensible sentence is
+that **this is the first arm that is not clearly behind.**
 
 ### 7.2 The pre-specified split (§6.2), and regression to the mean
 
 | group | n | vs `arm_2ffaeb4` | wins |
 |---|---:|---:|---:|
 | pinned | 15 | **+14.11 ± 2.63** | 14/15 |
-| unpinned | 24 | **+0.68 ± 2.22** | 12/24 |
+| unpinned | 25 | **+0.68 ± 2.13** | 13/25 |
 
-The pinned group's baseline mean is 20.85 against the unpinned group's 33.78 —
+The pinned group's baseline mean is 20.85 against the unpinned group's 33.49 —
 they were selected for being bad, exactly as §6.2 warned, so some of that +14 is
 regression to the mean and none of it is free. Fitting the effect on the *unpinned*
-tasks gives `delta = 14.02 − 0.395 × baseline`; a slope that negative is regression
-to the mean, and applied to the pinned group's baselines it predicts **+5.8 with no
-pins at all**.
+tasks gives `delta = 13.73 − 0.390 × baseline`; a slope that negative is regression
+to the mean, and applied to the pinned group's baselines it predicts **+5.6 with no
+pins at all**. Pin excess over that prediction: **+8.50 ± 2.52**.
 
-**Pin excess over that prediction: +8.32 ± 2.52** (+7.70 ± 2.70 excluding the
-unclean runs). A second, cruder control agrees: the twelve lowest-scoring *unpinned*
-tasks, baseline 23.67, gained +3.94 ± 3.63 where the pinned fifteen at baseline
-20.85 gained +14.11.
+That was where this section stopped, and it was not far enough.
+
+### 7.2a The same pins against the *control*, and why the two disagree
+
+Run the identical split against `control_bare_cc` instead of against `arm_2ffaeb4`:
+
+| group | n | vs `arm_2ffaeb4` | vs `control_bare_cc` |
+|---|---:|---:|---:|
+| pinned | 15 | **+14.11 ± 2.63** | **+1.68 ± 2.20** |
+| unpinned | 25 | **+0.68 ± 2.13** | **+3.78 ± 2.10** |
+
+**The ordering reverses.** Referenced to the old arm the pinned tasks gain twenty
+times what the unpinned ones do; referenced to the bare agent they gain *less than
+half*. Both numbers come from the same forty score files.
+
+The levels show why:
+
+| group | `arm_2ffaeb4` | control | `bb32a8c` |
+|---|---:|---:|---:|
+| pinned (15) | 20.85 | 33.28 | 34.96 |
+| unpinned (25) | 33.49 | 30.39 | 34.17 |
+
+The pinned tasks are the ones where the old arm trailed the control by **−12.43 ±
+2.72**. The unpinned ones are where it *led* by +3.10 ± 1.36. That is not incidental:
+`_rationale` in the pin table records `net = autor − control` per task, and **`net`
+is what tasks were selected on.** The table was built by ranking tasks on the gap
+between the two arms and pinning the worst of them.
+
+Selecting on a difference selects on the noise in *both* terms. The chosen tasks are
+those where `arm_2ffaeb4` came out unusually low **and** the control came out
+unusually high, and both regress on a re-run. So:
+
+- **+14.11 vs `arm_2ffaeb4` is biased upward** — the baseline it is measured from was
+  selected for being low.
+- **+1.68 vs the control is biased downward** — the comparator was selected for being
+  high.
+
+The §7.2 regression-to-the-mean correction fixes the first bias and not the second:
+it fits on baseline *level*, and the selection was on a *between-arm gap*. §6.2
+anticipated selection on level and said so. It did not anticipate this, and the
++8.50 inherits the gap.
+
+**So the pin effect is bracketed, not measured: somewhere in +1.68 … +14.11, from a
+design that cannot narrow it.** No reanalysis of these forty tasks will, because the
+selection used both arms that any reanalysis would compare against. The hold-out in
+§8.2 is not a nice-to-have refinement of this number; it is the only way to obtain
+one at all.
+
+What survives unchanged is §7.3 — in all fifteen pinned tasks the criterion the pin
+was aimed at moved up. The mechanism does what it claims. Its size is what is open.
 
 ### 7.3 Every pin against the criterion it aimed at (§6.3)
 
@@ -325,27 +381,34 @@ arm predates #262, so this had to be read off the export events rather than
 
 ### 7.7 Where the movement actually is
 
-Weight by score band, over the 39 tasks:
+Weight by score band, over the 40 tasks. Every cell is checklist weight pooled
+across tasks and divided by the arm's total weight, so the three rows are one
+method; the 39-task version of this table differed by at most 1.0 point per cell,
+and adding `Earth_003` changes no reading below.
 
 | | 0 absent | 1–20 | 21–40 shallow | 41–50 comparable | 51+ beats paper |
 |---|---:|---:|---:|---:|---:|
-| `arm_2ffaeb4` | 6.2% | 22.6% | 37.3% | 20.3% | 8.8% |
-| **`bb32a8c`** | **2.4%** | **15.4%** | 40.0% | 22.7% | **14.6%** |
-| control | 8.5% | 18.7% | 32.2% | 24.8% | 13.3% |
+| `arm_2ffaeb4` | 6.0% | 22.7% | 39.1% | 21.0% | 11.2% |
+| **`bb32a8c`** | **2.4%** | **15.8%** | 41.2% | 23.7% | **17.0%** |
+| control | 7.9% | 18.8% | 33.1% | 27.2% | 13.1% |
 
 **The gain is absent criteria being filled in, not shallow ones being deepened.**
-Weight scoring zero more than halved, 1–20 fell by seven points, and what arrived
-landed at the top (51+ nearly doubled). The shallow band did not shrink; it grew.
+Weight scoring zero fell by more than half, 1–20 fell by seven points, and what
+arrived landed at the top (51+ 11.2% → 17.0%). The shallow band did not shrink; it
+grew, and at 41.2% it is now the largest block in the arm.
 
 By criterion type — and image criteria carry 60.6% of the weight:
 
 | | image | text |
 |---|---:|---:|
-| `arm_2ffaeb4` | 29.1 | 28.3 |
-| **`bb32a8c`** | **36.5** | **31.9** |
-| control | 31.7 | 31.4 |
+| `arm_2ffaeb4` | 28.9 | 28.5 |
+| **`bb32a8c`** | **36.1** | **31.9** |
+| control | 32.0 | 31.7 |
 
-Image is where the arm passes the control (+4.8); on text it merely draws level.
+Image is where the arm passes the control (+4.1); on text it merely draws level
+(+0.2). Weighting each by its share, image contributes **+2.47** of the gap and text
+**+0.08** — so of the +2.99 in §7.1, **essentially all of it is an image-criterion
+gap**, and the arm has no measurable text advantage over the bare agent at all.
 
 The two groups differ in kind, not just in size. Pinned tasks moved weight into
 "comparable to the paper": **3.7% → 23.7%**, a six-fold rise, with absent weight
@@ -354,6 +417,34 @@ falling 9.0% → 1.3%. Unpinned tasks moved weight *out* of comparable
 (10.8% → 15.4%). Their mean is flat because those cancel: the non-pin changes made
 outcomes **more variable, not better**.
 
+### 7.8 The fortieth task, and how it went missing
+
+`Earth_003` is not a scheduling casualty, which is what §7 said about it for two
+days. Its run wrote a **45,132-byte report and eleven figures**, then spent four
+attempts at Stage 07 failing one schema check and reached its 40 h wall still
+trying. The check was `dispersion_type`, an enum of six tokens compared with `==`,
+against values like `range of the Z500 skillful lead time across the complete
+cascades` — the right measure, refused for the gloss after it (#312).
+
+The wall kill is where it became invisible. `_meta.json` is written once, after the
+result exists, so a run ended by a signal keeps the `running` the harness wrote at
+launch, forever. The scoring driver skips any workspace not marked `completed`, so
+it skipped this one — and logged only `scoreable workspaces: 39`, naming nothing it
+had dropped. A finished deliverable sat on disk while the arm was written up at
+n=39.
+
+Three separate things had to be wrong for one task to vanish quietly, and all three
+are fixed: the enum now accepts a measure with a gloss (#312), a scheduler kill
+writes `status: aborted` instead of leaving `running` (#313), and the driver names
+every workspace it excludes and why. That last one is the cheap one, and it is the
+one that would have surfaced this immediately:
+
+```
+SKIP Earth_003  Earth_003_20260818_205245: status='running', report 45132 B
+```
+
+**A count with nothing beside it reads as "that is all there was."** It was not.
+
 ---
 
 ## 8. Why, and what to do next
@@ -361,17 +452,36 @@ outcomes **more variable, not better**.
 ### 8.1 The attribution problem, stated plainly
 
 `2ffaeb4..bb32a8c` is **29 commits, 128 files, +22,438 lines**. Three of them are
-the routing layers this document is named for. So the clean reading of the split in
-§7.2 is uncomfortable:
+the routing layers this document is named for. Read only against `arm_2ffaeb4`, the
+split in §7.2 is uncomfortable and simple:
 
-- **The task-id pin table is worth about +8 points** above what regression to the
-  mean predicts, and the per-criterion evidence in §7.3 says it works for the
-  reason claimed.
-- **Everything else in those 29 commits — including #237 and #242 — is worth
-  +0.68 ± 2.22 together.** Statistically nothing.
+- The task-id pin table is worth about **+8.5** above what regression to the mean
+  predicts, and §7.3 says it works for the reason claimed.
+- Everything else in those 29 commits — including #237 and #242 — is worth
+  **+0.68 ± 2.13** together. Statistically nothing.
 
-A lookup table built from the answer key beat a month of architecture. That is the
-result, and the next section is mostly about how little of it can be banked.
+*A lookup table built from the answer key beat a month of architecture.* That was
+this section's conclusion, and §7.2a withdraws the number under it. Against the
+control the same pinned tasks gain +1.68 while the same "everything else" gains
++3.78, and the two readings cannot both be taken at face value: the pins were chosen
+on `net = autor − control`, so the first is measured from a baseline selected for
+being low and the second against a comparator selected for being high.
+
+What can still be said, with the arithmetic behind each clause:
+
+- **The arm is ahead of the arm it replaces**, +5.72 (95% CI +1.79 … +9.64), and
+  **not distinguishable from the bare agent**, +2.99 (−0.12 … +6.11).
+- **The pins repaired a deficit rather than building a lead.** On the fifteen pinned
+  tasks the old arm sat 12.4 points *below* the bare agent; `bb32a8c` sits 1.7 above.
+  That is a real repair — those tasks were the worst-scoring in the arm — and it is
+  not the same claim as the pins making AutoR better than the agent inside it.
+- **The unpinned tasks are where the lead over the control actually sits** (+3.78),
+  and §7.7 shows how: not by scoring higher on average but by becoming *more
+  variable* — weight moved out of "comparable" into both "shallow" and "beats
+  paper" at once. A mean that moves by dispersion is a weaker fact than a mean that
+  moves by level, and it is the fact available.
+- **Which of the 29 commits deserves the credit remains unattributed.** The design
+  isolates the pin layer from everything else and nothing else from anything else.
 
 ### 8.2 What is not yet known
 
@@ -393,9 +503,9 @@ arm point:
 
 | band | criteria | weight | worth |
 |---|---:|---:|---:|
-| 0–20 absent or empty | 28 | 17.8% | **+6.33** |
-| 21–40 flawed or shallow | 54 | **40.0%** | **+6.00** |
-| 41–50 comparable | 35 | 22.7% | +0.10 |
+| 0–20 absent or empty | 29 | 18.1% | **+6.46** |
+| 21–40 flawed or shallow | 58 | **41.2%** | **+6.13** |
+| 41–50 comparable | 37 | 23.7% | +0.17 |
 
 Two observations follow.
 

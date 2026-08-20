@@ -87,7 +87,7 @@ Paired against the control. `diff` is AutoR − control in benchmark points; the
 | `arm_2ffaeb4` | 08-15 | 38 | 28.65 | **+0.39** | −3.05 … +3.83 | 25–13 | +0.23 |
 | `full40_v220` | 08-15 | 38 | 27.33 | **−0.88** | −4.93 … +3.17 | 20–18 | +0.40 |
 | `full40_head` | 08-17 | 38 | 27.97 | **−0.70** | −4.32 … +2.91 | 22–16 | **−4.94** |
-| `full40_pins` | 08-17 | 36 | 31.91 | **+3.33** | −0.92 … +7.58 | 22–14 | +1.34 † |
+| `full40_pins` | 08-17 | **40** | **34.47** | **+2.99** | −0.12 … +6.11 | 26–14 | +1.34 † |
 | `full40_skills` | 08-17 | 31 | 34.78 | **+6.47** | **+1.95 … +11.00** | 23–8 | — |
 
 The `cap 5` column is computed on the *same* task set as its row's `n`, which it was not
@@ -100,11 +100,19 @@ exists to prevent, and it caught the doc rather than the data.
 † `full40_pins`'s cap-5 cell is n=34, not 36: `Material_000` and `Physics_002` have no
 cap-5 backup at all. No workspace under `full40_skills` has one, hence the em dash.
 
-`full40_pins` (37 of 40 tasks complete) and `full40_skills` (32 of 40) were **still
-running** when this was written. Their rows are snapshots, not results. Those arms hold 44
-and 45 workspace *directories*, which is what the denominator said here before — relaunch
-copies, and for skills five `*_DEAD_launcher_gone` stubs. Counting directories understates
-completion and hides that both arms are pairing against the control's 39 scoreable tasks.
+**`full40_pins` is now complete at 40 of 40** and its row above is a result, not a
+snapshot. Its cap-15 cell moved from the n=36 snapshot (+3.33) to +2.99 over all forty —
+the point estimate barely moved and the interval now sits astride zero, so the arm is
+**not** distinguishable from the control at 95%. The fortieth task took two extra days to
+appear for reasons that had nothing to do with the arm: `Earth_003` finished a 45 KB report,
+then failed a schema check four times at Stage 07 and was killed at its wall, and because a
+killed run never writes a terminal status the scoring driver skipped it while logging only a
+count. See §7.8 of [the routing arm write-up](rcb-skill-routing-arm.md).
+
+`full40_skills` (32 of 40) was **still running** when this was written and its row remains a
+snapshot. That arm holds 45 workspace *directories*, which is what the denominator said here
+before — relaunch copies, plus five `*_DEAD_launcher_gone` stubs. Counting directories
+understates completion and hides that the arm is pairing against a smaller scoreable set.
 
 As of 2026-08-19 `full40_pins` is at **39 of 40**; only `Earth_003` is still running, on its
 third launch, and the row above has not been re-scored to include the three tasks that
