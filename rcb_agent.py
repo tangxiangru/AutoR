@@ -22,12 +22,14 @@ Nothing here ever reads stdin. Any prompt that would block raises
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import signal
 import sys
 import time
 import traceback
 from pathlib import Path
-from typing import Sequence
+from typing import Iterator, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parent
 if str(REPO_ROOT) not in sys.path:
@@ -720,21 +722,22 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
 
     pipeline_completed = False
     aborted_with = ""
-    try:
-        pipeline_completed = manager.run(
-            goal,
-            venue=resolve_venue_key(args.venue),
-            skip_intake=not args.intake,
-            output_format=output_format,
-            resources=collect_reference_resources(workspace) or None,
-            final_stage=resolve_stage(args.final_stage),
-        )
-    except Exception as exc:  # noqa: BLE001 - a crashed pipeline must still export what it produced
-        # Exporting the salvage is right. Reporting the salvage as a finished run is not,
-        # and that is what happened until this line existed: the exception was recorded in
-        # `_agent_output.jsonl` and nowhere a downstream reader looks.
-        aborted_with = f"{type(exc).__name__}: {exc}"[:500]
-        emit_event({"type": "error", "where": "pipeline", "traceback": traceback.format_exc()})
+    with _sigterm_as_exception():
+        try:
+            pipeline_completed = manager.run(
+                goal,
+                venue=resolve_venue_key(args.venue),
+                skip_intake=not args.intake,
+                output_format=output_format,
+                resources=collect_reference_resources(workspace) or None,
+                final_stage=resolve_stage(args.final_stage),
+            )
+        except Exception as exc:  # noqa: BLE001 - a crashed pipeline must still export what it produced
+            # Exporting the salvage is right. Reporting the salvage as a finished run is
+            # not, and that is what happened until this line existed: the exception was
+            # recorded in `_agent_output.jsonl` and nowhere a downstream reader looks.
+            aborted_with = f"{type(exc).__name__}: {exc}"[:500]
+            emit_event({"type": "error", "where": "pipeline", "traceback": traceback.format_exc()})
 
     paths = build_run_paths_for_workspace(workspace)
     if paths is None:
@@ -784,6 +787,53 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
         },
     )
     return result
+
+
+class Terminated(Exception):
+    """The scheduler asked this run to stop.
+
+    Raised out of a ``SIGTERM`` handler so a kill takes the same path a crash already
+    takes: export whatever the run produced, record ``aborted``, write ``_meta.json``.
+    An ordinary :class:`Exception`, deliberately -- the point is to be caught by the
+    handler that already exists around :meth:`Manager.run`.
+    """
+
+
+@contextlib.contextmanager
+def _sigterm_as_exception() -> Iterator[None]:
+    """Make a scheduler kill produce a verdict instead of silence.
+
+    A run that is killed never writes a terminal status, so ``_meta.json`` keeps the
+    ``running`` the harness wrote at launch -- forever, since nothing revisits it. Both
+    readers gate on that field: ``run_arm.py`` will not resume the task and the scoring
+    driver will not score it. The workspace is then indistinguishable from one still in
+    flight, and the arm silently loses a task rather than reporting a failed one.
+
+    It cost a real measurement. On the `full40_pins` arm, Earth_003 hit its 40 h wall
+    during Stage 07 holding a finished 45 KB report and eleven figures. The scoring pass
+    logged ``scoreable workspaces: 39`` and named nothing it had dropped; the arm was
+    written up at n=39 for two days with the fortieth deliverable complete on disk.
+
+    Slurm sends ``SIGTERM`` and waits ``KillWait`` (30 s by default) before ``SIGKILL``,
+    which is enough to export a report that has already been written. If it is not, the
+    export is partial and the status still says what happened -- both better than a
+    workspace that claims to be running.
+
+    Restores the previous handler on the way out, and does nothing at all off the main
+    thread, where :func:`signal.signal` is not available.
+    """
+    def _raise(signum: int, _frame: object) -> None:
+        raise Terminated(f"signal {signum} (SIGTERM); the scheduler ended this run")
+
+    try:
+        previous = signal.signal(signal.SIGTERM, _raise)
+    except ValueError:  # not the main thread; nothing to install
+        yield
+        return
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous)
 
 
 def main(argv: list[str] | None = None) -> int:
