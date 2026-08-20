@@ -557,7 +557,7 @@ Eighteen `validate_*` functions are reachable from it in all:
 | 05+ | `validate_experimental_protocol` | No primary metric, `planned_seeds < 1`, or a baseline missing `why_competent` / `tuning_budget` |
 | 05+ | `validate_experiment_manifest` | The manifest does not parse into the declared shape |
 | 06+ | `validate_hypothesis_outcomes` | A frozen hypothesis has no verdict, a verdict adjudicates something unpreregistered, or a `supported`/`refuted` verdict cites an evidence path that does not exist |
-| 06+ | `validate_outcome_statistics` | A verdict has no `n_seeds`, an unrecognised `dispersion_type`, a single seed with no justification, or `dispersion_type: none` with two or more seeds |
+| 06+ | `validate_outcome_statistics` | A verdict has no `n_seeds`, a `dispersion_type` naming no known measure, a single seed with no justification, or `dispersion_type: none` with two or more seeds |
 | 06+ | `validate_report_plan_sources` | A planned figure or headline number's `source_artifact` is missing or empty |
 | 06, 07 | `validate_validity_response` | The stage did not answer every adversarial finding from the one before it, with a status, a ≥40-character explanation, and evidence when it claims `addressed` — or the workspace copy of that review disagrees with AutoR's stamped copy |
 | 06 | `validate_round_decision` | A round closes as `converged` with no supported hypothesis and no `negative_result: true` |
