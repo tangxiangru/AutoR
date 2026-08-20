@@ -260,6 +260,30 @@ def read_api_key(path: Path | None = None) -> str:
     return raw.strip().strip("\"'")
 
 
+def _base_url_from_env_file(bench_root: Path | None = None) -> str:
+    """`OPENAI_BASE_URL` from the checkout's own `.env`, when the environment lacks it.
+
+    Not a secret, and the one setting whose absence is silent: the SDK falls back to
+    api.openai.com, every call 401s inside `batch_generate`, and that helper turns the
+    exception into an `{"error": ...}` entry in the result list with no counter -- so an
+    agent averages over a batch that entirely failed. Four campaigns
+    (`fire-trial35-full`, `fire-r7`, `fire-r8`, `fire-r9`) were launched from a shell that
+    had not exported it, while the goal contract went on telling every one of their agents
+    that three OpenAI models were callable.
+    """
+    root = bench_root or Path(os.environ.get("FIREBENCH_ROOT", "")).expanduser()
+    candidates = [root / ".env"] if root else []
+    candidates.append(Path.home() / "FIRE-Bench" / ".env")
+    for path in candidates:
+        if not path.is_file():
+            continue
+        for line in path.read_text(encoding="utf-8").splitlines():
+            name, _, value = line.strip().partition("=")
+            if name.strip() == "OPENAI_BASE_URL" and value.strip():
+                return value.strip().strip("\"'")
+    return ""
+
+
 def load_credentials(*, key_file: Path | None = None, base_url: str = "") -> list[str]:
     """Put the credentials in the environment, and put them nowhere else.
 
@@ -278,7 +302,7 @@ def load_credentials(*, key_file: Path | None = None, base_url: str = "") -> lis
     if key:
         os.environ["OPENAI_API_KEY"] = key
         populated.append("OPENAI_API_KEY")
-    url = base_url or os.environ.get("OPENAI_BASE_URL", "")
+    url = base_url or os.environ.get("OPENAI_BASE_URL", "") or _base_url_from_env_file()
     if url:
         os.environ["OPENAI_BASE_URL"] = url
         populated.append("OPENAI_BASE_URL")

@@ -261,6 +261,7 @@ class AutomatedReviewer:
         unattended: bool = False,
         codex_command: str = "codex",
         disallowed_tools: Sequence[str] = (),
+        strict_mcp: bool = False,
         custody_mode: str = DEFAULT_CUSTODY_MODE,
     ) -> None:
         # Unattended runs cannot ask a human what the reviewer meant, and aborting a
@@ -285,6 +286,15 @@ class AutomatedReviewer:
                 ui=ui,
                 stage_timeout=stage_timeout,
                 disallowed_tools=disallowed_tools,
+                # A constructor parameter, not something a caller sets afterwards. The
+                # first version of this was `getattr(reviewer, "operator", None)` in
+                # `fire_agent.py`, which returned None -- the attribute is `_operator` --
+                # so the assignment guarded behind it never ran, and a benchmark whose
+                # protocol forbids browsing spent six campaigns with its reviewer seat
+                # still holding the operator's personal MCP search server. The executor
+                # was confined and verified; the reviewer was neither, and the verification
+                # looked complete because it only ever asked the executor.
+                strict_mcp=strict_mcp,
             )
         # Read back off the operator rather than stored from the argument. A reviewer is
         # a model seat, a protocol that denies a tool has to reach every seat or it is not
@@ -293,6 +303,9 @@ class AutomatedReviewer:
         # existing caller: withholding a tool a stage contract assumes is available fails
         # the stage rather than the tool.
         self.disallowed_tools = tuple(getattr(self._operator, "disallowed_tools", ()))
+        #: Read back for the same reason as `disallowed_tools`: a codex reviewer has no
+        #: such knob, so what was asked for and what is carried can differ.
+        self.strict_mcp = bool(getattr(self._operator, "strict_mcp", False))
         self.backend_name = normalized_backend
         self.model = model
         self.fake_mode = fake_mode

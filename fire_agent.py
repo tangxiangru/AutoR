@@ -130,6 +130,7 @@ from src.manager import ResearchManager  # noqa: E402
 from src.operator import ClaudeOperator  # noqa: E402
 from src.operator_codex import CodexOperator  # noqa: E402
 from src.rcb import emit_event  # noqa: E402
+from src.run_skills import install_run_skills  # noqa: E402
 from src.stage_graph import StageGraph  # noqa: E402
 from src.terminal_ui import TerminalUI  # noqa: E402
 from src.utils import (  # noqa: E402
@@ -362,6 +363,11 @@ def build_manager(
     reviewer. What is left on is the thing being measured -- the stages and the reviewer
     between them.
     """
+    # The reviewer is a seat like any other and reads the same task statement. Confining
+    # the executor and leaving the reviewer able to search moves the leak one seat over,
+    # which is the shape of leak that gets recorded as "denied" -- and did, for six
+    # campaigns, because the first version of this poked `reviewer.operator` after
+    # construction and that attribute is `_operator`.
     reviewer = AutomatedReviewer(
         review_backend,
         codex_command=args.codex_command,
@@ -371,13 +377,13 @@ def build_manager(
         stage_timeout=operator.stage_timeout,
         unattended=True,
         disallowed_tools=disallowed_tools,
+        strict_mcp=True,
     )
-    # The reviewer is a seat like any other and reads the same task statement. Confining
-    # the executor and leaving the reviewer able to search would move the leak one seat
-    # over, which is the shape of leak that gets recorded as "denied".
-    inner = getattr(reviewer, "operator", None)
-    if inner is not None and hasattr(inner, "strict_mcp"):
-        inner.strict_mcp = True
+    if review_backend == "claude" and not reviewer.strict_mcp:
+        raise RuntimeError(
+            "the reviewer seat did not take --strict-mcp-config; refusing to run a "
+            "no-browsing benchmark with an unconfined reviewer"
+        )
     return ResearchManager(
         project_root=REPO_ROOT,
         runs_dir=fire_runs_dir_for(workspace),
@@ -653,6 +659,18 @@ def run(args: argparse.Namespace) -> FireRunResult:
                 stages_approved = stages_approved_in(paths)
         else:
             paths = _fresh_run_tree(fire_runs_dir_for(workspace), goal)
+            # The same skill pack the pipeline arm gets.
+            #
+            # Without this the direct arm ran with zero skills installed while the pipeline
+            # arm ran with about 117 -- measured across the three-hour campaign: 3,981
+            # skills over 34 pipeline cells, 0 over 35 direct cells -- because the pack is
+            # installed by `ResearchManager`, which the direct arm does not build. Every
+            # write-up of this comparison said the two arms differ by the stage graph and
+            # the reviewer and nothing else, and every paired `direct - pipeline` delta was
+            # therefore crossing two boundaries at once.
+            installed_skills = install_run_skills(paths, REPO_ROOT / "src" / "skills")
+            emit_event({"type": "progress", "stage": "skills",
+                        "installed": len(installed_skills), "arm": "direct"})
             direct_conclusion = DirectConclusionWriter(operator)(
                 paths=paths, workspace=workspace, goal=goal
             )

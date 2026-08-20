@@ -595,6 +595,98 @@ class ArtifactVisibilityTests(unittest.TestCase):
             self.assertEqual(mirror_run_artifacts(workspace, None), {"code": 0, "outputs": 0})
 
 
+class ArmParityTests(unittest.TestCase):
+    """Four defects a fidelity audit found, each of which had already moved a number.
+
+    All four share a shape: something was configured, looked configured, and was not.
+    Three of them were "verified" at the time by a check that could not have failed.
+    """
+
+    def test_the_reviewer_seat_takes_strict_mcp(self) -> None:
+        """`getattr(reviewer, "operator")` is None -- the attribute is `_operator`.
+
+        So the line that confined the reviewer never ran, and six campaigns of a
+        no-browsing benchmark went out with the reviewer holding the operator's personal
+        MCP search server. The executor was confined and checked; the reviewer was
+        neither, and the check looked complete because it only ever asked the executor.
+        """
+        from src.approval_agent import AutomatedReviewer
+
+        reviewer = AutomatedReviewer("claude", model="opus", fake_mode=True,
+                                     unattended=True, strict_mcp=True)
+        self.assertTrue(reviewer.strict_mcp)
+        self.assertTrue(reviewer._operator.strict_mcp)  # noqa: SLF001 - that is the point
+
+    def test_strict_mcp_is_still_off_by_default_for_every_other_caller(self) -> None:
+        from src.approval_agent import AutomatedReviewer
+
+        self.assertFalse(
+            AutomatedReviewer("claude", model="opus", fake_mode=True).strict_mcp
+        )
+
+    def test_the_front_end_asks_the_reviewer_for_confinement(self) -> None:
+        """A grep, because the constructor argument is the whole fix."""
+        source = (Path(__file__).resolve().parent.parent / "fire_agent.py").read_text(encoding="utf-8")
+        self.assertIn("strict_mcp=True", source)
+        self.assertNotIn('getattr(reviewer, "operator"', source)
+
+    def test_the_direct_arm_installs_the_same_skill_pack(self) -> None:
+        """Measured asymmetry: 3,981 skills over 34 pipeline cells, 0 over 35 direct.
+
+        The pack is installed by `ResearchManager`, which the direct arm does not build,
+        so every paired `direct - pipeline` delta crossed two boundaries while every
+        write-up said one.
+        """
+        source = (Path(__file__).resolve().parent.parent / "fire_agent.py").read_text(encoding="utf-8")
+        self.assertIn("install_run_skills(paths,", source)
+
+
+class MedianDrawIsNotTheMaximumTests(unittest.TestCase):
+    def _median(self, *f1s):
+        import importlib.util
+
+        path = Path(__file__).resolve().parent.parent / "tools" / "score_fire_run.py"
+        spec = importlib.util.spec_from_file_location("_sfr", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        draws = [{"status": "scored", "overall_metrics": {"precision": v, "recall": v, "f1": v}}
+                 for v in f1s]
+        return module.median_draw(draws)["f1"]
+
+    def test_an_even_sample_does_not_report_its_best_draw(self) -> None:
+        """`scored[len // 2]` is the upper middle; on two draws that is the maximum.
+
+        Ten cells across the campaigns ended with exactly two scored draws and each
+        reported its better one under a column headed "median".
+        """
+        self.assertEqual(self._median(40.0, 80.0), 40.0)
+
+    def test_an_odd_sample_is_unchanged(self) -> None:
+        self.assertEqual(self._median(40.0, 60.0, 80.0), 60.0)
+
+    def test_a_single_draw_is_itself(self) -> None:
+        self.assertEqual(self._median(55.0), 55.0)
+
+
+class BaseUrlIsNeverSilentlyEmptyTests(unittest.TestCase):
+    """Four campaigns ran with `OPENAI_BASE_URL=""` while the prompt promised gpt-5.x.
+
+    The failure is silent twice over: the SDK falls back to api.openai.com, and
+    `batch_generate` turns every resulting 401 into an `{"error": ...}` entry in the
+    result list with no counter, so an agent averages over a batch that entirely failed.
+    """
+
+    def test_it_falls_back_to_the_checkout_env_file(self) -> None:
+        import os as _os
+
+        from src.firebench import _base_url_from_env_file
+
+        root = Path(_os.environ.get("FIREBENCH_ROOT", Path.home() / "FIRE-Bench")).expanduser()
+        if not (root / ".env").is_file():
+            self.skipTest("no FIRE-Bench checkout on this box")
+        self.assertTrue(_base_url_from_env_file(root).startswith("http"))
+
+
 class ReportedRowTests(unittest.TestCase):
     """FIRE-Bench reports three numbers, and they have to come from one draw.
 

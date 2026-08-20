@@ -143,7 +143,16 @@ def median_draw(draws: list[dict]) -> dict | None:
     if not scored:
         return None
     scored.sort(key=lambda d: float(d["overall_metrics"]["f1"]))
-    chosen = scored[len(scored) // 2]["overall_metrics"]
+    # Lower middle on an even count, not `len // 2`.
+    #
+    # `scored[len(scored) // 2]` is the *upper* middle, which for the common even case of
+    # two surviving draws is simply the maximum -- a row labelled "median" that is the best
+    # of two. Ten cells across the campaigns ended with exactly two scored draws, and each
+    # of them reported its better one. There is no true median of an even sample that is
+    # also a real draw, and the row has to be a real draw or its three numbers do not
+    # belong to one run; of the two candidates the lower one is the choice that cannot
+    # flatter.
+    chosen = scored[(len(scored) - 1) // 2]["overall_metrics"]
     return {
         "precision": round(float(chosen.get("precision", 0.0)), 2),
         "recall": round(float(chosen.get("recall", 0.0)), 2),
