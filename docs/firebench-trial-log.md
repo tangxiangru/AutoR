@@ -17,6 +17,12 @@ Vertex) throughout, and within any one run every arm is held to the same wall cl
 | Run 4 | 35 | 3 h | shared Gemini 3.7 Flash | **13/34** | direct 44.0 |
 | Run 5 | 35 | 8 h + raised retry limits | shared Gemini 3.7 Flash | *in flight* | *in flight* |
 
+**Read every number against a floor of 29.4, not against zero.** One `opus` call with no
+tools, no data and no experiment scores **F1 29.4** on these 35 tasks (Run 7) — more than
+either Claude Code arm achieves with three hours of real experimentation. These papers are
+in the model's training data, and the benchmark cannot tell recall of the literature from
+rediscovery of it.
+
 **The one result that has not moved across every condition**: `autor-direct` — one agentic
 call with the same goal, model, tools and clock — beats `autor-pipeline` on every one of
 them, by a median of +8.9, +7.1 and +6.2 F1. The gap narrows as the pipeline is given more
@@ -160,6 +166,148 @@ Counting an unscoreable run as 0, which is what upstream's scorer does:
 `autor-pipeline` produced no scoreable conclusion on 1 task(s): `counterfactual_simulatability`.
 
 `claude-stock` produced no scoreable conclusion on 2 task(s): `premise_order_effects`, `prompt_formatting_sensitivity`.
+
+## Run 5 — 35 tasks, shared search, eight-hour budget, retry limits raised
+
+35 tasks × 3 arms = 105 cells · deadline **28800 s** · --max-attempts 6 --max-auto-skips 4 --max-operator-calls-per-stage 8 --reserve-seconds 1800
+
+Run 4 with the limits that actually bound it raised: `--max-attempts` 2→6, `--max-auto-skips` 1→4, `--max-operator-calls-per-stage` 4→8, and the clock 3 h→8 h. In Run 4 every failed stage had used exactly two attempts and been auto-skipped, so this is the direct test of whether the pipeline was unable or merely cut off.
+
+| arm | scoreable | Prec. | Recall | F1 |
+|:---|---:|---:|---:|---:|
+| `autor-pipeline` | 19/35 | 24.4 ± 15.6 | 46.9 ± 36.9 | 28.1 ± 23.1 |
+| `autor-direct` | 23/35 | 36.3 ± 22.7 | 50.4 ± 29.5 | 38.8 ± 24.0 |
+| `claude-stock` | 17/35 | 13.6 ± 14.0 | 53.5 ± 26.9 | 18.9 ± 17.9 |
+
+Counting an unscoreable run as 0, which is what upstream's scorer does:
+
+| arm | Prec. | Recall | F1 |
+|:---|---:|---:|---:|
+| `autor-pipeline` | 13.2 ± 16.7 | 25.5 ± 35.8 | 15.3 ± 22.0 |
+| `autor-direct` | 23.8 ± 25.3 | 33.1 ± 33.9 | 25.5 ± 26.9 |
+| `claude-stock` | 6.6 ± 11.8 | 26.0 ± 32.8 | 9.2 ± 15.6 |
+
+`autor-direct − autor-pipeline`: 19 complete pairs, median **+8.3 F1**, 13 wins / 5 losses / 1 ties.
+
+`autor-pipeline` produced no scoreable conclusion on 16 task(s): `fallback_behaviors`, `fractal_complexity_of_language`, `hallucination_awareness`, `hallucination_snowballing`, `hallusionbench_illusion`, `icl_from_repetition`, `introspective_learning`, `lifebench_length_following`, `llm_confidence_elicitation`, `llm_racial_bias_in_medicine`, `llm_value_consistency`, `llms_assume_rationality`, `llms_lack_self_correction`, `lost_in_the_middle`, `mathvista_visual_math`, `mcq_selection_bias`.
+
+`autor-direct` produced no scoreable conclusion on 12 task(s): `fallback_behaviors`, `fractal_complexity_of_language`, `hallucination_snowballing`, `icl_from_repetition`, `introspective_learning`, `lifebench_length_following`, `llm_confidence_elicitation`, `llms_assume_rationality`, `llms_lack_self_correction`, `lost_in_the_middle`, `mathvista_visual_math`, `mcq_selection_bias`.
+
+`claude-stock` produced no scoreable conclusion on 18 task(s): `fallback_behaviors`, `fractal_complexity_of_language`, `hallucination_awareness`, `hallusionbench_illusion`, `icl_from_repetition`, `introspective_learning`, `llm_value_consistency`, `llms_assume_rationality`, `llms_lack_self_correction`, `lost_in_the_middle`, `mathvista_visual_math`, `mcq_selection_bias`, `premise_order_effects`, `prompt_formatting_sensitivity`, `questbench`, `seca_hallucination`, `to_cot_or_not_to_cot`, `uncertainty_in_instruction_following`.
+
+## Run 6 — bare Claude Code, three-hour budget
+
+35 tasks × 1 arms = 35 cells · deadline **10800 s** · adapter defaults
+
+Upstream's agent with none of this repository's task-facing additions: no wall-clock sentence, no request for a conclusion file, and Claude Code's own `WebSearch` rather than the shared Gemini server. It keeps only the fixes that decide whether a run can be recorded. Compare against Run 4's arms, which share its budget.
+
+| arm | scoreable | Prec. | Recall | F1 |
+|:---|---:|---:|---:|---:|
+| `claude-bare` | 34/35 | 13.8 ± 13.1 | 35.7 ± 29.2 | 16.3 ± 14.5 |
+
+Counting an unscoreable run as 0, which is what upstream's scorer does:
+
+| arm | Prec. | Recall | F1 |
+|:---|---:|---:|---:|
+| `claude-bare` | 13.4 ± 13.1 | 34.7 ± 29.4 | 15.8 ± 14.6 |
+
+`claude-bare` produced no scoreable conclusion on 1 task(s): `llms_assume_rationality`.
+
+---
+
+## Run 7 — the floor: what the benchmark scores with no experiment at all
+
+The premise of FIRE-Bench is **rediscovery**: an agent designs and runs experiments and
+arrives at a finding the paper's authors also arrived at. That premise assumes the finding
+is not already in the model. These are published papers, most of them from 2023–2024, and
+the model under test is later than all of them.
+
+So: one call per task, the research question only, **no tools, no data, no experiment, no
+browsing** — `claude -p` with every tool denied by name and `--strict-mcp-config` over an
+empty server list, so "did not run anything" is enforced rather than requested. Same
+binary, same model, same grader as the arms.
+
+| | Prec. | Recall | F1 |
+|:---|---:|---:|---:|
+| **parametric floor** (`opus`, one call, nothing else) | 25.2 ± 16.4 | 55.4 ± 31.9 | **29.4 ± 20.6** |
+| the same probe on `gpt-5.1` | 28.0 ± 18.8 | 33.5 ± 25.1 | 26.2 ± 19.1 |
+| `claude-bare` — three hours of real experiments | 13.8 ± 13.1 | 35.7 ± 29.2 | **16.3 ± 14.5** |
+| `claude-stock` — three hours of real experiments | 15.2 ± 16.9 | 41.8 ± 33.3 | 18.0 ± 16.7 |
+| `autor-pipeline` | 31.4 ± 24.4 | 48.5 ± 30.9 | 33.4 ± 24.5 |
+| `autor-direct` | 42.5 ± 24.8 | 55.8 ± 29.8 | 44.0 ± 23.5 |
+
+**Answering from memory beats three hours of real experimentation, on both precision and
+recall.** Reading any of these numbers as an absolute is therefore wrong; only the distance
+above 29.4 can be attributed to the research:
+
+| arm | F1 | above the floor |
+|:---|---:|---:|
+| `claude-bare` | 16.3 | **−13.1** |
+| `claude-stock` | 18.0 | **−11.4** |
+| `autor-pipeline` | 33.4 | +4.0 |
+| `autor-direct` | 44.0 | **+14.6** |
+
+Two arms score *below* the cost of doing nothing.
+
+### It is not the length of the answer
+
+The obvious explanation is shape: the bare arm's scored text is a median 3,217 characters
+against a 245-character reference, and precision is a ratio over the agent's own claims.
+It was tested and it is wrong. One extra call restated each bare answer in the reference
+register — no new information, no new experiment, not even a new reading of the task:
+
+| | chars | claims extracted | Prec. | Recall | F1 |
+|:---|---:|---:|---:|---:|---:|
+| `claude-bare`, as produced | 3,217 | 12 | 14.0 | 39.2 | 16.3 |
+| the same answers, compressed | 967 | **12** | 13.8 | 39.9 | **17.1** |
+
+A third of the characters, **the same twelve claims**, and no score. The grader decomposes
+propositions, not sentences; writing shorter compresses the prose around the assertions
+and leaves the assertions. Claim count does track precision *across* arms — 12 claims →
+14.0, 11 → 24.6, 7 → 41.8 against a 5-claim reference — but it is not reachable by writing
+shorter. It is reached by asserting less, which means deciding what the question asked.
+
+### What it is instead
+
+The floor arm recites the literature's consensus, and the literature's consensus **is** the
+reference. An arm that actually experiments reports what *it* measured — on this deployment,
+against substituted models, at whatever scale fits the clock — and that often differs from
+the paper. The honest run is the one that diverges.
+
+This is the same mechanism as the `premise_order_effects` case in Run 4, seen from the
+other side: 112 items × 9 orderings × 2 models, a corrupted-item control at 0.15, and a
+correct null reported at a ceiling — scored 0.0, while a sentence recalling what the
+literature says would have scored well.
+
+### Why the published table is higher, and what part of the gap this is
+
+FIRE-Bench's Table 3 puts Claude Code (Sonnet-4) at 52.1 / 48.3 / **46.7**, against
+`claude-bare`'s 16.3 here. Four contributors, in what the evidence supports as descending
+order:
+
+1. **The models the tasks name are not served here.** Every task's `instruction.txt` lists
+   the models the source paper used — `gpt-3.5-turbo`, `gpt-4o`, `llama-2-70b`,
+   `gemini-1.5-pro`. The intersection with this deployment is **empty**. Every arm
+   substitutes frontier models, and several of these papers' effects are gone at the
+   frontier. An agent that reproduces the paper's *design* on models the paper never used
+   gets the paper's conclusion wrong, correctly.
+2. **A different claim judge.** The shipped extractor/checker is `openai/gpt-4.1`, which
+   404s here; ours is `openai/gpt-5.1`. It decides both the decomposition (the denominator
+   of precision) and every entailment verdict. Untestable here, and not small.
+3. **A different executing model** (`opus` vs Sonnet-4), whose final-message style is
+   longer and more structured — which costs claims.
+4. **A different task population** — 35 verified here, 30 in the paper's table.
+
+None of this makes the arm-to-arm comparisons in this log wrong: within a run they share
+the judge, the model, the catalogue, the clock and the tools. It makes the *absolute*
+numbers incomparable to the paper, and it makes the floor, not zero, the origin.
+
+### Reproducing
+
+```bash
+python3 tools/fire_parametric_probe.py --bench-root ~/FIRE-Bench \
+    --out-root ~/fire-parametric --model opus --backend claude-cli --score
+```
 
 ---
 

@@ -1035,80 +1035,54 @@ the agent writes, decomposed into atomic claims and matched against the authors'
 `--profile direct` is the paired control — the same goal, model, denied tools, sandbox and
 deadline, in one agentic call instead of a stage walk.
 
-**Measured here, six tasks, one run each, `opus` executing and reviewing, every arm on the
-benchmark's own 3600 s clock. Each cell is the median judge draw of three — one draw, so
-its three numbers are consistent with each other; arms are the mean ± sd across tasks,
-which is the shape [FIRE-Bench's own Table 3](https://github.com/maitrix-org/FIRE-Bench)
-reports:**
+**Measured here: 35 tasks, one run per cell, `opus` executing and reviewing, every arm on
+the same wall clock, three judge draws per log, each cell the median draw so its three
+numbers are one run's. Arms are the mean ± sd across tasks, the shape
+[FIRE-Bench's own Table 3](https://github.com/maitrix-org/FIRE-Bench) reports.**
 
-| task | AutoR pipeline | | | AutoR direct | | | stock Claude Code | | |
-|:---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| | P | R | F1 | P | R | F1 | P | R | F1 |
-| `cot_in_planning` | 62.5 | 100.0 | **76.9** | 60.0 | 66.7 | 63.2 | — | — | *no conclusion* |
-| `premise_order_effects` | 0.0 | 0.0 | 0.0 | 80.0 | 80.0 | **80.0** | — | — | *no conclusion* |
-| `prompt_formatting_sensitivity` | 50.0 | 33.3 | 40.0 | 75.0 | 66.7 | **70.6** | — | — | *no conclusion* |
-| `lifebench_length_following` | 0.0 | 0.0 | 0.0 | 46.2 | 40.0 | **42.9** | — | — | *no conclusion* |
-| `persona_reasoning_biases` | 0.0 | 0.0 | 0.0 | 28.6 | 50.0 | **36.4** | 11.1 | 50.0 | 18.2 |
-| `mcq_selection_bias` | 30.0 | 50.0 | 37.5 | 75.0 | 66.7 | **70.6** | 25.0 | 83.3 | 38.5 |
+| arm | what it is | scoreable | Prec. | Recall | F1 |
+|:---|:---|---:|---:|---:|---:|
+| *parametric floor* | *one call, no tools, no data, **no experiment*** | *35/35* | *25.2 ± 16.4* | *55.4 ± 31.9* | ***29.4 ± 20.6*** |
+| `claude-bare` | Claude Code as upstream ships it | 34/35 | 13.8 ± 13.1 | 35.7 ± 29.2 | 16.3 ± 14.5 |
+| `claude-stock` | + told the clock, + the shared search tool | 33/35 | 15.2 ± 16.9 | 41.8 ± 33.3 | 18.0 ± 16.7 |
+| `autor-pipeline` | AutoR's stage walk, Stage 02→05 + synthesis | 34/35 | 31.4 ± 24.4 | 48.5 ± 30.9 | 33.4 ± 24.5 |
+| `autor-direct` | one agentic call, **same goal, model, tools, clock** | 35/35 | **42.5 ± 24.8** | **55.8 ± 29.8** | **44.0 ± 23.5** |
 
-| arm | scoreable | Prec. | Recall | F1 | median wall clock |
-|:---|---:|---:|---:|---:|---:|
-| AutoR pipeline | 6 / 6 | 23.8 ± 28.0 | 30.6 ± 40.0 | 25.7 ± 31.5 | 52 min |
-| AutoR direct | 6 / 6 | **60.8 ± 20.1** | **61.7 ± 14.3** | **60.6 ± 17.2** | **11 min** |
-| stock Claude Code | **2 / 6** | 18.1 ± 9.8 | 66.7 ± 23.5 | 28.4 ± 14.4 | 61 min, killed |
-| *stock, counting an unscoreable run as 0* | 6 / 6 | 6.0 ± 10.3 | 22.2 ± 36.0 | 9.4 ± 16.0 | |
+**1. The floor is 29.4, not zero, and two arms are below it.** One `opus` call given the
+research question and nothing else — every tool denied by name, an empty MCP config, no
+data, no experiment — scores **F1 29.4**. That is more than Claude Code manages with three
+hours of real experimentation. These papers are in the training data, and the benchmark
+cannot distinguish recalling a finding from rediscovering it. Only the distance above 29.4
+is attributable to the research: `autor-direct` **+14.6**, `autor-pipeline` +4.0,
+`claude-stock` **−11.4**, `claude-bare` **−13.1**.
 
-The stock arm's two rows are both reported because neither is obviously the right one and
-the choice moves its F1 from 28.4 to 9.4. Which is comparable to a published table depends
-on how that table handled a run that produced nothing, and FIRE-Bench's paper does not say.
+**2. It is not that the losing arms write too much.** The obvious reading — bare's scored
+text is 3,217 characters against a 245-character reference, and precision is a ratio over
+the agent's own claims — was tested and refuted. Restating each bare answer in the
+reference register, no new information, cut it to 967 characters and left **the same twelve
+claims** and the same score (16.3 → 17.1). The grader decomposes propositions, not
+sentences. What separates the arms is how much they *assert*, not how long they write.
 
-**How much of this is the judge.** These six logs were scored twice, with nothing changing
-but the judge's sampling. The arm means moved by 4 to 5 F1 points — pipeline 30.2 → 25.7,
-direct 55.9 → 60.6, stock 22.9 → 28.4 — and one *task* moved by 13.7 (`cot_in_planning`,
-pipeline arm, 100.0 → 76.9). The ordering of the arms did not move. Treat the ordering as
-the result and the individual numbers as one draw of a noisy instrument; on a single
-unchanged log the measured range is 43 F1 points.
+**3. Under this clock, the pipeline still loses to one call of the same model on the same
+contract.** Direct wins 21 of 34 tasks, median **+6.2 F1**, on precision and recall alike.
+Third benchmark, same direction. It narrows as the pipeline gets room: in a three-hour
+budget the pipeline completed its stage walk on 13 of 34 tasks against 0 of 35 at one hour,
+and its F1 rose from 29.9 to 33.4.
 
-**Three things this says, in decreasing order of how much the sample supports them.**
+**4. An honest null is scored as a wrong answer.** On `premise_order_effects` the pipeline
+ran 112 problems × 9 orderings × 2 models, 694 billed calls per arm, with a corrupted-premise
+control at 0.15 confirming the items were real, and reported that order did not move
+accuracy — correctly, about instances where its strong model scored 1.000 in every ordering,
+which it said. It scored **0.0**. The direct arm, in a fifth of the time, piloted, saw the
+ceiling, generated a harder pool and found the effect at sign-test p = 0.0001, scoring 80.0.
 
-**1. The clock is the benchmark's main filter, and telling the agent about it is what gets
-past it.** Four of six stock Claude Code runs produced *nothing scoreable*: given the raw
-`instruction.txt`, which asks for a full report and says nothing about a deadline, they were
-still building figures and prose when the harness killed them at 61 minutes. Both AutoR arms
-were scoreable 6 times out of 6. The difference is not the pipeline — the direct arm has none
-— it is a goal contract that states the wall clock, states that the conclusion is the only
-artifact read, and says to write it early and rewrite it, plus a watcher that republishes the
-scored line every time the file on disk improves.
-
-**2. Under this clock, the pipeline loses to one call of the same model on the same
-contract.** Direct wins 5 of 6 tasks, median **+34.8 F1**, and it wins on precision and
-recall alike rather than by trading one for the other. Every pipeline run hit the reserve
-boundary at 52 minutes having approved one to three of its four stages; the direct arm
-finished in a median of 11. This is the same direction as
-[ResearchClawBench](#researchclawbench) and [FrontierScience](#frontierscience-research), and
-it is the third benchmark to say it.
-
-**3. Three of the pipeline's four low scores are honest nulls, not empty runs — and the
-metric cannot tell the difference.** On `premise_order_effects` the pipeline ran 112 problems
-across nine orderings on two models, 694 billed calls per arm, with a corrupted-premise
-control at 0.15 accuracy confirming the task was real, and concluded that premise order did
-*not* move accuracy. That is correct about what it measured: its strong model scored 1.000 in
-every ordering — at ceiling — and it said so. It scored **0.0**, because the reference
-conclusion says premise order matters. The direct arm, on the same task in a fifth of the
-time, ran a pilot, saw the ceiling, generated a harder pool with chains up to sixteen steps,
-found the effect at sign-test p = 0.0001, and scored **80.0 / 80.0 / 80.0**. The lesson is about
-*iteration*, not about honesty: what the pipeline lacked was a second pass at its own
-instance difficulty, and its budget went to preregistration, a reproduction table and a gate
-ledger instead.
-
-**What this is not.** Six of thirty-five tasks, one run per cell, and a judge whose measured
-range on a single unchanged log is 43 F1 points. It is not comparable to FIRE-Bench's
-published table (best row: Claude Code with Sonnet-4 at 46.7 ± 23.4 F1): different executing
-model, and — decisively — **none of the models the tasks name is served on this deployment**,
-so every arm substituted from the same catalogue and every arm is answering a slightly
-different question from the one the papers answered. That substitution is also the likeliest
-reason for finding 2's ceilings: these papers' effects were measured on gpt-3.5 and
-Llama-2-era models.
+**What this is not.** Not comparable to FIRE-Bench's published table (best row: Claude Code
+with Sonnet-4 at 46.7 ± 23.4). Four reasons, in descending order of what the evidence
+supports: **none of the models the tasks name is served on this deployment**, so every arm
+substitutes frontier models and several of these papers' effects are gone at the frontier;
+the claim extractor and checker is `openai/gpt-5.1` because the shipped `openai/gpt-4.1`
+404s here, and it decides both the decomposition and every verdict; a different executing
+model; and 35 tasks against the paper's 30.
 
 The adapter, the deadline design, the six exit clauses, the judge's noise and the six holes
 in the benchmark's own harness that had to be routed around are in
