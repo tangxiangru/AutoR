@@ -990,12 +990,51 @@ Paired over the forty tasks that is **−5.67 ± 1.84** — but the two arms wer
 budget, and the confound is about as large as the effect: the AutoR arm ran with
 `--stage-timeout 1800` and 28 of its 40 runs logged `Stage timed out`, while the bare arm had no
 per-stage cap. On the twelve AutoR runs that never hit the cap the paired deficit is **−3.93**
-rather than −6.42. That is a post-hoc subgroup and not a corrected value, so the honest reading is
-that the scaffold is behind and the published margin is unreliable
-([§6.8](docs/framework.md#68-the-scaffold-is-currently-worth-less-than-no-scaffold)).
-It is behind while writing 36% more prose — it covers less,
-not less well. [§6.8](docs/framework.md#68-the-scaffold-is-currently-worth-less-than-no-scaffold) is
-the account of why, and `RUBRIC_VERSION` 7 is the first change aimed at it.
+rather than −6.42. That is a post-hoc subgroup and not a corrected value.
+
+**Two of the three numbers above are artifacts of how they were measured, and the table is kept
+only so this paragraph has something to correct.**
+
+*The judge was shown a third of the figures it should have been.* Upstream ResearchClawBench sends
+the grader `generated_images[:15]`; the local scorer was capped at 5, and the arms differ in how
+many figures they ship, so the cap was not a constant offset. Re-scored at 15 with everything else
+held fixed — same runs, same `gpt-5.1`, same 40 tasks:
+
+| arm | mean | paired vs bare Claude Code | median Δ | won | p |
+|:---|---:|---:|---:|---:|---:|
+| AutoR (Opus), `bb32a8c` + pins | **32.19** | **+3.47** | +4.20 | 24 of 38 | 0.085 |
+| bare Claude Code (Opus) | 28.33 | — | — | — | — |
+| AutoR (Opus), the arm above | 27.45 | −0.88 | +1.82 | 20 of 38 | 0.673 |
+
+So the −5.67 is not a real margin: the same two arms, re-judged correctly, are **−0.88 and not
+significant**. Every AutoR arm has a *positive* median delta and a mean that is worse — it wins the
+typical task and is dragged under by a handful of collapses, which is a different problem from
+"behind" and has a different fix. `p` is an exact paired sign-flip test over the per-task deltas.
+
+*And the control was never search-less.* It was recorded here that the bare arm had no working web
+search, on the evidence of its `WebSearch` calls returning an org-policy 400. Sixteen calls did fail
+that way — but all 44 of its runs also list `ai4ai-web-search` as a **connected** MCP server,
+inherited from the user-level config because no arm passes `--strict-mcp-config`, and
+`mcp__ai4ai-web-search__web_search` was called 12 times and succeeded 12 times across 8 tasks. AutoR's
+182 successful searches over 32 tasks are a **15× usage gap, not a capability gap**, and the server
+behind them was connected on both sides. Handing the bare agent a second search server changes
+nothing measurable: **17 wins, 17 losses, median Δ 0.00, p = 0.452**.
+
+Both readings — "no search" and the "search parity" that replaced it — came from counting tool
+*names*. Pair `tool_use` ids to `tool_result` ids and read the body.
+
+What has not changed: AutoR writes 36% more prose than the bare agent and covers **less** of what
+the task asked for. [§6.8](docs/framework.md#68-the-scaffold-is-currently-worth-less-than-no-scaffold)
+is the account of why, and `RUBRIC_VERSION` 7 is the first change aimed at it — but its headline,
+that the scaffold is worth less than no scaffold, is now unsupported at the corrected image cap
+rather than demonstrated.
+
+**What is still open.** A later arm scores 35.32 and is +8.29 paired at p = 0.001, which would be
+the first significant result in either direction — and it is **not reported here**, because it has
+finished 33 of 40 tasks and the seven still running are ones the bare agent scored *well* on (33.90
+against 27.11 on the tasks that have paired). Assuming the worst for the unfinished seven collapses
+it to +0.72 at p = 0.83. A partly-finished arm is a selected subset, and this one is selected the
+flattering way. The number goes in when all forty land.
 
 [The framework document's §6](docs/framework.md#6-the-system-measured-against-itself) is the full
 account, including the part that is worse than the mean: the two highest scores came from runs that
