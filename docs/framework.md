@@ -1112,6 +1112,19 @@ this document is:
 
 ### 6.8 The scaffold is currently worth less than no scaffold
 
+> **Retired on 2026-08-20. The heading is kept because three documents link to this anchor;
+> the conclusion under it is not supported any more.** Four later arms — `full40_skills`,
+> `full40_main40`, `full40_skills161` and `full40_abl40` — score 36.89, 37.23, 38.71 and
+> **40.17** against the control's 31.48 on the same judge and the same forty tasks, paired
+> at +5.29, +6.00, +7.82 and +9.23, and **all four 95% intervals exclude zero**. The
+> scaffold is ahead of the bare agent it wraps. What follows is the state of the question
+> in mid-August and the reasoning that was correct for the arms then on disk; read it as
+> history, and read
+> [the lab notebook](researchclawbench-arms.md#four-arms-nobody-was-scoring) for where it
+> landed. One sting survives the reversal: the arm in front is `full40_abl40`, which is
+> `full40_main40` with its forty pinned task-scoped skills **deleted**, and the pins are
+> worth −3.16 ± 1.48 paired over 33 tasks.
+
 The repairs of §6.5 worked, in the sense that they were aimed at: the floor came up from 14.16 to
 **23.57**, and six of the seven zeros went away — every one of the forty runs now ships a report
 with methodology, results and figures in it. **One zero survived**, and it is `Information_002`:
