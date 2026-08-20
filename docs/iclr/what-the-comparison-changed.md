@@ -21,7 +21,7 @@ Section 3 is what that cost.
 | #256 | §4.7 (1) and (2): obligations vanishing from every retry; a second entry to a stage replaying a spent session id |
 | #258 | §4.1: a content census of the run root around every reviewer subprocess |
 | #267 | §4.5: the deliverables gate stops being conditional on the output format |
-| #271 | **Not from the list.** A launch race in the FrontierScience trial driver, found because it was reddening every pull request |
+| #271 | **Not from the list.** A launch race in the trial driver of a benchmark adapter since removed, found because it was reddening every pull request |
 | #268 | §4.3: the closing sentence is derived from the record rather than asserted |
 | #273 | §4.6: the cost ledger gets a reader, and the supervisor rule is *refused* one |
 | #278 | §4.2: an overridden refusal stops being recorded as an approval |
@@ -137,18 +137,22 @@ binary; `grep -c` on those prints nothing at all and exits 1, which a shell read
 
 ### 2.4 The launch race in the trial driver (#271)
 
-Not from the list. Found because `tests/test_fs_trial_driver.py` was failing about one
-module run in three under load — a different test each time, never in isolation.
+Not from the list, and **the code it landed in is no longer in this tree**: the driver was
+the trial driver of a benchmark adapter since removed. The measurement stands, and it is
+recorded here because the shape of the defect outlives the module. Found because that
+adapter's trial-driver test module was failing about one module run in three under load —
+a different test each time, never in isolation.
 
-The defect is proven on a pure function. `next_actions` abandons a `launched` run whose
-`child_pid` is not in `autor_pids(...)`, and neither end of that test is observable when a
-run has just started: `tools/fs_trial.py` writes the state file *before* `Popen` with no pid
-at all, and `autor_pids` walks `/proc` — **31–37 ms on a quiet box, longer under load**,
-most of it the walk rather than the child. A healthy run could be pronounced dead
-microseconds after starting, its replacement given a fresh workspace, and both paid for.
+The defect is proven on a pure function. The driver's recovery policy abandons a
+`launched` run whose `child_pid` is not in `autor_pids(...)`, and neither end of that test
+is observable when a run has just started: the driver wrote the state file *before*
+`Popen` with no pid at all, and `autor_pids` walks `/proc` — **31–37 ms on a quiet box,
+longer under load**, most of it the walk rather than the child. A healthy run could be
+pronounced dead microseconds after starting, its replacement given a fresh workspace, and
+both paid for.
 
-`FS_LAUNCH_GRACE_SECONDS = 60` closes it: three orders of magnitude above that latency and
-**forty-five times below `FS_STALL_SECONDS` (2700)**, the same module's existing statement
+A **60 s launch grace** closed it: three orders of magnitude above that latency and
+**forty-five times below that module's stall timeout (2700 s)**, its existing statement
 about how long a run may be silent before anyone worries.
 
 **The attribution is not proven.** Eight loaded module runs with the fix and eight without

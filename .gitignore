@@ -32,11 +32,3 @@ project/
 api.txt
 *.key
 .env
-
-# The FrontierScience-Research split. Pinned by digest in src/frontierscience.py and never
-# committed: its dataset card carries a canary GUID asking that the text stay out of
-# crawlable corpora, and this repository is one. The reader defaults to ~/.cache, so these
-# two lines are for a copy that lands here anyway -- and for the judge responses, which
-# quote rubric items back verbatim while they reason.
-frontierscience/
-research_test.jsonl

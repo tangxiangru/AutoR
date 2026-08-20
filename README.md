@@ -46,8 +46,7 @@ overview and the operating manual.
 [Review](#review-five-kinds-of-critic) · [The stage contract](#the-stage-contract-and-what-gets-validated) ·
 [Execution model](#execution-model) · [Run layout](#run-layout) · [Architecture](#architecture) ·
 [Benchmarks](#benchmarks) ([ResearchClawBench](#researchclawbench) ·
-[FrontierScience](#frontierscience-research) · [FIRE-Bench](#fire-bench) ·
-[AIRS-Bench](#airs-bench)) ·
+[FIRE-Bench](#fire-bench) · [AIRS-Bench](#airs-bench)) ·
 [Documentation](#documentation) · [Limits](#limits) · [License](#license)
 
 ## What AutoR is
@@ -191,8 +190,6 @@ modules**, with no third-party dependency.
 | Read the paired-trial analysis and exit | `python main.py --trial-report` |
 | Benchmark AutoR on ResearchClawBench | `python rcb_agent.py --workspace <WORKSPACE>` |
 | Score a finished benchmark run with the reference judge | `python tools/score_rcb_run.py --workspace <WORKSPACE> --bench <BENCH>` |
-| Answer one FrontierScience question, with AutoR or with one direct call | `python fs_agent.py --task fs:043 --profile ideate` · `--profile direct` |
-| Grade a FrontierScience answer against its rubric | `python tools/score_fs_run.py --task fs:043 --answer answer.md --out score.json` |
 | Rediscover a published finding on FIRE-Bench, under its own one-hour clock | `python fire_agent.py --bench-root ~/FIRE-Bench --task cot_in_planning --profile pipeline` · `--profile direct` |
 | Score a FIRE-Bench conclusion with the benchmark's own claim-level judge | `python tools/score_fire_run.py --bench-root ~/FIRE-Bench --log-file <log.log> --task cot_in_planning --draws 3` |
 | Stage an AIRS-Bench task's data and workspace | `python tools/airs_setup.py --task <TASK> --repo <AIRS_BENCH> --raw-dir <RAW> --workspace <WS>` |
@@ -642,7 +639,7 @@ Alongside the prompt, AutoR installs an agent skill pack from [src/skills/](src/
 `runs/<run_id>/.claude/skills/` — the operator's working directory — so the agent can *pull*
 long-form craft guidance when it needs it. A skill costs nothing in the prompts that do not use it.
 
-173 skills ship today: 84 general ones and 89 field-specific ones. Forty of them were written in one pass against the twelve tasks that trailed a bare-Claude-Code control under a single judge — three or four per task, each selected by a phrase in that task's brief and in no other of the forty, and every one of the forty pinned. Most of them were written against a scored arm's per-criterion losses on the
+168 skills ship today: 79 general ones and 89 field-specific ones. Forty of them were written in one pass against the twelve tasks that trailed a bare-Claude-Code control under a single judge — three or four per task, each selected by a phrase in that task's brief and in no other of the forty, and every one of the forty pinned. Most of them were written against a scored arm's per-criterion losses on the
 twenty-five ResearchClawBench tasks that lost, at least three per task. **A run is not offered all of
 them.** Two filters narrow the pack, and a skill has to survive both:
 
@@ -650,26 +647,22 @@ them.** Two filters narrow the pack, and a skill has to survive both:
    become two. A materials run does not benefit from being offered advice about observational
    astronomy, it just has one more description to read past.
 2. **Shape.** A skill may carry an `applies_when` regex, matched against this run's own research
-   brief and data manifest. 56 skills are scoped this way today; measured over the forty
+   brief and data manifest. 51 skills are scoped this way today; measured over the forty
    ResearchClawBench briefs they select between 1 and 7 tasks each — forty of the
    forty-four RCB-shaped ones select exactly one — eighteen tasks receive none of them, and no task
    receives more than six. The seven added for AIRS-Bench are scoped on a different corpus and
    select 19 of its 20 briefs and **none** of the forty ResearchClawBench ones; the twentieth is a
    brief whose whole task paragraph is one sentence that never says what the deliverable is, so no
-   predicate over task shape can reach it and its pin does instead. The five added for
-   FrontierScience-Research select **all sixty** of its task statements and **none** of the forty,
-   and their predicate is that benchmark's own closing instruction rather than a research shape —
-   a trade written down where they are exempted rather than argued away. `tools/skill_selectivity.py` prints the selection set
+   predicate over task shape can reach it and its pin does instead. `tools/skill_selectivity.py` prints the selection set
    for a corpus and `--expect` turns it into an assertion, because a predicate is a claim about a
    kind of research problem and it should be checkable.
 
-   Five of the forty-nine select **nothing** over that corpus, and are exempt by name in
-   `tests/test_every_skill_can_be_loaded.py` rather than by a loosened regex. They were written
-   against FrontierScience-Research, not ResearchClawBench, and their shared predicate is a phrase
-   in that benchmark's own closing instruction: measured, it occurs in 60 of its 60 task statements
-   and in 0 of these 40 briefs. That is a real cost written down rather than argued away — a
-   predicate over a harness's tail sentence generalises to nothing outside that harness — and it is
-   why those five reach a run through the third route below rather than through this one.
+   A skill that selects **nothing** over the forty is exempt by name in
+   `tests/test_every_skill_can_be_loaded.py` rather than passed by a loosened regex, and the
+   exemption carries the measurement that justifies it. Those seven are the whole list today:
+   a predicate written against one harness's own task shape generalises to nothing outside that
+   harness, which is a real cost written down rather than argued away, and it is why they reach a
+   run through the third route below rather than through this one.
 
 The predicate reads the brief, never the task's identifier: a table of benchmark ids would select
 the same tasks today and generalise to nothing.
@@ -691,22 +684,24 @@ the same tasks today and generalise to nothing.
 4. **Force.** A front end may set `Manager.skill_force` to a set of names installed on every run it
    launches, whatever the filters say and whatever the pin table holds. Neither an inference about
    this task nor a record of this task: a decision about a whole benchmark population, taken outside
-   the run, on evidence the run cannot see. `fs_agent.py` is the only caller today —
-   `FS_FORCED_SKILLS`, five skills written against a paired sixty-task FrontierScience-Research
-   trial, with `--no-forced-skills` as the control arm out of the same binary. It also closes a hole
-   the predicate cannot: `select_run_skills` fails closed on an empty brief and refuses every
-   task-scoped skill silently. The control arm sets `Manager.skill_withhold` as well as clearing
-   the force, and has to: those five also carry a predicate that matches all sixty of that
-   benchmark's task statements, so clearing the force alone leaves the same pack installed under a
-   different banner. Withholding beats every other input here, including a pin, because it is not a
+   the run, on evidence the run cannot see. No front end in the tree sets it today — the adapter
+   that did belonged to a benchmark since removed, which offered `--no-forced-skills` as the
+   control arm out of the same binary. It also closes a hole the predicate cannot:
+   `select_run_skills` fails closed on an empty brief and refuses every
+   task-scoped skill silently. A control arm has to set `Manager.skill_withhold` as well as clear
+   the force, and that is not a hypothetical: the five skills that adapter forced *also* carried
+   a predicate matching **all sixty** of that benchmark's task statements, so
+   clearing the force alone left the arm running with the same five under a different banner —
+   measured on a `--fake-operator` run before `skill_withhold` existed, where the difference
+   between the two arms came to one paragraph of prompt rather than five skills.
+   Withholding beats every other input here, including a pin, because it is not a
    routing decision — it is an experimenter saying which arm this run is.
    **A forced run writes `skill_forced` and `skill_forced_by` into its
    `run_config.json` and a `skills forced_by_front_end` line into its log**, saying in the same
-   sentence that a score from it is not comparable to one from a run without them. `fs_agent.py`
-   writes the same fact where a *trial* can read it — `skill_forced` and `skill_withheld` in the
-   workspace's `_meta.json`, both taken off the manager's installed set rather than off the flag
-   — and the paired trial folds the withheld set into the environment digest, so that sentence
-   about comparability is enforced rather than only printed.
+   sentence that a score from it is not comparable to one from a run without them. A front end that
+   uses it owes the same fact somewhere a *trial* can read — taken off the manager's installed set
+   rather than off the flag, and folded into the arms' environment digest — so that sentence about
+   comparability is enforced rather than only printed.
    Announced in the prompt under its own banner, never the pin's: the pin sentence earns its force by being precise
    about a scored run of this exact task, and reusing it here would be a claim that is false of
    every run that reads it.
@@ -918,24 +913,22 @@ is in **[docs/framework.md](docs/framework.md)**.
 
 ## Benchmarks
 
-AutoR is wired to four, and they measure different halves of it.
+AutoR is wired to three, and they measure different halves of it.
 [ResearchClawBench](#researchclawbench) hands the agent a workspace of raw data and reference
 papers and scores the report and figures it produces against the published paper — a test of
-conducting research. [FrontierScience-Research](#frontierscience-research) hands it one written
-examination question and grades the text of the answer against a ten-point rubric — no data, no
-reference paper, no figure, no reference answer, and a test of what the system knows and can
-derive. [FIRE-Bench](#fire-bench) hands it a research question from a published empirical study,
-expects it to design and run its own experiments, and scores the two-sentence conclusion it
-writes against the authors' own — claim by claim, under a wall clock the harness enforces.
+conducting research. [FIRE-Bench](#fire-bench) hands it a research question from a published
+empirical study, expects it to design and run its own experiments, and scores the two-sentence
+conclusion it writes against the authors' own — claim by claim, under a wall clock the harness
+enforces.
 [AIRS-Bench](#airs-bench) hands it a prepared dataset and a metric and scores the predictions it
 writes. A change that moves one need not move the others.
 
-The fourth one is worth having for a reason the other three cannot supply. All three of them
+The last one is worth having for a reason the other two cannot supply. Both of them
 reach their number through a model reading what AutoR wrote, and on ResearchClawBench the choice
 of reader is worth more than most of the effects being argued about — 16.2 points between two
 judges on one identical artifact set, and 8.5 points between eight draws of the *same* judge.
 AIRS-Bench runs `scipy` over a CSV: the same submission scores the same number every time. It is
-the only one of the four where a one-task before-and-after is a measurement rather than a draw
+the only one of the three where a one-task before-and-after is a measurement rather than a draw
 from a distribution.
 
 ### ResearchClawBench
@@ -997,12 +990,51 @@ Paired over the forty tasks that is **−5.67 ± 1.84** — but the two arms wer
 budget, and the confound is about as large as the effect: the AutoR arm ran with
 `--stage-timeout 1800` and 28 of its 40 runs logged `Stage timed out`, while the bare arm had no
 per-stage cap. On the twelve AutoR runs that never hit the cap the paired deficit is **−3.93**
-rather than −6.42. That is a post-hoc subgroup and not a corrected value, so the honest reading is
-that the scaffold is behind and the published margin is unreliable
-([§6.8](docs/framework.md#68-the-scaffold-is-currently-worth-less-than-no-scaffold)).
-It is behind while writing 36% more prose — it covers less,
-not less well. [§6.8](docs/framework.md#68-the-scaffold-is-currently-worth-less-than-no-scaffold) is
-the account of why, and `RUBRIC_VERSION` 7 is the first change aimed at it.
+rather than −6.42. That is a post-hoc subgroup and not a corrected value.
+
+**Two of the three numbers above are artifacts of how they were measured, and the table is kept
+only so this paragraph has something to correct.**
+
+*The judge was shown a third of the figures it should have been.* Upstream ResearchClawBench sends
+the grader `generated_images[:15]`; the local scorer was capped at 5, and the arms differ in how
+many figures they ship, so the cap was not a constant offset. Re-scored at 15 with everything else
+held fixed — same runs, same `gpt-5.1`, same 40 tasks:
+
+| arm | mean | paired vs bare Claude Code | median Δ | won | p |
+|:---|---:|---:|---:|---:|---:|
+| AutoR (Opus), `bb32a8c` + pins | **32.19** | **+3.47** | +4.20 | 24 of 38 | 0.085 |
+| bare Claude Code (Opus) | 28.33 | — | — | — | — |
+| AutoR (Opus), the arm above | 27.45 | −0.88 | +1.82 | 20 of 38 | 0.673 |
+
+So the −5.67 is not a real margin: the same two arms, re-judged correctly, are **−0.88 and not
+significant**. Every AutoR arm has a *positive* median delta and a mean that is worse — it wins the
+typical task and is dragged under by a handful of collapses, which is a different problem from
+"behind" and has a different fix. `p` is an exact paired sign-flip test over the per-task deltas.
+
+*And the control was never search-less.* It was recorded here that the bare arm had no working web
+search, on the evidence of its `WebSearch` calls returning an org-policy 400. Sixteen calls did fail
+that way — but all 44 of its runs also list `ai4ai-web-search` as a **connected** MCP server,
+inherited from the user-level config because no arm passes `--strict-mcp-config`, and
+`mcp__ai4ai-web-search__web_search` was called 12 times and succeeded 12 times across 8 tasks. AutoR's
+182 successful searches over 32 tasks are a **15× usage gap, not a capability gap**, and the server
+behind them was connected on both sides. Handing the bare agent a second search server changes
+nothing measurable: **17 wins, 17 losses, median Δ 0.00, p = 0.452**.
+
+Both readings — "no search" and the "search parity" that replaced it — came from counting tool
+*names*. Pair `tool_use` ids to `tool_result` ids and read the body.
+
+What has not changed: AutoR writes 36% more prose than the bare agent and covers **less** of what
+the task asked for. [§6.8](docs/framework.md#68-the-scaffold-is-currently-worth-less-than-no-scaffold)
+is the account of why, and `RUBRIC_VERSION` 7 is the first change aimed at it — but its headline,
+that the scaffold is worth less than no scaffold, is now unsupported at the corrected image cap
+rather than demonstrated.
+
+**What is still open.** A later arm scores 35.32 and is +8.29 paired at p = 0.001, which would be
+the first significant result in either direction — and it is **not reported here**, because it has
+finished 33 of 40 tasks and the seven still running are ones the bare agent scored *well* on (33.90
+against 27.11 on the tasks that have paired). Assuming the worst for the unfinished seven collapses
+it to +0.72 at p = 0.83. A partly-finished arm is a selected subset, and this one is selected the
+flattering way. The number goes in when all forty land.
 
 [The framework document's §6](docs/framework.md#6-the-system-measured-against-itself) is the full
 account, including the part that is worse than the mean: the two highest scores came from runs that
@@ -1026,49 +1058,6 @@ what the reported systems actually score and which of their numbers reproduce, s
 [docs/researchclawbench-landscape.md](docs/researchclawbench-landscape.md); for the adapter, its
 output contract and the export rules, see
 [docs/researchclawbench.md](docs/researchclawbench.md).
-
-### FrontierScience-Research
-
-`python fs_agent.py --task fs:043 --profile ideate` answers one of the sixty questions of
-[FrontierScience-Research](https://arxiv.org/abs/2601.21165) with AutoR entered at Stage 02 and
-stopped there; `--profile direct` answers the same question with one call to the same model and
-is the paired control. `tools/score_fs_run.py` grades an answer against the task's own rubric
-with the paper's verbatim judge prompt. The dataset is pinned by digest rather than committed,
-and is never downloaded automatically.
-
-**Where AutoR lands, on all sixty tasks.** Both arms `claude-opus-5[1m]`, identical task
-instruction, browsing denied and witnessed, judged by **gpt-5.1** at one draw per task. Accuracy
-is the benchmark's own metric — the share of tasks scoring at least 7 of 10 rubric points — with
-a refused run scored zero, which is the only framing with no survivorship in it:
-
-| arm | overall | physics | chemistry | biology |
-|:---|---:|---:|---:|---:|
-| `direct-opus` — one Claude CLI call | **51.7%** | **30.0%** | 60.0% | **65.0%** |
-| **AutoR** `ideate` — the pipeline | **50.0%** | **15.0%** | **80.0%** | 55.0% |
-
-The totals are nearly equal and they hide two large effects in opposite directions: **the pipeline
-gains twenty points of chemistry and loses half of physics.** Over the forty-three tasks where both
-arms produced an answer the paired mean difference is **+0.085 ± 0.233** rubric points — seventeen
-wins, seventeen losses, nine ties, median exactly zero — bought with **4.5× the output tokens and
-5.3× the wall clock**, for an answer a quarter shorter.
-
-It also **refused outright on fourteen of sixty tasks**, thirteen because Stage 02 never passed its
-own reviewer, against four for the control that were all the front end's answer timeout rather than
-the benchmark. That is above the plan's 20% publication ceiling, so the trial's own report declines
-to print a difference at all — and the refusal rate, not the difference, is the largest thing this
-benchmark currently says about the pipeline.
-
-**Not comparable to the paper's table.** The paper grades with GPT-5 over thirty draws; that
-deployment returns 404 here. The anchor that makes the water level readable is a different arm: a
-bare `claude-opus-4-5` through the API scores 21.7% under this judge where the paper puts it at
-**17.5%** under its own — agreement inside one standard error, which is what says the jump to 51.7%
-is the model and the substrate rather than a lenient judge.
-
-The full record — the three framings and why they disagree about the sign, the per-task movements,
-both kinds of refusal, and the three-task calibration this overturns — is in
-[docs/frontierscience-results.md](docs/frontierscience-results.md); the adapter, the prompt
-contract and the ten admission clauses are in
-[docs/frontierscience.md](docs/frontierscience.md).
 
 ### FIRE-Bench
 
@@ -1130,8 +1119,9 @@ contract.** Direct wins 5 of 6 tasks, median **+34.8 F1**, and it wins on precis
 recall alike rather than by trading one for the other. Every pipeline run hit the reserve
 boundary at 52 minutes having approved one to three of its four stages; the direct arm
 finished in a median of 11. This is the same direction as
-[ResearchClawBench](#researchclawbench) and [FrontierScience](#frontierscience-research), and
-it is the third benchmark to say it.
+[ResearchClawBench](#researchclawbench) and as the sixty-task written-answer trial of
+2026-08-19, on a benchmark since removed from this repository, and it is the third benchmark
+to say it.
 
 **3. Three of the pipeline's four low scores are honest nulls, not empty runs — and the
 metric cannot tell the difference.** On `premise_order_effects` the pipeline ran 112 problems
@@ -1206,7 +1196,9 @@ AutoR's single invalid submission is the failure the brief warns about: 1,137 ro
 split has 1,147, a whole task lost to ten rows, and under the benchmark's own convention
 that task is a zero in its mean rather than a gap in it.
 
-This is the same direction as the other three, and the fourth benchmark to say it
+This is the same direction as every other benchmark AutoR has been run on, and the fourth to
+say it — the other three being the two above and the sixty-task written-answer trial of
+2026-08-19, on a benchmark since removed from this repository
 ([§6.8](docs/framework.md#68-the-scaffold-is-currently-worth-less-than-no-scaffold)) — this
 time through an instrument with no judge in it, which is the one thing the reading could not
 previously be blamed on.
@@ -1249,9 +1241,7 @@ below is the detail behind it.
 | [Skill-routing arm record](docs/rcb-skill-routing-arm.md) | One arm end to end: the corrected baseline, why the scoring pass is part of the result, the four defects the run exposed, the analysis written before the numbers arrived — and the result, which is the first arm ahead of the bare agent and which attributes almost all of it to one lookup table. |
 | [ResearchClawBench Landscape](docs/researchclawbench-landscape.md) | How EvoScientist, ARIS Codex and MIRA actually score on the benchmark, which reported numbers reproduce, and the baseline any result must be quoted against. |
 | [AIRS-Bench Run Log](docs/airsbench-run-log.md) | The experimental record behind those numbers: provenance, the exact commands, every task's value and wall clock, the six things that went wrong while it ran, and the integrity audit. |
-| [AIRS-Bench](docs/airsbench.md) | The fourth benchmark: twenty ML research tasks scored by a deterministic metric over `submission.csv`. The adapter, the arm harness, three defects running it surfaced in the benchmark itself, and what AutoR scores. |
-| [FrontierScience-Research](docs/frontierscience.md) | The second benchmark: sixty written science questions graded against a rubric by a judge model. The two profiles, the prompt contract, the judge's measured noise, the paired trial, and the two numbers that are not measured. |
-| [FrontierScience Results](docs/frontierscience-results.md) | The sixty-task paired trial: the pipeline against one bare model call, accuracy by subject, what it cost, both kinds of refusal, and the calibration it overturns. |
+| [AIRS-Bench](docs/airsbench.md) | Twenty ML research tasks scored by a deterministic metric over `submission.csv`. The adapter, the arm harness, three defects running it surfaced in the benchmark itself, and what AutoR scores. |
 | [Architecture](docs/architecture.md) | Layers, the module map, the stage walk, prompt assembly by typed channel, recovery, extension points. |
 | [Development](docs/development.md) | Dev setup, tests, CI, conventions, and recipes for adding a stage, venue, or backend. |
 | [Troubleshooting](docs/troubleshooting.md) | Symptom-to-fix for the errors AutoR actually raises. |

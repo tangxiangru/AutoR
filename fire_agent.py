@@ -111,7 +111,7 @@ from src.firebench import (  # noqa: E402
     stage_task_inputs,
     write_fire_meta,
 )
-from src.frontierscience import read_transcript_witness, stages_approved_in  # noqa: E402
+from src.bench_call import read_transcript_witness, stages_approved_in  # noqa: E402
 from src.manager import ResearchManager  # noqa: E402
 from src.operator import ClaudeOperator  # noqa: E402
 from src.operator_codex import CodexOperator  # noqa: E402

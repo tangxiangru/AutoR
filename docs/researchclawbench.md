@@ -9,11 +9,11 @@ AutoR runs it through `rcb_agent.py`. No human is involved at any point — the 
 is a reviewer agent (a second Claude Code instance), and every remaining terminal prompt is
 a hard error rather than a hang.
 
-This is one of two benchmarks AutoR is wired to. The other,
-[FrontierScience-Research](frontierscience.md), hands the agent a written examination
-question and grades the text of the answer against a rubric: no data, no reference paper, no
-figure and no reference answer. They measure different halves of the same system, which is
-the reason for having both.
+This is one of three benchmarks AutoR is wired to. The others are
+[FIRE-Bench](firebench.md), which scores one written conclusion claim by claim against the
+conclusion a paper's authors wrote, and [AIRS-Bench](airsbench.md), which scores a
+`submission.csv` against held-out labels with no judge in the loop at all. They measure
+different halves of the same system, which is the reason for having more than one.
 
 ---
 
