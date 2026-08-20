@@ -174,6 +174,48 @@ class MirrorAndFigureTest(ExportTestBase):
         self.assertTrue((self.workspace / "code" / "pkg" / "helper.py").exists())
         self.assertFalse((self.workspace / "code" / "pkg" / "__pycache__").exists())
 
+    def test_a_file_that_is_already_its_own_target_does_not_end_the_run(self) -> None:
+        """`export_run` is the last thing `rcb_agent.run` does, so this raised after the
+        deliverable existed and turned a finished run into `status: failed`.
+
+        Four workspaces on this box are in exactly that state -- all seven stages approved,
+        a 43-46 KB report, and `exit_code 1` from `shutil.SameFileError` in here. Because
+        `run_arm.py::_scoreable` requires `completed`, each became permanently unscoreable
+        while its claim still blocked a retry.
+
+        The agent's workspace reaches the run tree by symlink, and this filesystem has also
+        handed two distinct directory entries the same `st_ino`, so `path.samefile(target)`
+        answers True for files that are not the same file. Either way the copy is a no-op
+        and must not be fatal.
+        """
+        write_text(self.paths.code_dir / "analysis.py", "print(1)\n")
+        destination = self.workspace / "code"
+        destination.mkdir(parents=True, exist_ok=True)
+        (destination / "analysis.py").hardlink_to(self.paths.code_dir / "analysis.py")
+
+        copied = mirror_tree(self.paths.code_dir, destination)
+
+        self.assertEqual(copied, 1)
+        self.assertEqual((destination / "analysis.py").read_text(), "print(1)\n")
+
+    def test_a_symlinked_target_is_replaced_by_a_real_file(self) -> None:
+        """Skipping instead of unlinking would archive a pointer into `.autor/`.
+
+        The archive exists so the run's code survives the run tree; a symlink back into the
+        tree it is archiving away from is worth nothing, and is the reason this unlinks
+        rather than taking the cheaper `continue`.
+        """
+        write_text(self.paths.code_dir / "analysis.py", "print(1)\n")
+        destination = self.workspace / "code"
+        destination.mkdir(parents=True, exist_ok=True)
+        (destination / "analysis.py").symlink_to(self.paths.code_dir / "analysis.py")
+
+        copied = mirror_tree(self.paths.code_dir, destination)
+
+        self.assertEqual(copied, 1)
+        self.assertFalse((destination / "analysis.py").is_symlink())
+        self.assertEqual((destination / "analysis.py").read_text(), "print(1)\n")
+
     def test_figures_are_collected_as_report_relative_pngs(self) -> None:
         (self.paths.figures_dir / "main_result.png").write_bytes(PNG_BYTES)
         (self.paths.results_dir / "ignored.pdf").write_bytes(b"%PDF-1.4")

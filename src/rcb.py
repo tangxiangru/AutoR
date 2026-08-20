@@ -559,6 +559,26 @@ def mirror_tree(source: Path, destination: Path, *, skip_suffixes: frozenset[str
             continue
         target = destination / path.relative_to(source)
         target.parent.mkdir(parents=True, exist_ok=True)
+        # Source and target can be the same file. The agent's workspace reaches the run
+        # tree by symlink, and this filesystem has also been observed handing two distinct
+        # directory entries the same st_ino, so `os.path.samefile` answers True and
+        # `copy2` raises `SameFileError`. That exception is not caught anywhere above:
+        # `export_run` is the last thing `rcb_agent.run` does, so the run raises *after*
+        # the deliverable is on disk and exits 1. Four workspaces on this box are in that
+        # state -- `full40_abl40/{Life_000,Earth_000}`, `full40_skills/Information_003`,
+        # `full40_v220/Earth_000` -- each with all seven stages approved and a 43-46 KB
+        # report, each recorded `status: failed`. `run_arm.py::_scoreable` then requires
+        # `completed`, so a finished run became permanently unscoreable and its claim
+        # blocked a retry.
+        #
+        # Unlinking rather than skipping: `target` is sometimes itself the symlink that
+        # points back into the run tree, and skipping would archive a pointer where the
+        # archive is supposed to hold a file.
+        if target.is_symlink():
+            target.unlink()
+        elif target.exists() and path.samefile(target):
+            copied += 1
+            continue
         shutil.copy2(path, target)
         copied += 1
     return copied
