@@ -88,7 +88,17 @@ Paired against the control. `diff` is AutoR − control in benchmark points; the
 | `full40_v220` | 08-15 | 38 | 27.33 | **−0.88** | −4.93 … +3.17 | 20–18 | +0.40 |
 | `full40_head` | 08-17 | 38 | 27.97 | **−0.70** | −4.32 … +2.91 | 22–16 | **−4.94** |
 | `full40_pins` | 08-17 | **40** | **34.47** | **+2.99** | −0.12 … +6.11 | 26–14 | +1.34 † |
-| `full40_skills` | 08-17 | 31 | 34.78 | **+6.47** | **+1.95 … +11.00** | 23–8 | — |
+| `full40_skills` | 08-20 | **39** | **36.89** | **+5.29** | **+2.12 … +8.46** | 30–9 | — |
+| `full40_main40` | 08-20 | 35 | 37.23 | **+6.00** | **+1.65 … +10.35** | 27–8 | — |
+| `full40_skills161` | 08-20 | 35 | 38.71 | **+7.82** | **+5.02 … +10.63** | 29–6 | — |
+| `full40_abl40` | 08-20 | 35 | **40.17** | **+9.23** | **+6.13 … +12.34** | 27–8 | — |
+
+The bottom four rows landed on 2026-08-20 and **every one of their intervals excludes zero**.
+`full40_skills`'s row previously read n=31 / 34.78 / +6.47 as a snapshot; it is now complete
+at 39 of 40 and the point estimate fell to +5.29 as the slower tasks arrived, which is the
+direction a snapshot's selection bias predicts. The three arms below it had never appeared in
+this document at all: nothing was scoring them, and they would have finished and been thrown
+away. See [Four arms nobody was scoring](#four-arms-nobody-was-scoring).
 
 The `cap 5` column is computed on the *same* task set as its row's `n`, which it was not
 at first: the four cells read +0.72, +0.36, −4.80 and +1.49 while being paired over 40, 40,
@@ -366,6 +376,58 @@ Two blemishes found while checking, neither load-bearing:
 
 `full40_pins` was still one task short when this was written. `Earth_003` is on its third
 launch and had reached `04_implementation` at 11 h 48 m.
+
+## Four arms nobody was scoring
+
+`full40_skills`, `full40_main40`, `full40_abl40` and `full40_skills161` ran to completion
+with **no scorer attached to any of them**. `pins`, `a9c`, the topology pair and the two
+FIRE-Bench trials each had a watcher; these four had none, and `full40_skills` alone was
+sitting on 36 finished tasks and zero scores on the instrument its baselines were measured
+with. They would have finished and been discarded.
+
+They are scored now, by `score-unscored/score_unscored.py`, at three draws — the same pass
+as the control, for the reason the section above gives.
+
+**The scaffold is ahead of the bare agent it wraps.** Four arms, four intervals excluding
+zero, on the same judge and the same forty tasks. The sentence this document and
+`framework.md` §6.8 have carried for two weeks — that the scaffold is worth less than no
+scaffold — does not survive them and should be retired rather than hedged.
+
+### The pin ablation, which is the one that stings
+
+`full40_abl40` is `full40_main40` with 40 task-scoped skill directories deleted and their
+pins struck. Same commit, same flags, same forty tasks; the skills are the only difference.
+Paired over the 33 tasks both arms finished:
+
+| | mean on the 33 shared | paired difference | 95% CI | W–L |
+|:---|---:|---:|:---|---:|
+| `main40` − `abl40` | 37.38 vs 40.53 | **−3.16 ± 1.48** | **−6.06 … −0.25** | 10–23 |
+
+**The pinned skills are worth negative three points, and the interval excludes zero.** The
+arm in front of every other arm in this file is the one with them removed.
+
+Three things that make the effect *larger* than −3.16 rather than smaller, all of which
+argue against reading this as noise:
+
+- **The manipulation is not uniform.** The struck pins fall on a minority of the forty
+  tasks and the rest lose nothing, so a 40-task mean dilutes whatever happened on the
+  tasks that actually changed. −3.16 is the diluted number.
+- **Both arms are ahead of the control.** +6.00 and +9.23. This is not a scaffold-versus-
+  nothing result, it is a within-scaffold result, and the two arms share every other
+  source of variance the pairing does not already cancel.
+- **The loss count carries it, not one collapse.** 23 of 33 tasks, not a handful of
+  outliers dragging a mean.
+
+What it does not license:
+
+- **It is 33 pairs.** That resolves about 3 points at 80% power and the effect is about
+  that size, so the sign is better supported than the magnitude.
+- **Each arm is 35 of 40**, so each is selected on its own completions, and the two arms
+  are missing *different* tasks — `main40` lacks `Information_003` and `Physics_000`,
+  `abl40` lacks `Astronomy_001` and `Energy_000`. The 33-task intersection is what the
+  pairing is over; neither arm's own 35-task mean is comparable to the other's.
+- **It does not say which skills.** Forty directories were struck together. Attributing
+  the −3.16 to any one of them needs an arm that strikes one of them.
 
 ## Reproducing the table
 

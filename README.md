@@ -1029,12 +1029,46 @@ is the account of why, and `RUBRIC_VERSION` 7 is the first change aimed at it �
 that the scaffold is worth less than no scaffold, is now unsupported at the corrected image cap
 rather than demonstrated.
 
-**What is still open.** A later arm scores 35.32 and is +8.29 paired at p = 0.001, which would be
-the first significant result in either direction — and it is **not reported here**, because it has
-finished 33 of 40 tasks and the seven still running are ones the bare agent scored *well* on (33.90
-against 27.11 on the tasks that have paired). Assuming the worst for the unfinished seven collapses
-it to +0.72 at p = 0.83. A partly-finished arm is a selected subset, and this one is selected the
-flattering way. The number goes in when all forty land.
+### Four later arms have landed, and they are ahead
+
+The paragraph that stood here said a promising arm was being withheld until all forty of its tasks
+landed, because a partly-finished arm is a subset selected the flattering way. They have landed —
+and three more arms with them. Every score below is `tools/score_rcb_run.py --judge reference
+--draws 3`, the same instrument the control was measured with; **a one-draw number is not
+comparable to these** and the reason is
+[in the lab notebook](docs/researchclawbench-arms.md#three-instruments-over-the-same-39-workspaces).
+
+| arm | n | mean | paired vs bare Claude Code | 95% CI | won |
+|:---|---:|---:|---:|:---|---:|
+| `full40_abl40` — pins struck | 35 | **40.17** | **+9.23 ± 1.59** | +6.13 … +12.34 | 27 of 35 |
+| `full40_skills161` | 35 | 38.71 | **+7.82 ± 1.43** | +5.02 … +10.63 | 29 of 35 |
+| `full40_main40` — full pin set | 35 | 37.23 | **+6.00 ± 2.22** | +1.65 … +10.35 | 27 of 35 |
+| `full40_skills` | 39 | 36.89 | **+5.29 ± 1.62** | +2.12 … +8.46 | 30 of 39 |
+| `full40_pins` (`bb32a8c`) | 40 | 34.47 | +2.99 ± 1.54 | −0.03 … +6.01 | 26 of 40 |
+| bare Claude Code (Opus) | 40 | 31.48 | — | — | — |
+| `arm_2ffaeb4` | 40 | 28.75 | −2.73 ± 1.78 | −6.21 … +0.76 | 20 of 40 |
+| `full40` (post-repair, above) | 40 | 23.07 | −8.40 ± 1.78 | −11.90 … −4.91 | 12 of 40 |
+
+**All four of the new intervals exclude zero.** Read against the sentence three paragraphs up —
+"the scaffold is currently worth less than no scaffold" — the scaffold is now ahead of the bare
+agent it wraps, by between 5 and 9 points depending on the arm, on the same judge and the same
+forty tasks. That claim is retired.
+
+**But the arm in front is the one with the skills deleted.** `abl40` is `main40` with 40
+task-scoped skill directories removed and their pins struck; it is otherwise the same commit and
+the same flags. Paired over the 33 tasks both finished:
+
+> `main40` − `abl40` = **−3.16 ± 1.48**, 95% CI −6.06 … −0.25, winning 10 and losing 23.
+
+So the pins are worth **negative** three points, and the interval excludes zero. The manipulation
+is not uniform — the struck pins fall on a minority of the forty tasks and the rest lose nothing,
+so the per-affected-task effect is larger than −3.16, not smaller. Both arms are still ahead of the
+control; what the ablation says is that they are ahead *despite* the pinned skills rather than
+because of them.
+
+Two caveats that travel with the four rows. Each arm is 35–39 of 40, so each is still a subset
+selected on its own completions; and `abl40`'s lead over `main40` rests on 33 pairs, which resolves
+about 3 points and is measuring an effect of about that size.
 
 [The framework document's §6](docs/framework.md#6-the-system-measured-against-itself) is the full
 account, including the part that is worse than the mean: the two highest scores came from runs that
