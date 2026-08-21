@@ -16,9 +16,15 @@ runs of a benchmark, and on the sixty-task trial of 2026-08-19 -- run against a 
 since removed from this repository, which does not unmake the measurement -- it carried
 traffic: the two most-read files in a 1,456-file store were notes an earlier run had written
 about how that harness chose the answer it published -- `fs-ideate-write-answer-md-yourself-to-preempt-synthesis`
-at 92 reads and `an-existing-answer-md-outranks-the-synthesizer` at 56, both still in the store
-above, which outlives the adapter -- and in the chemistry block the read was the *first* tool
-call of the run, in both arms, before the agent had looked at the problem.
+at 92 reads and `an-existing-answer-md-outranks-the-synthesizer` at 56 -- and in the chemistry
+block the read was the *first* tool call of the run, in both arms, before the agent had looked
+at the problem.
+
+Those two notes have since been deleted from that store, because what they described is a code
+path that no longer exists and an agent following them today would act on nothing. **The store
+itself is untouched and still shared**, which is the fact this file is about: it belongs to
+Claude Code, it outlives any one benchmark, and the next set of runs under one results
+directory will pool their notes in it exactly as these did.
 It is asymmetric, too: 32 of 37 pipeline runs reached the store against 8 of 37 direct ones,
 so it does not cancel out of a paired comparison.
 
