@@ -79,12 +79,20 @@ def pinned_for(task: str) -> frozenset[str]:
 
 
 def reach() -> collections.Counter[str]:
-    """Tasks per skill, over the corpus, through the shipped selector."""
+    """Tasks per skill, over the corpus, through the shipped selector.
+
+    The corpus is ResearchClawBench's, so the selector is told so. A skill scoped with
+    `benchmarks: researchclawbench` is refused to a caller that names no benchmark --
+    the same safe direction an empty brief takes -- and without this argument the whole
+    scoped half of the pack reads as unreachable. Which is the honest answer to a
+    different question: reachability is per benchmark now, and this file asks it of one.
+    """
     pack = read_skill_pack(REPO / "src" / "skills")
     counted: collections.Counter[str] = collections.Counter()
     for task, brief in briefs().items():
         offered = select_run_skills(
             pack,
+            benchmark="researchclawbench",
             discipline=task.split("_")[0].lower(),
             brief=brief,
             pinned=pinned_for(task),
@@ -99,10 +107,22 @@ class EverySkillIsReachableTests(unittest.TestCase):
     def test_every_skill_is_selected_by_at_least_one_brief(self) -> None:
         counted = reach()
         pack = read_skill_pack(REPO / "src" / "skills")
+        # A skill scoped to a different benchmark is not unreachable, it is out of scope
+        # for this corpus -- these are ResearchClawBench briefs and nothing here can speak
+        # to whether a FIRE-Bench skill reaches a FIRE-Bench task. Skipping it is the
+        # difference between a gate that fails when someone adds one and a gate that says
+        # what it actually checked.
+        out_of_scope = {
+            entry.name
+            for entry in pack
+            if entry.benchmarks and "researchclawbench" not in entry.benchmarks
+        }
         dead = sorted(
             entry.name
             for entry in pack
-            if counted[entry.name] == 0 and entry.name not in UNREACHABLE_ON_PURPOSE
+            if counted[entry.name] == 0
+            and entry.name not in UNREACHABLE_ON_PURPOSE
+            and entry.name not in out_of_scope
         )
         self.assertEqual(
             dead,

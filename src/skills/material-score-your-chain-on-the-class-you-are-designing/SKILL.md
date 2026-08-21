@@ -1,6 +1,7 @@
 ---
 name: material-score-your-chain-on-the-class-you-are-designing
 description: Use at experimentation, analysis and writing when a calibration or reference table you fitted on is a mixed population and the objects you are designing are one class inside it. Covers finding those rows by name, reporting the chain's error on that subset per row rather than folding it into the pooled statistic, and why that subset is usually the only experimental validation available in the workspace.
+benchmarks: researchclawbench
 applies_when: \b(?:vitrimer\w*|glass transition temperature)\b
 stages: 05_experimentation, 06_analysis, 07_writing
 ---

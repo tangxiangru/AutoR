@@ -360,6 +360,7 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
         artifact_roots=[workspace],
         cross_reviewer=resolve_cross_reviewer(args.cross_review, args.cross_review_model),
     )
+    manager.skill_benchmark = "airsbench"
 
     if args.ideation_panel:
         from src.ideation_panel import IdeationPanel, apply_lens_models, resolve_lenses

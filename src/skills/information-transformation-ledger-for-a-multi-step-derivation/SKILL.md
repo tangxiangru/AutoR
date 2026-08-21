@@ -1,6 +1,7 @@
 ---
 name: information-transformation-ledger-for-a-multi-step-derivation
 description: Use at study design, analysis and writing whenever the result is produced by a chain of named steps - a symbolic derivation, a transform pipeline, a staged extraction. Covers lifting the step list verbatim from the supplied material, the per-step block that states the operation and not only the object, which steps earn a full block, and the stop condition on how much of the chain actually reached the report.
+benchmarks: researchclawbench
 stages: 03_study_design, 06_analysis, 07_writing
 ---
 

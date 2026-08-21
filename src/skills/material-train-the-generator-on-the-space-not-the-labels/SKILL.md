@@ -1,6 +1,7 @@
 ---
 name: material-train-the-generator-on-the-space-not-the-labels
 description: Use at literature survey, study design and implementation when a generative model is to be built over objects assembled from interchangeable components and the only file you were handed is a small labelled table. Covers splitting the corpus between the unsupervised and supervised halves of the model, recovering the component pools from the columns you already have, and classifying a release's files as apparatus or as answer key before you refuse them.
+benchmarks: researchclawbench
 applies_when: \b(?:vitrimer\w*|graph variational autoencoder)\b
 stages: 01_literature_survey, 03_study_design, 04_implementation
 ---

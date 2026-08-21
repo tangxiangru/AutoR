@@ -1,6 +1,7 @@
 ---
 name: math-rebuild-the-generator-the-system-learned-from
 description: Use at study design and implementation when the source system's headline rests on a training corpus its public release does not ship — millions of machine-generated examples, a self-play archive, a synthesised problem set — and what was released is only the solver or the evaluator. Covers why the generator is a build item and not a scope boundary, how to reconstruct it from the Methods description using the released solver as its inner loop, and which statistics make a corpus a thousand times smaller comparable to theirs.
+benchmarks: researchclawbench
 applies_when: without human demonstrations|no human demonstrations
 stages: 03_study_design, 04_implementation, 05_experimentation
 ---

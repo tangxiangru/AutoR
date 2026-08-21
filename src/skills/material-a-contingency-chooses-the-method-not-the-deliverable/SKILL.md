@@ -1,6 +1,7 @@
 ---
 name: material-a-contingency-chooses-the-method-not-the-deliverable
 description: Use at study design when you are writing a pre-registered branch, a cut order, a fallback or any go/no-go check that could fire later, and again at experimentation the moment one fires. Covers writing the branch table in artifacts rather than in hypotheses, the degraded producers available to a generative or search arm whose model underperforms, and the inventory check that catches a deleted deliverable before the report is written.
+benchmarks: researchclawbench
 applies_when: \b(?:vitrimer\w*|inverse-design framework)\b
 stages: 03_study_design, 05_experimentation, 06_analysis
 ---

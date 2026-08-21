@@ -333,7 +333,7 @@ def build_manager(
         unattended=True,
         disallowed_tools=disallowed_tools,
     )
-    return ResearchManager(
+    manager = ResearchManager(
         project_root=REPO_ROOT,
         runs_dir=fire_runs_dir_for(workspace),
         operator=operator,
@@ -359,6 +359,8 @@ def build_manager(
         archive=None,
         cross_reviewer=resolve_cross_reviewer(args.cross_review, args.cross_review_model),
     )
+    manager.skill_benchmark = "firebench"
+    return manager
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 ---
 name: every-claim-in-the-data-description-is-a-result
 description: Use at literature survey and study design, when you first read the task's description of each supplied data file, and again at analysis. Covers turning the description's counts, values, shapes and purpose clauses into a verification list the report answers row by row, on the supplied rows themselves.
+benchmarks: researchclawbench
 stages: 01_literature_survey, 03_study_design, 06_analysis
 ---
 

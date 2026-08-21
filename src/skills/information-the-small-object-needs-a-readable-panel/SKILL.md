@@ -1,6 +1,7 @@
 ---
 name: information-the-small-object-needs-a-readable-panel
 description: Use at experimentation and analysis when the claim is about something small in a large input — a cropped region, a localised attention peak, a few pixels of text, a rare token — and you are laying out the qualitative panel or saving its intermediate objects. Covers rendering the object under test at a size a reader can adjudicate, measuring that size before you save the figure, and persisting each visual object as an image rather than only as an array.
+benchmarks: researchclawbench
 applies_when: fine-grained perception|small objects
 stages: 05_experimentation, 06_analysis, 07_writing
 ---

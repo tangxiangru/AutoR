@@ -1,6 +1,7 @@
 ---
 name: write-the-result-sentence-before-the-statistic
 description: Use at the design freeze when analysis and figure slots are being fixed, and again at analysis before a comparative quantity is left uncomputed. Covers checking that the statistic can express the claim at all - its arguments, its degrees of freedom, its unit - the two-dataset test that finds the ones that cannot, and how to amend a frozen slate when a slot's statistic fails.
+benchmarks: researchclawbench
 stages: 03_study_design, 06_analysis
 ---
 

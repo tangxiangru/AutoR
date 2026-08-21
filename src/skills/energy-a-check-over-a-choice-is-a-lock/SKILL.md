@@ -1,6 +1,7 @@
 ---
 name: energy-a-check-over-a-choice-is-a-lock
 description: Use at implementation and experimentation when you are about to add a cross-artifact consistency check, a self-test, a guard or a tripwire to your own pipeline. Covers the one question that separates a guard from a ratchet, how to pin a chosen quantity without freezing it, and why scope and coverage decisions must never be asserted in code.
+benchmarks: researchclawbench
 applies_when: geospatial levelized-cost
 stages: 04_implementation, 05_experimentation
 ---

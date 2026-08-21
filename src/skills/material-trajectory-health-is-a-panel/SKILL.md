@@ -1,6 +1,7 @@
 ---
 name: material-trajectory-health-is-a-panel
 description: Use at experimentation when a dynamics or sampling run is launched (MD, Monte Carlo, annealing, any iterative sampler), and again at analysis and writing when its result is drawn. Covers the health channels to append to disk while the loop is running, the numbers to state against thresholds you declared, and the trace panel that makes the run checkable — without changing the configuration the protocol specified.
+benchmarks: researchclawbench
 stages: 05_experimentation, 06_analysis, 07_writing
 ---
 

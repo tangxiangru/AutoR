@@ -1,6 +1,7 @@
 ---
 name: the-results-panel-is-not-where-the-run-argues-with-itself
 description: Use at study design when the figure plan is written, at analysis when that plan is executed, and at writing. Covers keeping the figure inventory amendable once the data has actually been parsed and fitted, giving the run's own provenance audit its own figure and section instead of the foreground of a results panel, and writing panel titles as physical statements rather than internal identifiers.
+benchmarks: researchclawbench
 stages: 03_study_design, 06_analysis, 07_writing
 ---
 

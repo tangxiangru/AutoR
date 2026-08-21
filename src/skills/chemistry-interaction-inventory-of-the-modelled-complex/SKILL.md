@@ -1,6 +1,7 @@
 ---
 name: chemistry-interaction-inventory-of-the-modelled-complex
 description: Use at study design, analysis and writing when the result is a modelled or predicted molecular complex — a docked pose, a co-folded assembly, a binding interface — and RMSD, DockQ or lDDT is about to be the whole answer. Covers the reference-versus-prediction contact inventory per interaction class, the pocket-cropped figure with the interactions drawn, and the mechanism sentence.
+benchmarks: researchclawbench
 stages: 03_study_design, 06_analysis, 07_writing
 ---
 

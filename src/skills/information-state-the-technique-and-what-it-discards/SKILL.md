@@ -1,6 +1,7 @@
 ---
 name: information-state-the-technique-and-what-it-discards
 description: Use at analysis and writing whenever the work invokes a standard technique of the field by name - a transformation, an identity, an approximation, an estimator, a decomposition. Covers stating the rule and its convention before applying it, naming what the technique costs, showing the expansion it generates before simplification, and what to do with conditional steps you skipped.
+benchmarks: researchclawbench
 stages: 06_analysis, 07_writing
 ---
 

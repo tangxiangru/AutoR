@@ -1,6 +1,7 @@
 ---
 name: a-deliverable-is-not-an-instruction
 description: Use at study design when listing the task's deliverables into report_plan.json, and again before writing when checking coverage. Covers how to tell a research deliverable from the harness's own operating instructions, why a padded list is worse than a short one, and what to write when a deliverable is genuinely out of reach.
+benchmarks: researchclawbench
 stages: 03_study_design, 07_writing
 ---
 

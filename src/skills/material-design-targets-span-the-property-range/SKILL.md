@@ -1,6 +1,7 @@
 ---
 name: material-design-targets-span-the-property-range
 description: Use when a task asks you to generate, design or optimise candidates toward desired property values that the brief never enumerates. Covers deriving the target grid from the supplied property distribution, why the target outside your validator's fitted range must not be deleted, and how a source study's published designs may and may not be used as anchors.
+benchmarks: researchclawbench
 stages: 03_study_design, 05_experimentation, 06_analysis
 ---
 

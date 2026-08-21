@@ -1,6 +1,7 @@
 ---
 name: neuroscience-a-benchmark-rerun-owes-a-ranking
 description: Use at analysis and writing after re-running a published comparison of many methods on many metrics, when you are deciding what the section says. Covers separating the outcome of the comparison from the fidelity of your reproduction, counting the wins over the whole comparator set, and naming the class a claim survives in when a competitor beats the method the task is about.
+benchmarks: researchclawbench
 applies_when: single-cell readouts
 stages: 06_analysis, 07_writing
 ---

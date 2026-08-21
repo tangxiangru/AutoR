@@ -1,6 +1,7 @@
 ---
 name: late-budget-goes-to-the-task-not-the-method
 description: Use at the head of the analysis stage and again during the writing stage's review passes, whenever a figure slot, an attempt or a redraw is still available. Covers re-deriving the reporting slate from the result tables that now exist rather than from the design note, why a label column joined for another purpose is a reporting axis you already paid for, how to rank a spare exhibit against the task's descriptive clauses, and why a review pass that only finds bookkeeping spends an attempt for nothing.
+benchmarks: researchclawbench
 stages: 06_analysis, 07_writing
 ---
 

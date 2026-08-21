@@ -1,6 +1,7 @@
 ---
 name: the-figure-plan-is-a-purchase-order
 description: Use at study design when the figure or panel plan is written, at implementation, and at experimentation when compute is being allocated. Covers writing each planned panel as a row naming the file and column it will be drawn from, pricing and buying the producing steps before the robustness machinery, and taking each panel's axis from the language the task states its own decision rule in.
+benchmarks: researchclawbench
 stages: 03_study_design, 04_implementation, 05_experimentation
 ---
 

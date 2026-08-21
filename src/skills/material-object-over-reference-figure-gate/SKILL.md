@@ -1,6 +1,7 @@
 ---
 name: material-object-over-reference-figure-gate
 description: Use when figures are being written or are about to be declared finished and no panel yet draws the run's own generated or predicted objects over their reference population in physical coordinates - the panels so far are rate bars, threshold curves, tables as graphics, or titles carrying hypothesis ids and verdict words. Covers an assertion gate over the plotting code that fails the figure stage until every named deliverable has an object-over-reference panel with units on both axes.
+benchmarks: researchclawbench
 stages: 04_implementation, 06_analysis
 ---
 

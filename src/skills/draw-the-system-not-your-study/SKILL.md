@@ -1,6 +1,7 @@
 ---
 name: draw-the-system-not-your-study
 description: Use at study design when allocating figure slots, and again at analysis and writing, on tasks where the source's own rendered figures are not available to copy. Covers the four slots reserved for the system before any hypothesis claims one, drawing the loaded arrays instead of their counts, why a panel that reports a shortfall is not the panel carrying the result, and why a deliverable marked covered_by an artifact path is not covered.
+benchmarks: researchclawbench
 stages: 03_study_design, 06_analysis, 07_writing
 ---
 

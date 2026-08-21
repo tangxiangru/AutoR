@@ -1,6 +1,7 @@
 ---
 name: every-variant-persists-the-same-object
 description: Use at implementation when you write the routine that reduces a scan to a scalar, at experimentation when the sweep over alternative treatments runs, and at writing before any comparison figure is finalised. Covers persisting the full curve for every variant on a shared grid rather than only its threshold crossings, why a ragged results file makes the field's comparison figure undrawable after the compute is gone, and diffing the rendered image against the plan slot that named it.
+benchmarks: researchclawbench
 stages: 04_implementation, 05_experimentation, 07_writing
 ---
 

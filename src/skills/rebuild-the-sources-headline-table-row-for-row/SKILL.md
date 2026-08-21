@@ -1,6 +1,7 @@
 ---
 name: rebuild-the-sources-headline-table-row-for-row
 description: Use at literature survey when the source's central result is a table of many benchmarks crossed with many methods, at study design to fix the row and column set and budget any data the supplied archive does not ship, and at analysis to render it. Covers transcribing the published table as the target skeleton, where the missing rows come from, shipping a table-shaped exhibit rather than a chart over the subset you ran, and marking cells you could not fill.
+benchmarks: researchclawbench
 stages: 01_literature_survey, 03_study_design, 06_analysis
 ---
 

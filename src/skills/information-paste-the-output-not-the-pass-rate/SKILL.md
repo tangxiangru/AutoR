@@ -1,6 +1,7 @@
 ---
 name: information-paste-the-output-not-the-pass-rate
 description: Use at analysis and writing whenever a result takes the form "the system produced X" — a model transcript, a transcribed formula, a caption, an extracted field, a generated snippet. Covers pasting the literal output into the report body, which outputs and how many, why a string rendered into a figure is not in the report, and the grep that checks it.
+benchmarks: researchclawbench
 stages: 06_analysis, 07_writing
 applies_when: visual question answering
 ---

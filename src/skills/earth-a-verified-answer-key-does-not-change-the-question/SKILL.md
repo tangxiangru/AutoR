@@ -1,6 +1,7 @@
 ---
 name: earth-a-verified-answer-key-does-not-change-the-question
 description: Use at literature survey when you find that the supplied archive holds the source study's published output as well as its raw inputs, and again at hypothesis generation before anything is frozen. Covers what to do with the source's headline numbers in the hour you first recompute them, why a confirmed answer pulls a run into auditing the method that produced it, and the ordering rule that keeps the critique behind the delivered product.
+benchmarks: researchclawbench
 applies_when: glacial mass change
 stages: 01_literature_survey, 02_hypothesis_generation, 07_writing
 ---

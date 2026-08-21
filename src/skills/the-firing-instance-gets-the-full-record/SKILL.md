@@ -1,6 +1,7 @@
 ---
 name: the-firing-instance-gets-the-full-record
 description: Use at study design, and again at analysis and writing, when the supplied instance comes back at background — no match, near-zero score, one part matched out of many — and the run is turning into a careful demonstration that nothing happened. Covers the equal-depth artifact rule for the instance where the method does fire, the ordering against the graded item, the four-rung ladder in one paragraph, and measuring rather than inferring the mechanism behind the negative.
+benchmarks: researchclawbench
 stages: 03_study_design, 06_analysis, 07_writing
 ---
 

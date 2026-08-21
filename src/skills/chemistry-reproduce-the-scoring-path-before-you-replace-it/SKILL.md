@@ -1,6 +1,7 @@
 ---
 name: chemistry-reproduce-the-scoring-path-before-you-replace-it
 description: Use at implementation, experimentation and analysis when you are reproducing a published benchmark number and the source's scoring path is one you can read — which rows are scored, in what order, how many the loader drops, which epoch is reported, how tasks are pooled, over how many seeds. Covers implementing that path exactly before improving it, the one-row-per-step ladder from the published rule down to your own honest estimate, and why one un-replicated step makes the reproduction gap you report uninterpretable.
+benchmarks: researchclawbench
 applies_when: molecular property prediction
 stages: 04_implementation, 05_experimentation, 06_analysis
 ---

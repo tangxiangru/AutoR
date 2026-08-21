@@ -1,6 +1,7 @@
 ---
 name: neuroscience-embedding-carries-the-label-and-the-score
 description: Use when a low-dimensional embedding — UMAP, t-SNE, PHATE, diffusion map, PCA — is about to become a results figure, and you are choosing what colours it and what its caption says. Covers colouring by the discrete annotation the claim is about rather than by a continuous ramp, and the separation statistics the panel owes in its own caption.
+benchmarks: researchclawbench
 applies_when: continuous cellular trajector
 stages: 03_study_design, 06_analysis, 07_writing
 ---

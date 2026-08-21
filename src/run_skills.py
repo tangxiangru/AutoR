@@ -74,10 +74,38 @@ class SkillPackEntry:
     #: Stage slugs whose prompt should name this skill. Empty means the skill is
     #: pull-only and no prompt announces it.
     stages: frozenset[str] = field(default_factory=frozenset)
+    #: Benchmarks this skill may be offered to. Empty means any.
+    #:
+    #: The provenance label and the scope in one field, because they are the same fact.
+    #: A skill written from the per-criterion losses of one benchmark's scored run is not
+    #: general craft advice, and it should not present itself as such to a run of another
+    #: benchmark -- measured, a FIRE-Bench run was installing 117 skills, 116 of them
+    #: written from ResearchClawBench scores, against 42 with them removed, and the paired
+    #: difference over 33 tasks was -2.6 F1 (t = -0.52): nothing, from a listing seven
+    #: times larger. The gain those skills carry on the benchmark they came from is +8.63.
+    #: Both facts are about the same skills, and a scope is how both can be true.
+    benchmarks: frozenset[str] = field(default_factory=frozenset)
 
     @property
     def task_scoped(self) -> bool:
         return bool(self.applies_when or self.applies_unless)
+
+    def offered_to(self, benchmark: str | None) -> bool:
+        """Whether a run of *benchmark* may be offered this skill.
+
+        An unscoped skill goes anywhere, which is the old behaviour and the default.
+        A scoped one goes only where it says.
+
+        ``None`` -- a caller that does not know which benchmark it is, or an ordinary
+        non-benchmark project run -- is refused a scoped skill. That is the same safe
+        direction ``select_run_skills`` takes on an empty brief: a skill that names its
+        benchmark is by construction wrong for most runs, so admitting one on missing
+        information adds a description that competes with the rest and describes a
+        situation this run is probably not in.
+        """
+        if not self.benchmarks:
+            return True
+        return benchmark is not None and benchmark.casefold() in self.benchmarks
 
     def applies_to(self, brief: str) -> bool:
         """Whether this skill is offered to a run with this research brief.
@@ -143,9 +171,22 @@ def read_skill_pack(source_dir: Path) -> list[SkillPackEntry]:
                 stages=frozenset(
                     slug.strip() for slug in fields.get("stages", "").split(",") if slug.strip()
                 ),
+                benchmarks=frozenset(
+                    b.strip().casefold()
+                    for b in fields.get("benchmarks", "").split(",")
+                    if b.strip()
+                ),
             )
         )
     return entries
+
+
+#: The benchmarks a skill may scope itself to, and the only values `skill_benchmark`
+#: takes. One entry per front end that sets it: `rcb_agent.py`, `fire_agent.py`,
+#: `airs_agent.py`. `main.py` is an ordinary project run and sets none, so a scoped
+#: skill is never offered there -- which is right, since every scoped skill so far was
+#: written from a benchmark's own scored losses.
+KNOWN_BENCHMARKS = frozenset({"researchclawbench", "firebench", "airsbench"})
 
 
 #: The part of the task statement that states the question. Matching a predicate
@@ -236,6 +277,19 @@ def validate_skill_pack(source_dir: Path) -> list[str]:
         if name in seen:
             problems.append(f"Duplicate skill name {name!r}.")
         seen.add(name)
+
+        # A benchmark nobody declares is a skill nobody is offered. `offered_to` refuses
+        # a scoped skill to every run that does not name its benchmark, so one typo here
+        # -- `researchclawbench` for `ResearchClawBench`, `fire-bench` for `firebench` --
+        # removes the skill from the whole pack and nothing anywhere says so. The set is
+        # closed for that reason: adding a benchmark means adding a front end that sets
+        # `skill_benchmark`, and both halves land together or neither does.
+        for value in (b.strip() for b in fields.get("benchmarks", "").split(",")):
+            if value and value.casefold() not in KNOWN_BENCHMARKS:
+                problems.append(
+                    f"{child.name}/{SKILL_FILENAME} names benchmark {value!r}, which no front "
+                    f"end sets. Known: {', '.join(sorted(KNOWN_BENCHMARKS))}."
+                )
 
         # A predicate that does not compile silently removes the skill from every
         # run -- `applies_to` swallows `re.error` so a run does not die of one --
@@ -333,6 +387,7 @@ def pins_for(task_id: str | None, table: dict[str, list[str]]) -> frozenset[str]
 def select_run_skills(
     entries: list[SkillPackEntry],
     *,
+    benchmark: str | None = None,
     discipline: str | None = None,
     brief: str = "",
     pinned: frozenset[str] = frozenset(),
@@ -343,7 +398,12 @@ def select_run_skills(
     Two independent narrowings, and a skill has to survive both:
 
     * the field filter, on the name prefix;
-    * the shape filter, on ``applies_when`` / ``applies_unless`` against the brief.
+    * the shape filter, on ``applies_when`` / ``applies_unless`` against the brief;
+    * the benchmark scope, on ``benchmarks`` against *benchmark*.
+
+    The scope is the coarsest and the one a pin cannot override. A skill written from one
+    benchmark's scored losses is offered only to that benchmark; see
+    :meth:`SkillPackEntry.offered_to`.
 
     An empty ``brief`` refuses every task-scoped skill rather than admitting them
     all. That is the safe direction: a task-scoped skill is by construction wrong
@@ -376,6 +436,12 @@ def select_run_skills(
             or discipline_of(entry.name) == wanted
         ]
     entries = [entry for entry in entries if entry.name in pinned or entry.applies_to(brief)]
+    # Before the pin override, not after. A pin says "a scored run of *this task* lost the
+    # thing this skill describes", and a task id belongs to one benchmark -- so a pin can
+    # never be a reason to carry a skill into a different one. Putting the scope after the
+    # pin check would let a table keyed on ResearchClawBench ids reach a FIRE-Bench run the
+    # moment two benchmarks happened to name a task the same way.
+    entries = [entry for entry in entries if entry.offered_to(benchmark)]
     return [entry for entry in entries if entry.name not in withheld]
 
 
@@ -383,6 +449,7 @@ def install_run_skills(
     paths: RunPaths,
     source_dir: Path,
     *,
+    benchmark: str | None = None,
     discipline: str | None = None,
     brief: str | None = None,
     pinned: frozenset[str] = frozenset(),
@@ -415,6 +482,7 @@ def install_run_skills(
     all_names = {entry.name for entry in entries}
     entries = select_run_skills(
         entries,
+        benchmark=benchmark,
         discipline=discipline,
         brief=task_brief(paths) if brief is None else brief,
         pinned=pinned,

@@ -1,6 +1,7 @@
 ---
 name: the-supplied-arm-owns-figure-one
 description: Use at study design when the figure slots are allocated, and again at analysis and writing, when the study has two arms — the files the task supplied and a better external version of the same quantities — and you are deciding what goes on which axes. Covers which population owns the opening figure, copying the source panel's rendering and not only its data, and keeping the two arms out of each other's sentences.
+benchmarks: researchclawbench
 stages: 03_study_design, 06_analysis, 07_writing
 ---
 

@@ -1,6 +1,7 @@
 ---
 name: every-supplied-array-is-a-series-in-a-results-panel
 description: Use at study design when the figure plan is written, and again before the report is finalised, whenever the task ships a data file holding several named arrays, columns or blocks. Covers building the deliverable inventory from inside the file rather than from the directory listing, grouping the supplied series by shared abscissa into panels, and the grep sweep that finds the arrays you measured and never drew.
+benchmarks: researchclawbench
 stages: 03_study_design, 06_analysis, 07_writing
 ---
 

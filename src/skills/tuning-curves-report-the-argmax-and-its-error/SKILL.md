@@ -1,6 +1,7 @@
 ---
 name: tuning-curves-report-the-argmax-and-its-error
 description: Use at experimentation, analysis and writing whenever you sweep a stimulus, dose or environment parameter across a population of units and reduce each unit's responses to a selectivity, modulation or preference index. Covers extracting the preferred level alongside the index, its per-unit error against an expected value with a chance line drawn, naming groups and clusters by what they prefer, and the artifact-key audit that catches a result computed into a sibling key no panel draws.
+benchmarks: researchclawbench
 stages: 05_experimentation, 06_analysis, 07_writing
 ---
 

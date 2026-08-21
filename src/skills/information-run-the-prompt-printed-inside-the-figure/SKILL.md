@@ -1,6 +1,7 @@
 ---
 name: information-run-the-prompt-printed-inside-the-figure
 description: Use at literature survey, study design and experimentation when reproducing a generative model whose paper demonstrates its capability with a figure of samples — text-to-image panels, dialogue transcripts, rendered outputs. Covers why the copy you fetched does not carry the showcase inputs, running them before any benchmark grid is costed, which one to run first, and where the artifact has to land to count as delivered.
+benchmarks: researchclawbench
 stages: 01_literature_survey, 03_study_design, 05_experimentation
 applies_when: text-to-image
 ---

@@ -1,6 +1,7 @@
 ---
 name: energy-publish-the-ordering-when-the-level-fails
 description: Use at analysis and again at writing when your absolute values miss their validation target, when a competitiveness or threshold count comes out zero everywhere, or when you are about to answer a 'where / which / identify' deliverable with a variance decomposition or a share. Subordinate to `close-the-gap-to-the-published-number`: publish the ordering in addition to closing the level, never instead of it.
+benchmarks: researchclawbench
 stages: 06_analysis, 07_writing
 ---
 

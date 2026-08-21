@@ -1,6 +1,7 @@
 ---
 name: price-the-missing-object-before-you-deepen-an-arm
 description: Use at experimentation, analysis and writing, when a run that has a deliverable plan and an automatic coverage or completeness check. Covers auditing coverage against the object a reader opens rather than the path a checker sees, pricing every missing exhibit in wall-clock against the arm you are still deepening, and re-owning the obligations of a stage that was skipped or amended mid-run.
+benchmarks: researchclawbench
 stages: 05_experimentation, 06_analysis, 07_writing
 ---
 

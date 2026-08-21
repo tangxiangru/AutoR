@@ -1,6 +1,7 @@
 ---
 name: publish-the-input-summary-in-its-measured-unit
 description: Use at implementation when the loader summarises the supplied data, at analysis when a summary statistic of the input becomes an argument to your estimator, and at writing while drafting the data section. Covers publishing dispersions in the unit the measurement was made in rather than the coordinate the estimator consumes, the scalar that reaches the page under its downstream name only, and the self-checks that catch both. Extends astronomy-error-budget-is-the-audit-trail.
+benchmarks: researchclawbench
 stages: 04_implementation, 06_analysis, 07_writing
 ---
 

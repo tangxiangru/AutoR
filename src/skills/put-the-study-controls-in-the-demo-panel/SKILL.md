@@ -1,6 +1,7 @@
 ---
 name: put-the-study-controls-in-the-demo-panel
 description: Use when the source ships showcase examples — a demo notebook, a teaser figure, images supplied with the task — at experimentation, to run every arm of the study on those inputs, and at analysis when the panel is drawn. Covers putting the study's control arms inside the demo panel, title discipline, and keeping overlays registered to the image they explain.
+benchmarks: researchclawbench
 stages: 05_experimentation, 06_analysis
 ---
 

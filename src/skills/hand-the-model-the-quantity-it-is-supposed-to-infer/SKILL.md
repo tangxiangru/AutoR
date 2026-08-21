@@ -1,6 +1,7 @@
 ---
 name: hand-the-model-the-quantity-it-is-supposed-to-infer
 description: Use at study design and again the first time a trained arm lands short of a published number, when the pipeline infers an intermediate quantity - a per-atom charge, a latent field, an assignment, an alignment - and then feeds it to whatever gets scored. Covers the arm that supplies that quantity's true value instead of estimating it, the scale sweep through it that turns the arm into a panel, and why this is the one diagnostic that still works on hardware that cannot converge the real arm.
+benchmarks: researchclawbench
 applies_when: latent charges?|latent Ewald
 stages: 03_study_design, 04_implementation, 05_experimentation, 06_analysis
 ---

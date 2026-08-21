@@ -1,6 +1,7 @@
 ---
 name: energy-dispatch-quantities-on-the-native-time-index
 description: Use at study design when allocating figure slots, and again at analysis and writing, on any run that produces one value per quantity per step over a horizon. Covers the (quantity x axis) coverage matrix a one-axis deliverables ledger cannot see, the empty-cell test that has to pass before a figure is drawn, and how a per-step panel is built and ordered against method panels.
+benchmarks: researchclawbench
 stages: 03_study_design, 06_analysis, 07_writing
 ---
 

@@ -1,6 +1,7 @@
 ---
 name: measure-every-clause-of-the-data-description
 description: Use at study design when the task ships datasets with prose descriptions, and at analysis and writing before the data section is fixed. Covers turning every asserted clause into a measurement — including the qualitative ones about variety, structure and how the data was generated — and why a verdict on the data's fitness is weak until the characterisation under it exists.
+benchmarks: researchclawbench
 stages: 03_study_design, 06_analysis, 07_writing
 ---
 

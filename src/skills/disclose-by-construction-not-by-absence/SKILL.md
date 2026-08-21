@@ -1,6 +1,7 @@
 ---
 name: disclose-by-construction-not-by-absence
 description: Use at analysis when figures are rendered and at writing when they are captioned, and whenever an internal review asks you to disclose something you could not do. Covers why a disclaimer drawn inside a figure's axes destroys the result it annotates, the single location a caveat is stated in and what counts as a second copy, and how to describe the substitute you built instead of the gap you had.
+benchmarks: researchclawbench
 stages: 06_analysis, 07_writing
 ---
 

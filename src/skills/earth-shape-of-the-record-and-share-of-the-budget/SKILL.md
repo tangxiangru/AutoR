@@ -1,6 +1,7 @@
 ---
 name: earth-shape-of-the-record-and-share-of-the-budget
 description: Use at analysis and again at writing when the deliverable is a multi-year record - an annual time series, a reconstruction, a trajectory - and you are about to report it as a period mean, a cumulative total and a validation residual against a reference version of itself. Covers the change over the record's own length, the extremes, the per-unit split, and the record's share of the budget it is one term of.
+benchmarks: researchclawbench
 stages: 03_study_design, 06_analysis, 07_writing
 ---
 

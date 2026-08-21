@@ -1,6 +1,7 @@
 ---
 name: energy-cost-surface-before-the-verdict-map
 description: Use at figure planning and analysis whenever the deliverable is a spatially resolved cost, yield or performance model. Extends `the-canonical-figure` and the two energy skills on panels and per-layer effects with four things they do not cover: draw the modelled quantity before any pass/fail overlay, put the driver fields at the same extent beside it, count result panels against validity panels, and re-price a null you created by your own configuration choice.
+benchmarks: researchclawbench
 stages: 03_study_design, 06_analysis, 07_writing
 ---
 

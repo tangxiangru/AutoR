@@ -1,6 +1,7 @@
 ---
 name: price-the-queue-and-preempt-your-own-arms
 description: Use at study design when the run queue is priced and ordered, at implementation when the runner is launched, and again at every stage boundary while any condition the source names is still at N=0. Covers pricing per (condition x dataset slice) from measured seconds, a floor N per row, committed-hours arithmetic against the clock, and preempting your own invented arms when the queue is over-subscribed.
+benchmarks: researchclawbench
 stages: 03_study_design, 04_implementation, 05_experimentation
 ---
 

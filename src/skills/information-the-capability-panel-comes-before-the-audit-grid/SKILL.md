@@ -1,6 +1,7 @@
 ---
 name: information-the-capability-panel-comes-before-the-audit-grid
 description: Use at analysis and writing when a figure has to show a generative system's own output — images it drew, structures it produced, artifacts it rendered. Covers why a scored contact sheet is not evidence that the system works, what the capability panel contains instead, how its members are chosen without cherry-picking, and the order the two figures go in.
+benchmarks: researchclawbench
 stages: 06_analysis, 07_writing
 applies_when: visual generation
 ---

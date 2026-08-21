@@ -1,6 +1,7 @@
 ---
 name: math-register-every-metric-a-run-emits
 description: Use at study design when cells are about to be chosen on a binary per-run outcome - solved / converged / correct / within tolerance - and the same runs also emit continuous quantities. Covers the metric register, recording every row on failed and timed-out runs, sizing n from a two-instance paired pilot instead of from the rate, and per-cell paired reporting with both averaging conventions.
+benchmarks: researchclawbench
 stages: 03_study_design, 05_experimentation, 06_analysis
 ---
 

@@ -1,6 +1,7 @@
 ---
 name: energy-the-terms-behind-the-rate
 description: Use at analysis and writing whenever a headline number is a share, rate or fraction, and especially when your share lands close to a published one. Covers choosing the denominator's population by where the mechanism acts rather than by the model's outer edge, publishing the absolute terms of the balance beside every share, and reconciling with a published study term by term instead of on the ratio.
+benchmarks: researchclawbench
 stages: 06_analysis, 07_writing
 ---
 

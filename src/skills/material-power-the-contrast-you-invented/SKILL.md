@@ -1,6 +1,7 @@
 ---
 name: material-power-the-contrast-you-invented
 description: Use at hypothesis generation and study design when a contrast of your own design is about to define the observable, the plotted series or the framing of an experiment the task named, and again at writing when figures, sections and captions are being titled. Covers the pre-funding power check against the within-condition spread, and the slots a self-generated hypothesis may not occupy.
+benchmarks: researchclawbench
 stages: 02_hypothesis_generation, 03_study_design, 07_writing
 ---
 

@@ -1,6 +1,7 @@
 ---
 name: chemistry-accuracy-and-cost-for-every-module-you-swap-in
 description: Use at study design, through experimentation and again at analysis when the method under test is a drop-in replacement for a standard layer — a different basis, kernel, activation family or transform — and the source claims the replacement is both more accurate and cheaper. Covers giving every alternative module a cell in the accuracy column and in the cost column, fixing one matching convention across both, and dividing the runtime by the invariant already sitting in your own results file before you publish a contradiction of the source's ratio.
+benchmarks: researchclawbench
 applies_when: Fourier-based Kolmogorov|replacing conventional MLP-based transformations
 stages: 03_study_design, 05_experimentation, 06_analysis
 ---

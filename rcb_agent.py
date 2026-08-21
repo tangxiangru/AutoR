@@ -719,6 +719,7 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
     # derived from the task statement; a pin is derived from a previous run's score, so
     # it needs the name of the task that produced it. `configs/task_skill_pins.json`.
     manager.skill_task_id = _task_id or None
+    manager.skill_benchmark = "researchclawbench"
 
     pipeline_completed = False
     aborted_with = ""

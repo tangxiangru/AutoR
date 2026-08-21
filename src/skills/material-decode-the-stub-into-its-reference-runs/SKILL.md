@@ -1,6 +1,7 @@
 ---
 name: material-decode-the-stub-into-its-reference-runs
 description: Use at literature survey, study design and implementation when the supplied data is a short file of bare numeric literals under headers naming scripts or workflows - no column names, no units, no provenance - and the plan is forming around what the numbers are rather than which reference run they were the input to. Covers the decode table (array -> call signature -> role -> unit -> source of unit), choosing estimators whose conventional diagnostic is producible, and composing the blocks into each other for held-out evidence.
+benchmarks: researchclawbench
 stages: 01_literature_survey, 03_study_design, 04_implementation
 ---
 

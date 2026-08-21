@@ -1,6 +1,7 @@
 ---
 name: material-deliver-a-candidate-a-chemist-could-make
 description: Use when a design, screening or generation task ends in candidates a human would have to synthesise or fabricate, and the brief asks for an experimental validation you cannot run. Covers the component-pinned search that makes a candidate orderable, drawing the delivered candidate as chemistry, and putting every existing measurement on the same property axis as your prediction.
+benchmarks: researchclawbench
 stages: 05_experimentation, 06_analysis, 07_writing
 ---
 

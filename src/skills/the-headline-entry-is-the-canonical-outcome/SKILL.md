@@ -1,6 +1,7 @@
 ---
 name: the-headline-entry-is-the-canonical-outcome
 description: Use at study design when a decision rule is being frozen, and at analysis and writing when a capability the source demonstrated by example is about to be summarised by a rate you introduced. Covers what the summary row, the abstract, the section heading and the figure title are allowed to say, and calibrating a scoring predicate against the reference answer before it decides anything. Extends information-exhibit-the-intermediate-objects.
+benchmarks: researchclawbench
 stages: 03_study_design, 06_analysis, 07_writing
 ---
 

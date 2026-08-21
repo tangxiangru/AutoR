@@ -1,6 +1,7 @@
 ---
 name: neuroscience-simulate-the-topologies-you-were-not-given
 description: Use at study design when the claim is about recovering or preserving a continuous progression and you have been handed exactly one dataset. Covers why one file is one trajectory shape, how to generate the linear, bifurcating and tree cases you were not given, and what a synthetic ground truth buys that no real dataset can.
+benchmarks: researchclawbench
 applies_when: neurodegeneration-related state transitions
 stages: 03_study_design, 05_experimentation
 ---

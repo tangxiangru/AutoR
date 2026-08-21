@@ -1,6 +1,7 @@
 ---
 name: material-front-load-one-result-block-per-deliverable
 description: Use at study design when the results outline is locked, and again at writing, when the report opens with an abstract, a data audit or a mechanism section and a figure-bearing deliverable is first referenced behind them. Covers the block-per-deliverable layout, the character-offset audit of report.md that proves it held, and the repair order when the audit fails.
+benchmarks: researchclawbench
 stages: 03_study_design, 07_writing
 ---
 

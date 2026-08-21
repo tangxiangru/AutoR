@@ -1,6 +1,7 @@
 ---
 name: energy-dependence-statistics-move-with-the-averaging-window
 description: Use at analysis and writing when a coupling between two supplied series - load against weather, generation against irradiance, emissions against activity - is about to be reported as a single correlation, sensitivity or R-squared value. Covers the resolution ladder the statistic has to be reported as, how to compare it against a reference value whose window is unstated, and getting the ladder into the graded figure.
+benchmarks: researchclawbench
 stages: 06_analysis, 07_writing
 ---
 

@@ -1,6 +1,7 @@
 ---
 name: extract-the-pdf-text-layer-then-read-every-figure
 description: Use at literature survey, and again as a study-design gate, when the source demonstrates a capability by example - generated samples, transcripts, worked cases, before/after pairs - and those inputs are printed inside the figure graphics. Covers extracting every obtainable PDF's text layer before calling an input unrecoverable, building the figure inventory as the coverage denominator, opening as images only what the text layer misses, and the demonstration ledger study design has to spend.
+benchmarks: researchclawbench
 stages: 01_literature_survey, 03_study_design
 ---
 

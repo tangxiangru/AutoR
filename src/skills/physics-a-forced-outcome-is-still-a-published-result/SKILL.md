@@ -1,6 +1,7 @@
 ---
 name: physics-a-forced-outcome-is-still-a-published-result
 description: Use at study design when you are deciding which of the source's documented cases a rule of yours will be scored on, again at analysis before any hit-count, rate or census is published, and again at writing when the case is being named. Covers the case whose outcome your own theory proves must happen, why dropping it inverts the rate you then publish, and why the run you already did for it can still fail to arrive.
+benchmarks: researchclawbench
 applies_when: self-assembly in growth simulations
 stages: 03_study_design, 05_experimentation, 06_analysis, 07_writing
 ---

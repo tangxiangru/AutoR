@@ -1,6 +1,7 @@
 ---
 name: life-the-correspondence-is-a-table-not-a-score
 description: Use at implementation, analysis and writing when the task's named output is a correspondence between the parts of two objects — chain-to-chain pairings, matched cells, mapped reads, docked poses, aligned residues — and it is about to be reported as one best-match score. Covers the per-row record schema including unmatched parts and every column the tool emits, and the numbers computed across rows: coverage, spread of the auxiliary fields, and whether the per-part transforms agree.
+benchmarks: researchclawbench
 stages: 04_implementation, 06_analysis, 07_writing
 ---
 

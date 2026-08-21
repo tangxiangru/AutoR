@@ -1,6 +1,7 @@
 ---
 name: math-train-distribution-is-a-reporting-axis
 description: Use at study design before anything is trained or loaded, and again at analysis and writing, when the method contains a learned component - a released checkpoint you load or a model you train - and the supplied data splits into structurally distinct subsets. Covers the provenance record, labelling every evaluation cell IN/OUT/unknown with a count of distinct structures behind the label, splitting every results object by that label, and the Results paragraph that states the margin on each half.
+benchmarks: researchclawbench
 stages: 03_study_design, 06_analysis, 07_writing
 ---
 

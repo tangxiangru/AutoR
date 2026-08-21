@@ -1,6 +1,7 @@
 ---
 name: time-the-operation-not-the-invocation
 description: Use at implementation and experimentation whenever a runtime, throughput or speed-up ratio between two programs is being measured, and again at analysis before any ratio is quoted — especially one that lands below a published figure. Covers the fixed-cost decomposition, the flat-cost-versus-size signature of a mis-timed harness, the conditions table both arms must match, and the per-instance head-to-head.
+benchmarks: researchclawbench
 stages: 04_implementation, 05_experimentation, 06_analysis
 ---
 

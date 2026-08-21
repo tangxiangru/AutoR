@@ -1,6 +1,7 @@
 ---
 name: information-check-the-steps-yourself-not-only-their-scores
 description: Use at implementation and experimentation when the deliverable is a multi-step symbolic or analytic calculation whose correctness would otherwise rest on a grader, a rubric or a similarity score. Covers the cheapest mechanical check that applies to each class of step, the time cap that stops checking from displacing the write-up, and reporting the table with one worked failure beside the grader's verdict.
+benchmarks: researchclawbench
 stages: 04_implementation, 05_experimentation
 ---
 

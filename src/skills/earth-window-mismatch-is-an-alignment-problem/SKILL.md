@@ -1,6 +1,7 @@
 ---
 name: earth-window-mismatch-is-an-alignment-problem
 description: Use at study design, and again when planning figures, whenever a comparator you hold - a model projection ensemble, a scenario run, a prior published assessment, a sibling record - is reported over a different period, baseline epoch, initial state or unit than your result, and you are deciding whether the comparison can be made at all. Covers re-baselining onto a common start date, plotting an ensemble that publishes only horizon endpoints, reading the crossing date, expressing prior assessments as revisions, and where a genuine refusal belongs.
+benchmarks: researchclawbench
 stages: 03_study_design, 06_analysis, 07_writing
 ---
 

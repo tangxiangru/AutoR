@@ -1,6 +1,7 @@
 ---
 name: energy-sweep-the-legs-only-one-side-pays
 description: Use at study design when the perturbation list is drafted, and at analysis, whenever the deliverable compares a cost assembled from a chain — production plus transport plus conversion — against a cost assembled somewhere else. Covers which legs decide a margin, routing the chain per origin instead of scaling a straight line, and sweeping the far side's assumptions rather than only your own plant's.
+benchmarks: researchclawbench
 applies_when: ammonia shipping and reconversion
 stages: 03_study_design, 05_experimentation, 06_analysis
 ---

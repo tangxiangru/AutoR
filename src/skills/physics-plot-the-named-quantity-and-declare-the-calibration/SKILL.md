@@ -1,6 +1,7 @@
 ---
 name: physics-plot-the-named-quantity-and-declare-the-calibration
 description: Use at study design when each figure's dependent variable is chosen, at analysis when an unknown calibration, an arbitrary unit or an invariance argument is about to change what goes on the y-axis, and before the report is finalised. Covers keeping the task's named quantity on the primary panel, resolving an unknown absolute scale with one declared constant instead of a veto, and where bounds, ratios and normalised deficits belong.
+benchmarks: researchclawbench
 stages: 03_study_design, 06_analysis, 07_writing
 ---
 

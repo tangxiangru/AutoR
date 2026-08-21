@@ -1,6 +1,7 @@
 ---
 name: physics-a-known-answer-is-a-prior-not-a-contaminant
 description: Use at literature survey and hypothesis freeze when you already know some of the answers - from a note left by a previous run, a review that quotes the number, a related paper, or your own reading - and you are recording that exposure so your predictions stay honest. Covers the three ways a contamination record silently deletes the results it was meant to flag, and what to produce for each pre-known quantity instead.
+benchmarks: researchclawbench
 applies_when: multi-shell icosahedral
 stages: 01_literature_survey, 02_hypothesis_generation, 03_study_design
 ---
