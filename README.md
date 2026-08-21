@@ -1041,6 +1041,7 @@ comparable to these** and the reason is
 | arm | n | mean | paired vs bare Claude Code | 95% CI | won |
 |:---|---:|---:|---:|:---|---:|
 | `full40_abl40` — pins struck | 35 | **40.17** | **+9.23 ± 1.59** | +6.13 … +12.34 | 27 of 35 |
+| `full40_a9c2b48` — **all forty** | **40** | 38.80 | **+7.33 ± 1.53** | +4.33 … +10.33 | 30 of 40 |
 | `full40_skills161` | 35 | 38.71 | **+7.82 ± 1.43** | +5.02 … +10.63 | 29 of 35 |
 | `full40_main40` — full pin set | 35 | 37.23 | **+6.00 ± 2.22** | +1.65 … +10.35 | 27 of 35 |
 | `full40_skills` | 39 | 36.89 | **+5.29 ± 1.62** | +2.12 … +8.46 | 30 of 39 |
@@ -1066,9 +1067,18 @@ so the per-affected-task effect is larger than −3.16, not smaller. Both arms a
 control; what the ablation says is that they are ahead *despite* the pinned skills rather than
 because of them.
 
-Two caveats that travel with the four rows. Each arm is 35–39 of 40, so each is still a subset
-selected on its own completions; and `abl40`'s lead over `main40` rests on 33 pairs, which resolves
-about 3 points and is measuring an effect of about that size.
+**`a9c2b48` is the row that answers the caveat the other three carry.** Every other arm above is
+35–39 of 40, so each is a subset selected on its own completions — and that selection is not
+neutral: when this arm stood at 33 of 40 the seven it had not finished were ones the control scored
+*well* on, 33.90 against 27.11 on the tasks that had paired, which is the flattering direction.
+Assuming the worst for those seven would have collapsed it from +8.29 to +0.72. It was held back
+from this table for that reason. All forty have now landed and the estimate moved the other way,
+to **+7.33 over 40 pairs with nothing dropped**. That is the first complete AutoR arm to separate
+from the control, and it is what makes the four incomplete rows readable as low rather than
+inflated.
+
+One caveat still travels with the rest: `abl40`'s lead over `main40` rests on 33 pairs, which
+resolves about 3 points and is measuring an effect of about that size.
 
 [The framework document's §6](docs/framework.md#6-the-system-measured-against-itself) is the full
 account, including the part that is worse than the mean: the two highest scores came from runs that
