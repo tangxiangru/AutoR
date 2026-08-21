@@ -119,20 +119,20 @@ then failed a schema check four times at Stage 07 and was killed at its wall, an
 killed run never writes a terminal status the scoring driver skipped it while logging only a
 count. See §7.8 of [the routing arm write-up](rcb-skill-routing-arm.md).
 
-`full40_skills` (32 of 40) was **still running** when this was written and its row remains a
-snapshot. That arm holds 45 workspace *directories*, which is what the denominator said here
-before — relaunch copies, plus five `*_DEAD_launcher_gone` stubs. Counting directories
-understates completion and hides that the arm is pairing against a smaller scoreable set.
+`full40_skills` reached **39 of 40** on 2026-08-20 and its row is a result rather than a
+snapshot. Two sentences here said otherwise for three days — "32 of 40, still running", and
+a separate note that `full40_pins` was at 39 of 40 — and both were left behind by the arms
+they described while the paragraph above them had already been corrected. That arm holds 45
+workspace *directories*, which is what the denominator said here before: relaunch copies,
+plus five `*_DEAD_launcher_gone` stubs. Counting directories overstates the population and
+hides that the arm pairs against a smaller scoreable set.
 
-As of 2026-08-19 `full40_pins` is at **39 of 40**; only `Earth_003` is still running, on its
-third launch, and the row above has not been re-scored to include the three tasks that
-landed since. It is still a snapshot. What the finished 39 look like under a *second,
-independent* instrument is [its own section below](#three-instruments-over-the-same-39-workspaces),
-and the answer is that the instrument is worth more points than the arm is: on the pass the
-baselines were built with, the arm separates from `arm_2ffaeb4` and still does not separate
-from the control.
+What the finished arms look like under a *second, independent* instrument is
+[its own section below](#three-instruments-over-the-same-39-workspaces), and the answer is
+that the instrument is worth more points than the arm is.
 
-**`full40_skills` is the first arm whose interval excludes zero.** Before reading it as a
+**`full40_skills` was the first arm whose interval excluded zero**, and four arms have since
+joined it — see [Four arms nobody was scoring](#four-arms-nobody-was-scoring). Before reading it as a
 result, two checks that were run:
 
 - *Selection.* The 8 unscored tasks score 28.39 on the control against 28.31 for the 31
@@ -154,9 +154,76 @@ result, two checks that were run:
 
 ---
 
+## Before the control existed
+
+Moved here from `README.md` on 2026-08-21, because the README had grown three layers of
+superseded arm history and the current result was underneath all of it. These are the two
+measurements that came before the control arm existed. They are not comparable to anything
+in the table above — different judge window, different instrument — and they are kept
+because the corrections above are corrections *of them*.
+
+**The first measurement, 2026-08-06, scored 2026-08-11.** One attempt per task, Opus
+executing and reviewing, `gpt-5.1`. The three comparison agents were re-scored from their
+public runs under that same judge:
+
+| agent | mean | median | max | tasks scoring 0 |
+|:---|---:|---:|---:|---:|
+| Codex CLI | 19.53 | 17.73 | 48.40 | 2 |
+| ResearchHarness (GPT-5.4) | 15.40 | 10.85 | 45.10 | 1 |
+| ARIS Codex | 15.02 | 12.65 | 46.90 | 2 |
+| **AutoR** | **14.16** | 11.50 | 47.70 | **7** |
+
+AutoR was last, below the bare Codex CLI it can be configured to run on top of. Eight of
+the forty runs shipped a 197-byte "incomplete run" stub and the deficit was almost entirely
+those. Three caveats travelled with it and still do: **single-attempt**, where the public
+leaderboard aggregates the best score per (task, agent) pair; **cross-model**, since all
+three comparators run GPT-5.4; and a `gpt-5.1` number. It is also a cap-5 number, so it is
+void for the reason [the measurement fault](#the-measurement-fault-and-why-it-is-first)
+gives — which is why no row above quotes it.
+
+**The re-run, 23.57.** #180 and #181 closed the routes that produced the stubs; re-running
+all forty took the mean to 23.57 and removed six of the seven zeros. The survivor,
+`Information_002`, scored 0.0 on all three criteria with no judge failure — the defect the
+repair did not touch, not an artefact of it. That batch also made the obvious control cheap
+and it had never been run: the same model, same machine, same forty task statements, no
+AutoR. It scored 29.24 against AutoR's 23.57, a paired −5.67 ± 1.84.
+
+Both of those numbers are cap-5 and both are superseded. At three draws and the corrected
+window the same arm is `full40` at **23.07**, −8.40 against the control — the row in the
+table above.
+
+### One task, before and after a targeted fix
+
+Also moved out of `README.md`. Kept because it is the only per-criterion before/after in the
+record, and lost nothing by leaving the front page: forty-task arms with intervals now exist,
+and a single-task delta cannot be read against them. `Astronomy_000`, reference judge
+`gpt-5.1`, before and after the export and figure-budget fixes in #147 / #149 / #153:
+
+| Checklist item | Weight | Before | After |
+| --- | ---: | ---: | ---: |
+| Text: data characterisation | 0.2 | 48 | 38 |
+| Image: exclusion curve | 0.3 | 0 | 48 |
+| Text: coupling limits | 0.5 | 0 | 48 |
+| **Weighted total** | | **9.6** | **46.0** |
+
+**One task out of forty, and not to be extrapolated** — single-draw noise on one task of this
+benchmark is about 8.5 points, so even the 36.4-point move is only about four times the noise
+floor and the two text items move in opposite directions.
+
 ## What was chased and refuted
 
 Kept because a refuted hypothesis is cheaper to read than to re-run.
+
+- **"The bare control had no web search."** Recorded on the evidence of its `WebSearch`
+  calls returning an org-policy 400. Sixteen calls did fail that way — but all 44 of its
+  runs also list `ai4ai-web-search` as a **connected** MCP server, inherited from the
+  user-level config because no arm passes `--strict-mcp-config`, and
+  `mcp__ai4ai-web-search__web_search` was called 12 times and succeeded 12 times across 8
+  tasks. AutoR's 182 successful searches over 32 tasks are a **15× usage gap, not a
+  capability gap**. Handing the bare agent a second search server changes nothing
+  measurable: 17 wins, 17 losses, median Δ 0.00, p = 0.452.
+  *Both* readings — "no search", and the "search parity" that replaced it — came from
+  counting tool **names**. Pair `tool_use` ids to `tool_result` ids and read the body.
 
 - **"AutoR loses by 5 points."** From `full40` and then `full40_head`, both read in
   isolation. Three sister arms did not reproduce it. *A result one arm shows and its

@@ -956,80 +956,32 @@ one-task A/B comparison below about eight points is uninterpretable** — includ
 before-and-after on the same task, which is the shape a harness change most tempts you into. Average
 draws, or compare across tasks, or say nothing.
 
-### Where AutoR lands, on all forty tasks
+### How the number got here
 
-One attempt per task, Claude Opus executing and reviewing, judged by `gpt-5.1`. The three
-comparison agents were re-scored from their public runs under that same judge:
+Three earlier measurements of this benchmark are **superseded and have been moved** to
+[the lab notebook](docs/researchclawbench-arms.md), which is where the arm-by-arm record
+belongs: the first run at **14.16** where AutoR placed last behind the bare Codex CLI, the
+post-repair re-run at **23.57** against a 29.24 control, and the re-score that corrected
+both. Each was wrong in a way worth knowing about rather than wrong by accident, and the
+notebook keeps each one next to the correction that retired it:
 
-| agent | mean | median | max | tasks scoring 0 |
-|:---|---:|---:|---:|---:|
-| Codex CLI | 19.53 | 17.73 | 48.40 | 2 |
-| ResearchHarness (GPT-5.4) | 15.40 | 10.85 | 45.10 | 1 |
-| ARIS Codex | 15.02 | 12.65 | 46.90 | 2 |
-| **AutoR** | **14.16** | 11.50 | 47.70 | **7** |
+- **The judge was shown a third of the figures it should have been.** Upstream sends the
+  grader `generated_images[:15]`; the local scorer was capped at 5, and arms differ in how
+  many figures they ship, so the cap was not a constant offset.
+- **The arms were not given the same budget.** The AutoR side ran `--stage-timeout 1800`
+  and 28 of its 40 runs logged `Stage timed out`; the bare arm had no per-stage cap.
+- **The draw count decides the verdict.** One judge draw against three moves an arm's
+  comparator by more than the effect being measured.
 
-**AutoR is last**, below the bare Codex CLI it can be configured to run on top of. Eight of the
-forty runs shipped a 197-byte "incomplete run" stub, and the deficit is almost entirely those. Three
-caveats travel with the number and none can be dropped: it is **single-attempt** where the
-leaderboard aggregates the best score per (task, agent) pair; it is **cross-model**, since all three
-comparators run GPT-5.4; and it is a `gpt-5.1` number.
+One correction from that era is a method, not an arm, so it stays here. *The control was
+never search-less*: it was recorded as having no working web search on the evidence of 16
+`WebSearch` calls returning an org-policy 400, when all 44 of its runs also had
+`ai4ai-web-search` connected and called it successfully 12 times. Both that reading and the
+"search parity" that replaced it came from counting tool **names**. Pair `tool_use` ids to
+`tool_result` ids and read the body.
 
-### The re-run, and the control that matters more
-
-#180 and #181 closed the routes that produced the stubs. Re-running all forty tasks on the repaired
-code took the mean to **23.57** and removed six of the seven zeros; the seventh, `Information_002`,
-still scores 0.0 and is the case §2.4.1 dissects. The same batch made the obvious control
-cheap, and it had never been run: the same model, on the same machine, handed the same forty task
-statements with no AutoR at all.
-
-| arm | mean | zero criteria, of 154 | tasks won, of 40 |
-|:---|---:|---:|---:|
-| bare Claude Code (Opus) | **29.24** | 25 (16%) | 25 |
-| AutoR (Opus), post-repair | 23.57 | 35 (23%) | 15 |
-
-Paired over the forty tasks that is **−5.67 ± 1.84** — but the two arms were not given the same
-budget, and the confound is about as large as the effect: the AutoR arm ran with
-`--stage-timeout 1800` and 28 of its 40 runs logged `Stage timed out`, while the bare arm had no
-per-stage cap. On the twelve AutoR runs that never hit the cap the paired deficit is **−3.93**
-rather than −6.42. That is a post-hoc subgroup and not a corrected value.
-
-**Two of the three numbers above are artifacts of how they were measured, and the table is kept
-only so this paragraph has something to correct.**
-
-*The judge was shown a third of the figures it should have been.* Upstream ResearchClawBench sends
-the grader `generated_images[:15]`; the local scorer was capped at 5, and the arms differ in how
-many figures they ship, so the cap was not a constant offset. Re-scored at 15 with everything else
-held fixed — same runs, same `gpt-5.1`, same 40 tasks:
-
-| arm | mean | paired vs bare Claude Code | median Δ | won | p |
-|:---|---:|---:|---:|---:|---:|
-| AutoR (Opus), `bb32a8c` + pins | **32.19** | **+3.47** | +4.20 | 24 of 38 | 0.085 |
-| bare Claude Code (Opus) | 28.33 | — | — | — | — |
-| AutoR (Opus), the arm above | 27.45 | −0.88 | +1.82 | 20 of 38 | 0.673 |
-
-So the −5.67 is not a real margin: the same two arms, re-judged correctly, are **−0.88 and not
-significant**. Every AutoR arm has a *positive* median delta and a mean that is worse — it wins the
-typical task and is dragged under by a handful of collapses, which is a different problem from
-"behind" and has a different fix. `p` is an exact paired sign-flip test over the per-task deltas.
-
-*And the control was never search-less.* It was recorded here that the bare arm had no working web
-search, on the evidence of its `WebSearch` calls returning an org-policy 400. Sixteen calls did fail
-that way — but all 44 of its runs also list `ai4ai-web-search` as a **connected** MCP server,
-inherited from the user-level config because no arm passes `--strict-mcp-config`, and
-`mcp__ai4ai-web-search__web_search` was called 12 times and succeeded 12 times across 8 tasks. AutoR's
-182 successful searches over 32 tasks are a **15× usage gap, not a capability gap**, and the server
-behind them was connected on both sides. Handing the bare agent a second search server changes
-nothing measurable: **17 wins, 17 losses, median Δ 0.00, p = 0.452**.
-
-Both readings — "no search" and the "search parity" that replaced it — came from counting tool
-*names*. Pair `tool_use` ids to `tool_result` ids and read the body.
-
-What has not changed: AutoR writes 36% more prose than the bare agent and covers **less** of what
-the task asked for. [§6.8](docs/framework.md#68-the-scaffold-is-currently-worth-less-than-no-scaffold)
-is the account of why, and `RUBRIC_VERSION` 7 is the first change aimed at it — but its headline,
-that the scaffold is worth less than no scaffold, is now unsupported at the corrected image cap
-rather than demonstrated.
-
+What has not changed: AutoR writes 36% more prose than the bare agent and covers **less**
+of what the task asked for.
 ### Four later arms have landed, and they are ahead
 
 The paragraph that stood here said a promising arm was being withheld until all forty of its tasks
@@ -1085,24 +1037,13 @@ resolves about 3 points and is measuring an effect of about that size.
 account, including the part that is worse than the mean: the two highest scores came from runs that
 halted at hypothesis generation, and across 133 stage visits the graph took **one** backward edge.
 
-### One task, before and after a targeted fix
-
-Measured on `Astronomy_000`, reference judge gpt-5.1, before and after the export and figure-budget
-fixes in #147 / #149 / #153:
-
-| Checklist item | Weight | Before | After |
-| --- | ---: | ---: | ---: |
-| Text: data characterisation | 0.2 | 48 | 38 |
-| Image: exclusion curve | 0.3 | 0 | 48 |
-| Text: coupling limits | 0.5 | 0 | 48 |
-| **Weighted total** | | **9.6** | **46.0** |
-
-**This is one task out of forty and must not be extrapolated.** ResearchClawBench's published
-leaderboard numbers are means over all 40 tasks; a single-task score is not comparable to one. For
-what the reported systems actually score and which of their numbers reproduce, see
-[docs/researchclawbench-landscape.md](docs/researchclawbench-landscape.md); for the adapter, its
-output contract and the export rules, see
-[docs/researchclawbench.md](docs/researchclawbench.md).
+Where to go next: for what the reported systems actually score and which of their numbers
+reproduce, see
+[docs/researchclawbench-landscape.md](docs/researchclawbench-landscape.md); for the adapter,
+its output contract and the export rules, see
+[docs/researchclawbench.md](docs/researchclawbench.md); for every arm, what changed between
+them and what the instrument was doing while we read them, see
+[docs/researchclawbench-arms.md](docs/researchclawbench-arms.md).
 
 ### FIRE-Bench
 
