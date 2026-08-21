@@ -382,6 +382,31 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Use the fake operator instead of a real backend. For smoke-testing the adapter.",
     )
     parser.add_argument(
+        "--min-report-figures",
+        type=int,
+        default=None,
+        help=f"Distinct figures report/images/ must hold before Stage 07 can be approved. "
+             f"Defaults to {BENCHMARK_MIN_REPORT_FIGURES}. Clamped to [1, MAX_REPORT_FIGURES]. "
+             "The judge is shown a fixed set of the first MAX_REPORT_FIGURES images, and most "
+             "runs stop well under it, so this is the knob for an arm that tests whether "
+             "filling the window is worth anything.",
+    )
+    parser.add_argument(
+        "--skills-dir",
+        default=None,
+        help="Directory to load the agent skill pack from, instead of <repo>/src/skills. "
+             "For arms that measure a different pack: the pack becomes an argument the "
+             "artifact records rather than an edit to a worktree nobody can pin.",
+    )
+    parser.add_argument(
+        "--withhold-skills",
+        default=None,
+        help="Skills this run is denied whatever the field filter, the predicates or the pin "
+             "table say. A comma-separated list of names, or @PATH to read one name per line "
+             "(blank lines and # comments ignored). This is the control arm of any experiment "
+             "about skills.",
+    )
+    parser.add_argument(
         "--export-only",
         action="store_true",
         help="Skip the pipeline and only re-export the most recent run in the workspace into "
@@ -638,7 +663,14 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
         # and validation/comparison plots" -- three distinct questions -- and 27 of its 40
         # tasks carry two or more image criteria. A one-figure report clears AutoR's ordinary
         # gate while forfeiting criteria it never addressed.
-        min_report_figures=BENCHMARK_MIN_REPORT_FIGURES,
+        # Measured over 541 scored runs, with task and arm fixed effects, a published figure
+        # is worth about +0.79 benchmark points -- and 423 of those runs published fewer than
+        # the MAX_REPORT_FIGURES the judge is handed, median twelve. The slope is partly a
+        # proxy for run quality (the image-criterion slope is +0.72 against +0.41 on text),
+        # so it is an upper bound and not a promise. It is still the largest effect anyone
+        # has measured here, which is why the floor is now an argument: an arm can raise it
+        # and find out, and `run_config.json` records which arm did.
+        min_report_figures=benchmark_figure_floor(args.min_report_figures),
         cross_reviewer=resolve_cross_reviewer(args.cross_review, args.cross_review_model),
         # `StageGraph.named` rather than `main.py`'s `resolve_graph`, which additionally
         # lets the cross-run archive pick a topology. A benchmark arm must be the
@@ -719,6 +751,15 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
     # derived from the task statement; a pin is derived from a previous run's score, so
     # it needs the name of the task that produced it. `configs/task_skill_pins.json`.
     manager.skill_task_id = _task_id or None
+    # The pack itself, as an argument. Until this existed the only way to measure a
+    # different pack was to delete files in a worktree, which is how the best-scoring arm
+    # on the board came to exist as a dirty checkout with no SHA that nobody can re-run.
+    if args.skills_dir:
+        skills_dir = Path(args.skills_dir).expanduser()
+        if not skills_dir.is_dir():
+            raise SystemExit(f"--skills-dir: not a directory: {skills_dir}")
+        manager.skills_dir = skills_dir
+    manager.skill_withhold = read_withheld_skills(args.withhold_skills)
 
     pipeline_completed = False
     aborted_with = ""
@@ -834,6 +875,50 @@ def _sigterm_as_exception() -> Iterator[None]:
         yield
     finally:
         signal.signal(signal.SIGTERM, previous)
+
+
+
+
+def benchmark_figure_floor(requested: int | None) -> int:
+    """The figure floor a benchmark run gets, given what the caller asked for.
+
+    Unasked, a benchmark run keeps :data:`BENCHMARK_MIN_REPORT_FIGURES` rather than AutoR's
+    ordinary floor of one: the benchmark's own instructions ask every agent for "data
+    overview, main results, and validation/comparison plots", and 27 of its 40 tasks carry
+    two or more image criteria, so a one-figure report clears the ordinary gate while
+    forfeiting criteria it never addressed.
+
+    A caller may raise it. `resolve_min_report_figures` clamps the result into
+    ``[1, MAX_REPORT_FIGURES]`` downstream, so a value past the window the judge sees cannot
+    turn the gate into busywork.
+    """
+    return BENCHMARK_MIN_REPORT_FIGURES if requested is None else requested
+
+
+def read_withheld_skills(spec: str | None) -> frozenset[str]:
+    """The skills this run is denied, from a comma list or ``@file``.
+
+    A file, because the useful ablation names forty-odd skills and a command line that long
+    stops being readable in `_meta.json` -- which is where anyone later reconstructs what an
+    arm actually ran. Blank lines and `#` comments are allowed so the file can say why.
+
+    Unknown names are not an error here. `install_run_skills` applies the set by exclusion,
+    so a name matching nothing withholds nothing, and the run config records the set that
+    was asked for beside the pack digest that resulted -- which is the pair a reader needs
+    to tell "withheld nothing" from "asked for nothing".
+    """
+    if not spec:
+        return frozenset()
+    text = spec.strip()
+    if text.startswith("@"):
+        try:
+            raw = Path(text[1:]).expanduser().read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            raise SystemExit(f"--withhold-skills: cannot read {text[1:]}: {exc}") from exc
+        names = [line.split("#", 1)[0].strip() for line in raw.splitlines()]
+    else:
+        names = [part.strip() for part in text.split(",")]
+    return frozenset(n for n in names if n)
 
 
 def main(argv: list[str] | None = None) -> int:
