@@ -1011,17 +1011,34 @@ comparable to these** and the reason is
 agent it wraps, by between 5 and 9 points depending on the arm, on the same judge and the same
 forty tasks. That claim is retired.
 
-**But the arm in front is the one with the skills deleted.** `abl40` is `main40` with 40
-task-scoped skill directories removed and their pins struck; it is otherwise the same commit and
-the same flags. Paired over the 33 tasks both finished:
+**But the arm in front is the one with a set of skills deleted.** `abl40` is `main40` with 41
+task-scoped `SKILL.md` files removed; it is otherwise the same commit and the same flags. Paired
+over the 35 tasks both finished:
 
-> `main40` − `abl40` = **−3.16 ± 1.48**, 95% CI −6.06 … −0.25, winning 10 and losing 23.
+> `main40` − `abl40` = **−2.75 ± 1.08**, 95% CI −4.88 … −0.63, winning 10 and losing 25.
 
-So the pins are worth **negative** three points, and the interval excludes zero. The manipulation
-is not uniform — the struck pins fall on a minority of the forty tasks and the rest lose nothing,
-so the per-affected-task effect is larger than −3.16, not smaller. Both arms are still ahead of the
-control; what the ablation says is that they are ahead *despite* the pinned skills rather than
-because of them.
+Those 41 skills are worth **negative** two-and-three-quarter points and the interval excludes
+zero. Both arms are still well ahead of the control (+7.01 and +8.81), so they are ahead *despite*
+that skill set rather than because of it. The manipulation is not uniform — the deletions bear on
+a minority of the forty tasks and the rest lose nothing — so the per-affected-task effect is
+larger than −2.75, not smaller.
+
+**This is not a verdict on pinning, and an earlier version of this paragraph said it was.** It
+read "the pins are worth negative three points", which conflated two different experiments.
+`abl40` deletes skill *files* and leaves 240 pins across 25 tasks in place: pinning is still on in
+both of its arms. The ablation that actually isolates pinning is a different pair, `pins_on`
+against `pins_off` — same commit, all 168 skill directories present on both sides, 420 pins
+against **zero** — and it points the other way:
+
+| ablation | what differs | n | difference | 95% CI |
+|:---|:---|---:|---:|:---|
+| `main40` − `abl40` | 41 skill files deleted; pinning on in both | 35 | **−2.75 ± 1.08** | −4.88 … −0.63 |
+| `pins_on` − `pins_off` | pinning on vs off; every skill present in both | 21 | **+1.82 ± 1.63** | −1.36 … +5.01 |
+
+Read together: **a particular set of skills hurts, and the mechanism that routes skills to tasks
+does not** — it is mildly positive and nowhere near significant at n=21. Those are complementary
+answers, not contradictory ones, and telling them apart required reading the two worktrees rather
+than the two names.
 
 **`a9c2b48` is the row that answers the caveat the other three carry.** Every other arm above is
 35–39 of 40, so each is a subset selected on its own completions — and that selection is not

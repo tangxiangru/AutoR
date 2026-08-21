@@ -462,39 +462,53 @@ scaffold — does not survive them and should be retired rather than hedged.
 
 ### The pin ablation, which is the one that stings
 
-`full40_abl40` is `full40_main40` with 40 task-scoped skill directories deleted and their
-pins struck. Same commit, same flags, same forty tasks; the skills are the only difference.
-Paired over the 33 tasks both arms finished:
+`full40_abl40` is `full40_main40` with 41 task-scoped `SKILL.md` files deleted. Same commit,
+same flags, same forty tasks. Paired over the 35 tasks both arms finished, beside the
+ablation that isolates pinning instead:
 
-| | mean on the 33 shared | paired difference | 95% CI | W–L |
+| ablation | mean on the shared set | paired difference | 95% CI | W–L |
 |:---|---:|---:|:---|---:|
-| `main40` − `abl40` | 37.38 vs 40.53 | **−3.16 ± 1.48** | **−6.06 … −0.25** | 10–23 |
+| `main40` − `abl40` (n=35) | 37.98 vs 40.73 | **−2.75 ± 1.08** | **−4.88 … −0.63** | 10–25 |
+| `pins_on` − `pins_off` (n=21) | 41.78 vs 39.95 | +1.82 ± 1.63 | −1.36 … +5.01 | 13–8 |
 
-**The pinned skills are worth negative three points, and the interval excludes zero.** The
-arm in front of every other arm in this file is the one with them removed.
+**That set of 41 skills is worth negative two-and-three-quarter points, and the interval
+excludes zero.** The arm in front of every other arm in this file is the one with them
+removed.
 
-Three things that make the effect *larger* than −3.16 rather than smaller, all of which
-argue against reading this as noise:
+**It is not a verdict on pinning, and this section said it was.** It read "the pinned
+skills are worth negative three points" over the first row alone, which is two experiments
+run together. Read the worktrees rather than the names:
 
-- **The manipulation is not uniform.** The struck pins fall on a minority of the forty
-  tasks and the rest lose nothing, so a 40-task mean dilutes whatever happened on the
-  tasks that actually changed. −3.16 is the diluted number.
-- **Both arms are ahead of the control.** +6.00 and +9.23. This is not a scaffold-versus-
-  nothing result, it is a within-scaffold result, and the two arms share every other
-  source of variance the pairing does not already cancel.
-- **The loss count carries it, not one collapse.** 23 of 33 tasks, not a handful of
-  outliers dragging a mean.
+| worktree | commit | `SKILL.md` files | pins | tasks pinned |
+|:---|:---|---:|---:|---:|
+| `autor-main40` | 48501e7 | 161 | 280 | 27 |
+| `autor-abl40` | 48501e7 | **120** | 240 | 25 |
+| `autor-pinson` | f0f469c | 168 | 420 | 47 |
+| `autor-pinsoff` | f0f469c | 168 | **0** | **0** |
 
-What it does not license:
+`abl40` deletes 41 skill files and leaves 240 pins in place — **pinning is on in both of
+its arms**, so it cannot say anything about pinning. `pins_off` deletes no skill at all and
+sets every pin to zero, so it is the one that can. They answer different questions and give
+different answers: a particular skill set hurts; the routing mechanism does not.
 
-- **It is 33 pairs.** That resolves about 3 points at 80% power and the effect is about
-  that size, so the sign is better supported than the magnitude.
-- **Each arm is 35 of 40**, so each is selected on its own completions, and the two arms
-  are missing *different* tasks — `main40` lacks `Information_003` and `Physics_000`,
-  `abl40` lacks `Astronomy_001` and `Energy_000`. The 33-task intersection is what the
-  pairing is over; neither arm's own 35-task mean is comparable to the other's.
-- **It does not say which skills.** Forty directories were struck together. Attributing
-  the −3.16 to any one of them needs an arm that strikes one of them.
+Three things that make the −2.75 *larger* rather than smaller:
+
+- **The manipulation is not uniform.** The deletions bear on a minority of the forty tasks
+  and the rest lose nothing, so a 40-task mean dilutes whatever happened on the tasks that
+  actually changed. −2.75 is the diluted number.
+- **Both arms are ahead of the control.** +7.01 and +8.81. This is a within-scaffold
+  result, and the pairing already cancels every source of variance the two arms share.
+- **The loss count carries it.** 25 of 35 tasks, not a handful of outliers dragging a mean.
+
+What neither row licenses:
+
+- **`pins_on` − `pins_off` is 21 pairs at t=1.12.** It is not evidence that pinning helps;
+  it is the absence of evidence that it hurts, and it will move.
+- **The arms are missing different tasks.** `main40` and `abl40` are 39 and 36 of 40, and
+  the 35-task intersection is what the pairing is over — neither arm's own mean is
+  comparable to the other's.
+- **Neither says which skill.** Forty-one files were struck together. Attributing the
+  −2.75 to any one of them needs an arm that strikes one of them.
 
 ## Reproducing the table
 
