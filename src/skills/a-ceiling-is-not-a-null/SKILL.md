@@ -18,24 +18,27 @@ tell it from one.
 
 ## The failure this prevents
 
-Measured on one task of a rediscovery benchmark, by a pipeline that did the
-methodology well:
+Measured on one task of a rediscovery benchmark, by a run that did the methodology well:
 
-> 112 generated problems × 9 orderings × 2 models, 694 billed calls per arm, a
-> corrupted-premise control at 0.15 accuracy confirming the items were real, CI95
-> on every cell, a pre-registration, and a `published` vs `ours` table whose own
-> rules forbade reporting the recalled column as measured.
+> generated items in the hundreds, crossed with nine conditions and two models, ~700
+> billed calls per arm, a deliberately corrupted control scoring 0.15 to confirm the items
+> were real, CI95 on every cell, and a pre-registration.
 
-Its strong model scored **1.000 in every one of the nine conditions**. The run
-noticed — it wrote "the stronger model is at ceiling rather than demonstrably
-invariant" — and then concluded that the manipulation did not move accuracy.
+Its strong model scored **1.000 in every one of the nine conditions**. The run noticed —
+it wrote "the stronger model is at ceiling rather than demonstrably invariant" — and then
+reported the manipulation as having no effect.
 
-A second run, on the same question with a fifth of the wall clock, ran a small
-pilot, saw the same ceiling, **generated a harder pool** (longer chains, more
-premises), and found the effect at sign-test p = 0.0001.
+Everything in that sentence except the last clause is good work. The last clause is a
+claim the design could not have supported in either direction: on items where the model is
+correct every time, no manipulation can lower accuracy, so "no effect" and "no headroom"
+produce identical numbers. The run had already identified the ceiling and reported past it
+anyway.
 
-The difference between them was not rigour and was not time. It was one pass back
-to instance difficulty after the pilot said the instrument was saturated.
+A second run on the same question, with a fraction of the wall clock, ran a small pilot,
+saw the same ceiling, and spent its next step raising item difficulty until the baseline
+came off 1.000. Whatever it then measured was informative, because both outcomes were
+reachable. That is the entire difference, and it is one step, not more rigour and not more
+time.
 
 ## The test
 
@@ -68,3 +71,10 @@ the arm that was *not* saturated and say the other was out of range.
 
 An honest "not measurable on these items" is worth more than a null that is
 indistinguishable from a real one, because the null will be read as the answer.
+
+**A note on where this example came from.** It is a real run, and it is described here in
+terms of the *instrument* — ceiling, control, conditions, pilot — with the manipulation and
+the outcome left out on purpose. This file was written while its author could read the
+benchmark's reference answers, so anything in it that named which way an effect went would
+be that answer arriving in a later run's prompt. See
+`tests/test_firebench_skills_do_not_leak.py`.

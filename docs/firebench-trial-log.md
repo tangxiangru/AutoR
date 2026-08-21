@@ -15,7 +15,7 @@ Vertex) throughout, and within any one run every arm is held to the same wall cl
 | Run 2 | 35 | 3600 s | AutoR: none · stock: built-ins | 0/35 | direct 41.5 |
 | Run 3 | 35 | 3600 s | shared Gemini 3.7 Flash | 0/35 | direct 40.2 |
 | Run 4 | 35 | 3 h | shared Gemini 3.7 Flash | **13/34** | direct 44.0 |
-| Run 5 | 35 | 8 h + raised retry limits | shared Gemini 3.7 Flash | *in flight* | *in flight* |
+| Run 5 | 35 | 8 h + raised retry limits | shared Gemini 3.7 Flash | 16/35 approved Stage 03 | direct 43.6 |
 
 **Read every number against a floor of 29.4, not against zero.** One `opus` call with no
 tools, no data and no experiment scores **F1 29.4** on these 35 tasks (Run 7) — more than
@@ -105,8 +105,14 @@ stands as the **browsing-denied** condition.
 **What the stock arm's 9.4 is, and is not.** It is not a search deficit. Twenty-four of its
 thirty-five runs produced *no conclusion at all*: given the raw `instruction.txt`, which
 asks for a full report and never mentions a deadline, they were still building figures when
-the harness killed them at sixty-one minutes. The eleven that finished average 28.4. The
-number measures a missing deadline in the prompt, not missing knowledge.
+the harness killed them at sixty-one minutes. The number measures a missing deadline in the
+prompt, not missing knowledge.
+
+> **Correction.** This paragraph used to end "the eleven that finished average 28.4". They
+> average **9.4** — the same figure as the arm row above it, which is what the table's
+> "scoreable 11/35" denominator already means. 28.4 is `claude-stock`'s F1 in **Run 1**,
+> the withdrawn pilot: a number carried across from a retracted table into later prose.
+> See the corrections section at the end of this file.
 
 ---
 
@@ -171,29 +177,29 @@ Counting an unscoreable run as 0, which is what upstream's scorer does:
 
 35 tasks × 3 arms = 105 cells · deadline **28800 s** · --max-attempts 6 --max-auto-skips 4 --max-operator-calls-per-stage 8 --reserve-seconds 1800
 
-Run 4 with the limits that actually bound it raised: `--max-attempts` 2→6, `--max-auto-skips` 1→4, `--max-operator-calls-per-stage` 4→8, and the clock 3 h→8 h. In Run 4 every failed stage had used exactly two attempts and been auto-skipped, so this is the direct test of whether the pipeline was unable or merely cut off.
+Run 4 with the limits that actually bound it raised: `--max-attempts` 2→6, `--max-auto-skips` 1→4, `--max-operator-calls-per-stage` 4→8, and the clock 3 h→8 h. In Run 4 every failed stage had used exactly two attempts and been auto-skipped, so this is the direct test of whether the pipeline was unable or merely cut off — and the extra attempts are spent and convert: Stage 03 went from 12 approved / 22 skipped to 16 / 4, with thirteen cells passing on the third attempt, four on the fourth and one on the sixth.
+
+> **This table replaces a mid-flight snapshot.** The section published here first was written by a finisher script that fired when `squeue` briefly emptied between the array ending with 40 SIGTERMed cells and a resubmission resuming them; it scored 65 of 105 cells and its numbers ran the other way. Every figure below is from the complete campaign.
 
 | arm | scoreable | Prec. | Recall | F1 |
 |:---|---:|---:|---:|---:|
-| `autor-pipeline` | 19/35 | 24.4 ± 15.6 | 46.9 ± 36.9 | 28.1 ± 23.1 |
-| `autor-direct` | 23/35 | 36.3 ± 22.7 | 50.4 ± 29.5 | 38.8 ± 24.0 |
-| `claude-stock` | 17/35 | 13.6 ± 14.0 | 53.5 ± 26.9 | 18.9 ± 17.9 |
+| `autor-pipeline` | 35/35 | 30.1 ± 26.1 | 43.4 ± 32.4 | 30.1 ± 25.2 |
+| `autor-direct` | 35/35 | 38.8 ± 23.9 | 58.5 ± 30.7 | 43.6 ± 23.7 |
+| `claude-stock` | 29/35 | 16.1 ± 14.0 | 49.2 ± 31.8 | 21.0 ± 18.1 |
 
 Counting an unscoreable run as 0, which is what upstream's scorer does:
 
 | arm | Prec. | Recall | F1 |
 |:---|---:|---:|---:|
-| `autor-pipeline` | 13.2 ± 16.7 | 25.5 ± 35.8 | 15.3 ± 22.0 |
-| `autor-direct` | 23.8 ± 25.3 | 33.1 ± 33.9 | 25.5 ± 26.9 |
-| `claude-stock` | 6.6 ± 11.8 | 26.0 ± 32.8 | 9.2 ± 15.6 |
+| `autor-pipeline` | 30.1 ± 26.1 | 43.4 ± 32.4 | 30.1 ± 25.2 |
+| `autor-direct` | 38.8 ± 23.9 | 58.5 ± 30.7 | 43.6 ± 23.7 |
+| `claude-stock` | 13.4 ± 14.2 | 40.8 ± 34.4 | 17.4 ± 18.2 |
 
-`autor-direct − autor-pipeline`: 19 complete pairs, median **+8.3 F1**, 13 wins / 5 losses / 1 ties.
+`autor-direct − autor-pipeline`: 35 complete pairs, median **+12.0 F1**, 22 wins / 12 losses / 1 ties.
 
-`autor-pipeline` produced no scoreable conclusion on 16 task(s): `fallback_behaviors`, `fractal_complexity_of_language`, `hallucination_awareness`, `hallucination_snowballing`, `hallusionbench_illusion`, `icl_from_repetition`, `introspective_learning`, `lifebench_length_following`, `llm_confidence_elicitation`, `llm_racial_bias_in_medicine`, `llm_value_consistency`, `llms_assume_rationality`, `llms_lack_self_correction`, `lost_in_the_middle`, `mathvista_visual_math`, `mcq_selection_bias`.
+`claude-stock` produced no scoreable conclusion on 6 task(s): `premise_order_effects`, `prompt_formatting_sensitivity`, `questbench`, `seca_hallucination`, `to_cot_or_not_to_cot`, `uncertainty_in_instruction_following`.
 
-`autor-direct` produced no scoreable conclusion on 12 task(s): `fallback_behaviors`, `fractal_complexity_of_language`, `hallucination_snowballing`, `icl_from_repetition`, `introspective_learning`, `lifebench_length_following`, `llm_confidence_elicitation`, `llms_assume_rationality`, `llms_lack_self_correction`, `lost_in_the_middle`, `mathvista_visual_math`, `mcq_selection_bias`.
-
-`claude-stock` produced no scoreable conclusion on 18 task(s): `fallback_behaviors`, `fractal_complexity_of_language`, `hallucination_awareness`, `hallusionbench_illusion`, `icl_from_repetition`, `introspective_learning`, `llm_value_consistency`, `llms_assume_rationality`, `llms_lack_self_correction`, `lost_in_the_middle`, `mathvista_visual_math`, `mcq_selection_bias`, `premise_order_effects`, `prompt_formatting_sensitivity`, `questbench`, `seca_hallucination`, `to_cot_or_not_to_cot`, `uncertainty_in_instruction_following`.
+---
 
 ## Run 6 — bare Claude Code, three-hour budget
 
@@ -251,17 +257,17 @@ Two arms score *below* the cost of doing nothing.
 
 ### It is not the length of the answer
 
-The obvious explanation is shape: the bare arm's scored text is a median 3,217 characters
-against a 245-character reference, and precision is a ratio over the agent's own claims.
+The obvious explanation is shape: the bare arm's scored text is a median 3,228 characters
+against a 255-character reference, and precision is a ratio over the agent's own claims.
 It was tested and it is wrong. One extra call restated each bare answer in the reference
 register — no new information, no new experiment, not even a new reading of the task:
 
 | | chars | claims extracted | Prec. | Recall | F1 |
 |:---|---:|---:|---:|---:|---:|
-| `claude-bare`, as produced | 3,217 | 12 | 14.0 | 39.2 | 16.3 |
-| the same answers, compressed | 967 | **12** | 13.8 | 39.9 | **17.1** |
+| `claude-bare`, as produced | 3,228 | 12 | 14.0 | 39.2 | 16.3 |
+| the same answers, compressed | **1,164** | **12** | 13.8 | 39.9 | **17.1** |
 
-A third of the characters, **the same twelve claims**, and no score. The grader decomposes
+**36% of the characters, the same twelve claims, and no score.** The grader decomposes
 propositions, not sentences; writing shorter compresses the prose around the assertions
 and leaves the assertions. Claim count does track precision *across* arms — 12 claims →
 14.0, 11 → 24.6, 7 → 41.8 against a 5-claim reference — but it is not reachable by writing
@@ -274,10 +280,9 @@ reference. An arm that actually experiments reports what *it* measured — on th
 against substituted models, at whatever scale fits the clock — and that often differs from
 the paper. The honest run is the one that diverges.
 
-This is the same mechanism as the `premise_order_effects` case in Run 4, seen from the
-other side: 112 items × 9 orderings × 2 models, a corrupted-item control at 0.15, and a
-correct null reported at a ceiling — scored 0.0, while a sentence recalling what the
-literature says would have scored well.
+This is the same mechanism as the ceiling case described under Run 3, seen from the other
+side: a correct null reported at a ceiling scores near nothing, while a sentence recalling
+what the literature says scores well.
 
 ### Why the published table is higher, and what part of the gap this is
 
@@ -341,10 +346,20 @@ whose F1 is the median — one run, so `F1 = 2PR/(P+R)` holds on it. Across task
 is averaged independently, which is what the paper does and is correct at that level: its
 own 52.1 and 48.3 give a harmonic mean of 50.1, not the 46.7 it prints.
 
-**The judge is very noisy.** The same unchanged log scored three times returned F1 of 57.1,
-92.3 and 100.0. Re-scoring one whole six-task matrix moved every arm's mean by 4–5 F1 points
-and moved one task by 13.7 — *without changing the ordering of the arms*. Treat the ordering
-as the result and any single number as one draw of a noisy instrument.
+**The judge is very noisy, and noisy enough to reorder the arms.** Re-scoring one whole
+six-task matrix — the same logs, a fresh set of judge draws, nothing else changed — moved
+every arm's mean by 4.5 to 5.5 F1 points, moved one cell by **23.1** (`cot_in_planning`,
+pipeline arm, 100.0 → 76.9), and **changed the ordering**: `autor-pipeline` was second on
+the first pass and third on the second, below `claude-stock`. Both passes are preserved as
+`fire-trial/report-pass1.json` and `fire-trial/report.json`.
+
+> **Correction.** This paragraph used to say the largest task move was 13.7 and that the
+> ordering did *not* change. Both are false against the two surviving reports, and the
+> second was the load-bearing half — it was the basis for "treat the ordering as the
+> result". On six tasks the ordering is not stable either. It also cited a 57.1 / 92.3 /
+> 100.0 triple from an early single-log probe whose artifacts were not kept; that number is
+> withdrawn for want of evidence, and the measured within-cell spread that *is* recoverable
+> is the per-metric `min`/`max` in every `_score/summary.json`.
 
 ## Reproducing
 
@@ -359,3 +374,39 @@ The throttle is a **quota** number, not a node count: what runs out first is the
 per-base-model request pool the backend shares with every other session on the machine.
 Measured headroom when this was written was 24 concurrent with zero 429s, and 105 concurrent
 1-CPU cells also ran clean once the cluster had the cores.
+
+---
+
+## Corrections
+
+Five published claims in this file were wrong. They are listed rather than silently edited,
+because four of the five share one cause worth naming.
+
+**The cause: numbers carried out of Run 1 after Run 1 was withdrawn.** A retracted table
+stops being cited, but its figures had already been written into surrounding prose, and
+prose is not re-derived when a table is. The fix in the tooling is
+`tools/fire_report_md.py` — tables are now generated from `report.json` — but every
+sentence *around* a table is still typed, and that is where all of these were.
+
+| claim as published | what the artifacts say |
+|:---|:---|
+| "the eleven that finished average **28.4**" (Run 2) | **9.4** — the same figure as the arm row two lines above. 28.4 is `claude-stock`'s F1 in the withdrawn Run 1. |
+| the ceiling case "scored **0.0**, while the direct arm found the effect at p = 0.0001 and scored **80.0**" | Neither number exists in any surviving run. `premise_order_effects` is pipeline 54.5 / direct 68.6 in Run 2, 57.7 / **0.0** in Run 3 — the 0.0 is the *direct* arm — and 58.5 / 70.6 in Run 4. The 80.0 was Run 1's. The **mechanism** is real and recoverable from the run tree (~700 billed calls per arm, corrupted control at 0.15, strong model 1.000 in all nine conditions, a null reported anyway); the two scores attached to it were not. |
+| compression: "3,217 → **967** characters, a third" | 3,228 → **1,164.5** (medians), 36%. The 967 was one cell's value read as if it were the median. The conclusion is unchanged and in fact slightly stronger: the claim count did not move at all. |
+| "moved one task by **13.7** — *without changing the ordering of the arms*" | The largest cell move is **23.1**, and **the ordering did change**: `autor-pipeline` was second on the first pass and third on the second, below `claude-stock`. This was the load-bearing half of the sentence — it was the stated reason to "treat the ordering as the result". On six tasks the ordering is not stable either. |
+| "the same unchanged log scored three times returned F1 of **57.1 / 92.3 / 100.0**" | No surviving artifact. Withdrawn for want of evidence. The within-cell spread that *is* recoverable is the per-metric `min`/`max` in every `_score/summary.json`. |
+
+**And one structural error, of a different kind.** The Run 5 section published here first
+was a **mid-flight snapshot**: a finisher script waited on `squeue`, which briefly emptied
+between the array ending — with 40 cells SIGTERMed by preemption — and a resubmission
+resuming them. It scored 65 of 105 cells and wrote a table whose trend ran the opposite way
+to the finished campaign's. The waiter should have keyed on cells completed against cells
+planned, not on the scheduler being momentarily quiet.
+
+### What was *not* wrong
+
+Every arm row in Runs 2, 3, 4, 6 and 7 recomputes exactly from its `report.json`, as do the
+paired medians, the win/loss counts, the parametric floor (29.4 / 26.2), the claim-count
+gradient, the Stage 03 attempt-exhaustion diagnosis, and "24 of 35 stock runs produced no
+conclusion". The errors were all in prose written *beside* generated tables, not in the
+tables.
