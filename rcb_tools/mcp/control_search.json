@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "autor-search": {
+      "command": "/home/robtang_google_com/.local/bin/python3",
+      "args": ["-m", "src.mcp_web_search"],
+      "env": {
+        "PYTHONPATH": "/home/robtang_google_com/autor-skills161",
+        "AUTOR_WEB_SEARCH_MODEL": "gemini-3.7-flash"
+      },
+      "cwd": "/home/robtang_google_com/autor-skills161"
+    }
+  }
+}

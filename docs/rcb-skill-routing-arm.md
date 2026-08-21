@@ -392,9 +392,8 @@ announcement, not a delivery**, and the +14.11 in §7.2 was attributed to a mech
 that fired on four tasks.
 
 This has since drifted further. On the current tree the pack is 168 skills and the
-table is 47 keys / 420 pins, and because the shape filter now selects around 66
-skills per task unaided, the pins still add a median of **one** skill, on 16 of 40
-tasks:
+table is 47 keys / 420 pins, and around 66 skills reach each task before any pin does,
+so the pins still add a median of **one** skill, on 16 of 40 tasks:
 
 | | `bb32a8c` (45 skills, 24 pins) | current (168 skills, 420 pins) |
 |---|---:|---:|
@@ -404,6 +403,16 @@ tasks:
 
 A seventeen-fold larger pin table buys twelve more tasks with one extra skill each.
 The table grew; the mechanism did not.
+
+**And "the shape filter selects 66 per task" — the phrasing this section carried until
+now — is the wrong account of why.** Counting frontmatter across the trees: 4 of 120
+skills at `a9c2b48` carry `applies_when` or `applies_unless`, 44 of 161 at `48501e7`, 56
+of 173 on main today. Between 68% and 97% of every pack is unconditional. Those 66 skills
+arrive because they are unconditional or match the task's field by name prefix, not
+because a predicate matched its brief. The pins are redundant not because a filter
+already chose well but because **nearly everything is offered to nearly everyone**, which
+leaves a pin almost nothing to add. See
+[What actually moves the score](what-actually-moves-the-score.md) §4.
 
 ### 7.3b The same selection, one scale down
 

@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import rcb_agent
 from src.utils import (
     BENCHMARK_MIN_REPORT_FIGURES,
     MAX_REPORT_FIGURES,
@@ -148,10 +149,69 @@ class ConfigPersistenceTest(unittest.TestCase):
 
 
 class BenchmarkAdapterTest(unittest.TestCase):
-    def test_the_adapter_raises_the_floor(self) -> None:
-        source = (Path(__file__).resolve().parent.parent / "rcb_agent.py").read_text(encoding="utf-8")
-        self.assertIn("min_report_figures=BENCHMARK_MIN_REPORT_FIGURES", source)
+    """The adapter raises the floor above AutoR's ordinary one, and still can.
+
+    This asserted the literal source text `min_report_figures=BENCHMARK_MIN_REPORT_FIGURES`
+    until the floor became an argument. The invariant it was protecting is behavioural --
+    *a benchmark run that was not told otherwise gets the benchmark floor, not the ordinary
+    one* -- so it is now tested as behaviour, which also lets the argument exist.
+    """
+
+    def test_a_run_that_asks_for_nothing_gets_the_benchmark_floor(self) -> None:
+        self.assertEqual(rcb_agent.benchmark_figure_floor(None), BENCHMARK_MIN_REPORT_FIGURES)
+        self.assertGreater(BENCHMARK_MIN_REPORT_FIGURES, MIN_REPORT_FIGURES)
+
+    def test_a_caller_can_raise_it(self) -> None:
+        self.assertEqual(rcb_agent.benchmark_figure_floor(15), 15)
+
+    def test_a_caller_can_lower_it_and_the_clamp_still_holds(self) -> None:
+        """Lowering is allowed here and clamped downstream; the gate must not vanish."""
+        self.assertEqual(resolve_min_report_figures(rcb_agent.benchmark_figure_floor(0)), 1)
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheFigureFloorMustBeSettableTest(unittest.TestCase):
+    """The floor existed, was read as a hard gate, and could not be moved.
+
+    `min_report_figures` is written into `run_config.json`, clamped by
+    `resolve_min_report_figures`, and read back by `validate_markdown_report` as a hard
+    gate on the count of distinct figures in `report/images/`. `rcb_agent.py` pinned it at
+    `BENCHMARK_MIN_REPORT_FIGURES` = 3 with no way to say otherwise, and the README said so
+    outright: *"a `run_config.json` field with no CLI flag"*.
+
+    Three is far below where runs actually land. Measured over 541 scored runs with task and
+    arm fixed effects, a published figure is worth about +0.79 benchmark points, and 423 of
+    those runs published fewer than the `MAX_REPORT_FIGURES` the judge is handed — median
+    twelve. The gate at 3 has never fired against a real run. Making it an argument is what
+    turns that observation into an experiment somebody can run.
+    """
+
+    def test_the_flag_exists_and_defaults_to_the_benchmark_floor(self) -> None:
+        args = rcb_agent.parse_args(["--workspace", "/tmp/x", "--prompt", "/tmp/p"])
+        self.assertIsNone(args.min_report_figures)
+
+    def test_the_flag_parses_an_integer(self) -> None:
+        args = rcb_agent.parse_args(
+            ["--workspace", "/tmp/x", "--prompt", "/tmp/p", "--min-report-figures", "15"]
+        )
+        self.assertEqual(args.min_report_figures, 15)
+
+    def test_the_clamp_admits_the_whole_window_the_judge_sees(self) -> None:
+        """A floor of 15 has to survive the clamp, or the arm cannot be run at all.
+
+        `resolve_min_report_figures` clamps to `[1, MAX_REPORT_FIGURES]`. The README and
+        `docs/run-artifacts.md` both described that ceiling as 5, which was true when
+        `MAX_REPORT_FIGURES` was 5 and has been wrong since it became 15 — a stale bound is
+        how an arm gets configured to something it cannot reach.
+        """
+        self.assertEqual(MAX_REPORT_FIGURES, 15)
+        self.assertEqual(resolve_min_report_figures(MAX_REPORT_FIGURES), MAX_REPORT_FIGURES)
+        self.assertEqual(resolve_min_report_figures(MAX_REPORT_FIGURES + 1), MAX_REPORT_FIGURES)
+
+    def test_a_floor_of_zero_or_nonsense_still_falls_back_rather_than_failing(self) -> None:
+        for value in (0, -3, "", "three", None):
+            with self.subTest(value=value):
+                self.assertGreaterEqual(resolve_min_report_figures(value), 1)

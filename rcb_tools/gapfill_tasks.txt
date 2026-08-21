@@ -1,0 +1,6 @@
+autor_pins Neuroscience_001
+autor_skills Astronomy_000
+autor_skills Information_003
+autor_skills Material_000
+autor_skills Math_001
+autor_skills Math_002

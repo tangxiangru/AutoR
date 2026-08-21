@@ -815,3 +815,74 @@ class RecoveredDurationTest(unittest.TestCase):
         self._age_run_tree(4000)
         rcb_agent.main(["--workspace", str(self.workspace), "--export-only", "--no-synthesis"])
         self.assertNotEqual(self._meta()["duration_seconds"], 0)
+
+
+class ThePackAnArmRanMustBeNameableTest(unittest.TestCase):
+    """The skill pack was the one part of a run that could not be stated as an argument.
+
+    `Manager.skills_dir` was `project_root / "src" / "skills"` with no flag, no config key
+    and no environment override, so the only way to measure a different pack was to delete
+    files in a worktree. That is how `full40_abl40` -- the highest-scoring arm on the board
+    -- came to exist as a dirty checkout with 41 deleted files and no SHA, reproducible by
+    nobody, with a JSON-corrupted pin table beside it.
+
+    Two flags fix it. `--skills-dir` names a pack; `--withhold-skills` denies named skills
+    from the pack that is there, which is the cheaper form for an ablation because it does
+    not require building and pinning a second tree.
+    """
+
+    def test_a_comma_list_is_read(self) -> None:
+        self.assertEqual(rcb_agent.read_withheld_skills("a,b , c"), frozenset({"a", "b", "c"}))
+
+    def test_nothing_asked_for_is_nothing_withheld(self) -> None:
+        """The default may not deny anything, or every existing arm changes meaning."""
+        for spec in (None, "", "   ", ",", " , , "):
+            with self.subTest(spec=spec):
+                self.assertEqual(rcb_agent.read_withheld_skills(spec), frozenset())
+
+    def test_a_file_is_read_one_name_per_line(self) -> None:
+        """The useful ablation names forty-odd skills.
+
+        A command line that long stops being legible in `_meta.json`, which is where anyone
+        later reconstructs what an arm ran -- so the list has to be able to live in a file.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp, "withhold.txt")
+            path.write_text(
+                "# the 3 lowest-read skills, see docs/what-actually-moves-the-score.md\n"
+                "alpha\n"
+                "\n"
+                "beta  # never opened in 1016 runs\n"
+                "   gamma   \n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                rcb_agent.read_withheld_skills(f"@{path}"),
+                frozenset({"alpha", "beta", "gamma"}),
+            )
+
+    def test_a_comment_only_file_withholds_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp, "w.txt")
+            path.write_text("# nothing yet\n\n   \n", encoding="utf-8")
+            self.assertEqual(rcb_agent.read_withheld_skills(f"@{path}"), frozenset())
+
+    def test_an_unreadable_file_stops_the_run_rather_than_withholding_nothing(self) -> None:
+        """The failure that matters. A typo'd path that silently withheld nothing would
+        produce an arm labelled as the ablation and identical to the control, and the
+        score file would not say so."""
+        with self.assertRaises(SystemExit):
+            rcb_agent.read_withheld_skills("@/nonexistent/withhold/list.txt")
+
+    def test_both_flags_are_on_the_parser_and_default_to_today_s_behaviour(self) -> None:
+        args = rcb_agent.parse_args(["--workspace", "/tmp/x", "--prompt", "/tmp/p"])
+        self.assertIsNone(args.skills_dir)
+        self.assertIsNone(args.withhold_skills)
+
+    def test_the_flags_parse(self) -> None:
+        args = rcb_agent.parse_args(
+            ["--workspace", "/tmp/x", "--prompt", "/tmp/p",
+             "--skills-dir", "/tmp/pack", "--withhold-skills", "a,b"]
+        )
+        self.assertEqual(args.skills_dir, "/tmp/pack")
+        self.assertEqual(args.withhold_skills, "a,b")
