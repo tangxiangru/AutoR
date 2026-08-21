@@ -412,6 +412,44 @@ def do_score_cell(args: argparse.Namespace) -> int:
     return 0
 
 
+def assert_interpreter_can_reach_the_catalogue(python: str, bench_root: Path) -> None:
+    """Refuse to write an sbatch whose interpreter cannot read the model catalogue.
+
+    Submission time is the only cheap moment to catch this. Run 11 was submitted from a
+    virtualenv without ``openai``; ``agents/claude/run.py`` imports the benchmark helper
+    directly and ``fire_agent.py`` probed it in a subprocess under the same interpreter,
+    so both lost the catalogue. The goal contract then substituted "No model catalogue was
+    supplied to this run." into all sixty-nine cells and every one of them still produced
+    a scoreable conclusion. The campaign existed to measure what *adding* models to that
+    block does; what it measured was every agent losing the block. Eight hours across
+    seventy cells, and the first sign of it was an arm moving eleven points for no
+    reason anyone could name.
+
+    A single subprocess here costs a second and makes that unrepeatable.
+    """
+    script = (
+        "import json,sys;"
+        "sys.path.insert(0, %r);"
+        "from utils.llm_inference import available_models;"
+        "print(json.dumps(available_models()))" % str(bench_root)
+    )
+    out = subprocess.run(
+        [python, "-c", script], cwd=str(bench_root),
+        capture_output=True, text=True, timeout=180,
+    )
+    if out.returncode == 0 and out.stdout.strip():
+        return
+    tail = (out.stderr or out.stdout or "").strip().splitlines()
+    raise SystemExit(
+        f"Refusing to write an sbatch: {python} cannot read the benchmark's model "
+        f"catalogue from {bench_root}.\n"
+        f"  {tail[-1] if tail else 'no output'}\n\n"
+        "Every cell would run with no model block in its goal contract and would still "
+        "score, so nothing downstream could tell. Submit from an interpreter that has "
+        "the benchmark's dependencies."
+    )
+
+
 def do_slurm(args: argparse.Namespace) -> int:
     """Write an array script for the plan and, unless told not to, submit it.
 
@@ -423,6 +461,9 @@ def do_slurm(args: argparse.Namespace) -> int:
     is that number and not the node count.
     """
     plan_path = Path(args.plan).expanduser().resolve()
+    _plan_for_guard = json.loads(plan_path.read_text(encoding="utf-8"))
+    assert_interpreter_can_reach_the_catalogue(
+        sys.executable, Path(_plan_for_guard["bench_root"]))
     plan = json.loads(plan_path.read_text(encoding="utf-8"))
     out_dir = Path(args.out_dir).expanduser().resolve() if args.out_dir else plan_path.parent / "slurm"
     log_dir = out_dir / "logs"

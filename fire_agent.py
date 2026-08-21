@@ -79,6 +79,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
 import threading
 import time
@@ -263,6 +264,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output-format", default=DEFAULT_OUTPUT_FORMAT)
     parser.add_argument("--attempt-index", type=int, default=0,
                         help="Which repeat of this (task, profile) pair this is. Recorded only.")
+    parser.add_argument(
+        "--allow-missing-model-catalog", action="store_true",
+        help="Run even when the benchmark's model catalogue cannot be read. Off by "
+             "default: a missing catalogue removes the goal contract's whole model block "
+             "without removing anything that would make the run look broken.",
+    )
     parser.add_argument("--print-goal", action="store_true",
                         help="Print the goal contract and exit, leaving no workspace behind.")
     parser.add_argument("--fake-operator", action="store_true",
@@ -530,6 +537,20 @@ def run(args: argparse.Namespace) -> FireRunResult:
         staged["credentials"] = load_credentials()
 
     model_catalog = _probe_model_catalog(bench_root)
+    if model_catalog is None and not args.allow_missing_model_catalog:
+        raise SystemExit(
+            "Refusing to run: could not read the benchmark's model catalogue from "
+            f"{bench_root}.\n"
+            + "\n".join(f"  tried {reason}" for reason in MODEL_CATALOG_PROBE_FAILURES)
+            + "\n\nThis is fatal on purpose. Without the catalogue the goal contract "
+            "silently drops its entire model block -- the agent is told nothing about "
+            "which models it may call and nothing about not dropping an arm whose model "
+            "is missing -- and the run still produces a scoreable conclusion, so nothing "
+            "downstream can tell the difference. A whole 70-cell campaign was lost to "
+            "exactly this. Install the benchmark's dependencies into the launching "
+            "interpreter, or pass --allow-missing-model-catalog if a run with no model "
+            "block is genuinely what you want."
+        )
     goal = build_fire_goal(
         task,
         workspace,
@@ -748,6 +769,12 @@ def run(args: argparse.Namespace) -> FireRunResult:
     return FireRunResult(workspace=workspace, meta=meta)
 
 
+#: Why every interpreter the probe tried could not reach the benchmark's model catalogue.
+#: Read by the launch path to build a refusal that names the cause instead of a campaign
+#: that silently runs without a model block.
+MODEL_CATALOG_PROBE_FAILURES: list[str] = []
+
+
 def _probe_model_catalog(bench_root: Path) -> dict[str, Any] | None:
     """Ask the benchmark's own helper what it can reach, without importing it.
 
@@ -755,6 +782,19 @@ def _probe_model_catalog(bench_root: Path) -> dict[str, Any] | None:
     ``anthropic`` and (in the shipped version) ``transformers`` at module scope, and the
     adapter has no business inheriting that -- or crashing when one of them is absent on
     a box where the *agent's* interpreter would have had it.
+    **The catalogue is a precondition, not advice, and this used to say otherwise.**
+    Run 11 of the FIRE-Bench campaign was launched from a virtualenv without ``openai``
+    installed. The probe raised ``ImportError`` in its subprocess, this function returned
+    ``None``, and ``build_fire_goal`` quietly substituted "No model catalogue was supplied
+    to this run." for the whole model block -- in 69 of 69 cells. The campaign existed to
+    measure the effect of *adding* three models to that block; what it actually ran was
+    every agent losing the block entirely, along with the paragraph telling it not to drop
+    an arm whose model is missing. Eight hours of compute across seventy cells produced a
+    number that could not be interpreted, and nothing anywhere said so.
+
+    So: try more than one interpreter, because the one that launched the adapter is not
+    necessarily the one the benchmark's dependencies live in, and report *why* it failed
+    when they all fail. The caller decides whether to abort; it defaults to aborting.
     """
     script = (
         "import json,sys;"
@@ -762,20 +802,44 @@ def _probe_model_catalog(bench_root: Path) -> dict[str, Any] | None:
         "from utils.llm_inference import available_models;"
         "print(json.dumps(available_models()))" % str(bench_root)
     )
-    try:
-        import subprocess
+    import subprocess
 
-        out = subprocess.run(
-            [sys.executable, "-c", script],
-            cwd=str(bench_root),
-            capture_output=True,
-            text=True,
-            timeout=180,
-        )
+    # sys.executable first -- it is right whenever the launcher and the benchmark share an
+    # environment, which is the common case. The rest are the interpreters that plausibly
+    # have the benchmark's dependencies when it does not.
+    candidates = [sys.executable]
+    for name in ("python3", "python"):
+        found = shutil.which(name)
+        if found and found not in candidates:
+            candidates.append(found)
+    home_local = Path.home() / ".local" / "bin" / "python3"
+    if home_local.exists() and str(home_local) not in candidates:
+        candidates.append(str(home_local))
+
+    reasons = []
+    for interpreter in candidates:
+        try:
+            out = subprocess.run(
+                [interpreter, "-c", script],
+                cwd=str(bench_root),
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+        except Exception as exc:  # noqa: BLE001
+            reasons.append(f"{interpreter}: {type(exc).__name__}")
+            continue
         if out.returncode == 0 and out.stdout.strip():
-            return json.loads(out.stdout.strip().splitlines()[-1])
-    except Exception:  # noqa: BLE001 - the catalogue is advice, not a precondition
-        pass
+            try:
+                return json.loads(out.stdout.strip().splitlines()[-1])
+            except json.JSONDecodeError:
+                reasons.append(f"{interpreter}: probe printed non-JSON")
+                continue
+        tail = (out.stderr or out.stdout or "").strip().splitlines()
+        reasons.append(f"{interpreter}: rc={out.returncode} {tail[-1] if tail else 'no output'}")
+
+    MODEL_CATALOG_PROBE_FAILURES.clear()
+    MODEL_CATALOG_PROBE_FAILURES.extend(reasons)
     return None
 
 

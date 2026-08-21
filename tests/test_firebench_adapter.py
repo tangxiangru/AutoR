@@ -547,6 +547,50 @@ class GoalContractTests(unittest.TestCase):
             self.assertIn("ships no data", goal)
 
 
+class ModelCatalogueProbeTests(unittest.TestCase):
+    """A campaign may not run without knowing which models it may call.
+
+    Run 11 was launched from a virtualenv with no ``openai`` installed. The probe's
+    subprocess raised ImportError, the probe returned None, and the goal contract
+    substituted "No model catalogue was supplied to this run." in 69 of 69 cells -- in the
+    campaign whose entire purpose was to measure the effect of adding models to that
+    block. Nothing failed, nothing warned, and every cell produced a scoreable conclusion.
+    """
+
+    def test_a_probe_that_cannot_reach_the_catalogue_says_why(self) -> None:
+        import fire_agent
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # A bench root with no utils package: every interpreter fails to import.
+            self.assertIsNone(fire_agent._probe_model_catalog(Path(tmp)))
+            self.assertTrue(
+                fire_agent.MODEL_CATALOG_PROBE_FAILURES,
+                "a failed probe must record why, or the campaign runs blind",
+            )
+            self.assertTrue(
+                all("rc=" in reason or ":" in reason
+                    for reason in fire_agent.MODEL_CATALOG_PROBE_FAILURES),
+                fire_agent.MODEL_CATALOG_PROBE_FAILURES,
+            )
+
+    def test_the_probe_tries_more_than_the_launching_interpreter(self) -> None:
+        """The launcher's interpreter is not necessarily the benchmark's."""
+        import fire_agent
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fire_agent._probe_model_catalog(Path(tmp))
+            self.assertGreater(
+                len(fire_agent.MODEL_CATALOG_PROBE_FAILURES), 1,
+                "one interpreter tried is the bug this test exists for",
+            )
+
+    def test_running_without_a_catalogue_is_off_by_default(self) -> None:
+        import fire_agent
+
+        args = fire_agent.parse_args(["--task", "x"])
+        self.assertFalse(args.allow_missing_model_catalog)
+
+
 class ArtifactVisibilityTests(unittest.TestCase):
     """Where the run's measurements are, and where the synthesizer was looking.
 

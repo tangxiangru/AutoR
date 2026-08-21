@@ -400,37 +400,70 @@ paired F1 — is the same ordering Runs 5, 8 and 9 reported, at a smaller margin
 
 ---
 
-## Run 11 — an open-weight arm exists (in flight)
+## Run 11 — **WITHDRAWN**: the treatment was never applied
 
-35 tasks × 2 arms = 70 cells · **byte-identical plan to Run 10** except the model catalogue
+35 tasks × 2 arms = 70 cells · plan byte-identical to Run 10 · **do not quote its numbers**
 
-Every arm up to here could call gpt-5.x and Claude 4.5/4.1 and nothing else. Twenty of the
-thirty-five verified tasks ask about a *capability contrast* whose lower arm is an
-open-weight model — usually llama-2-70b. With nothing below the frontier available, the
-only substitution an agent could make **deleted that arm instead of weakening it**, and a
-run that then reports "no effect" is reporting a property of its model list. Several did.
+Run 11 was meant to add three open-weight Llamas (Vertex Model Garden, `provider="vertex-maas"`)
+to the model catalogue and change nothing else. It reported `autor-pipeline` 32.2 → **43.8**
+and `autor-direct` 42.4 → 43.2, flipping the ordering between the profiles.
 
-Vertex Model Garden serves three Llamas on this project as a managed API, each verified with
-a live call and each answering in exactly one region:
+**The catalogue never reached a single prompt.** Run 11 was submitted from a virtualenv
+with no `openai` installed. `agents/claude/run.py` imports the benchmark's helper directly
+and `fire_agent.py` probed it in a subprocess under the same interpreter, so both lost it;
+`_probe_model_catalog` returned `None` and the goal contract substituted its no-catalogue
+fallback. Measured, not inferred:
 
-| model | region |
-|:---|:---|
-| `meta/llama-3.3-70b-instruct-maas` | `us-central1` |
-| `meta/llama-4-scout-17b-16e-instruct-maas` | `us-east5` |
-| `meta/llama-4-maverick-17b-128e-instruct-maas` | `us-east5` |
+- **69 of 69** Run 11 prompts contain `No model catalogue was supplied to this run.`
+- **0 of 69** contain the open-weight line.
+- **70 of 70** Run 10 prompts contain the full frontier catalogue.
+- Same task, same arm: the prompt shrank 8205 → 7166 bytes.
 
-Llama 2 itself is **not** among them: Model Garden lists it only as a self-deploy entry
-needing a GPU endpoint of your own, so a faithful replication of a paper's original Llama-2
-arm still costs a deployment. `llama-3.3-70b` is the nearest available stand-in and the
-substitution is a real one, not a formality.
+So Run 11's agents did not get *more* than Run 10's. They got **less** — the whole model
+block, including the paragraph telling them not to drop an arm whose model is missing.
+Whatever moved pipeline 11.6 points, it was not the treatment this run was named after,
+and the run cannot be used to argue for or against the open-weight hypothesis.
 
-Run 11 is Run 10 with `provider="vertex-maas"` added to `available_models()` and rendered
-into the goal contract. The plan file is identical field for field; the catalogue is the
-only difference, which is what makes the pair readable. The prediction under test is
-narrow and falsifiable: **if the papers' effects were vanishing because every arm was
-confined to frontier models, the tasks that name a Llama should move and the other fifteen
-should not.** A uniform move across all thirty-five would refute the mechanism even if the
-mean goes up.
+The capability did reach the sandbox by a side channel: 63 of 70 cells made successful
+Vertex MaaS calls after reading the staged `ws/utils/llm_inference.py` themselves. That is
+a genuine finding about what agents discover, and it is not the registered experiment.
+
+**The registered prediction failed, and failed backwards.** Even taken at face value, the
+gain sits where the mechanism said nothing should move: in `autor-pipeline`, the 23 tasks
+naming a Llama moved a median of **+0.0**, and the 12 naming none moved **+22.9** (11 of 12
+up, permutation p ≈ 0.011). The prediction's premise was also wrong — 30 of the 35 tasks
+name an open-weight model, not 20, so the "control group" it assumed barely exists.
+
+Three further reasons its numbers are unusable, each independent:
+
+1. **Four uncontrolled variables moved with it** — the interpreter, `cpus-per-task` 1→2,
+   the node pool, and `a-ceiling-is-not-a-null/SKILL.md`, which was rewritten two minutes
+   after Run 10 launched and staged differently into the two campaigns (md5 e3d86c28 →
+   96475c06).
+2. **The out-of-memory cells gained the most.** Twelve cells were OOM-killed at 12 GiB
+   (8 pipeline, 4 direct); pipeline's OOM cells moved a median **+28.3** against **+5.6**
+   for the rest. The gain is unusable without ruling that out.
+3. **The noise floor for this comparison has never been measured.** Both plans are
+   `repeats: 1`. Run 7's three repeats sit inside a single array and estimate cell-level
+   noise (per-task sd ≈ 21), not campaign-level offset — and a campaign offset of only
+   3.4 F1 is enough to erase the result. Judge noise alone gives a per-cell 3-draw range
+   with a median of 13.9 points, so no single task's delta means anything.
+
+### What replaced it
+
+`_probe_model_catalog` now tries several interpreters and records why each failed, a
+missing catalogue is **fatal by default** (`--allow-missing-model-catalog` to override),
+and `fire_trial.py slurm` refuses to write an sbatch whose interpreter cannot read the
+catalogue — one subprocess at submission time, which is the only cheap moment to catch it.
+`tests/test_firebench_adapter.py::ModelCatalogueProbeTests` holds all three.
+
+Run 11b and Run 12b were then launched from an interpreter that can: 70 of 70 Run 11b
+prompts contain the open-weight line and 0 contain the fallback, checked before the run
+was left alone. Run 12b adds `claude-bare` and `claude-stock` at the same 8 h budget and
+the same catalogue, so that a bare-Claude-Code comparison finally exists at one
+configuration. Both run at 24 GiB.
+
+**None of this rescues Run 11.** It is a lost campaign, kept here for the defect.
 
 ---
 
@@ -496,6 +529,14 @@ Measured headroom when this was written was 24 concurrent with zero 429s, and 10
 ---
 
 ## Corrections
+
+**Run 11's headline was withdrawn before it was ever quoted outside this file** — the
+model catalogue it was named after reached 0 of 69 prompts. The defect it exposed is the
+general one: a silently missing input removed a whole section of the goal contract, every
+cell still produced a scoreable conclusion, and the only visible symptom was an arm moving
+eleven points for no nameable reason. A degradation that leaves the artifact well-formed
+is invisible to everything downstream of it.
+
 
 Five published claims in this file were wrong. They are listed rather than silently edited,
 because four of the five share one cause worth naming.
