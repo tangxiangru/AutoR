@@ -405,6 +405,69 @@ tasks:
 A seventeen-fold larger pin table buys twelve more tasks with one extra skill each.
 The table grew; the mechanism did not.
 
+### 7.3b The same selection, one scale down
+
+§7.3 was withdrawn on the ground that "the largest-moving criterion moved up" restates
+the task total. That is true but it is the weak version of the objection, and picking
+the largest mover is not the rule the pins actually used. The current table's
+`_columns` states the rule outright:
+
+> `recoverable` is the sum of weight × (control − autor) over **only the criteria
+> where the control scored higher**
+
+So a pin targets the criterion of **maximum weighted gap between the two arms** — an
+argmax over the three to eight criteria a task has. That is the §7.2a disease at
+criterion scale, and an argmax over a handful of noisy items regresses harder than a
+task-level ranking does.
+
+Applying that exact rule and asking whether `full40_pins` beat `arm_2ffaeb4` on the
+criterion it selects:
+
+| group | argmax-gap criterion moved up | mean move | base in `arm_2ffaeb4` |
+|---|---:|---:|---:|
+| pinned (15) | 14/15 — 93% | **+24.6** | 11.1 |
+| unpinned (20) | 16/20 — **80%** | +7.6 | 29.5 |
+
+**The placebo rate is 80%, not zero.** Run the pins' own aiming rule on tasks that were
+never pinned and four criteria in five come up anyway. Against that null, 93% on
+fifteen tasks is not a finding — it is thirteen percentage points on n=15 versus n=20.
+
+The magnitude gap is the part worth keeping: +24.6 against +7.6. But the pinned targets
+start at 11.1 where the unpinned ones start at 29.5, so most of that is the room to
+move. Fitting `move ~ base` on the twenty unpinned targets gives
+`move = 17.9 − 0.349 × base`, which predicts +14.1 for the pinned targets unaided
+against an actual +24.6 — an excess of **+10.5 ± 3.8**.
+
+And that number has exactly the defect §7.2a is about. The fit corrects for selection
+on **level**; the criterion was selected on the **gap**. It is the +8.5 of §7.2 rebuilt
+one scale down, with the same correction aimed at the same wrong variable. Both are
+reported here so the shape is visible: *every* estimate in this document that leans on
+a regression-to-the-mean adjustment is adjusting for the wrong thing, because in every
+case the selection was on a difference between two arms.
+
+**One thing has improved and should be said.** The bb32a8c table recorded no target
+criterion at all (§7.3). The current table, rebuilt by #264, records the criterion,
+its weight, both arms' scores and the weighted loss for every pin, and its
+`_provenance` declares the selection in plain words — *"25 tasks were assessed — the 12
+that scored below the pre-fix arm and the 20 that lost to the bare agent."* That is
+the right way to ship a table built from an answer key. It does not make the estimate
+identified; it makes it auditable, which is why the paragraphs above could be written
+at all.
+
+**What it means for the arm now running.** The 27 pinned tasks in the current table are
+gap-selected the same way. Recomputed from the arm the table was built on:
+
+| group | mean `full40_v220 − control` | negative |
+|---|---:|---:|
+| pinned (27) | **−7.16** | 22/27 |
+| unpinned (13) | **+6.55** | 4/13 |
+
+— a 13.71-point separation on the selection variable itself. This does **not** bias the
+`pins_on − pins_off` contrast of §7.9, because both arms see the same tasks and the
+selection cancels within each pair. It bounds what that contrast generalises to: the
+answer will be *what the pins are worth on the tasks they were written for*, which is
+the honest question, and not *what pinning is worth on a task nobody has scored*.
+
 ### 7.4 The two pins aimed at uncontested zero (§6.4)
 
 One worked and one did not, which is the most a two-case split can say.
@@ -541,14 +604,49 @@ been measured.** Every comparison in this document divides by a standard error b
 from between-task spread, which assumes a task re-run would reproduce itself. Nothing
 has ever checked that.
 
-At the time of writing ten tasks are scored in both arms — too few to quote as a
+**One uncontrolled channel, checked rather than assumed.**
+`install_learned_skill` reads `~/.autor/learned_skills/<field>/learned_notes.json` —
+`DEFAULT_POOL`, outside both worktrees, with no override and no isolation flag. It
+installs a `learned-from-earlier-runs` skill into **all 40 runs of both arms**, built
+from a twelve-note buffer that every concurrent arm on this machine writes to and that
+was being rewritten while this ablation ran. That is a genuine shared-state channel and
+it looked fatal.
+
+It is not, and the reason is worth recording: **the skill is byte-identical in all 40
+pairs.** Both arms of each task launch in the same second and read the same snapshot,
+so the pool is held constant within every pair and cancels in the paired difference.
+It does mean the result is conditional on that particular note pool — an
+external-validity limit, not a bias — and it means a *staggered* relaunch would break
+the property silently. Any task re-run out of step with its twin should be dropped, and
+the md5 of that file is how to tell.
+
+At the time of writing thirteen tasks are scored in both arms — too few to quote as a
 result, and stated here only so the analysis is fixed before the rest arrive:
 
-| group | n | pins_on − pins_off |
-|---|---:|---:|
-| all | 10 | +0.45 ± 1.95 |
-| A | 4 | +2.77 ± 1.38 |
-| C (placebo) | 5 | −1.00 ± 3.76, **sd 8.42** |
+| group | n | pins_on − pins_off | sd |
+|---|---:|---:|---:|
+| all | 13 | +1.80 ± 1.76 | 6.36 |
+| A adds a skill | 4 | +2.77 ± 1.38 | 2.76 |
+| B re-announce | 3 | +5.40 ± 4.01 | 6.95 |
+| **C placebo** | 6 | **−0.64 ± 3.09** | **7.58** |
+
+Group C is so far doing what item 3 requires of it — sitting on zero.
+
+**The power problem this creates, stated before the rest arrives.** If the placebo sd
+settles near 8, the minimum effect this design can detect at 80% power is:
+
+| n | | detectable |
+|---:|---|---:|
+| 16 | group A | **≈ 5.9** |
+| 27 | A+B | ≈ 4.5 |
+| 40 | whole arm | ≈ 3.7 |
+
+A pin layer that adds one skill to sixteen tasks is not expected to be worth six
+points. **So the likely outcome is a confidence interval containing zero, and that is
+not the same as evidence of no effect** — it is this design running out of resolution.
+Say which of the two it is when the numbers land. Detecting a two-point effect against
+this noise needs about 139 tasks, which ResearchClawBench does not have; the route to
+it is replicates, not more tasks.
 
 If that group-C spread holds up, it is the most consequential number in this file: a
 per-task run-to-run sd near 8 puts the standard error of any forty-task paired
