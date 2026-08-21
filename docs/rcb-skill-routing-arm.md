@@ -668,6 +668,40 @@ resolution of a forty-task arm is a few points and not a fraction of one.
    the rest of the experiment shows. It is the durable output.
 5. No task is dropped for finishing late or being killed; §7.8 is the reason.
 
+### 7.10 The other ablation, and what the pair of them says
+
+`pins_on`/`pins_off` is not the only ablation of this machinery that ran. #315 scored
+`full40_abl40` — `full40_main40` with **forty task-scoped skill directories deleted and
+their pins struck**, same commit, same flags, same forty tasks. Re-derived here from the
+score files rather than quoted:
+
+| | n | paired | 95% CI | W–L |
+|---|---:|---:|:---|---:|
+| `main40` − `abl40` | 33 | **−3.16 ± 1.48** | −6.18 … −0.14 | 10–23 |
+| `main40` vs control | 35 | +6.00 ± 2.22 | | |
+| `abl40` vs control | 35 | **+9.23 ± 1.59** | | |
+
+**The arm in front is the one with the skills deleted**, and the interval excludes zero.
+
+The two ablations remove different things, and the difference is exactly the A/B split
+of §7.3a:
+
+* **`abl40` removes the skill directories *and* the pins** — the content goes. Result:
+  **−3.16**, i.e. the task-scoped skills were costing about three points.
+* **`pins_off` removes only the pin table.** The skills stay, because the shape filter
+  installs ~66 of them per task unaided (§7.3a); what is removed is the *announcement*.
+  Result so far: **+1.80 ± 1.76 on 13 pairs — nothing.**
+
+Read together they say something neither says alone. **The content is the part with an
+effect, and its sign is negative; the routing layer sitting on top of it is doing
+approximately nothing.** That is consistent with every mechanical finding above — a pin
+that adds one skill to sixteen tasks and re-announces on eleven more cannot carry a
+large effect in either direction, and §7.2's +8.5 was never measuring it.
+
+It also reorders the arms. `full40_pins`, the subject of this document, is at +2.99
+against the control; `abl40`, which is the same lineage with this machinery taken out, is
+at +9.23. Whatever is making recent arms better than the bare agent, **it is not this.**
+
 ---
 
 ## 8. Why, and what to do next
