@@ -318,24 +318,92 @@ selection used both arms that any reanalysis would compare against. The hold-out
 §8.2 is not a nice-to-have refinement of this number; it is the only way to obtain
 one at all.
 
-What survives unchanged is §7.3 — in all fifteen pinned tasks the criterion the pin
-was aimed at moved up. The mechanism does what it claims. Its size is what is open.
+This section originally closed by saying §7.3 survived — that the mechanism does what
+it claims and only its size is open. **That is withdrawn too.** §7.3 turned out to
+restate the task totals rather than corroborate them, and §7.3a shows the pin layer
+added four skill-installs across the whole arm. So the position is worse than
+"bracketed": there is no sound evidence the pins did anything, and the mechanism they
+were supposed to work through barely fired. §7.9 is the experiment that settles it,
+and it is already running.
 
-### 7.3 Every pin against the criterion it aimed at (§6.3)
+### 7.3 Every pin against the criterion it aimed at (§6.3) — WITHDRAWN
 
-**In all fifteen pinned tasks, the criterion that moved most moved up.** The pins
-are not raising task totals by some diffuse route; the specific criterion each was
-written for is the one that changed:
+This section reported: *"In all fifteen pinned tasks, the criterion that moved most
+moved up. The pins are not raising task totals by some diffuse route; the specific
+criterion each was written for is the one that changed."* Both sentences are
+withdrawn. The check §6.3 pre-registered could not be run, and the check that was
+run in its place carries no information.
 
-| task | pinned skill | that criterion |
-|---|---|---:|
-| Physics_000 | `run-the-conditions-the-source-ran` | 10 → **56** |
-| Neuroscience_003 | `run-the-conditions-the-source-ran` | 6 → **51** |
-| Astronomy_001 | `the-canonical-figure` | 9 → **49** |
-| Information_002 | `the-supplied-item-is-the-graded-unit` | 5 → **42** |
-| Math_003 | `run-the-conditions-the-source-ran` | 1 → **38** |
-| Chemistry_000 | `the-attribution-is-the-deliverable` | 8 → **37** |
-| Material_001 | `material-landmark-scalars-in-physical-units` | 1 → **35** |
+**§6.3 was not executable as written.** It says *"`_rationale` in the pin table
+records, per task, which checklist index each pin targets."* It does not. The union
+of `_rationale` keys over all fifteen pinned tasks is `autor`, `control`,
+`new_to_this_run`, `net`, `recoverable`, `headroom`, `note` — `recoverable` is a
+weighted point total, not an index. Three tasks carry a free-text `note` and exactly
+one of them (`Material_001`) names an index. So for fourteen of fifteen tasks there
+is no pre-specified target criterion to check a pin against, and there never was.
+
+**What was measured instead was the largest mover, and that is close to a
+tautology.** In a task whose total went up, the criterion with the largest absolute
+change is very likely to be one that went up. Measured:
+
+| group | largest-moving criterion moved up |
+|---|---:|
+| pinned (15) | 14/15 — 93% |
+| unpinned (25) | 14/25 — 56% |
+
+and the statistic agrees with the sign of the task total in **37 of 40 tasks**. It is
+a restatement of the total, not independent corroboration of it. The pinned group's
+93% is what 14/15 task-level wins implies; it is not additional evidence that the
+pins caused them. (The original text said 15/15; re-derived here it is 14/15. The
+count is not the problem with it.)
+
+The seven rows of the table above are real per-criterion movements and they are
+large. What is withdrawn is the claim that they are *the criteria the pins were
+aimed at*, because for six of those seven the artifact records no aim.
+
+### 7.3a What the pin layer mechanically changes
+
+The claim in §7.3 mattered because it was the one piece of evidence that the pins
+worked *for the reason given* rather than by selection. With it withdrawn, the
+obvious next question is what the pin layer does at all — and that is answerable
+from the trees, without running anything, by asking `select_run_skills` what each of
+the forty tasks is offered with the pin table and without it.
+
+At `bb32a8c`, the tree that produced every number in §7:
+
+| | tasks |
+|---|---:|
+| pin adds a skill the filters would not have installed | **4** |
+| pin only re-announces a skill already installed | 11 |
+| no pin reaches the run | 25 |
+
+**Four skill-installs, across forty tasks — 0.4% of the 943 skill-installs the arm
+made.** Eleven of the fifteen pinned tasks received exactly the skills they would
+have received anyway; what changed for them is that a skill moved out of the prompt's
+`shape` group and into its `pinned` group, which
+`format_skills_for_prompt` renders last and frames as *"not an inference: a record of
+what a previous run of the same task lost."*
+
+That is not nothing — the same function's docstring records that framing measurably
+governs whether a skill is read at all, *"the one skill a rendered prompt told the
+operator to read fired in 31 of 40 runs, and the three a prompt said were 'installed
+for this stage' fired in none."* But it means **the pin layer is mostly an
+announcement, not a delivery**, and the +14.11 in §7.2 was attributed to a mechanism
+that fired on four tasks.
+
+This has since drifted further. On the current tree the pack is 168 skills and the
+table is 47 keys / 420 pins, and because the shape filter now selects around 66
+skills per task unaided, the pins still add a median of **one** skill, on 16 of 40
+tasks:
+
+| | `bb32a8c` (45 skills, 24 pins) | current (168 skills, 420 pins) |
+|---|---:|---:|
+| pin adds a skill | 4 tasks | 16 tasks |
+| re-announce only | 11 | 11 |
+| nothing at all | 25 | **13** |
+
+A seventeen-fold larger pin table buys twelve more tasks with one extra skill each.
+The table grew; the mechanism did not.
 
 ### 7.4 The two pins aimed at uncontested zero (§6.4)
 
@@ -445,6 +513,63 @@ SKIP Earth_003  Earth_003_20260818_205245: status='running', report 45132 B
 
 **A count with nothing beside it reads as "that is all there was."** It was not.
 
+### 7.9 The ablation that settles it, in flight
+
+§7.2a said the pin effect is bracketed by a design that cannot narrow it, and that
+the only route to a number is an experiment where task selection does not enter. That
+experiment is running: arms `pins_on` and `pins_off`, both from trees detached at
+**`f0f469c`**, differing in exactly one file — `configs/task_skill_pins.json`, 47
+keys / 420 pins against an empty table. Same tasks in both arms, so the selection that
+produced the bracket cancels rather than needing correcting.
+
+Both arms are scored on the instrument §1 names, verified rather than assumed:
+`gpt-5.1`, `draws 3`, bench `bfffc480`.
+
+**Read it in the three groups of §7.3a, because they are three different treatments
+and pooling them dilutes the only one that is real:**
+
+| group | n | what differs between the arms |
+|---|---:|---|
+| **A** | 16 | the pin installs a skill the filters would not have |
+| **B** | 11 | the same skills, moved into the prompt's `pinned` group |
+| **C** | 13 | **nothing** |
+
+**Group C is not padding — it is the most valuable arm of the experiment.** Thirteen
+tasks run twice under configurations that are byte-identical for them. Whatever
+difference appears there is AutoR's run-to-run variance, and **that quantity has never
+been measured.** Every comparison in this document divides by a standard error built
+from between-task spread, which assumes a task re-run would reproduce itself. Nothing
+has ever checked that.
+
+At the time of writing ten tasks are scored in both arms — too few to quote as a
+result, and stated here only so the analysis is fixed before the rest arrive:
+
+| group | n | pins_on − pins_off |
+|---|---:|---:|
+| all | 10 | +0.45 ± 1.95 |
+| A | 4 | +2.77 ± 1.38 |
+| C (placebo) | 5 | −1.00 ± 3.76, **sd 8.42** |
+
+If that group-C spread holds up, it is the most consequential number in this file: a
+per-task run-to-run sd near 8 puts the standard error of any forty-task paired
+comparison near 1.3 **before** any real effect, which is the same size as the
+differences §7.1 reports. It would not overturn `pins_on − pins_off`; it would mean
+every single-task claim anywhere in this document is noise, and that the honest
+resolution of a forty-task arm is a few points and not a fraction of one.
+
+**Pre-registered here, before the remaining thirty tasks are scored:**
+
+1. Report A, B and C separately and never pool them into one "pin effect".
+2. The estimate of the pin layer is **group A**, because A is where the layer does
+   what it is described as doing. B estimates the value of announcing a skill more
+   strongly, which is a different and also interesting quantity.
+3. **Group C must come out at zero.** If it does not, C is the noise floor and every
+   interval in this document is quoted against the wrong denominator — say so rather
+   than treating a non-zero placebo as a finding about pins.
+4. Quote the group-C standard deviation as the run-to-run variance estimate whatever
+   the rest of the experiment shows. It is the durable output.
+5. No task is dropped for finishing late or being killed; §7.8 is the reason.
+
 ---
 
 ## 8. Why, and what to do next
@@ -456,7 +581,8 @@ the routing layers this document is named for. Read only against `arm_2ffaeb4`, 
 split in §7.2 is uncomfortable and simple:
 
 - The task-id pin table is worth about **+8.5** above what regression to the mean
-  predicts, and §7.3 says it works for the reason claimed.
+  predicts. §7.3 was cited here as evidence that it works for the reason claimed; that
+  citation is withdrawn — see §7.3 and §7.3a.
 - Everything else in those 29 commits — including #237 and #242 — is worth
   **+0.68 ± 2.13** together. Statistically nothing.
 
