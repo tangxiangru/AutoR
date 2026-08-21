@@ -870,6 +870,7 @@ flowchart LR
 | [src/evolution.py](src/evolution.py) | The champion ratchet: budgeted polish rounds, reverted when they do not improve, rejected on verdict drift |
 | [src/writing_manifest.py](src/writing_manifest.py) | The Stage 07 inventory plus the AutoR-owned triage artifact for each output format |
 | [src/provenance.py](src/provenance.py) | Which stage wrote each workspace file, every version it has held, and what a rollback withdraws or rewinds |
+| [rcb_tools/](rcb_tools/README.md) | The operator scripts every benchmark arm in [the lab notebook](docs/researchclawbench-arms.md) was actually run and scored by — launchers, the claim protocol, the two scorers and the `gpt-5.1` judge swap. Machine-specific by design and not imported by anything under `src/`; kept for provenance, since two of the defects that notebook records were defects in these files |
 | [src/effects.py](src/effects.py) | The inverse of each write, accumulated per stage and applied in reverse on a backward edge; commutative and ordered keys |
 | [src/emissions.py](src/emissions.py) | Acts that leave the run, withheld until the stage that asked for them is approved |
 | [src/approval_agent.py](src/approval_agent.py) | The solo approval gate, its six-choice vocabulary and its unreadable-verdict fallback |
