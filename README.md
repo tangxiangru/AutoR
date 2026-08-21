@@ -532,7 +532,7 @@ options, concrete file paths under `Files Produced`, and no `[In progress]`, `[P
 | Stage 03+ | Machine-readable data under `workspace/data/`, plus a `report_plan.json` committing to the figures and headline numbers the report will carry |
 | Stage 05+ | Machine-readable results under `workspace/results/`, plus a valid `experiment_manifest.json` |
 | Stage 06+ | Real figure files under `workspace/figures/`, and every planned figure's `source_artifact` resolving to a non-empty file |
-| Stage 07+ (markdown) | `report/report.md` with resolving figure references, between `min_report_figures` and 5 figures under `report/images/`, `deliverables_coverage.json`, `citation_verification.json`, `self_review.json`, `report_review.json` |
+| Stage 07+ (markdown) | `report/report.md` with resolving figure references, between `min_report_figures` and `MAX_REPORT_FIGURES` figures under `report/images/`, `deliverables_coverage.json`, `citation_verification.json`, `self_review.json`, `report_review.json` |
 | Stage 07+ (latex) | `main.tex` matching the venue, `sections/*.tex`, a bibliography, a compiled PDF, `build_log.txt`, `citation_verification.json`, `self_review.json`, `layout_review.json` |
 | Stage 08+ | Review and readiness assets under `workspace/reviews/` |
 
@@ -541,7 +541,7 @@ Requirements are cumulative, and the stage that *produces* a class of artifact m
 cutoff is `stage_execution_started_at` feeding `recent_in`, and the rubric enforces the same rule
 independently in `_fresh_artifact_kinds`, so a Stage 07 draft cannot score on Stage 06's figures.
 
-`min_report_figures` is a `run_config.json` field with no CLI flag, clamped to `[1, 5]`. It is 1 for
+`min_report_figures` is a `run_config.json` field, set by `rcb_agent.py --min-report-figures`, clamped to `[1, MAX_REPORT_FIGURES]` (15). It is 1 for
 an ordinary run and **3** for a ResearchClawBench run (`BENCHMARK_MIN_REPORT_FIGURES`).
 
 **Validity gates.** The same function — `validate_stage_artifacts` ([src/utils.py](src/utils.py)) —

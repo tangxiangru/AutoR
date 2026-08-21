@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime
+import hashlib
 import shutil
 import sys
 from pathlib import Path
@@ -5271,6 +5272,27 @@ class ResearchManager:
                 f"Could not install the agent skill pack from {self.skills_dir}: {exc}",
             )
             return []
+        # What pack this run actually had. `skills_dir` and `skill_withhold` are arguments
+        # now, so an arm that measures a different pack is a configuration rather than an
+        # edit to somebody's worktree -- but only if the run says which pack it got. The
+        # best-scoring arm on the board at the time of writing exists solely as a dirty
+        # checkout with 41 deleted files and no SHA, and cannot be re-run by anyone.
+        #
+        # The digest is over the installed names, so two runs are comparable without
+        # reconstructing anyone's flags: same digest, same pack.
+        try:
+            config = load_run_config(paths)
+            config["skill_pack"] = {
+                "source": str(self.skills_dir),
+                "installed": len(installed),
+                "withheld_requested": sorted(self.skill_withhold),
+                "digest": hashlib.sha256(
+                    "\n".join(sorted(installed)).encode("utf-8", "replace")
+                ).hexdigest()[:16],
+            }
+            save_run_config(paths, config)
+        except (OSError, TypeError, ValueError):
+            pass
         if installed:
             append_log_entry(
                 paths.logs,
