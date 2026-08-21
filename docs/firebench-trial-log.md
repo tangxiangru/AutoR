@@ -316,6 +316,124 @@ python3 tools/fire_parametric_probe.py --bench-root ~/FIRE-Bench \
 
 ---
 
+## Run 8 — the three skills
+
+35 tasks × 2 arms = 70 cells · deadline **28800 s** · Run 5's limits · `src/skills/` seated
+
+Run 5 with three skills available: `a-ceiling-is-not-a-null`, `both-arms-or-no-claim`,
+`a-conclusion-is-not-a-report`. Each was written from a *failure mechanism* visible in the
+runs rather than from any task's answer, and `tests/test_firebench_skills_do_not_leak.py`
+holds them to that.
+
+| arm | scoreable | Prec. | Recall | F1 |
+|:---|---:|---:|---:|---:|
+| `autor-pipeline` | 35/35 | 27.7 ± 20.3 | 45.3 ± 28.0 | 30.4 ± 22.3 |
+| `autor-direct` | 35/35 | 45.3 ± 30.2 | 57.1 ± 30.6 | 46.2 ± 27.8 |
+
+`autor-direct − autor-pipeline`: 35 complete pairs, median **+10.3 F1**, 23 wins / 8 losses / 4 ties.
+
+Against Run 5, `direct` moves 43.6 → 46.2 and `pipeline` 30.1 → 30.4. Read that as *not
+distinguishable from Run 5 at this sample size* rather than as a small gain: the paired
+per-task spread within one configuration is wide enough (see "Two things about the numbers
+themselves") that a 2.6-point arm mean is inside it.
+
+**The skills only ever reached one arm.** The audit that follows Run 9 found `pipeline`
+loaded 3,981 skills across 34 cells and `direct` loaded **0** across 35 — `install_run_skills`
+was called on the pipeline branch only. So this row is not "AutoR with skills" versus
+"AutoR without"; it is the pipeline with skills against the direct profile with none, and
+the direct arm's 46.2 owes nothing to them.
+
+---
+
+## Run 9 — search off
+
+35 tasks × 2 arms = 70 cells · deadline **28800 s** · Run 5's limits · `--web-search off`
+
+Whether the agents were recovering the papers' findings rather than rediscovering them.
+`--web-search off` declines to seat AutoR's Gemini search server and denies Claude Code's
+own `WebSearch`/`WebFetch`; it is not a general network kill switch, and an agent that
+shells out to `curl` is not stopped by it.
+
+| arm | scoreable | Prec. | Recall | F1 |
+|:---|---:|---:|---:|---:|
+| `autor-pipeline` | 28/35 | 27.4 ± 19.4 | 44.8 ± 31.9 | 29.4 ± 19.9 |
+| `autor-direct` | 28/35 | 38.2 ± 29.2 | 51.4 ± 30.7 | 39.6 ± 28.3 |
+
+Both arms failed to produce a scoreable conclusion on the *same* seven tasks. That is the
+finding, not the means: seven of thirty-five tasks are ones where **both** profiles die
+without search, so the seven are a property of the task, not of the profile. The 29.4/39.6
+are computed over the twenty-eight that survived and are therefore not comparable to Run 5's
+thirty-five — the seven that dropped out are not a random seven.
+
+---
+
+## Run 10 — the paired rerun after the audit
+
+35 tasks × 2 arms = 70 cells · deadline **28800 s** · Run 5's limits · four audit fixes
+
+An audit of Runs 3–9 found four defects that had been live the whole time, and this run is
+the clean-configuration repeat with all four fixed:
+
+1. **The reviewer was never confined.** `strict_mcp` was applied via
+   `getattr(reviewer, "operator")`, and the attribute is `_operator`, so it silently read
+   `None`. Six campaigns ran with an unconfined reviewer; six real `ai4ai-web-search` calls
+   came out of `review_start`. Fixed by threading `strict_mcp` through
+   `ApprovalAgent.__init__`.
+2. **Skills reached one arm only** — 3,981 loads on `pipeline`, 0 on `direct`.
+   `install_run_skills` now runs on both branches.
+3. **`median_draw` returned the max on an even number of samples.** Ten cells were affected.
+   Now lower-middle.
+4. **`OPENAI_BASE_URL=""`** in four campaigns, which sends the SDK to `api.openai.com`
+   instead of the deployment.
+
+| arm | scoreable | Prec. | Recall | F1 |
+|:---|---:|---:|---:|---:|
+| `autor-pipeline` | 35/35 | 28.5 ± 19.0 | 49.6 ± 28.1 | 32.2 ± 20.1 |
+| `autor-direct` | 35/35 | 39.9 ± 25.8 | 57.2 ± 29.0 | 42.4 ± 24.3 |
+
+`autor-direct − autor-pipeline`: 35 complete pairs, median **+7.8 F1**, 20 wins / 12 losses / 3 ties.
+
+This is the run to quote. It is the only campaign in which every cell in both arms scored,
+every known configuration defect is fixed, and the two arms differ in the profile and
+nothing else. The ordering it reports — `direct` ahead of `pipeline` by a median of 7.8
+paired F1 — is the same ordering Runs 5, 8 and 9 reported, at a smaller margin.
+
+---
+
+## Run 11 — an open-weight arm exists (in flight)
+
+35 tasks × 2 arms = 70 cells · **byte-identical plan to Run 10** except the model catalogue
+
+Every arm up to here could call gpt-5.x and Claude 4.5/4.1 and nothing else. Twenty of the
+thirty-five verified tasks ask about a *capability contrast* whose lower arm is an
+open-weight model — usually llama-2-70b. With nothing below the frontier available, the
+only substitution an agent could make **deleted that arm instead of weakening it**, and a
+run that then reports "no effect" is reporting a property of its model list. Several did.
+
+Vertex Model Garden serves three Llamas on this project as a managed API, each verified with
+a live call and each answering in exactly one region:
+
+| model | region |
+|:---|:---|
+| `meta/llama-3.3-70b-instruct-maas` | `us-central1` |
+| `meta/llama-4-scout-17b-16e-instruct-maas` | `us-east5` |
+| `meta/llama-4-maverick-17b-128e-instruct-maas` | `us-east5` |
+
+Llama 2 itself is **not** among them: Model Garden lists it only as a self-deploy entry
+needing a GPU endpoint of your own, so a faithful replication of a paper's original Llama-2
+arm still costs a deployment. `llama-3.3-70b` is the nearest available stand-in and the
+substitution is a real one, not a formality.
+
+Run 11 is Run 10 with `provider="vertex-maas"` added to `available_models()` and rendered
+into the goal contract. The plan file is identical field for field; the catalogue is the
+only difference, which is what makes the pair readable. The prediction under test is
+narrow and falsifiable: **if the papers' effects were vanishing because every arm was
+confined to frontier models, the tasks that name a Llama should move and the other fifteen
+should not.** A uniform move across all thirty-five would refute the mechanism even if the
+mean goes up.
+
+---
+
 ## What may and may not be compared to the paper
 
 FIRE-Bench's Table 3 best row is CC(Sonnet-4) at **52.1 ± 26.1 / 48.3 ± 24.8 / 46.7 ± 23.4**.
