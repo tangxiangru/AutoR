@@ -835,18 +835,19 @@ carry 60.6% of total weight. It gives no credit for process, which makes it a ha
 whose thesis is about process.
 
 40 tasks, one attempt each, Claude Opus executing and reviewing, scored with the benchmark's own
-reference judge `gpt-5.1`. Three comparison agents re-scored from their public runs under the
-identical judge:
+reference judge `gpt-5.1`.
 
-| agent | mean | median | max | tasks scoring 0 |
-|:---|---:|---:|---:|---:|
-| Codex CLI | 19.53 | 17.73 | 48.40 | 2 |
-| ResearchHarness (GPT-5.4) | 15.40 | 10.85 | 45.10 | 1 |
-| ARIS Codex | 15.02 | 12.65 | 46.90 | 2 |
-| **AutoR** | **14.16** | 11.50 | 47.70 | **7** |
+**The four-agent table that stood here was removed on 2026-08-21.** It was scored at
+`MAX_IMAGES = 5` where upstream sends fifteen, on criteria that are 60.6% images, and the
+arms do not ship the same number of figures — so the ordering it reported was a property of
+the instrument. It survives once, in
+[the lab notebook](researchclawbench-arms.md#before-the-control-existed); §6.2 through §6.5
+below are corrections of it and read against that copy. The current answer is
+[the arms table](../README.md#four-later-arms-have-landed-and-they-are-ahead), which puts
+AutoR ahead of the same control by +7.33 over forty pairs.
 
-Last, below the bare Codex CLI it can be configured to run on top of. §2.5 exists because structure
-is not self-justifying; this is that principle applied to the whole system.
+§2.5 exists because structure is not self-justifying; this is that principle applied to the
+whole system.
 
 ### 6.2 What the deficit was made of
 
@@ -1324,7 +1325,7 @@ any.
   machine and the same judge, so the paired deficit is −5.67 ± 1.84 and the scaffold is currently
   net-negative — with the caveat §6.8 now carries, that the AutoR arm ran under an eight-fold
   tighter stage timeout than the control and that 28 of its 40 runs hit it, which puts a confound
-  of about the effect's own size inside that margin. The cross-agent table in §6.1 is the **pre-repair** 14.16 batch and is also
+  of about the effect's own size inside that margin. The cross-agent table §6.1 used to carry — now in [the lab notebook](researchclawbench-arms.md#before-the-control-existed) — is the **pre-repair** 14.16 batch and is also
   **cross-model** — all three comparison agents run GPT-5.4 — so it is not a clean harness
   comparison in either direction; it is **single-attempt** where the public leaderboard aggregates
   the *best* score per (task, agent) pair; and both numbers are `gpt-5.1` numbers, where judge
