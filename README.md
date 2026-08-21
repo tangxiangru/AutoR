@@ -965,9 +965,12 @@ post-repair re-run at **23.57** against a 29.24 control, and the re-score that c
 both. Each was wrong in a way worth knowing about rather than wrong by accident, and the
 notebook keeps each one next to the correction that retired it:
 
-- **The judge was shown a third of the figures it should have been.** Upstream sends the
-  grader `generated_images[:15]`; the local scorer was capped at 5, and arms differ in how
-  many figures they ship, so the cap was not a constant offset.
+- **The judge was shown between 29% and 80% of the figures, depending on the arm.**
+  `gpt51_judge.py` held `MAX_IMAGES = 5` for four days after upstream raised its own cap
+  from five to fifteen (`bfffc48`, 2026-08-14) — a lag behind upstream, not a local
+  deviation from it — and `image_paths[0]` is the target figure, so four workspace slots
+  were left. Arms differ in how many figures they ship, so the clip was not a constant
+  offset: four slots showed the control 67% of its figures and the skills arm 29%.
 - **The arms were not given the same budget.** The AutoR side ran `--stage-timeout 1800`
   and 28 of its 40 runs logged `Stage timed out`; the bare arm had no per-stage cap.
 - **The draw count decides the verdict.** One judge draw against three moves an arm's
