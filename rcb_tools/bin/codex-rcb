@@ -1,0 +1,24 @@
+#!/bin/bash
+# codex, for AutoR's ResearchClawBench runs only.
+#
+# Why a separate binary rather than configuring the machine's codex: ~/.codex belongs to
+# whoever else is using this box (currently set to gpt-5.6-sol), and one config serving two
+# experiments is how both end up on a model neither of them chose. This wrapper points a
+# private CODEX_HOME at the lab Azure endpoint and execs the real codex; nothing outside
+# AutoR's benchmark jobs ever invokes it.
+#
+# The key is read from ~/api.txt at call time and handed over as an environment variable
+# that codex resolves through `env_key`. It is never written into a config file and never
+# appears on a command line, so it cannot leak through `ps` or a job log.
+set -euo pipefail
+KEY_FILE="${RCB_KEY_FILE:-$HOME/api.txt}"
+[[ -r "$KEY_FILE" ]] || { echo "codex-rcb: no key at $KEY_FILE" >&2; exit 78; }
+# Refuse a key other users can read, the same rule the judge applies.
+perms=$(stat -c %a "$KEY_FILE")
+[[ "$perms" == "600" || "$perms" == "400" ]] || {
+  echo "codex-rcb: $KEY_FILE is mode $perms; run chmod 600 $KEY_FILE" >&2; exit 78; }
+
+export CODEX_HOME="$HOME/rcb_tools/codex_rcb_home"
+export LAB_AZURE_API_KEY
+LAB_AZURE_API_KEY="$(<"$KEY_FILE")"
+exec /home/robtang_google_com/.local/bin/codex "$@"

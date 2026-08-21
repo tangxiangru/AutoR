@@ -10,9 +10,11 @@ nothing on the only front-end where effort tiering is unconditionally on.
 It was found by an audit of the documentation, not by a test, which is the wrong way round.
 The scan below is a few lines and would have caught it the day it landed.
 
-The front ends are checked together on purpose. `main.py`, `rcb_agent.py` and `fs_agent.py`
+The front ends are checked together on purpose. `main.py`, `rcb_agent.py` and `fire_agent.py`
 declare overlapping flag sets and have diverged before; a gate that covered only one of them
-would be the same defect written fresh.
+would be the same defect written fresh. The population follows the tree: a front end that
+is deleted comes out of it, which is what happened to a fourth entry when its benchmark was
+removed, and a front end that lands goes in.
 """
 
 from __future__ import annotations
@@ -34,7 +36,7 @@ REPO = Path(__file__).resolve().parent.parent
 KNOWN_UNWIRED: dict[str, set[str]] = {
     "main.py": set(),
     "rcb_agent.py": set(),
-    "fs_agent.py": set(),
+    "fire_agent.py": set(),
 }
 
 

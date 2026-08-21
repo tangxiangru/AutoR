@@ -87,8 +87,18 @@ Paired against the control. `diff` is AutoR − control in benchmark points; the
 | `arm_2ffaeb4` | 08-15 | 38 | 28.65 | **+0.39** | −3.05 … +3.83 | 25–13 | +0.23 |
 | `full40_v220` | 08-15 | 38 | 27.33 | **−0.88** | −4.93 … +3.17 | 20–18 | +0.40 |
 | `full40_head` | 08-17 | 38 | 27.97 | **−0.70** | −4.32 … +2.91 | 22–16 | **−4.94** |
-| `full40_pins` | 08-17 | 36 | 31.91 | **+3.33** | −0.92 … +7.58 | 22–14 | +1.34 † |
-| `full40_skills` | 08-17 | 31 | 34.78 | **+6.47** | **+1.95 … +11.00** | 23–8 | — |
+| `full40_pins` | 08-17 | **40** | **34.47** | **+2.99** | −0.12 … +6.11 | 26–14 | +1.34 † |
+| `full40_skills` | 08-20 | **39** | **36.89** | **+5.29** | **+2.12 … +8.46** | 30–9 | — |
+| `full40_main40` | 08-20 | 35 | 37.23 | **+6.00** | **+1.65 … +10.35** | 27–8 | — |
+| `full40_skills161` | 08-20 | 35 | 38.71 | **+7.82** | **+5.02 … +10.63** | 29–6 | — |
+| `full40_abl40` | 08-20 | 35 | **40.17** | **+9.23** | **+6.13 … +12.34** | 27–8 | — |
+
+The bottom four rows landed on 2026-08-20 and **every one of their intervals excludes zero**.
+`full40_skills`'s row previously read n=31 / 34.78 / +6.47 as a snapshot; it is now complete
+at 39 of 40 and the point estimate fell to +5.29 as the slower tasks arrived, which is the
+direction a snapshot's selection bias predicts. The three arms below it had never appeared in
+this document at all: nothing was scoring them, and they would have finished and been thrown
+away. See [Four arms nobody was scoring](#four-arms-nobody-was-scoring).
 
 The `cap 5` column is computed on the *same* task set as its row's `n`, which it was not
 at first: the four cells read +0.72, +0.36, −4.80 and +1.49 while being paired over 40, 40,
@@ -100,21 +110,29 @@ exists to prevent, and it caught the doc rather than the data.
 † `full40_pins`'s cap-5 cell is n=34, not 36: `Material_000` and `Physics_002` have no
 cap-5 backup at all. No workspace under `full40_skills` has one, hence the em dash.
 
-`full40_pins` (37 of 40 tasks complete) and `full40_skills` (32 of 40) were **still
-running** when this was written. Their rows are snapshots, not results. Those arms hold 44
-and 45 workspace *directories*, which is what the denominator said here before — relaunch
-copies, and for skills five `*_DEAD_launcher_gone` stubs. Counting directories understates
-completion and hides that both arms are pairing against the control's 39 scoreable tasks.
+**`full40_pins` is now complete at 40 of 40** and its row above is a result, not a
+snapshot. Its cap-15 cell moved from the n=36 snapshot (+3.33) to +2.99 over all forty —
+the point estimate barely moved and the interval now sits astride zero, so the arm is
+**not** distinguishable from the control at 95%. The fortieth task took two extra days to
+appear for reasons that had nothing to do with the arm: `Earth_003` finished a 45 KB report,
+then failed a schema check four times at Stage 07 and was killed at its wall, and because a
+killed run never writes a terminal status the scoring driver skipped it while logging only a
+count. See §7.8 of [the routing arm write-up](rcb-skill-routing-arm.md).
 
-As of 2026-08-19 `full40_pins` is at **39 of 40**; only `Earth_003` is still running, on its
-third launch, and the row above has not been re-scored to include the three tasks that
-landed since. It is still a snapshot. What the finished 39 look like under a *second,
-independent* instrument is [its own section below](#three-instruments-over-the-same-39-workspaces),
-and the answer is that the instrument is worth more points than the arm is: on the pass the
-baselines were built with, the arm separates from `arm_2ffaeb4` and still does not separate
-from the control.
+`full40_skills` reached **39 of 40** on 2026-08-20 and its row is a result rather than a
+snapshot. Two sentences here said otherwise for three days — "32 of 40, still running", and
+a separate note that `full40_pins` was at 39 of 40 — and both were left behind by the arms
+they described while the paragraph above them had already been corrected. That arm holds 45
+workspace *directories*, which is what the denominator said here before: relaunch copies,
+plus five `*_DEAD_launcher_gone` stubs. Counting directories overstates the population and
+hides that the arm pairs against a smaller scoreable set.
 
-**`full40_skills` is the first arm whose interval excludes zero.** Before reading it as a
+What the finished arms look like under a *second, independent* instrument is
+[its own section below](#three-instruments-over-the-same-39-workspaces), and the answer is
+that the instrument is worth more points than the arm is.
+
+**`full40_skills` was the first arm whose interval excluded zero**, and four arms have since
+joined it — see [Four arms nobody was scoring](#four-arms-nobody-was-scoring). Before reading it as a
 result, two checks that were run:
 
 - *Selection.* The 8 unscored tasks score 28.39 on the control against 28.31 for the 31
@@ -136,9 +154,76 @@ result, two checks that were run:
 
 ---
 
+## Before the control existed
+
+Moved here from `README.md` on 2026-08-21, because the README had grown three layers of
+superseded arm history and the current result was underneath all of it. These are the two
+measurements that came before the control arm existed. They are not comparable to anything
+in the table above — different judge window, different instrument — and they are kept
+because the corrections above are corrections *of them*.
+
+**The first measurement, 2026-08-06, scored 2026-08-11.** One attempt per task, Opus
+executing and reviewing, `gpt-5.1`. The three comparison agents were re-scored from their
+public runs under that same judge:
+
+| agent | mean | median | max | tasks scoring 0 |
+|:---|---:|---:|---:|---:|
+| Codex CLI | 19.53 | 17.73 | 48.40 | 2 |
+| ResearchHarness (GPT-5.4) | 15.40 | 10.85 | 45.10 | 1 |
+| ARIS Codex | 15.02 | 12.65 | 46.90 | 2 |
+| **AutoR** | **14.16** | 11.50 | 47.70 | **7** |
+
+AutoR was last, below the bare Codex CLI it can be configured to run on top of. Eight of
+the forty runs shipped a 197-byte "incomplete run" stub and the deficit was almost entirely
+those. Three caveats travelled with it and still do: **single-attempt**, where the public
+leaderboard aggregates the best score per (task, agent) pair; **cross-model**, since all
+three comparators run GPT-5.4; and a `gpt-5.1` number. It is also a cap-5 number, so it is
+void for the reason [the measurement fault](#the-measurement-fault-and-why-it-is-first)
+gives — which is why no row above quotes it.
+
+**The re-run, 23.57.** #180 and #181 closed the routes that produced the stubs; re-running
+all forty took the mean to 23.57 and removed six of the seven zeros. The survivor,
+`Information_002`, scored 0.0 on all three criteria with no judge failure — the defect the
+repair did not touch, not an artefact of it. That batch also made the obvious control cheap
+and it had never been run: the same model, same machine, same forty task statements, no
+AutoR. It scored 29.24 against AutoR's 23.57, a paired −5.67 ± 1.84.
+
+Both of those numbers are cap-5 and both are superseded. At three draws and the corrected
+window the same arm is `full40` at **23.07**, −8.40 against the control — the row in the
+table above.
+
+### One task, before and after a targeted fix
+
+Also moved out of `README.md`. Kept because it is the only per-criterion before/after in the
+record, and lost nothing by leaving the front page: forty-task arms with intervals now exist,
+and a single-task delta cannot be read against them. `Astronomy_000`, reference judge
+`gpt-5.1`, before and after the export and figure-budget fixes in #147 / #149 / #153:
+
+| Checklist item | Weight | Before | After |
+| --- | ---: | ---: | ---: |
+| Text: data characterisation | 0.2 | 48 | 38 |
+| Image: exclusion curve | 0.3 | 0 | 48 |
+| Text: coupling limits | 0.5 | 0 | 48 |
+| **Weighted total** | | **9.6** | **46.0** |
+
+**One task out of forty, and not to be extrapolated** — single-draw noise on one task of this
+benchmark is about 8.5 points, so even the 36.4-point move is only about four times the noise
+floor and the two text items move in opposite directions.
+
 ## What was chased and refuted
 
 Kept because a refuted hypothesis is cheaper to read than to re-run.
+
+- **"The bare control had no web search."** Recorded on the evidence of its `WebSearch`
+  calls returning an org-policy 400. Sixteen calls did fail that way — but all 44 of its
+  runs also list `ai4ai-web-search` as a **connected** MCP server, inherited from the
+  user-level config because no arm passes `--strict-mcp-config`, and
+  `mcp__ai4ai-web-search__web_search` was called 12 times and succeeded 12 times across 8
+  tasks. AutoR's 182 successful searches over 32 tasks are a **15× usage gap, not a
+  capability gap**. Handing the bare agent a second search server changes nothing
+  measurable: 17 wins, 17 losses, median Δ 0.00, p = 0.452.
+  *Both* readings — "no search", and the "search parity" that replaced it — came from
+  counting tool **names**. Pair `tool_use` ids to `tool_result` ids and read the body.
 
 - **"AutoR loses by 5 points."** From `full40` and then `full40_head`, both read in
   isolation. Three sister arms did not reproduce it. *A result one arm shows and its
@@ -358,6 +443,58 @@ Two blemishes found while checking, neither load-bearing:
 
 `full40_pins` was still one task short when this was written. `Earth_003` is on its third
 launch and had reached `04_implementation` at 11 h 48 m.
+
+## Four arms nobody was scoring
+
+`full40_skills`, `full40_main40`, `full40_abl40` and `full40_skills161` ran to completion
+with **no scorer attached to any of them**. `pins`, `a9c`, the topology pair and the two
+FIRE-Bench trials each had a watcher; these four had none, and `full40_skills` alone was
+sitting on 36 finished tasks and zero scores on the instrument its baselines were measured
+with. They would have finished and been discarded.
+
+They are scored now, by `score-unscored/score_unscored.py`, at three draws — the same pass
+as the control, for the reason the section above gives.
+
+**The scaffold is ahead of the bare agent it wraps.** Four arms, four intervals excluding
+zero, on the same judge and the same forty tasks. The sentence this document and
+`framework.md` §6.8 have carried for two weeks — that the scaffold is worth less than no
+scaffold — does not survive them and should be retired rather than hedged.
+
+### The pin ablation, which is the one that stings
+
+`full40_abl40` is `full40_main40` with 40 task-scoped skill directories deleted and their
+pins struck. Same commit, same flags, same forty tasks; the skills are the only difference.
+Paired over the 33 tasks both arms finished:
+
+| | mean on the 33 shared | paired difference | 95% CI | W–L |
+|:---|---:|---:|:---|---:|
+| `main40` − `abl40` | 37.38 vs 40.53 | **−3.16 ± 1.48** | **−6.06 … −0.25** | 10–23 |
+
+**The pinned skills are worth negative three points, and the interval excludes zero.** The
+arm in front of every other arm in this file is the one with them removed.
+
+Three things that make the effect *larger* than −3.16 rather than smaller, all of which
+argue against reading this as noise:
+
+- **The manipulation is not uniform.** The struck pins fall on a minority of the forty
+  tasks and the rest lose nothing, so a 40-task mean dilutes whatever happened on the
+  tasks that actually changed. −3.16 is the diluted number.
+- **Both arms are ahead of the control.** +6.00 and +9.23. This is not a scaffold-versus-
+  nothing result, it is a within-scaffold result, and the two arms share every other
+  source of variance the pairing does not already cancel.
+- **The loss count carries it, not one collapse.** 23 of 33 tasks, not a handful of
+  outliers dragging a mean.
+
+What it does not license:
+
+- **It is 33 pairs.** That resolves about 3 points at 80% power and the effect is about
+  that size, so the sign is better supported than the magnitude.
+- **Each arm is 35 of 40**, so each is selected on its own completions, and the two arms
+  are missing *different* tasks — `main40` lacks `Information_003` and `Physics_000`,
+  `abl40` lacks `Astronomy_001` and `Energy_000`. The 33-task intersection is what the
+  pairing is over; neither arm's own 35-task mean is comparable to the other's.
+- **It does not say which skills.** Forty directories were struck together. Attributing
+  the −3.16 to any one of them needs an arm that strikes one of them.
 
 ## Reproducing the table
 

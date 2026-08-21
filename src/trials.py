@@ -220,26 +220,6 @@ RCB_TOTAL = Outcome(
     selected_on_by=frozenset(),
 )
 
-#: FrontierScience-Research, filled by :mod:`src.fs_trial`. ``selected_on_by`` is empty
-#: and that is a claim with a guard behind it: the score comes from a judge that runs
-#: after the answer is finished, against a rubric no stage was shown; the prompt the
-#: agent sees is frozen by ``task_instruction_sha256`` in the plan digest and a test
-#: refuses any scoring-function language in it. ``--answer-guidance coverage`` tells the
-#: agent the rubric's *shape*, so a capability whose mechanism is "raise the coverage
-#: hint" belongs in this set and the circularity refusal would then fire.
-#:
-#: The unit is the rubric's own scale and not a percentage. Every FrontierScience rubric
-#: sums to 10.0 points, so a difference here is in points out of ten and a reader who
-#: takes it for a percentage is out by an order of magnitude in the direction that
-#: flatters: +0.5 points is a tenth of the observed across-task spread, and "+0.5%" is
-#: nothing.
-FS_TOTAL = Outcome(
-    key="fs_research_total",
-    unit="FrontierScience rubric points (0-10)",
-    measured_by="a gpt-5.1 judge, after the run, against the task's published rubric",
-    selected_on_by=frozenset(),
-)
-
 #: Every measure a trial may declare, by key. A registry and not a free-form string
 #: for the same reason ``stage_graph.GUARDS`` is one: the failure mode of an outcome
 #: nothing recognises is silence. ``circular`` would read an empty ``selected_on_by``,
@@ -247,7 +227,7 @@ FS_TOTAL = Outcome(
 #: keyword argument at one call site. Adding a measure means adding it here, where the
 #: claim that nothing selects on it is written down next to it.
 DECLARED_OUTCOMES: Mapping[str, Outcome] = {
-    outcome.key: outcome for outcome in (RUBRIC_TOTAL, RCB_TOTAL, FS_TOTAL)
+    outcome.key: outcome for outcome in (RUBRIC_TOTAL, RCB_TOTAL)
 }
 
 

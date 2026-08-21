@@ -233,7 +233,10 @@ class SeamTests(unittest.TestCase):
         ``src/trial_driver.py`` is in the population because the fence has to cover the
         seam, not the file it was written against. The kernel is imported by every
         driver, so an archive write added there would reach every benchmark at once --
-        and FrontierScience's totals are 0-10, a third unit in the same bucket.
+        and every driver brings its own unit. It was written when a third one, since
+        removed, carried totals on a 0-10 scale; ``tools/fire_trial.py`` is the live
+        case and the harder one, because an F1 lands on [0, 1], the same numbers a
+        rubric mean uses and not the same quantity.
         """
         for name in ("src/rcb_trial.py", "tools/rcb_trial.py", "src/trial_driver.py"):
             body = (REPO_ROOT / name).read_text(encoding="utf-8")

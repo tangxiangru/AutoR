@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime
+import hashlib
 import shutil
 import sys
 from pathlib import Path
@@ -119,7 +120,7 @@ from .run_skills import (
     read_skill_pack,
     validate_task_pins,
 )
-from .skill_evolution import install_learned_skill
+from .skill_evolution import install_learned_skill, pool_fingerprint
 from .manifest import (
     ensure_run_manifest,
     format_manifest_status,
@@ -5251,6 +5252,19 @@ class ResearchManager:
                     learned = ""
                 if learned:
                     installed.append(learned)
+                    # The pool lives outside every worktree, so two arms of an ablation
+                    # pinned to different commits still read this same file -- and it is
+                    # rewritten, twelve notes per field with the oldest evicted, while they
+                    # run. Nothing recorded which twelve a given run saw, so a paired
+                    # comparison could only assume the channel was constant. Record the
+                    # digest and it can be checked, and the pairs where it was not can be
+                    # dropped instead of quietly averaged in.
+                    try:
+                        config = load_run_config(paths)
+                        config["learned_pool"] = pool_fingerprint(self.skill_discipline)
+                        save_run_config(paths, config)
+                    except (OSError, TypeError, ValueError):
+                        pass
         except OSError as exc:
             append_log_entry(
                 paths.logs,
@@ -5258,6 +5272,27 @@ class ResearchManager:
                 f"Could not install the agent skill pack from {self.skills_dir}: {exc}",
             )
             return []
+        # What pack this run actually had. `skills_dir` and `skill_withhold` are arguments
+        # now, so an arm that measures a different pack is a configuration rather than an
+        # edit to somebody's worktree -- but only if the run says which pack it got. The
+        # best-scoring arm on the board at the time of writing exists solely as a dirty
+        # checkout with 41 deleted files and no SHA, and cannot be re-run by anyone.
+        #
+        # The digest is over the installed names, so two runs are comparable without
+        # reconstructing anyone's flags: same digest, same pack.
+        try:
+            config = load_run_config(paths)
+            config["skill_pack"] = {
+                "source": str(self.skills_dir),
+                "installed": len(installed),
+                "withheld_requested": sorted(self.skill_withhold),
+                "digest": hashlib.sha256(
+                    "\n".join(sorted(installed)).encode("utf-8", "replace")
+                ).hexdigest()[:16],
+            }
+            save_run_config(paths, config)
+        except (OSError, TypeError, ValueError):
+            pass
         if installed:
             append_log_entry(
                 paths.logs,

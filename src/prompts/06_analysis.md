@@ -58,7 +58,7 @@ Write `{{WORKSPACE_RESULTS_DIR}}/hypothesis_outcomes.json`:
       "statistics": {
         "n_seeds": 5,
         "dispersion": 0.012,
-        "dispersion_type": "std | stderr | ci95 | iqr | range | none",
+        "dispersion_type": "std | stderr | ci95 | iqr | range | var | mad | none, optionally followed by what the spread is of",
         "single_run_justification": "only when n_seeds is 1"
       }
     }
@@ -84,7 +84,9 @@ Rules:
   the mean looks.
 - `supported` and `refuted` require at least one `evidence` path that exists in the run.
 - `supported` and `refuted` also require a `statistics` block: how many runs the verdict
-  rests on, and how the spread was measured. `dispersion_type` must name the measure —
+  rests on, and how the spread was measured. `dispersion_type` must *start* with the
+  measure and may then say what the spread is of — `range of the skillful lead time
+  across the three cascades` is better than a bare `range`, and both are accepted —
   an interval whose meaning is unstated cannot be read, and every venue asks.
 - A verdict from a single run is refused unless `single_run_justification` says why one
   run settles it. A deterministic procedure is a legitimate reason; it is a claim worth

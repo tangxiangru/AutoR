@@ -158,7 +158,7 @@ The settings the run was started with, so a resume reproduces them.
 | `evolve_rounds` | Improvement rounds per stage; `2` by default, `0` measures without polishing. |
 | `archive_steer` | Whether the cross-run archive may choose this run's topology, as opposed to only recording what it did. `false` by default. |
 | `web_search` | `auto`, `gemini`, `native`, or `off`. The mode, not the resolved backend. Absent in runs created before it existed, and read as `auto`. |
-| `min_report_figures` | Distinct rendered figures `workspace/report/images/` must hold before Stage 07 can be approved in `markdown` mode. `MIN_REPORT_FIGURES` = 1 for an ordinary run; `rcb_agent.py` sets `BENCHMARK_MIN_REPORT_FIGURES` = 3. `resolve_min_report_figures` clamps whatever it reads into `[1, MAX_REPORT_FIGURES]`, so a value of `0`, `99` or `"three"` becomes 1, 5 and 1 respectively rather than failing the run. Read as a hard gate by `validate_markdown_report`. |
+| `min_report_figures` | Distinct rendered figures `workspace/report/images/` must hold before Stage 07 can be approved in `markdown` mode. `MIN_REPORT_FIGURES` = 1 for an ordinary run; `rcb_agent.py` defaults it to `BENCHMARK_MIN_REPORT_FIGURES` = 3 and `--min-report-figures` overrides that. `resolve_min_report_figures` clamps whatever it reads into `[1, MAX_REPORT_FIGURES]`, so a value of `0`, `99` or `"three"` becomes 1, 15 and 1 respectively rather than failing the run. Read as a hard gate by `validate_markdown_report`. |
 | `created_at` | ISO-8601 to the second. Preserved across rewrites. |
 
 A missing or corrupt file falls back to defaults rather than failing the run.
@@ -1376,9 +1376,12 @@ Stage 06's verdict on every preregistered hypothesis.
   `exploratory_findings`, never in `outcomes`.
 
 - A `supported` or `refuted` verdict needs a `statistics` block naming how many
-  runs it rests on and how the spread was measured. `dispersion_type` is one of
-  `std`, `stderr`, `ci95`, `iqr`, `range`, `none` — an interval whose meaning is
-  unstated cannot be read. A verdict from a single run is refused unless
+  runs it rests on and how the spread was measured. `dispersion_type` *starts* with
+  one of `std`, `stderr`, `ci95`, `iqr`, `range`, `var`, `mad`, `none` — an interval
+  whose meaning is unstated cannot be read — and may then say what the spread is of,
+  as in `range of the skillful lead time across the three cascades`. A common
+  spelling of a measure is read as that measure, so `standard deviation`, `variance`
+  and `median absolute deviation` are all accepted. A verdict from a single run is refused unless
   `single_run_justification` says why one run settles it.
 - `inconclusive` and `not_tested` are exempt: they are the honest verdicts when
   the evidence is thin, and requiring statistics for them would push a run

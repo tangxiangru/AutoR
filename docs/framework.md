@@ -491,7 +491,7 @@ The chain that runs unconditionally at every rigor level, `fast` included:
 | Every attempt from 05 | A frozen file that disagrees with the stamp, or is missing, is written back from AutoR's copy rather than re-derived | `freeze_preregistration` |
 | Stage 05+ | A protocol declares a primary metric, planned seeds, and per-baseline `why_competent` + `tuning_budget` | `validate_experimental_protocol` |
 | Stage 06+ | Exactly one verdict per frozen hypothesis, nothing unpreregistered adjudicated, every `supported`/`refuted` verdict citing an evidence file that exists | `validate_hypothesis_outcomes` |
-| Stage 06+ | A verdict carries `n_seeds`, a `dispersion_type` from a fixed vocabulary, and a written justification if a single seed settled it | `validate_outcome_statistics` |
+| Stage 06+ | A verdict carries `n_seeds`, a `dispersion_type` that starts with a known measure and may then gloss it, and a written justification if a single seed settled it | `validate_outcome_statistics` |
 | Stage 06 close | `converged` is refused when nothing came out supported, unless the round declares `negative_result: true` | `validate_round_decision` |
 | Stage 06→07 edge | The move into Writing is taken off the agent's menu until every empirical id has a verdict and a figure exists — a routing preference, not the gate; see below | `_guard_validity_chain` |
 | Stage 07+ | Every manuscript claim is `confirmatory` on a `supported` hypothesis, or labelled `exploratory` — and cites a file that exists | `validate_claim_provenance` |
@@ -602,7 +602,6 @@ An explicit `--flag`/`--no-flag` always beats the level. The validity chain is n
 | [`archive.py`](../src/archive.py) | Cross-run routes and edge payoffs keyed on a comparability basis; variant proposal, exploration and conservative promotion. |
 | [`decisions.py`](../src/decisions.py) | "Was offered this edge and declined" — the control arm the payoffs are computed against. |
 | [`trials.py`](../src/trials.py) | Paired A/B trials over archived runs. |
-| [`fs_trial.py`](../src/fs_trial.py) | The FrontierScience paired trial, where an arm is an answer producer rather than a commit: ten admission clauses that each refuse a *pair*, an environment digest observed off the artifacts, the byte-identical-row fold, and a refusal rate above which no difference is published. |
 | [`trial_driver.py`](../src/trial_driver.py) | The benchmark-agnostic half of both trial drivers: the lock and its three-condition liveness test, the `/proc` census that separates running an agent from mentioning one, atomic state writes, and a process-group kill. |
 | [`inference.py`](../src/inference.py) | Exact permutation tests and attainable-p floors; derives the archive's `min_observations` from the family size rather than asserting it. |
 
@@ -622,8 +621,7 @@ An explicit `--flag`/`--no-flag` always beats the level. The validity chain is n
 | --- | --- |
 | [`platform/foundry.py`](../src/platform/foundry.py) | The LaTeX paper package and the Stage 08 release bundle. |
 | [`rcb.py`](../src/rcb.py) · [`rcb_agent.py`](../rcb_agent.py) | The ResearchClawBench adapter: workspace layout, goal construction, report selection, figure publication, export. |
-| [`frontierscience.py`](../src/frontierscience.py) · [`fs_agent.py`](../fs_agent.py) | The FrontierScience-Research adapter: the pinned dataset and its strict rubric grammar, the three-block prompt contract with the fenced question first, the `direct` and `ideate` profiles, the four ranked answer sources, and an exit code computed from the metadata rather than claimed beside it. |
-| [`fs_scoring.py`](../src/fs_scoring.py) | The paper's judge prompt verbatim, the verdict grammar, and the rules that decide whether a draw is a measurement at all. A failed draw is refused, never recorded as a zero. |
+| [`bench_call.py`](../src/bench_call.py) | The seam a benchmark front end makes one operator call through, and what it reads back: one wrapper over the invocation `rcb.py` already uses, so the MCP config and the denied-tool list get no third copy, and a transcript witness whose unobserved fields are `None` rather than zero, so a run with no evidence cannot pass an admission clause that counts browsing calls. |
 | [`studio_service.py`](../src/studio_service.py) · [`backend/`](../src/backend) · [`frontend/`](../src/frontend) | The local browser workspace over the same run directories. |
 | [`terminal_ui.py`](../src/terminal_ui.py) | The terminal-first interaction layer. |
 
@@ -1113,6 +1111,30 @@ this document is:
 > demonstrated that the topology helps.
 
 ### 6.8 The scaffold is currently worth less than no scaffold
+
+> **Retired on 2026-08-20. The heading is kept because three documents link to this anchor;
+> the conclusion under it is not supported any more.** Four later arms — `full40_skills`,
+> `full40_main40`, `full40_skills161` and `full40_abl40` — score 36.89, 37.23, 38.71 and
+> **40.17** against the control's 31.48 on the same judge and the same forty tasks, paired
+> at +5.29, +6.00, +7.82 and +9.23, and **all four 95% intervals exclude zero**. The
+> scaffold is ahead of the bare agent it wraps. What follows is the state of the question
+> in mid-August and the reasoning that was correct for the arms then on disk; read it as
+> history, and read
+> [the lab notebook](researchclawbench-arms.md#four-arms-nobody-was-scoring) for where it
+> landed.
+>
+> **A fifth arm closes the hole in those four.** Each of them is 35–39 of 40 and therefore a
+> subset selected on its own completions, which is the objection this reversal was most
+> vulnerable to. `full40_a9c2b48` has finished all forty: **38.80, paired +7.33 ± 1.53 over
+> 40 tasks with nothing dropped, winning 30**. The selection worry was not idle — at 33 of 40
+> that arm's unfinished seven were ones the control did *well* on (33.90 against 27.11), and
+> assuming the worst for them would have read +0.72. Completing them moved it to +7.33.
+>
+> One sting survives the reversal: the arm in front is `full40_abl40`, which is
+> `full40_main40` with its forty pinned task-scoped skills **deleted**, and the pins are
+> worth −3.16 ± 1.48 paired over 33 tasks. Four ablations launched on 2026-08-20 —
+> `xrev`, `pins`, `opcalls`, and the topology pair — are the follow-up, and none of them
+> reports yet.
 
 The repairs of §6.5 worked, in the sense that they were aimed at: the floor came up from 14.16 to
 **23.57**, and six of the seven zeros went away — every one of the forty runs now ships a report

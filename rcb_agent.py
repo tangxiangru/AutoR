@@ -22,12 +22,14 @@ Nothing here ever reads stdin. Any prompt that would block raises
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import signal
 import sys
 import time
 import traceback
 from pathlib import Path
-from typing import Sequence
+from typing import Iterator, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parent
 if str(REPO_ROOT) not in sys.path:
@@ -380,6 +382,31 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Use the fake operator instead of a real backend. For smoke-testing the adapter.",
     )
     parser.add_argument(
+        "--min-report-figures",
+        type=int,
+        default=None,
+        help=f"Distinct figures report/images/ must hold before Stage 07 can be approved. "
+             f"Defaults to {BENCHMARK_MIN_REPORT_FIGURES}. Clamped to [1, MAX_REPORT_FIGURES]. "
+             "The judge is shown a fixed set of the first MAX_REPORT_FIGURES images, and most "
+             "runs stop well under it, so this is the knob for an arm that tests whether "
+             "filling the window is worth anything.",
+    )
+    parser.add_argument(
+        "--skills-dir",
+        default=None,
+        help="Directory to load the agent skill pack from, instead of <repo>/src/skills. "
+             "For arms that measure a different pack: the pack becomes an argument the "
+             "artifact records rather than an edit to a worktree nobody can pin.",
+    )
+    parser.add_argument(
+        "--withhold-skills",
+        default=None,
+        help="Skills this run is denied whatever the field filter, the predicates or the pin "
+             "table say. A comma-separated list of names, or @PATH to read one name per line "
+             "(blank lines and # comments ignored). This is the control arm of any experiment "
+             "about skills.",
+    )
+    parser.add_argument(
         "--export-only",
         action="store_true",
         help="Skip the pipeline and only re-export the most recent run in the workspace into "
@@ -636,7 +663,14 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
         # and validation/comparison plots" -- three distinct questions -- and 27 of its 40
         # tasks carry two or more image criteria. A one-figure report clears AutoR's ordinary
         # gate while forfeiting criteria it never addressed.
-        min_report_figures=BENCHMARK_MIN_REPORT_FIGURES,
+        # Measured over 541 scored runs, with task and arm fixed effects, a published figure
+        # is worth about +0.79 benchmark points -- and 423 of those runs published fewer than
+        # the MAX_REPORT_FIGURES the judge is handed, median twelve. The slope is partly a
+        # proxy for run quality (the image-criterion slope is +0.72 against +0.41 on text),
+        # so it is an upper bound and not a promise. It is still the largest effect anyone
+        # has measured here, which is why the floor is now an argument: an arm can raise it
+        # and find out, and `run_config.json` records which arm did.
+        min_report_figures=benchmark_figure_floor(args.min_report_figures),
         cross_reviewer=resolve_cross_reviewer(args.cross_review, args.cross_review_model),
         # `StageGraph.named` rather than `main.py`'s `resolve_graph`, which additionally
         # lets the cross-run archive pick a topology. A benchmark arm must be the
@@ -717,24 +751,34 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
     # derived from the task statement; a pin is derived from a previous run's score, so
     # it needs the name of the task that produced it. `configs/task_skill_pins.json`.
     manager.skill_task_id = _task_id or None
+    # The pack itself, as an argument. Until this existed the only way to measure a
+    # different pack was to delete files in a worktree, which is how the best-scoring arm
+    # on the board came to exist as a dirty checkout with no SHA that nobody can re-run.
+    if args.skills_dir:
+        skills_dir = Path(args.skills_dir).expanduser()
+        if not skills_dir.is_dir():
+            raise SystemExit(f"--skills-dir: not a directory: {skills_dir}")
+        manager.skills_dir = skills_dir
+    manager.skill_withhold = read_withheld_skills(args.withhold_skills)
 
     pipeline_completed = False
     aborted_with = ""
-    try:
-        pipeline_completed = manager.run(
-            goal,
-            venue=resolve_venue_key(args.venue),
-            skip_intake=not args.intake,
-            output_format=output_format,
-            resources=collect_reference_resources(workspace) or None,
-            final_stage=resolve_stage(args.final_stage),
-        )
-    except Exception as exc:  # noqa: BLE001 - a crashed pipeline must still export what it produced
-        # Exporting the salvage is right. Reporting the salvage as a finished run is not,
-        # and that is what happened until this line existed: the exception was recorded in
-        # `_agent_output.jsonl` and nowhere a downstream reader looks.
-        aborted_with = f"{type(exc).__name__}: {exc}"[:500]
-        emit_event({"type": "error", "where": "pipeline", "traceback": traceback.format_exc()})
+    with _sigterm_as_exception():
+        try:
+            pipeline_completed = manager.run(
+                goal,
+                venue=resolve_venue_key(args.venue),
+                skip_intake=not args.intake,
+                output_format=output_format,
+                resources=collect_reference_resources(workspace) or None,
+                final_stage=resolve_stage(args.final_stage),
+            )
+        except Exception as exc:  # noqa: BLE001 - a crashed pipeline must still export what it produced
+            # Exporting the salvage is right. Reporting the salvage as a finished run is
+            # not, and that is what happened until this line existed: the exception was
+            # recorded in `_agent_output.jsonl` and nowhere a downstream reader looks.
+            aborted_with = f"{type(exc).__name__}: {exc}"[:500]
+            emit_event({"type": "error", "where": "pipeline", "traceback": traceback.format_exc()})
 
     paths = build_run_paths_for_workspace(workspace)
     if paths is None:
@@ -784,6 +828,97 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
         },
     )
     return result
+
+
+class Terminated(Exception):
+    """The scheduler asked this run to stop.
+
+    Raised out of a ``SIGTERM`` handler so a kill takes the same path a crash already
+    takes: export whatever the run produced, record ``aborted``, write ``_meta.json``.
+    An ordinary :class:`Exception`, deliberately -- the point is to be caught by the
+    handler that already exists around :meth:`Manager.run`.
+    """
+
+
+@contextlib.contextmanager
+def _sigterm_as_exception() -> Iterator[None]:
+    """Make a scheduler kill produce a verdict instead of silence.
+
+    A run that is killed never writes a terminal status, so ``_meta.json`` keeps the
+    ``running`` the harness wrote at launch -- forever, since nothing revisits it. Both
+    readers gate on that field: ``run_arm.py`` will not resume the task and the scoring
+    driver will not score it. The workspace is then indistinguishable from one still in
+    flight, and the arm silently loses a task rather than reporting a failed one.
+
+    It cost a real measurement. On the `full40_pins` arm, Earth_003 hit its 40 h wall
+    during Stage 07 holding a finished 45 KB report and eleven figures. The scoring pass
+    logged ``scoreable workspaces: 39`` and named nothing it had dropped; the arm was
+    written up at n=39 for two days with the fortieth deliverable complete on disk.
+
+    Slurm sends ``SIGTERM`` and waits ``KillWait`` (30 s by default) before ``SIGKILL``,
+    which is enough to export a report that has already been written. If it is not, the
+    export is partial and the status still says what happened -- both better than a
+    workspace that claims to be running.
+
+    Restores the previous handler on the way out, and does nothing at all off the main
+    thread, where :func:`signal.signal` is not available.
+    """
+    def _raise(signum: int, _frame: object) -> None:
+        raise Terminated(f"signal {signum} (SIGTERM); the scheduler ended this run")
+
+    try:
+        previous = signal.signal(signal.SIGTERM, _raise)
+    except ValueError:  # not the main thread; nothing to install
+        yield
+        return
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
+
+
+def benchmark_figure_floor(requested: int | None) -> int:
+    """The figure floor a benchmark run gets, given what the caller asked for.
+
+    Unasked, a benchmark run keeps :data:`BENCHMARK_MIN_REPORT_FIGURES` rather than AutoR's
+    ordinary floor of one: the benchmark's own instructions ask every agent for "data
+    overview, main results, and validation/comparison plots", and 27 of its 40 tasks carry
+    two or more image criteria, so a one-figure report clears the ordinary gate while
+    forfeiting criteria it never addressed.
+
+    A caller may raise it. `resolve_min_report_figures` clamps the result into
+    ``[1, MAX_REPORT_FIGURES]`` downstream, so a value past the window the judge sees cannot
+    turn the gate into busywork.
+    """
+    return BENCHMARK_MIN_REPORT_FIGURES if requested is None else requested
+
+
+def read_withheld_skills(spec: str | None) -> frozenset[str]:
+    """The skills this run is denied, from a comma list or ``@file``.
+
+    A file, because the useful ablation names forty-odd skills and a command line that long
+    stops being readable in `_meta.json` -- which is where anyone later reconstructs what an
+    arm actually ran. Blank lines and `#` comments are allowed so the file can say why.
+
+    Unknown names are not an error here. `install_run_skills` applies the set by exclusion,
+    so a name matching nothing withholds nothing, and the run config records the set that
+    was asked for beside the pack digest that resulted -- which is the pair a reader needs
+    to tell "withheld nothing" from "asked for nothing".
+    """
+    if not spec:
+        return frozenset()
+    text = spec.strip()
+    if text.startswith("@"):
+        try:
+            raw = Path(text[1:]).expanduser().read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            raise SystemExit(f"--withhold-skills: cannot read {text[1:]}: {exc}") from exc
+        names = [line.split("#", 1)[0].strip() for line in raw.splitlines()]
+    else:
+        names = [part.strip() for part in text.split(",")]
+    return frozenset(n for n in names if n)
 
 
 def main(argv: list[str] | None = None) -> int:

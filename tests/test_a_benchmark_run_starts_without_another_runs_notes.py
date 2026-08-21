@@ -1,27 +1,48 @@
 """Claude Code's memory store is keyed on an ancestor directory, so runs share it.
 
 The store is not per-run and not per-workspace. Probed against the real binary (2.1.229) on
-this box, a session whose cwd was `/rmeng_data/robtang/memprobe` and a benchmark stage whose
-cwd was `/rmeng_data/robtang/fs-trial-skills/workspaces/fs024_direct-opus_.../.autor/<ts>`
-both reported the same `memory_paths.auto`:
+this box, a session whose cwd was `/rmeng_data/robtang/memprobe` -- one directory down -- and a
+benchmark stage whose cwd was five directories down, a per-task workspace's `.autor/<timestamp>`
+directory, both reported the same `memory_paths.auto`:
 
     /home/robtang_google_com/.claude/projects/-rmeng-data-robtang/memory/
 
+The four levels between them are the measurement: the key is an *ancestor* of the cwd, so no
+amount of nesting under one results directory separates two runs.
+
 Every run under one results directory therefore reads and writes one store, whose `MEMORY.md`
 index is loaded into each agent's context at session start. That is a channel between the
-runs of a benchmark, and on the sixty-task FrontierScience trial it carried traffic: the two
-most-read files in a 1,456-file store were notes an earlier run had written about this
-harness's own exit clauses -- `fs-ideate-write-answer-md-yourself-to-preempt-synthesis` at 92
-reads and `an-existing-answer-md-outranks-the-synthesizer` at 56 -- and in the chemistry block
-the read was the *first* tool call of the run, in both arms, before the agent had looked at
-the problem. It is asymmetric, too: 32 of 37 pipeline runs reached the store against 8 of 37
-direct ones, so it does not cancel out of a paired comparison.
+runs of a benchmark, and on the sixty-task trial of 2026-08-19 -- run against a benchmark
+since removed from this repository, which does not unmake the measurement -- it carried
+traffic: the two most-read files in a 1,456-file store were notes an earlier run had written
+about how that harness chose the answer it published -- `fs-ideate-write-answer-md-yourself-to-preempt-synthesis`
+at 92 reads and `an-existing-answer-md-outranks-the-synthesizer` at 56 -- and in the chemistry
+block the read was the *first* tool call of the run, in both arms, before the agent had looked
+at the problem.
+
+Those two notes have since been deleted from that store, because what they described is a code
+path that no longer exists and an agent following them today would act on nothing. **The store
+itself is untouched and still shared**, which is the fact this file is about: it belongs to
+Claude Code, it outlives any one benchmark, and the next set of runs under one results
+directory will pool their notes in it exactly as these did.
+It is asymmetric, too: 32 of 37 pipeline runs reached the store against 8 of 37 direct ones,
+so it does not cancel out of a paired comparison.
 
 **The default stays off, and the control for that is a test here.** AutoR's ordinary use is a
 researcher's own project, where carrying notes between sessions is the feature working; only
-a measurement needs every run to start from the same state. So the isolation is opt-in, the
-FrontierScience front end opts in, and nothing else changes -- including the sibling
-benchmarks that were mid-flight when this landed.
+a measurement needs every run to start from the same state. So the isolation is opt-in: a
+benchmark front end that needs it asks for it, and nothing else changes -- including the
+sibling benchmarks that were mid-flight when this landed.
+
+The front-end half of this file went with that benchmark. Two classes used to live below --
+one asserting that its front end asked for isolation, one asserting that its `_meta.json`
+recorded the answer as a tri-state where `None` means "never asked" -- and both were about
+code that has been deleted, so they were removed with it. What is left, `TheFlagTests`, is
+the guard on `ClaudeOperator(isolate_auto_memory=...)` itself. Nothing in the tree passes it
+today -- the front end that did was the deleted one -- so this file is now the only thing
+holding the flag correct, and the measurement above is the only recorded reason it exists.
+Both are here so the next paired trial can ask for isolation rather than rediscover why it
+needs to.
 """
 
 from __future__ import annotations
@@ -35,7 +56,6 @@ REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from src.frontierscience import FS_SOURCE_AGENT, FsAnswer, build_fs_meta  # noqa: E402
 from src.operator import ClaudeOperator  # noqa: E402
 
 SETTINGS_FLAG = "--settings"
@@ -132,90 +152,6 @@ class TheFlagTests(unittest.TestCase):
         self.assertEqual(settings_payloads(command), [{"autoMemoryEnabled": False}])
         self.assertIn("--resume", command)
         self.assertIn("--mcp-config", command)
-
-
-class WhatTheFrontEndAsksForTests(unittest.TestCase):
-    def operator_for(self, backend: str):
-        from fs_agent import create_operator
-
-        return create_operator(
-            backend=backend, model="opus", fake_mode=True, ui=None, stage_timeout=60,
-            disallowed_tools=["WebSearch"], codex_sandbox="danger-full-access",
-            codex_command="codex",
-        )
-
-    def test_the_frontierscience_front_end_isolates(self) -> None:
-        self.assertIs(self.operator_for("claude").isolate_auto_memory, True)
-
-    def test_a_claude_seat_reports_what_it_did(self) -> None:
-        from fs_agent import auto_memory_isolation_for
-
-        operator = self.operator_for("claude")
-        self.assertIs(auto_memory_isolation_for(operator, "claude"), True)
-        operator.isolate_auto_memory = False
-        self.assertIs(auto_memory_isolation_for(operator, "claude"), False)
-
-    def test_a_codex_seat_claims_nothing(self) -> None:
-        """It never starts Claude Code, so the store is not a fact about it either way.
-
-        The trap this pins: `CodexOperator` subclasses `ClaudeOperator`, so it *inherits*
-        the attribute and a plain read returns `False` -- a codex run would record "the
-        memory store was reachable" about a binary it never ran. The assertion on the
-        inherited attribute is here so the test states why the branch exists rather than
-        looking like a redundant null check somebody could delete.
-        """
-        from fs_agent import auto_memory_isolation_for
-
-        operator = self.operator_for("codex")
-        self.assertIs(operator.isolate_auto_memory, False)
-        self.assertIsNone(auto_memory_isolation_for(operator, "codex"))
-
-    def test_an_operator_without_the_attribute_is_not_an_exception(self) -> None:
-        from fs_agent import auto_memory_isolation_for
-
-        self.assertIs(auto_memory_isolation_for(object(), "claude"), False)
-
-
-class WhatTheRecordSaysTests(unittest.TestCase):
-    """Tri-state, because "not isolated" and "not recorded" are different facts."""
-
-    def meta(self, **kwargs) -> dict:
-        return build_fs_meta(
-            workspace=Path("/tmp/ws"), task="fs:000", profile="direct",
-            answer_guidance="minimal", model="opus", review_model="opus",
-            operator="claude", pipeline_completed=True,
-            answer=FsAnswer(
-                path=Path("/tmp/ws/answer.md"), source=FS_SOURCE_AGENT,
-                chars=900, sha256="0" * 64, refusals=[],
-            ),
-            auto_skipped_stages=[], stages_approved=[], disallowed_tools=[],
-            dataset_path=None, dataset_sha256="d", run_id="r", duration_seconds=1,
-            **kwargs,
-        )
-
-    def test_true_is_recorded(self) -> None:
-        self.assertIs(self.meta(auto_memory_isolated=True)["auto_memory_isolated"], True)
-
-    def test_false_is_recorded(self) -> None:
-        self.assertIs(self.meta(auto_memory_isolated=False)["auto_memory_isolated"], False)
-
-    def test_a_record_that_was_never_asked_says_so(self) -> None:
-        """`None`, not `False`. The sixty-task trials on disk are exactly this case.
-
-        They ran with the store open and no field to say so. Defaulting the omission to
-        `False` would assert a measurement nobody made; defaulting it to `True` would let
-        them claim an isolation they did not have. The field is present either way, so a
-        reader gets `null` rather than a `KeyError` they might paper over.
-        """
-        payload = self.meta()
-        self.assertIn("auto_memory_isolated", payload)
-        self.assertIsNone(payload["auto_memory_isolated"])
-
-    def test_the_field_survives_a_round_trip(self) -> None:
-        self.assertIs(
-            json.loads(json.dumps(self.meta(auto_memory_isolated=True)))["auto_memory_isolated"],
-            True,
-        )
 
 
 if __name__ == "__main__":

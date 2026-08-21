@@ -265,7 +265,7 @@ listed separately, but they fail a stage exactly the same way.
 | **05+** | A frozen preregistration exists, holds at least one empirical hypothesis, every one carries a `decision_rule`, and the manifest has not silently changed under it. | `validate_preregistration` |
 | **05+** | An experimental protocol declares a primary metric, planned seeds, and per-baseline `why_competent` and `tuning_budget`. | `validate_experimental_protocol` |
 | **06+** | Exactly one verdict per frozen hypothesis, nothing unpreregistered adjudicated, and every `supported`/`refuted` verdict citing an evidence file that exists. | `validate_hypothesis_outcomes` |
-| **06+** | Each `supported` or `refuted` verdict carries `statistics.n_seeds`, a `dispersion_type` from a fixed vocabulary, and a written justification when a single run settled it (`MIN_SEEDS_FOR_A_VERDICT` is 2). `inconclusive` and `not_tested` are exempt on purpose. | `validate_outcome_statistics` |
+| **06+** | Each `supported` or `refuted` verdict carries `statistics.n_seeds`, a `dispersion_type` that starts with a known measure and may then gloss it, and a written justification when a single run settled it (`MIN_SEEDS_FOR_A_VERDICT` is 2). `inconclusive` and `not_tested` are exempt on purpose. | `validate_outcome_statistics` |
 
 The argument for the chain, and where each link is frozen, is in
 [The AutoR Framework](framework.md#33-the-validity-chain).

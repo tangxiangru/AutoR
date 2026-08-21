@@ -9,21 +9,26 @@ copies of it.
 Stage-shaped callers never saw this. They parse a delimited section out of the text, and a
 second copy of the section changes nothing they read -- which is why all forty
 ResearchClawBench reports on this box are clean and why nothing caught it for as long as the
-seam has existed. The callers that keep the reply are the two FrontierScience answer producers
-and ResearchClawBench's report synthesizer.
+seam has existed. The callers that keep the reply are the shared ``_OperatorCall`` seam in
+``src/bench_call.py`` -- FIRE-Bench's two answer producers today -- and ResearchClawBench's
+report synthesizer.
 
-What it cost, measured on the sixty-task FrontierScience trial: **fifty-five of the control
-arm's sixty answers carried the answer twice** -- forty an exact byte-for-byte halving, fifteen
-more asymmetric because the reply arrived in several streamed blocks -- against **none** of the
-pipeline arm's, because only the control arm keeps the reply. Forty-two of the forty-three
+What it cost, measured on the sixty-task trial of 2026-08-19 against a benchmark since removed
+from this repository -- the measurement is why the composer is the shape it is, so it stays:
+**fifty-five of the control arm's sixty answers carried the answer twice** -- forty an exact
+byte-for-byte halving, fifteen more asymmetric because the reply arrived in several streamed
+blocks -- against **none** of the pipeline arm's, because only the control arm keeps the
+reply. Forty-two of the forty-three
 paired tasks were affected. Re-judging twelve of them cut back to a single copy moved the score
 by **+0.033 points on average** (sd 0.633, four negative, five unchanged, three positive), so the
 duplication did not measurably flatter the arm that had it -- the reason to repair this is that an
 arm-asymmetric artifact should not be in a paired comparison, not that it was worth points.
 
 An earlier revision of this docstring reported that re-judging as -0.307 over eleven answers. That
-figure is not in `~/fs-runs/dedup_recheck.json` and is not reachable from it by dropping any record;
-see the correction note in `docs/frontierscience-results.md`.
+figure is not in the recheck record it claimed to come from -- `~/fs-runs/dedup_recheck.json`, which
+is on disk and outlives the adapter -- and is not reachable from it by dropping any record. The
++0.033 above is the figure that record supports; the results doc that carried the correction note
+went with the benchmark.
 
 The three tests below are the three things that have to stay true: the reply is captured once,
 the result event is still the reply when nothing else produced one, and a caller that keeps the

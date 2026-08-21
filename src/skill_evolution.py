@@ -32,6 +32,8 @@ method: what to check, what to run, what to look at. `looks_like_a_result` refus
 from __future__ import annotations
 
 import json
+import hashlib
+import os
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -41,8 +43,21 @@ from .utils import RunPaths, read_text, write_text
 
 
 #: Where learned notes accumulate across runs. Outside any run directory, because the point
-#: is to outlive the run that wrote it.
+#: is to outlive the run that wrote it -- and therefore **outside any worktree**, which makes
+#: it the one input two arms of an ablation share no matter how carefully their trees are
+#: pinned. ``AUTOR_LEARNED_POOL`` moves it, so a paired arm can be given a frozen or private
+#: pool; unset, behaviour is exactly what it was.
 DEFAULT_POOL = Path.home() / ".autor" / "learned_skills"
+
+#: Environment variable that relocates the pool. Read at call time rather than import time
+#: so a test, or a launcher that sets it after import, gets the pool it asked for.
+POOL_ENV_VAR = "AUTOR_LEARNED_POOL"
+
+
+def default_pool() -> Path:
+    """The pool this run should read, honouring :data:`POOL_ENV_VAR`."""
+    override = os.environ.get(POOL_ENV_VAR, "").strip()
+    return Path(override).expanduser() if override else DEFAULT_POOL
 
 #: Notes kept per field. Past this the oldest go; see the module docstring on why a cap.
 MAX_NOTES_PER_DISCIPLINE = 12
@@ -122,8 +137,8 @@ def _pool_file(pool: Path, discipline: str) -> Path:
     return pool / safe / POOL_FILENAME
 
 
-def load_notes(discipline: str, *, pool: Path = DEFAULT_POOL) -> list[LearnedNote]:
-    path = _pool_file(pool, discipline)
+def load_notes(discipline: str, *, pool: Path | None = None) -> list[LearnedNote]:
+    path = _pool_file(pool if pool is not None else default_pool(), discipline)
     if not path.is_file():
         return []
     try:
@@ -144,9 +159,15 @@ def load_notes(discipline: str, *, pool: Path = DEFAULT_POOL) -> list[LearnedNot
 
 def record_note(
     discipline: str, title: str, body: str, learned_in: str,
-    *, pool: Path = DEFAULT_POOL, now: str | None = None,
+    *, pool: Path | None = None, now: str | None = None,
 ) -> tuple[LearnedNote | None, list[str]]:
-    """File a note, or refuse it and say why. Never raises on a bad note."""
+    """File a note, or refuse it and say why. Never raises on a bad note.
+
+    Reads and writes the same pool. A default that read the override and wrote the shared
+    location would give an "isolated" arm a private view and a shared side effect, which
+    is worse than no isolation because it looks like isolation.
+    """
+    pool = pool if pool is not None else default_pool()
     problems = validate_note(discipline, title, body)
     if problems:
         return None, problems
@@ -167,14 +188,47 @@ def record_note(
     return note, []
 
 
-def install_learned_skill(paths: RunPaths, discipline: str, *, pool: Path = DEFAULT_POOL) -> str:
+def pool_fingerprint(discipline: str, *, pool: Path | None = None) -> dict[str, object]:
+    """What this run read out of the shared pool, in a form a later reader can compare.
+
+    The pool lives outside every worktree and every run directory, so two arms of an
+    ablation pinned to different commits still read the same file, and it is rewritten
+    while they run -- twelve notes per field, oldest evicted. Nothing recorded that.
+
+    On the `pins_on`/`pins_off` ablation this turned out to be harmless, and only because
+    the twins launch in the same second: the installed skill was byte-identical in all
+    forty pairs, so the channel was held constant within each pair and cancelled in the
+    paired difference. That is luck about scheduling, not a property of the design. A task
+    relaunched out of step with its twin reads a different pool and nothing says so.
+
+    So record it: the field, how many notes were read, and a digest of exactly what they
+    were. A paired analysis can then *verify* the channel was constant instead of assuming
+    it, and drop the pairs where it was not.
+    """
+    resolved = pool if pool is not None else default_pool()
+    notes = load_notes(discipline, pool=resolved)
+    digest = hashlib.sha256()
+    for note in notes:
+        digest.update(note.title.encode("utf-8", "replace"))
+        digest.update(b"\x00")
+        digest.update(note.body.encode("utf-8", "replace"))
+        digest.update(b"\x00")
+    return {
+        "pool": str(resolved),
+        "discipline": discipline,
+        "notes": len(notes),
+        "digest": digest.hexdigest()[:16] if notes else "",
+    }
+
+
+def install_learned_skill(paths: RunPaths, discipline: str, *, pool: Path | None = None) -> str:
     """Write the field's learned notes into the run as one skill. Returns its name, or "".
 
     One skill rather than one per note: they are short, they are all about the same field,
     and a pool that installs twelve descriptions crowds out the twenty-nine the pack already
     has. The model reads the file when the field comes up and finds every note in it.
     """
-    notes = load_notes(discipline, pool=pool)
+    notes = load_notes(discipline, pool=pool if pool is not None else default_pool())
     if not notes:
         return ""
     name = "learned-from-earlier-runs"

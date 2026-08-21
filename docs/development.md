@@ -113,7 +113,7 @@ its own docstring, not everything it touches.
 | Operators, recovery, backend health | `test_operator_recovery.py`, `test_operator_codex.py`, `test_bounded_recovery.py`, `test_backend_health.py` |
 | Web search | `test_web_search.py`, `test_web_search_off.py`, `test_mcp_web_search.py` |
 | Report output and the benchmark adapter | `test_markdown_report.py`, `test_report_figure_floor.py`, `test_rcb_adapter.py`, `test_rcb_report_source.py`, `test_rcb_scoring.py`, `test_score_rcb_run.py` (which also holds the repository-wide secret scan), `test_score_rcb_run_wiring.py` |
-| FrontierScience-Research | `test_fs_dataset.py` (the pinned digests and the strict rubric parser), `test_fs_adapter.py` (the prompt contract, its word gate, the workspace and the six exit clauses), `test_fs_scoring.py` and `test_score_fs_run.py` (the judge prompt, the verdict grammar, the refusal rules, and an end-to-end pass against a stdlib `http.server` stub), `test_judge_plumbing_agrees.py` (the two scorers' shared plumbing, compared as normalised ASTs with a named exemption list), `test_fs_trial.py` and `test_fs_trial_driver.py` (the ten admission clauses, the duplicate fold, the publication ceiling and the dry run), `test_trial_driver.py` (the lock, the `/proc` census and the atomic state writes both drivers share), `test_trials_signflip.py` |
+| Paired trials and shared judge plumbing | `test_judge_plumbing_agrees.py` (the scorers' shared plumbing, compared as normalised ASTs with a named exemption list), `test_trial_driver.py` (the lock, the `/proc` census and the atomic state writes that moved out of `tools/rcb_trial.py` into the shared kernel, and the seam that keeps the driver running through them), `test_trials_signflip.py` |
 | Intake and bootstrap | `test_intake.py`, `test_bootstrap.py`, `test_project_bootstrap.py` |
 | Packaging and diagrams | `test_foundry_paper_package.py`, `test_release_package.py`, `test_diagram_gen.py` |
 | Studio | `test_studio_service.py`, `test_studio_http.py` |
@@ -130,13 +130,12 @@ optional scaffolding; both have caught real drift.
 ### Before you push
 
 ```bash
-python -m py_compile main.py studio.py rcb_agent.py fs_agent.py src/*.py src/*/*.py tools/*.py tests/*.py
+python -m py_compile main.py studio.py rcb_agent.py src/*.py src/*/*.py tools/*.py tests/*.py
 python -m unittest discover -s tests -p "test_*.py"
 ```
 
 The compile step catches syntax errors in modules no test happens to import —
-`tools/`, `rcb_agent.py` and `fs_agent.py` are the ones with the least test
-pressure on them.
+`tools/` and `rcb_agent.py` are the ones with the least test pressure on them.
 Note that it covers more than CI does; see below. (CONTRIBUTING.md prints a
 narrower form of the same command. The line above is a superset of it and costs
 nothing extra.)
@@ -436,7 +435,6 @@ adding a module means adding it twice.
 main.py                     terminal entry point: CLI parsing, no workflow logic
 studio.py                   Studio entry point (shim over src/backend/studio_http)
 rcb_agent.py                ResearchClawBench adapter entry point
-fs_agent.py                 FrontierScience-Research adapter entry point
 ```
 
 ```
@@ -512,9 +510,6 @@ src/
   platform/foundry.py       paper package and release package
   diagram_gen.py            optional Gemini method diagram
   rcb.py                    the ResearchClawBench export contract
-  frontierscience.py        the FrontierScience dataset, rubric grammar and prompt contract
-  fs_scoring.py             the FrontierScience judge prompt, verdict grammar and result document
-  fs_trial.py               the FrontierScience paired trial: arms, admission, report
 
   # Studio
   backend/studio_http.py    stdlib ThreadingHTTPServer, routing, static assets, SSE
@@ -530,8 +525,6 @@ src/
 ```
 tools/
   score_rcb_run.py          scores a finished benchmark workspace
-  score_fs_run.py           scores one FrontierScience answer against its rubric (stdlib HTTP)
-  fs_trial.py               runs and reports a paired FrontierScience trial
   archive_sample_complexity.py   how many runs an archive edge needs to be believable
   web_search.py             standalone search entry point handed to operators by path
 templates/registry.yaml     venue registry (parsed by hand, no YAML dependency)

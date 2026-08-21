@@ -14,7 +14,9 @@ import unittest
 from pathlib import Path
 
 from src.experimental_protocol import (
+    DISPERSION_TYPES,
     MIN_SEEDS_FOR_A_VERDICT,
+    canonical_dispersion,
     format_protocol_for_prompt,
     load_experimental_protocol,
     validate_experimental_protocol,
@@ -229,3 +231,78 @@ class StageGateWiringTest(ProtocolTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ADispersionMeasureMayCarryAGlossTest(ProtocolTestCase):
+    """The field is an enum and authors write sentences into it, correctly.
+
+    `dispersion_type` had to equal one of six tokens exactly. Across the run archive
+    seven distinct values were refused, and only three of them named a measure the
+    enum lacked; the other four named the right measure and were refused for saying
+    what the spread was taken over — "range of the Z500 skillful lead time across the
+    complete cascades", "ci95 half-width on sigma*, bootstrap over per-level repeats",
+    "std of the relative error over independent Voronoi fields".
+
+    On the `full40_pins` arm that cost Earth_003 four attempts at Stage 07 while a
+    finished 45 KB report and eleven figures sat on disk. The gate's own message is
+    "an interval whose meaning is unstated cannot be read", and in every one of those
+    four cases the meaning was stated at greater length than the enum allowed.
+    """
+
+    def test_the_measure_is_read_out_of_the_sentence(self) -> None:
+        for text, want in (
+            ("range of the Z500 skillful lead time across the complete cascades", "range"),
+            ("ci95 half-width on sigma*, bootstrap over per-level repeats", "ci95"),
+            ("std of the relative error over independent Voronoi fields", "std"),
+            ("none: the verdict is identical at every case", "none"),
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(canonical_dispersion(text), want)
+
+    def test_measures_the_enum_had_no_spelling_for(self) -> None:
+        for text, want in (
+            ("median absolute relative deviation over 24 tabulated solids", "mad"),
+            ("median absolute difference in K over the 8,424 per-vitrimer means", "mad"),
+            ("variance", "var"),
+            ("Standard Deviation across seeds", "std"),
+            ("interquartile range", "iqr"),
+            ("standard error of the mean", "stderr"),
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(canonical_dispersion(text), want)
+
+    def test_a_bare_token_still_works(self) -> None:
+        for token in DISPERSION_TYPES:
+            with self.subTest(token=token):
+                self.assertEqual(canonical_dispersion(token), token)
+
+    def test_prose_that_names_no_measure_is_still_refused(self) -> None:
+        """The widening may not become an acceptance of anything at all."""
+        for text in ("", "   ", "we ran it a few times", "see the appendix", "ranger", "n/a"):
+            with self.subTest(text=text):
+                self.assertEqual(canonical_dispersion(text), "")
+
+    def test_the_validator_accepts_a_glossed_measure(self) -> None:
+        self.write_outcome({
+            "n_seeds": 3, "dispersion": 0.4,
+            "dispersion_type": "range of the skillful lead time across the cascades",
+        })
+        self.assertEqual(validate_outcome_statistics(self.paths), [])
+
+    def test_the_validator_still_refuses_a_measureless_one(self) -> None:
+        self.write_outcome({"n_seeds": 3, "dispersion": 0.4, "dispersion_type": "quite tight"})
+        problems = validate_outcome_statistics(self.paths)
+        self.assertTrue(any("names no measure" in p for p in problems), problems)
+
+    def test_none_with_a_gloss_is_still_held_to_the_seed_rule(self) -> None:
+        """Reading the measure out of prose must not smuggle past the second check.
+
+        `none: the verdict is identical at every case` normalises to `none`, and a run
+        that says it had three seeds and no spread is still owed the spread.
+        """
+        self.write_outcome({
+            "n_seeds": 3, "dispersion": 0.0,
+            "dispersion_type": "none: the verdict is identical at every case",
+        })
+        problems = validate_outcome_statistics(self.paths)
+        self.assertTrue(any("no dispersion" in p for p in problems), problems)

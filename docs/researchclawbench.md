@@ -9,11 +9,11 @@ AutoR runs it through `rcb_agent.py`. No human is involved at any point — the 
 is a reviewer agent (a second Claude Code instance), and every remaining terminal prompt is
 a hard error rather than a hang.
 
-This is one of two benchmarks AutoR is wired to. The other,
-[FrontierScience-Research](frontierscience.md), hands the agent a written examination
-question and grades the text of the answer against a rubric: no data, no reference paper, no
-figure and no reference answer. They measure different halves of the same system, which is
-the reason for having both.
+This is one of three benchmarks AutoR is wired to. The others are
+[FIRE-Bench](firebench.md), which scores one written conclusion claim by claim against the
+conclusion a paper's authors wrote, and [AIRS-Bench](airsbench.md), which scores a
+`submission.csv` against held-out labels with no judge in the loop at all. They measure
+different halves of the same system, which is the reason for having more than one.
 
 ---
 
@@ -110,7 +110,7 @@ than shipped with an empty `report/images/`.
 > the next section: the scorer sweeps `outputs/` before `report/`, so a stray plot does not
 > add a figure, it takes a slot away from one.
 
-#### The five image slots
+#### The fifteen image slots
 
 This is where most of the score is. Across the 40 shipped tasks, 91 of 154 checklist items
 are `type: image` and they carry **60.6% of total weight** (median 62.5%; images are the
@@ -142,10 +142,12 @@ Four consequences drive the export, and the plan the run writes at Stage 03:
    entirely — the machine-readable results still go across — **and** `collect_figures`
    deletes any image a stage wrote directly to `<workspace>/outputs/`, which the goal
    contract's own instruction to keep `outputs/` up to date makes easy to do by accident.
-   Withholding them from the mirror is only half the defence: six stray PNGs there take all
-   five slots and the report's figures reach the judge as nothing.
+   Withholding them from the mirror is only half the defence: fifteen stray PNGs there take
+   every slot and the report's figures reach the judge as nothing, and any number below that
+   still costs a slot each. Under the old ceiling of five this took six stray files; it now
+   takes fifteen, which is a weaker failure mode, not an absent one.
 2. **`rglob` order is filesystem order, not alphabetical.** Naming cannot influence which
-   five survive. The only lever is publishing no more than five — so `collect_figures`
+   fifteen survive. The only lever is publishing no more than fifteen — so `collect_figures`
    enforces `MAX_REPORT_FIGURES`, picks by the report's own reference order, and prunes
    anything else already at the benchmark path. A figure the report references is never
    pruned; Stage 07's gate is what keeps a run from arriving over budget.
@@ -155,7 +157,7 @@ Four consequences drive the export, and the plan the run writes at Stage 03:
    `report/images/panels/*.png` takes a slot exactly the way a stray `outputs/` plot does.
    The loose one is worse: `rglob` yields a directory's own entries before it descends, so
    `report/panel.png` is reached *ahead* of everything in `report/images/`, while the nested
-   one is reached after — but both are competing for the same five slots. The only images
+   one is reached after — but both are competing for the same fifteen slots. The only images
    that survive the prune are the published slots and any image the winning report links
    directly.
 3. **No shipped task has more than five image criteria**, and 34 of 40 have three or fewer
@@ -176,9 +178,10 @@ Four consequences drive the export, and the plan the run writes at Stage 03:
    Stage 07 refuses a markdown report longer than the window whose highest-ranked planned
    figure is referenced for the first time past it. Nothing in AutoR truncates on it.
 
-A sixth figure does not add a sixth chance to match. It randomises which five are seen.
+A sixteenth figure does not add a sixteenth chance to match. It randomises which fifteen
+are seen.
 
-#### Where the five are chosen
+#### Where the fifteen are chosen
 
 Not at export, and not at Stage 07. The run commits to its figures at **Stage 03**, in
 `workspace/notes/report_plan.json`: one entry per slot, each naming the claim it settles,
@@ -196,7 +199,7 @@ That machinery is **not** benchmark-specific. It is the discipline
 `hypothesis_manifest.json` and `experimental_protocol.json` already apply — commit to the
 choice before the results can influence it — applied a third time, to figures, and every
 AutoR run gets it. What *is* benchmark-specific is everything above: the ~61% image weight,
-the one fixed set of five, the 10,000-character excerpt and the `outputs/`-before-`report/`
+the one fixed set of fifteen, the 10,000-character excerpt and the `outputs/`-before-`report/`
 sweep. Those reach the run through one place only, `build_benchmark_goal`, which a
 non-benchmark run never receives. Outside the benchmark the `report_contract` channel still
 describes the deliverable's shape: to a markdown run it gives the ceiling, interpolated from
@@ -281,8 +284,8 @@ agent for "data overview, main results, and validation/comparison plots" — thr
 questions — and 27 of the 40 shipped tasks carry two or more image criteria, together holding
 most of the weight. A one-figure report clears the ordinary gate while structurally forfeiting
 criteria it never addressed, because one image cannot answer two different questions. It is a
-count of *distinct* figures and never a target to pad toward: the ceiling is still 5, and a
-sixth is not shown to the judge at all.
+count of *distinct* figures and never a target to pad toward: the ceiling is 15, and a
+sixteenth is not shown to the judge at all.
 
 The coverage check is narrowed to markdown on purpose: a LaTeX run has no single
 well-defined published-figure location for it to match against, and `layout_review.json`
@@ -592,7 +595,7 @@ Scoring one run here, two of three items were judge failures: the honest total w
 | Stock default | Why it fails | Used here |
 |:---|:---|:---|
 | `max_tokens=500` | a reasoning judge spends the budget thinking and returns an empty body | 4096 |
-| `time_limit=120` | too short for a multimodal call carrying a target image plus five agent images | 600 |
+| `time_limit=120` | too short for a multimodal call carrying a target image plus up to fifteen agent images | 600 |
 | `multi_thread(max_workers=16)` | concurrent multimodal calls were the actual cause of most failures | serial |
 
 The tool counts failed calls separately from scored ones and **refuses to quote a
@@ -991,7 +994,7 @@ because of something observed on a real workspace:
 | `pipeline_completed` | A second witness: one workspace has `status: completed` and `pipeline_completed: false`. |
 | `report_from_agent` | A quota death still exports a fallback report worth about 7.5 points and records `completed`. |
 | `single_run_root` | Nothing stops a second invocation in one workspace; the exporter picks the lexicographically last root, which is the failed retry. |
-| `no_images_under_outputs` | Thirteen PNGs under `outputs/` took all five judge image slots: one image item 48 → 0, total 46.0 → 9.6. |
+| `no_images_under_outputs` | Thirteen PNGs under `outputs/` took all five judge image slots, under the then-current ceiling of five: one image item 48 → 0, total 46.0 → 9.6. Thirteen no longer fills the fifteen slots `bfffc48` opened, but it still takes thirteen of them. |
 | `single_report_md` | With `report.md` missing the scorer reads whatever an unsorted glob yields first, and records nothing about which file it read. |
 | `backend_reached` | `run.backend_unavailable` is the only machine-readable trace of a quota death; `last_error` stays null. |
 | `no_quota_in_logs` | `classify_backend` runs only when neither attempt wrote a stage file, so a mid-stage 429 reports itself complete. |
