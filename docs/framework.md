@@ -1121,9 +1121,20 @@ this document is:
 > in mid-August and the reasoning that was correct for the arms then on disk; read it as
 > history, and read
 > [the lab notebook](researchclawbench-arms.md#four-arms-nobody-was-scoring) for where it
-> landed. One sting survives the reversal: the arm in front is `full40_abl40`, which is
+> landed.
+>
+> **A fifth arm closes the hole in those four.** Each of them is 35–39 of 40 and therefore a
+> subset selected on its own completions, which is the objection this reversal was most
+> vulnerable to. `full40_a9c2b48` has finished all forty: **38.80, paired +7.33 ± 1.53 over
+> 40 tasks with nothing dropped, winning 30**. The selection worry was not idle — at 33 of 40
+> that arm's unfinished seven were ones the control did *well* on (33.90 against 27.11), and
+> assuming the worst for them would have read +0.72. Completing them moved it to +7.33.
+>
+> One sting survives the reversal: the arm in front is `full40_abl40`, which is
 > `full40_main40` with its forty pinned task-scoped skills **deleted**, and the pins are
-> worth −3.16 ± 1.48 paired over 33 tasks.
+> worth −3.16 ± 1.48 paired over 33 tasks. Four ablations launched on 2026-08-20 —
+> `xrev`, `pins`, `opcalls`, and the topology pair — are the follow-up, and none of them
+> reports yet.
 
 The repairs of §6.5 worked, in the sense that they were aimed at: the floor came up from 14.16 to
 **23.57**, and six of the seven zeros went away — every one of the forty runs now ships a report
