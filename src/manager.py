@@ -119,7 +119,7 @@ from .run_skills import (
     read_skill_pack,
     validate_task_pins,
 )
-from .skill_evolution import install_learned_skill
+from .skill_evolution import install_learned_skill, pool_fingerprint
 from .manifest import (
     ensure_run_manifest,
     format_manifest_status,
@@ -5251,6 +5251,19 @@ class ResearchManager:
                     learned = ""
                 if learned:
                     installed.append(learned)
+                    # The pool lives outside every worktree, so two arms of an ablation
+                    # pinned to different commits still read this same file -- and it is
+                    # rewritten, twelve notes per field with the oldest evicted, while they
+                    # run. Nothing recorded which twelve a given run saw, so a paired
+                    # comparison could only assume the channel was constant. Record the
+                    # digest and it can be checked, and the pairs where it was not can be
+                    # dropped instead of quietly averaged in.
+                    try:
+                        config = load_run_config(paths)
+                        config["learned_pool"] = pool_fingerprint(self.skill_discipline)
+                        save_run_config(paths, config)
+                    except (OSError, TypeError, ValueError):
+                        pass
         except OSError as exc:
             append_log_entry(
                 paths.logs,
