@@ -1,6 +1,7 @@
 ---
 name: information-the-release-defaults-name-the-graded-cell
 description: Use at literature survey when you first open the released code, and again at study design when you are deciding which benchmark gets the deepest run and which gets a token arm or two. Covers reading the entry point's default arguments, run-all script and shipped notebook as the source's own statement of its canonical experiment, and why the benchmark where your effect is largest is the wrong place to spend the surplus.
+benchmarks: researchclawbench
 applies_when: fixed-resolution vision encoders|task-guided cropping strategy
 stages: 01_literature_survey, 03_study_design, 06_analysis
 ---

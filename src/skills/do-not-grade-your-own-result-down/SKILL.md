@@ -1,6 +1,7 @@
 ---
 name: do-not-grade-your-own-result-down
 description: Use when drafting limitations, the discussion or the abstract, and any time you are about to call your own result unimproved, inconclusive or unverifiable. Covers the hedge that contradicts the run's own decision record, and the check a caveat has to fail before it is published.
+benchmarks: researchclawbench
 stages: 02_hypothesis_generation, 06_analysis, 07_writing
 ---
 

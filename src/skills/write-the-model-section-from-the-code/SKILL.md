@@ -1,6 +1,7 @@
 ---
 name: write-the-model-section-from-the-code
 description: Use at implementation while the model file is still open, and again at writing when the architecture, its training objectives or its hyperparameters are being described. Covers why a library primitive hides the components you are being credited for, and how to write a model section a reader could re-implement from.
+benchmarks: researchclawbench
 stages: 04_implementation, 07_writing
 ---
 

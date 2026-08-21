@@ -1,6 +1,7 @@
 ---
 name: the-expected-negatives-are-the-discrimination
 description: Use at study design when a per-unit metric's population is being chosen, and again at analysis and writing. Extends the per-unit publication clause of neuroscience-comparator-ladder-and-per-unit-predictions with the arm it omits: the units your sources expect to be null, the worst-positive-versus-best-negative separation number, and the rule that a shipped eligibility attribute is a reporting label and never a computation filter.
+benchmarks: researchclawbench
 stages: 03_study_design, 06_analysis, 07_writing
 ---
 

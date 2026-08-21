@@ -1,6 +1,7 @@
 ---
 name: a-supplied-parameter-file-is-a-list-of-questions
 description: Use at study design, analysis and writing when the task ships a small file of named constants, ranges, entity tables, case lists or run settings. Covers treating each entry as a question your run must answer in the file's own labels and units — including entries your own audit shows are wrong — and why an agreement count is not an answer.
+benchmarks: researchclawbench
 stages: 03_study_design, 06_analysis, 07_writing
 ---
 

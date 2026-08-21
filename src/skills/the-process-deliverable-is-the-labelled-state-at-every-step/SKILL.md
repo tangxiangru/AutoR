@@ -1,6 +1,7 @@
 ---
 name: the-process-deliverable-is-the-labelled-state-at-every-step
 description: Use at study design, experimentation and analysis when an asked-for output is a process — growth, assembly, a transformation, a pathway — and the theory assigns a discrete label to the system. Covers recording that label at every step, running one condition per named starting configuration plus a zero-driver null, and publishing the transition census against the quantity that drives it.
+benchmarks: researchclawbench
 stages: 03_study_design, 05_experimentation, 06_analysis
 ---
 

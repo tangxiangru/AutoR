@@ -1,6 +1,7 @@
 ---
 name: energy-a-frozen-rule-binds-the-verdict-not-the-work
 description: Use at experimentation, analysis and writing when a preregistered population, decision rule or hypothesis set is about to be the reason you do not run something, do not extend something, or do not print a number you already hold. Covers what a freeze actually protects, the two-row table that reports both, and the sentences that mark a withheld result.
+benchmarks: researchclawbench
 applies_when: least-cost/competitive locations
 stages: 05_experimentation, 06_analysis, 07_writing
 ---

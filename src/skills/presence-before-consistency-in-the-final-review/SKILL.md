@@ -1,6 +1,7 @@
 ---
 name: presence-before-consistency-in-the-final-review
 description: Use at analysis and writing, when a self-review, an adversarial reviewer or a validator loop is generating the items you spend your remaining revision attempts on. Covers why an internal review cannot see a missing deliverable, how to sort review items into presence and consistency, and what a saturated internal quality score is actually measuring.
+benchmarks: researchclawbench
 stages: 06_analysis, 07_writing
 ---
 

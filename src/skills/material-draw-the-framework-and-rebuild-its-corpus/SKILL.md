@@ -1,6 +1,7 @@
 ---
 name: material-draw-the-framework-and-rebuild-its-corpus
 description: Use when the brief asks for a framework combining several named components over a curated input resource, and only a labelled subset of that resource was supplied. Covers the overview figure no data script will ever emit, reconstructing the described corpus yourself, and the placeholders and empty panels that reach the delivered report.
+benchmarks: researchclawbench
 stages: 03_study_design, 04_implementation, 06_analysis, 07_writing
 ---
 

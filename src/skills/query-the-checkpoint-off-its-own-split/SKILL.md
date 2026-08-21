@@ -1,6 +1,7 @@
 ---
 name: query-the-checkpoint-off-its-own-split
 description: Use when a trained or fitted model checkpoint exists and every number you can currently report is an average over your own held-out split. Extends `chemistry-ranked-entities-and-property-curves` with what to do with the saved model itself: build configurations that appear in no split, push the grid past the edge of the training data, draw one curve per discrete condition with the separation between them stated as a number, and audit every supplied system the way you audited the first one.
+benchmarks: researchclawbench
 stages: 03_study_design, 05_experimentation, 06_analysis
 ---
 

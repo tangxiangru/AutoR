@@ -1,6 +1,7 @@
 ---
 name: astronomy-the-caption-is-the-figure-specification
 description: Use at literature survey the moment you have the source's full text, and again when the plotting code is written, whenever you are reproducing a figure whose rendering you cannot see. Covers mining each numbered caption for the panel order, the series and their colours, the reference model the residuals are taken against and how the data were normalised, and holding those fixed against a later stage that finds a better choice.
+benchmarks: researchclawbench
 applies_when: baryon acoustic oscillation
 stages: 01_literature_survey, 04_implementation, 06_analysis
 ---

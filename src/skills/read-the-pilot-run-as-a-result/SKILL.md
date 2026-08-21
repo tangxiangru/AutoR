@@ -1,6 +1,7 @@
 ---
 name: read-the-pilot-run-as-a-result
 description: Use at implementation and experimentation, when a reduced-scale or smoke run of the full pipeline finishes and before the compute budget is committed to the full run. Covers adjudicating the pilot's gap against the target instead of its exit code, reading the exclusions recorded beside the gap as its likely cause, testing whether a substituted input carries the contrast the headline statistic differentiates, and which input to change while changing one is still affordable.
+benchmarks: researchclawbench
 stages: 04_implementation, 05_experimentation
 ---
 

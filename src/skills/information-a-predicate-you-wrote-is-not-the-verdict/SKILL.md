@@ -1,6 +1,7 @@
 ---
 name: information-a-predicate-you-wrote-is-not-the-verdict
 description: Use at experimentation and analysis when a keyword list, regex or rubric you authored is scoring free-form model output, and its answer is about to become the report's headline about a qualitative capability. Covers the direction such a rule fails in, the calibration set that has to be frozen alongside it, which sensitivity check is worth the compute, and how a negative verdict has to be published.
+benchmarks: researchclawbench
 stages: 05_experimentation, 06_analysis
 applies_when: multimodal understanding
 ---

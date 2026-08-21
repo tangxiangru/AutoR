@@ -1,6 +1,7 @@
 ---
 name: two-marginal-rates-are-not-an-agreement
 description: Use at analysis and writing whenever your method and a reference implementation have been run over the same instances, and whenever a source figure plots one against the other. Covers reading a two-method scatter as an agreement claim that owes a number, the four paired quantities that number needs, and why a disagreement statistic of your own invention does not discharge the source's agreement statistic.
+benchmarks: researchclawbench
 stages: 06_analysis, 07_writing
 applies_when: score used to quantify similarity
 ---

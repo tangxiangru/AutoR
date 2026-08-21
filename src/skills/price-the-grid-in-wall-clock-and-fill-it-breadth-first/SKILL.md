@@ -1,6 +1,7 @@
 ---
 name: price-the-grid-in-wall-clock-and-fill-it-breadth-first
 description: Use at the end of study design and through implementation and experimentation, when the experiment grid has more cells than you can obviously afford and the budget is a wall clock rather than a queue. Covers the hard gate on planning time, measuring one cell's cost to price the whole grid, choosing a first-pass fidelity from the quotient, the pass order, and deciding between buying cells and buying repeats.
+benchmarks: researchclawbench
 stages: 03_study_design, 04_implementation, 05_experimentation
 ---
 

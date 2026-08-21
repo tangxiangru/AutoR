@@ -1,6 +1,7 @@
 ---
 name: earth-the-technique-grid-needs-values-in-its-cells
 description: Use at study design when the figure list is chosen, at implementation before any pipeline code is written, and again at analysis, when the supplied archive is stratified by measurement technique or instrument and you are about to describe that stratification. Covers reading the per-technique columns the archive already ships, drawing the technique grid with estimates in it rather than file counts, and why a no-peek rule about the reference product must not reach your figures.
+benchmarks: researchclawbench
 applies_when: DEM differencing|gravimetry
 stages: 03_study_design, 04_implementation, 06_analysis
 ---

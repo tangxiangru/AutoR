@@ -1,6 +1,7 @@
 ---
 name: chemistry-ablations-and-curves-without-an-accelerator
 description: Use at study design after you have priced a scaled-down training arm and found the machine cannot carry it — no accelerator visible, or no wall clock for one arm. Covers the one-row-per-named-component table with the inference switch that removes each part, why an input ablation does not answer a component criterion, and the ladder of curves that still ships when nothing can be trained.
+benchmarks: researchclawbench
 stages: 03_study_design, 05_experimentation, 06_analysis
 ---
 

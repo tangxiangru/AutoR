@@ -1,6 +1,7 @@
 ---
 name: astronomy-sample-the-published-table-into-chains
 description: Use at study design and implementation when the source's constraints reach you as a table of best-fit values with 1-sigma errors for two or more models and no posterior samples were released. Covers rebuilding the ensemble that table describes, writing it in the layout this field's posterior tools read, and what to state about the construction so it is evidence rather than decoration.
+benchmarks: researchclawbench
 applies_when: constraints on cosmological parameters
 stages: 03_study_design, 04_implementation, 06_analysis
 ---

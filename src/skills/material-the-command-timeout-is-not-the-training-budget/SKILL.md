@@ -1,6 +1,7 @@
 ---
 name: material-the-command-timeout-is-not-the-training-budget
 description: Use at study design when a training arm is costed against a per-command or per-stage time limit, at implementation when the training script is written, and at experimentation whenever a generative or surrogate metric comes back far below the published one. Covers checkpoint-and-resume so training accumulates across invocations, reading a metric off its curve rather than its endpoint, and asserting the denominator before any threshold is allowed to fire.
+benchmarks: researchclawbench
 applies_when: \bvitrimer\w*\b
 stages: 03_study_design, 04_implementation, 05_experimentation
 ---

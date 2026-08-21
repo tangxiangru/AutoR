@@ -1,6 +1,7 @@
 ---
 name: keep-the-pipeline-vocabulary-off-the-canvas
 description: Use at analysis and writing when your run carries internal scaffolding — numbered hypotheses, arm codes, clause verdicts, preregistered decision rules, provenance tags on input files — and you are about to save figures. Covers what may not appear inside the frame, what must, where the scaffolding does belong, and a four-question test on the image alone.
+benchmarks: researchclawbench
 stages: 06_analysis, 07_writing
 ---
 

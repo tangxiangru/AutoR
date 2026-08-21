@@ -1,6 +1,7 @@
 ---
 name: a-detection-score-is-a-claim-about-its-population
 description: Use at study design and at analysis whenever a detection or ranking score (area under a precision-recall or ROC curve, recall at a fixed precision) is about to be compared against another study's number, or when one arm detects items the other misses. Covers publishing the population beside the score, the prevalence ladder to run when the source never states its own, and the characterisation of the extra detections that needs no annotation.
+benchmarks: researchclawbench
 stages: 03_study_design, 06_analysis
 ---
 

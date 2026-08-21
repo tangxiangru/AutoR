@@ -332,6 +332,11 @@ class ResearchManager:
         #: reads it: every other routing input is derived from the task statement, and
         #: an identifier is not a property of the research question.
         self.skill_task_id: str | None = None
+        #: Which benchmark this run belongs to, or None for an ordinary project run. Set
+        #: by the front end, because that is the only thing that knows. A skill declaring
+        #: `benchmarks:` is offered only to a run whose front end named that benchmark;
+        #: see `SkillPackEntry.offered_to`.
+        self.skill_benchmark: str | None = None
         #: Skills the front end installs because of the benchmark this run was launched
         #: from, not because of anything in its task statement. A pin records what a
         #: previous run of *this task* lost; this records a decision about a whole
@@ -5182,6 +5187,7 @@ class ResearchManager:
             installed = install_run_skills(
                 paths,
                 self.skills_dir,
+                benchmark=self.skill_benchmark,
                 discipline=self.skill_discipline,
                 pinned=pinned | forced,
                 withheld=self.skill_withhold,

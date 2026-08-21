@@ -1,6 +1,7 @@
 ---
 name: the-limiting-component-not-the-step-count
 description: Use at implementation and experimentation when a training run is far from the number the source published and the obvious fix is more optimiser steps. Covers decomposing the headline metric to find the component that actually limits it, diffing your loss schedule against the source's training script before diffing step counts, running two cheap optimisation trials against that component, and finishing the training-set-size pilot into a plotted learning curve. Budget arithmetic itself lives in `close-the-gap-to-the-published-number`.
+benchmarks: researchclawbench
 stages: 04_implementation, 05_experimentation, 06_analysis
 ---
 

@@ -1,6 +1,7 @@
 ---
 name: information-port-every-branch-of-the-released-dispatch
 description: Use at implementation, when you are about to re-implement a released method by hand because its pinned environment will not install here, and at literature survey when you first read its entry point. Covers why a hand port silently fixes the arm set to the one path you planned to run, how to shim the release's own dispatch instead, and the smoke pass that turns "we could not afford that variant" into a measured per-branch cost.
+benchmarks: researchclawbench
 applies_when: training-free framework|task-guided cropping
 stages: 01_literature_survey, 04_implementation, 05_experimentation
 ---

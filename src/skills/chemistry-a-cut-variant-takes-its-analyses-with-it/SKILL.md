@@ -1,6 +1,7 @@
 ---
 name: chemistry-a-cut-variant-takes-its-analyses-with-it
 description: Use at literature survey, at study design, at every descope decision and again at writing, when the source's method is a family — the same module dropped into two or more backbones, or one architecture published in several named variants — and you are about to run only one of them. Covers listing which of the source's downstream analyses were produced from which variant before any of them is cut, shrinking a variant rather than deleting it, and what a saliency map, case study or ablation computed on the surviving variant is and is not evidence for.
+benchmarks: researchclawbench
 applies_when: Kolmogorov.{0,3}Arnold Graph Neural Network|KA-GNN
 stages: 01_literature_survey, 03_study_design, 05_experimentation, 07_writing
 ---

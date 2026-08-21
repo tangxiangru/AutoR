@@ -1,6 +1,7 @@
 ---
 name: information-a-training-free-method-owes-a-second-backbone
 description: Use when the method under study is training-free, plug-in, prompt-level or described as model-agnostic: at literature survey to enumerate which host models the released code actually supports and where that support came from, at study design to price the second host, at experimentation to run it. Covers finding hosts in dispatch tables and third-party contributions, choosing the cheapest one, and the three readings a two-host table owes.
+benchmarks: researchclawbench
 stages: 01_literature_survey, 03_study_design, 05_experimentation
 ---
 

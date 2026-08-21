@@ -1,6 +1,7 @@
 ---
 name: math-budget-the-grid-before-the-cell
 description: Use at hypothesis generation and study design when the supplied data is a factorial grid of conditions - one directory per family or environment, several condition levels inside each - and the source's protocol prices past the compute you have. Covers enumerating cells from the directories rather than from the protocol, calibrating the per-instance limit instead of inheriting it, breadth before depth with a per-cell cap, what to do when every arm floors, and the zero-compute figure that replaces an arm which never ran.
+benchmarks: researchclawbench
 stages: 02_hypothesis_generation, 03_study_design, 05_experimentation, 07_writing
 ---
 

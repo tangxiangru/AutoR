@@ -1,6 +1,7 @@
 ---
 name: a-refutation-banner-over-a-confirming-panel
 description: Use at hypothesis freeze, and again after the last revision pass, when a run has found that the supplied data or your own reproduction disagrees with the source it names. Covers the branch-name test that stops an agreement being printed as a refutation, and the enumerate-and-search sweep that keeps fidelity verdicts and internal labels out of the title, the headings and the figure banners.
+benchmarks: researchclawbench
 stages: 02_hypothesis_generation, 07_writing
 ---
 

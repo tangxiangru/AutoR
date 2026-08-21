@@ -1,6 +1,7 @@
 ---
 name: energy-utilisation-per-named-element-when-a-limit-binds
 description: Use at experimentation, analysis and figure planning whenever a result is explained by something reaching a limit -- a transfer capacity, a storage power or energy limit, a ramp rate, a cap, a budget. Covers reading per-element flows out of the solved object under their input ids, the normalised utilisation series and ranked binding-frequency table, and the cross-tab that tests the attribution instead of asserting it.
+benchmarks: researchclawbench
 stages: 05_experimentation, 06_analysis, 07_writing
 ---
 

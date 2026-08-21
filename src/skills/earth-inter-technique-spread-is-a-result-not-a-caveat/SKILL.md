@@ -1,6 +1,7 @@
 ---
 name: earth-inter-technique-spread-is-a-result-not-a-caveat
 description: Use at study design when the figure list is chosen, and again at analysis, when the supplied data is many estimates of one quantity from several measurement techniques, instruments or products and the deliverable is the combined or reconciled series they produce. Extends earth-report-the-lattice-and-show-the-field with the four things that decide whether the per-technique grid says anything: each technique's own coverage window, rate versus interannual variability, recomputing a population-mismatched statistic instead of demoting it, and where the offsets have to be printed.
+benchmarks: researchclawbench
 stages: 03_study_design, 06_analysis, 07_writing
 ---
 

@@ -1,6 +1,7 @@
 ---
 name: life-the-named-method-owns-the-deliverable
 description: Use at study design, experimentation and writing when the task's named output is an object some specific method produces — an alignment and its transform, a chain or read mapping, a docked pose, a called variant set — and you are also running the established tool for the same job. Covers which engine's object is the one printed, keeping the extracted-field set identical across engines, and what to do when the named method will not emit a field through the command you happened to use.
+benchmarks: researchclawbench
 stages: 03_study_design, 05_experimentation, 07_writing
 applies_when: correspondence between chains|superimposition vectors
 ---

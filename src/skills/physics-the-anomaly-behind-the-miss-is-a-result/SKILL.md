@@ -1,6 +1,7 @@
 ---
 name: physics-the-anomaly-behind-the-miss-is-a-result
 description: Use at experimentation the moment you diagnose why a block of your reproduced values misses the published ones, and again at analysis and writing when that diagnosis is about to be filed as an error source, a limitation, a flagged secondary observable, or a dispute with your own frozen scoring rule. Covers converting the mechanism into a statement about the system, giving it the rank a result gets rather than the rank a caveat gets, and where the extension worth most to a reproduction comes from.
+benchmarks: researchclawbench
 applies_when: optimal size mismatch
 stages: 05_experimentation, 06_analysis, 07_writing
 ---

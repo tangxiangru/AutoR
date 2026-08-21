@@ -1,6 +1,7 @@
 ---
 name: neuroscience-noise-ladder-not-a-null-band
 description: Use at study design and experimentation when the method's selling point is surviving noise, dropout, shallow sampling or unwanted technical variation, and you are deciding how to test that on a matrix somebody already normalised and batch-corrected. Covers measuring how much nuisance survived the preprocessing, building the corruption levels yourself, and what a degradation curve carries that a single-condition null band does not.
+benchmarks: researchclawbench
 applies_when: dynamically expressed molecular features
 stages: 03_study_design, 05_experimentation
 ---

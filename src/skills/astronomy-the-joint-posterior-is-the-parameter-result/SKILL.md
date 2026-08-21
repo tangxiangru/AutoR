@@ -1,6 +1,7 @@
 ---
 name: astronomy-the-joint-posterior-is-the-parameter-result
 description: Use at study design when the figure slate is fixed, and again at analysis and writing, when the deliverable is constraints or posterior distributions on parameters for two or more competing models. Covers why one overlaid triangle plot over the source's own parameter list is the exhibit that answers it, which parameters get an axis, and why a row of one-dimensional error bars reads as the figure never having been drawn.
+benchmarks: researchclawbench
 applies_when: posterior distributions? of\s+\w+\s+parameters
 stages: 03_study_design, 06_analysis, 07_writing
 ---

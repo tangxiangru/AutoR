@@ -1,6 +1,7 @@
 ---
 name: earth-two-orderings-of-a-regional-decomposition
 description: Use at study design when the figure and table plan is fixed, at analysis, and again at writing, whenever the deliverable splits a global or basin-wide total into per-region parts and you are about to report each part as an absolute rate. Covers the two normalisations every row owes and why their disagreement is the result, where the intensity denominator has to be captured before you need it, and what the spare cell of a small-multiple grid is for.
+benchmarks: researchclawbench
 applies_when: 19 global glacial regions|regional and global glacial mass change
 stages: 03_study_design, 06_analysis, 07_writing
 ---

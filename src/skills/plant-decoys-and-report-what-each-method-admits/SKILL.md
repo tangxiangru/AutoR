@@ -1,6 +1,7 @@
 ---
 name: plant-decoys-and-report-what-each-method-admits
 description: Use at study design and again at experimentation when a source claims robustness, resilience or degradation under worsening conditions, and the shipped data carries no knob to turn — or when the thing under test selects or ranks features rather than predicting a label. Extends run-the-conditions-the-source-ran: covers building a surrogate corruption axis, calibrating its worst level, and measuring what each method admits rather than only what it scores.
+benchmarks: researchclawbench
 stages: 03_study_design, 05_experimentation, 06_analysis
 ---
 

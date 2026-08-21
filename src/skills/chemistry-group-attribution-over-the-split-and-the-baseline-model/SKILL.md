@@ -1,6 +1,7 @@
 ---
 name: chemistry-group-attribution-over-the-split-and-the-baseline-model
 description: Use at study design, experimentation and analysis when the deliverable includes which substructures, functional groups or motifs drive the model's predictions, once the attribution estimator is already chosen. Covers widening from the one molecule the source drew to the whole evaluation split with per-molecule normalisation, running the identical attribution on the comparator model so a claim of better interpretability becomes measurable, and treating a learned edge or subgraph mask as a first-class output.
+benchmarks: researchclawbench
 stages: 03_study_design, 05_experimentation, 06_analysis
 ---
 

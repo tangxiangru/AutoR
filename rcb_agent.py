@@ -751,6 +751,7 @@ def run(args: argparse.Namespace) -> BenchmarkResult:
     # derived from the task statement; a pin is derived from a previous run's score, so
     # it needs the name of the task that produced it. `configs/task_skill_pins.json`.
     manager.skill_task_id = _task_id or None
+    manager.skill_benchmark = "researchclawbench"
     # The pack itself, as an argument. Until this existed the only way to measure a
     # different pack was to delete files in a worktree, which is how the best-scoring arm
     # on the board came to exist as a dirty checkout with no SHA that nobody can re-run.

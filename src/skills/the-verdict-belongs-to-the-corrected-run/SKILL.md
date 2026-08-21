@@ -1,6 +1,7 @@
 ---
 name: the-verdict-belongs-to-the-corrected-run
 description: Use at the hypothesis freeze, and again at analysis and writing, when a measurement already on disk turns out to have been taken with the wrong flag, the wrong input or the wrong configuration. Covers what a frozen commitment may and may not cover, why re-running a mis-invoked command is a bug fix rather than a post-hoc analysis, and how to record the correction so the reader takes the corrected number and not the broken one.
+benchmarks: researchclawbench
 stages: 02_hypothesis_generation, 06_analysis, 07_writing
 applies_when: ultra-?fast and sensitive
 ---

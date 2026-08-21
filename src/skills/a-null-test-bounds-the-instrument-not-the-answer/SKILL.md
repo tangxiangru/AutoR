@@ -1,6 +1,7 @@
 ---
 name: a-null-test-bounds-the-instrument-not-the-answer
 description: Use at analysis and again at writing whenever you run a permutation, shuffle, placebo, unforced-control or power test against your own headline result, especially when it comes back saying the result is not distinguishable from noise. Covers giving every condition the task names its own value line and stating the relation across them as a result, keeping the estimate and the bound as two results with two different subjects, and the sentence order that stops a bound replacing the answer.
+benchmarks: researchclawbench
 stages: 06_analysis, 07_writing
 ---
 

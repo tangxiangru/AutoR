@@ -1,6 +1,7 @@
 ---
 name: verify-against-the-publication-not-the-authors-code
 description: Use at literature survey the moment you find the source's released code, and at experimentation and analysis whenever you are about to report that a result reproduces. Covers where a reference value comes from and in what order of authority, transcribing the published-value file before you compute anything, the published-versus-ours comparison every deliverable carries in the body, and what a replay of the authors' script does and does not establish.
+benchmarks: researchclawbench
 stages: 01_literature_survey, 05_experimentation, 06_analysis
 ---
 

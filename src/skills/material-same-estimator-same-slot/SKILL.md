@@ -1,6 +1,7 @@
 ---
 name: material-same-estimator-same-slot
 description: Use at the literature survey when you recompute a statistic out of the source's own tables, and again at analysis and writing when a reproduction result is being placed in a figure, a caption and a table. Covers republishing the source's summary statistic in the source's own estimator, set and n, sweeping the literature-stage artifacts for statistics that never reached the draft, and giving the reproduction the panel position and caption clause the audit tends to take. Extends material-as-specified-run-and-stage-diagnostics.
+benchmarks: researchclawbench
 stages: 01_literature_survey, 06_analysis, 07_writing
 ---
 

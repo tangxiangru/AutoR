@@ -1,6 +1,7 @@
 ---
 name: energy-inject-the-defect-the-algorithm-claims-to-fix
 description: Use at hypothesis generation, study design and experimentation when the deliverable includes a data-repair algorithm - cleaning, imputation, outlier correction, gap filling, denoising - and especially when the supplied file turns out to hold little for it to repair. Covers injecting the defects the algorithm names into a leaf unit held as truth, scoring recovery per stage in physical units, and checking what the repair did to the downstream object.
+benchmarks: researchclawbench
 stages: 02_hypothesis_generation, 03_study_design, 05_experimentation
 ---
 

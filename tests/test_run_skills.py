@@ -22,6 +22,7 @@ from pathlib import Path
 from src.run_skills import (
     discipline_of,
     DEFAULT_PINS_FILENAME,
+    KNOWN_BENCHMARKS,
     MAX_PINS_PER_TASK,
     format_skills_for_prompt,
     load_task_pins,
@@ -487,6 +488,72 @@ class SkillsNamedInThePromptTest(unittest.TestCase):
             ),
             [],
         )
+
+    def _scoped_pack(self, tmp: str):
+        root = Path(tmp)
+        for name, extra in (
+            ("rcb-only", "benchmarks: researchclawbench"),
+            ("two-benchmarks", "benchmarks: researchclawbench, firebench"),
+            ("unscoped", ""),
+        ):
+            (root / name).mkdir(parents=True)
+            (root / name / "SKILL.md").write_text(
+                f"---\nname: {name}\ndescription: Use when the situation arises, at a stage.\n"
+                f"{extra}\n---\n\nbody\n",
+                encoding="utf-8",
+            )
+        return read_skill_pack(root)
+
+    def test_a_scoped_skill_reaches_only_its_own_benchmark(self) -> None:
+        """Measured: a FIRE-Bench run was installing 117 skills, 116 of them written from
+        ResearchClawBench's per-criterion losses, and the paired difference against a pack
+        with them removed was -2.6 F1 over 33 tasks -- nothing, from a listing seven times
+        larger. On the benchmark they came from the same skills carry +8.63."""
+        with tempfile.TemporaryDirectory() as tmp:
+            pack = self._scoped_pack(tmp)
+            got = {e.name for e in select_run_skills(pack, benchmark="researchclawbench")}
+            self.assertEqual(got, {"rcb-only", "two-benchmarks", "unscoped"})
+            got = {e.name for e in select_run_skills(pack, benchmark="firebench")}
+            self.assertEqual(got, {"two-benchmarks", "unscoped"})
+
+    def test_a_run_with_no_benchmark_is_offered_no_scoped_skill(self) -> None:
+        """The safe direction, and the same one an empty brief takes: a skill that names
+        its benchmark is by construction wrong for most runs."""
+        with tempfile.TemporaryDirectory() as tmp:
+            got = {e.name for e in select_run_skills(self._scoped_pack(tmp), benchmark=None)}
+            self.assertEqual(got, {"unscoped"})
+
+    def test_the_benchmark_name_is_matched_case_insensitively(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack = self._scoped_pack(tmp)
+            got = {e.name for e in select_run_skills(pack, benchmark="ResearchClawBench")}
+            self.assertIn("rcb-only", got)
+
+    def test_a_pin_cannot_carry_a_skill_into_another_benchmark(self) -> None:
+        """A pin is keyed on a task id, and a task id belongs to one benchmark. Ordering the
+        scope after the pin check would let a ResearchClawBench table reach a FIRE-Bench run
+        the moment two benchmarks named a task the same way."""
+        with tempfile.TemporaryDirectory() as tmp:
+            pack = self._scoped_pack(tmp)
+            got = {e.name for e in select_run_skills(
+                pack, benchmark="firebench", pinned=frozenset({"rcb-only"}))}
+            self.assertNotIn("rcb-only", got)
+
+    def test_an_unknown_benchmark_name_is_refused_by_the_validator(self) -> None:
+        """A typo removes the skill from every run and nothing says so."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "typo"
+            root.mkdir(parents=True)
+            (root / "SKILL.md").write_text(
+                "---\nname: typo\ndescription: Use when the situation arises, at a stage.\n"
+                "benchmarks: research-claw-bench\n---\n\nbody\n", encoding="utf-8")
+            problems = validate_skill_pack(Path(tmp))
+            self.assertTrue(any("research-claw-bench" in p for p in problems), problems)
+
+    def test_every_shipped_scope_names_a_benchmark_a_front_end_sets(self) -> None:
+        for entry in read_skill_pack(SKILL_PACK):
+            with self.subTest(skill=entry.name):
+                self.assertLessEqual(entry.benchmarks, KNOWN_BENCHMARKS)
 
     def test_a_pin_is_announced_at_the_stage_it_names(self) -> None:
         """Unconditional announcement was affordable at a cap of three pins per task and

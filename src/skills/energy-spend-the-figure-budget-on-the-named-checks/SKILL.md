@@ -1,6 +1,7 @@
 ---
 name: energy-spend-the-figure-budget-on-the-named-checks
 description: Use at study design when allocating figure slots, and again at analysis and writing when panels are drawn and ordered into the report. Covers a figure budget that is rationed and read in order, giving every check the task's own materials name a single-purpose panel before your diagnostics claim slots, titling a panel with its quantity rather than the run's verdict, and drawing a check that comes out trivially satisfied.
+benchmarks: researchclawbench
 stages: 03_study_design, 06_analysis, 07_writing
 ---
 

@@ -1,6 +1,7 @@
 ---
 name: the-axis-carries-the-observable-not-the-verdict
 description: Use when drafting the figure list at study design, when the plotting code is written, and again before writing — especially if figure slots are being assigned from preregistered hypotheses, decision rules or agreement checks. Covers what may occupy a panel's axes, where verdicts and intervals belong instead, and a one-minute test that sorts a figure set into observable and audit.
+benchmarks: researchclawbench
 stages: 03_study_design, 06_analysis, 07_writing
 ---
 

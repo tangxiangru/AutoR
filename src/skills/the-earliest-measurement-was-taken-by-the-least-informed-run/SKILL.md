@@ -1,6 +1,7 @@
 ---
 name: the-earliest-measurement-was-taken-by-the-least-informed-run
 description: Use at implementation and experimentation, and again at the head of analysis, when a run keeps learning how its tools behave after it has already measured something with them. Covers the log of tool facts and which earlier measurements each one puts in doubt, re-executing the named deliverable's own script last instead of first, and reading an unchanged diff as a result rather than as wasted time.
+benchmarks: researchclawbench
 stages: 04_implementation, 05_experimentation, 06_analysis
 applies_when: database format
 ---

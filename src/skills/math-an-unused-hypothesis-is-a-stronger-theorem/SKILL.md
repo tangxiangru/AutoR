@@ -1,6 +1,7 @@
 ---
 name: math-an-unused-hypothesis-is-a-stronger-theorem
 description: Use at analysis and writing when your system emits proofs, derivations or certificates for problems that arrive with stated hypotheses, and you are about to report how many of them closed. Covers reading the minimal premise set off each proof you already wrote to disk, publishing the per-problem premise-usage table, deleting a hypothesis nothing used and re-running to confirm the generalisation, and why an internal soundness check does not answer this question.
+benchmarks: researchclawbench
 applies_when: machine-verifiable|human-readable proofs
 stages: 06_analysis, 07_writing
 ---

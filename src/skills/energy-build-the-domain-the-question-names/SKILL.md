@@ -1,6 +1,7 @@
 ---
 name: energy-build-the-domain-the-question-names
 description: Use at study design, and again before implementation is frozen, whenever the supplied sample table covers a smaller area, population or period than the question does — especially when another supplied file (a boundary layer, a network, a catalogue, an administrative lattice) spans the whole of it. Covers telling a fixture from a domain, and building the evaluation lattice you were not handed.
+benchmarks: researchclawbench
 stages: 03_study_design, 04_implementation
 ---
 

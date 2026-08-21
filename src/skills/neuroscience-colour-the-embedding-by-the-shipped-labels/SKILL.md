@@ -1,6 +1,7 @@
 ---
 name: neuroscience-colour-the-embedding-by-the-shipped-labels
 description: Use at study design when a figure specification fixes what a low-dimensional embedding is coloured by, and again at analysis and writing when that projection is drawn. Covers the metadata-label inventory that decides the panel grid, the unreduced and size-matched-random arms that belong in the same figure, and rendering each panel's scores into its axes.
+benchmarks: researchclawbench
 stages: 03_study_design, 06_analysis, 07_writing
 ---
 

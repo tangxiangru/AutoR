@@ -1,6 +1,7 @@
 ---
 name: chemistry-fill-every-row-of-the-comparator-table
 description: Use at literature stage and study design when the source publishes performance broken out by class of system, and you are about to choose your evaluation panel with a filter written for throughput. Covers transcribing the table as rows, auditing the inclusion filter against those rows before it is frozen, and buying one target per row before a second target for any row.
+benchmarks: researchclawbench
 stages: 01_literature_survey, 03_study_design, 05_experimentation
 ---
 

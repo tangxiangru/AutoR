@@ -1,6 +1,7 @@
 ---
 name: claims-before-harness-forensics
 description: Use at hypothesis generation and study design on reproduction and method-evaluation tasks, once close reading of the release has turned up defects, ambiguities or under-specification, and again when ordering the report. Covers labelling every planned experiment as a test of a claim or a test of self-consistency, the count gate that follows, and where reproduction-fidelity statistics belong.
+benchmarks: researchclawbench
 stages: 02_hypothesis_generation, 03_study_design, 07_writing
 ---
 

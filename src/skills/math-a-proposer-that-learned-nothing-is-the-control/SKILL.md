@@ -1,6 +1,7 @@
 ---
 name: math-a-proposer-that-learned-nothing-is-the-control
 description: Use at study design and experimentation when the source's contribution is that a learned component chooses something a human or a search would otherwise supply, and the released model, checkpoint or its dependency stack will not install on your machine. Covers capping the time you spend inside somebody else's environment, training the smallest model that fits the same interface instead, the corpus-size scaling curve that bounds the endpoint you cannot reach, and why a random and a hand-written proposer are two copies of the null arm.
+benchmarks: researchclawbench
 applies_when: neuro-?symbolic|neurosymbolic
 stages: 03_study_design, 04_implementation, 05_experimentation
 ---

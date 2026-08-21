@@ -1,6 +1,7 @@
 ---
 name: withdraw-the-clause-whose-precondition-failed
 description: Use at hypothesis freeze to attach a validity precondition to every decision rule, and again at analysis when an arm has come back and one of those preconditions turns out not to hold - duplicated test rows, an offset the split handed one arm, a same-arm seed null wider than the cross-arm difference, an arm that never cleared its competence bar. Covers measuring the preconditions before the arm runs, withdrawing a clause instead of publishing it with caveats that void it, and the line between withdrawing and moving the goalposts.
+benchmarks: researchclawbench
 applies_when: latent charges|Born effective charges
 stages: 02_hypothesis_generation, 03_study_design, 06_analysis, 07_writing
 ---

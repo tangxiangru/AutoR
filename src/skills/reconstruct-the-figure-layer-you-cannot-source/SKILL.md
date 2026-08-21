@@ -1,6 +1,7 @@
 ---
 name: reconstruct-the-figure-layer-you-cannot-source
 description: Use at study design and implementation when a figure you are reproducing carries a component whose exact inputs are not in the supplied data - points drawn over an aggregate, per-unit traces, a second method's series, a band, an inset. Covers enumerating a published figure's layers when you cannot see the rendering, deciding between omitting a layer and building a labelled reconstruction from the coarser quantity you already hold, and the three conditions that make a reconstruction evidence rather than decoration.
+benchmarks: researchclawbench
 stages: 03_study_design, 04_implementation, 06_analysis
 ---
 
