@@ -524,6 +524,23 @@ class GoalContractTests(unittest.TestCase):
             self.assertIn("gpt-x", goal)
             self.assertIn("claude-y", goal)
 
+    def test_the_open_weight_line_reaches_the_prompt(self) -> None:
+        """A weak arm the agent is never told about is a weak arm it cannot run.
+
+        Twenty of the thirty-five verified tasks ask about a contrast whose lower arm is
+        an open-weight model. While the catalogue held only frontier models, the only
+        substitution available deleted that arm, and several runs duly reported a null
+        that was a property of the model list.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            goal = build_fire_goal(
+                _task(Path(tmp)),
+                Path(tmp) / "ws",
+                model_catalog={"openai": ["gpt-x"], "vertex-maas": ["meta/llama-z"]},
+            )
+            self.assertIn("meta/llama-z", goal)
+            self.assertIn('provider="vertex-maas"', goal)
+
     def test_a_task_with_no_data_says_so_rather_than_saying_nothing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             goal = build_fire_goal(_task(Path(tmp)), Path(tmp) / "ws", staged={"data": None})

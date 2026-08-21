@@ -377,6 +377,41 @@ exit $rc
 """
 
 
+#: Written by ``fire_trial.py slurm --score``. One array task per cell, each scoring its
+#: own log, so a scoring pass costs the scheduler and not the machine someone is working
+#: on. Every scoring pass up to the point this existed ran on the login node -- roughly a
+#: thousand judge calls -- which is exactly the thing the agent runs were moved off it for.
+SLURM_SCORE_TEMPLATE = """#!/bin/bash
+#SBATCH --job-name={job_name}
+#SBATCH --partition={partition}
+#SBATCH --array=1-{n_cells}%{throttle}
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=4G
+#SBATCH --time=01:00:00
+#SBATCH --output={log_dir}/%A_%a.out
+#SBATCH --error={log_dir}/%A_%a.out
+set -uo pipefail
+export TMPDIR=/tmp
+export OPENAI_BASE_URL="{openai_base_url}"
+umask 022
+echo "[score] array=${{SLURM_ARRAY_TASK_ID}} host=$(hostname) start=$(date -Is)"
+{python} {trial} score-cell --plan {plan} --index "${{SLURM_ARRAY_TASK_ID}}" --draws {draws}
+echo "[score] array=${{SLURM_ARRAY_TASK_ID}} rc=$? end=$(date -Is)"
+"""
+
+
+def do_score_cell(args: argparse.Namespace) -> int:
+    """Score exactly one cell. The seam the scoring array needs."""
+    plan = json.loads(Path(args.plan).expanduser().read_text(encoding="utf-8"))
+    ordered = plan["cells"]
+    if not 1 <= args.index <= len(ordered):
+        raise SystemExit(f"--index {args.index} out of range 1..{len(ordered)}")
+    cell = ordered[args.index - 1]
+    scorer = autor_root(plan) / "tools" / "score_fire_run.py"
+    print(_score_cell(plan, cell, scorer, args.draws))
+    return 0
+
+
 def do_slurm(args: argparse.Namespace) -> int:
     """Write an array script for the plan and, unless told not to, submit it.
 
@@ -392,7 +427,9 @@ def do_slurm(args: argparse.Namespace) -> int:
     out_dir = Path(args.out_dir).expanduser().resolve() if args.out_dir else plan_path.parent / "slurm"
     log_dir = out_dir / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
-    script = SLURM_TEMPLATE.format(
+    template = SLURM_SCORE_TEMPLATE if args.score else SLURM_TEMPLATE
+    script = template.format(
+        draws=args.draws,
         job_name=args.job_name,
         partition=args.partition,
         n_cells=len(plan["cells"]),
@@ -625,6 +662,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     slurm_cmd.add_argument("--mem", default="16G")
     slurm_cmd.add_argument("--walltime", default="02:00:00")
     slurm_cmd.add_argument("--no-submit", action="store_true")
+    slurm_cmd.add_argument("--score", action="store_true",
+                           help="Write a *scoring* array instead of a running one: one task "
+                                "per cell, each invoking `score-cell`. Scoring is a thousand "
+                                "judge calls for a full campaign and belongs on the scheduler "
+                                "for the same reason the agent runs do.")
+    slurm_cmd.add_argument("--draws", type=int, default=3)
+
+    sc = sub.add_parser("score-cell", help="Score exactly one cell. What the scoring array invokes.")
+    sc.add_argument("--plan", required=True)
+    sc.add_argument("--index", type=int, required=True)
+    sc.add_argument("--draws", type=int, default=3)
 
     score_cmd = sub.add_parser("score")
     score_cmd.add_argument("--plan", required=True)
@@ -648,6 +696,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return do_run_cell(args)
     if args.command == "slurm":
         return do_slurm(args)
+    if args.command == "score-cell":
+        return do_score_cell(args)
     if args.command == "score":
         return do_score(args)
     return do_report(args)
