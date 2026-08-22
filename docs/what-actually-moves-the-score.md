@@ -128,7 +128,12 @@ nothing left to add.
 
 ---
 
-## 5. The one lever with evidence behind it: figures
+## 5. The figure lever was tested and falsified
+
+> **Update 2026-08-22:** the `figfloor` arm from the eff1f5d quartet tested this directly
+> by forcing every run to produce 15 figures. Predicted +2.4; measured **+0.44 ± 1.03**.
+> The correlation was entirely "better runs make more figures", not figures causing better
+> scores. The remainder of this section is the original analysis that predicted the effect.
 
 Regressing each run's score on the number of figures it published, with **task and arm
 fixed effects** so task difficulty and arm quality are differenced out, over 541 scored
@@ -153,20 +158,30 @@ TEXT  criteria ~ images_available   beta = +0.410 ± 0.267   t = +1.53
 The image slope is 1.75× the text slope and only the image one clears its standard error
 — consistent with a real mechanism, since image criteria carry 60.6% of the weight and
 the judge literally cannot see a figure that was not produced. But **the text slope is
-not zero**, so part of this is runs that are simply better. Treat +0.79/figure as an
-upper bound on what a Stage 07 figure floor would buy.
+not zero**, so part of this is runs that are simply better. **That "part" turned out to be
+the whole thing.**
 
-It is still the best-evidenced lever on the board: it is larger than the entire disputed
-skill-pack effect, it has a mechanism, and its blast radius is computable — 78% of runs.
-It needs its own arm; it should not be bundled with anything else.
+**The direct test.** Arm `figfloor` raised `BENCHMARK_MIN_REPORT_FIGURES` from 3 to 15.
+Every one of its 47 runs topped out at exactly 15 images (`images_available` in
+`_score_gpt51.json`), versus median 13 in the paired control arms. The manipulation was
+uniform and it bit perfectly: **+2.91 figures ± 0.39** paired against the mean of `base_a`
+and `base_b`.
 
-**And it works through depth, not coverage** — see §6. The empty image cells are already
-gone, so an extra figure is not filling a blank criterion; it is giving the judge more to
-credit on a criterion that was already answered shallowly.
+The score effect, over n=31 scored tasks (out of 40, as of 2026-08-22):
 
-**What will not work:** raising the cap. The judge's window is 15 and
-`MAX_REPORT_FIGURES` already permits more than the median run produces. The shortfall is
-on the production side, not the cap.
+```
+figfloor − mean(base_a, base_b)   +0.44 ± 1.03   sd 5.71   W-L 14-17
+```
+
+95% CI roughly −1.59 … +2.47. Point estimate 18% of the predicted +2.4. **As a lever,
+forcing figures does nothing.**
+
+**What still works: the correlation as a selector.** Choosing the run with more figures is
+choosing a better run for reasons unrelated to the figures themselves. Over `base_a` and
+`base_b` at n=14 pairs, picking the longer report gains **+1.15 ± 0.74** against a single
+random draw, capturing 48% of an oracle ceiling of +2.42. Best-of-3 projects roughly
++1.5–1.9, which is still larger than any pipeline change proven here — but it costs 3× the
+compute per task.
 
 ---
 
