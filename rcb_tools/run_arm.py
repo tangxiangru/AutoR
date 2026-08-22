@@ -42,11 +42,22 @@ AUTOR_PIN_A9C = Path("/home/robtang_google_com/autor-pin-a9c2b48")
 #: because that one is under a live array and a benchmark run measures the clone it was
 #: launched from.
 AUTOR_SKILLS161 = Path("/home/robtang_google_com/autor-skills161")
-#: main at 48501e7, all 161 skills and all 4326 pins. The pair below is the one-variable
+#: main at 48501e7, all 161 skills and all 280 pins. The pair below is the one-variable
 #: control the `autor_skills161` arm could not be: the two trees differ in `src/skills` and
 #: `configs/task_skill_pins.json` and in nothing else (`diff -rq` clears everything but
 #: .git and __pycache__). `autor-abl40` has the 41 skill directories added by #270 deleted
-#: and their 40 pins struck, leaving 120 skills and 4286 pins.
+#: and their 40 pins struck, leaving 120 skills and 240 pins.
+#:
+#: 280 and 240, not the 4326 and 4286 this comment carried until now and the launchers
+#: printed into every run record. `sum(len(v) for v in table.values())` counts the six
+#: underscore-prefixed metadata keys too, and five of those are prose, so it was adding
+#: 4046 *characters* of `_provenance` and `_maximum` to the pin count. `slurm_pins.sbatch`
+#: has said "27 of the forty tasks carry 280 entries between them" the whole time; the two
+#: numbers were in the same repository disagreeing by a factor of fifteen.
+#:
+#: It is not a cosmetic error. Struck against 4326 the ablation reads as 0.9% of the pin
+#: table and beneath notice; struck against 280 it is 14%, one entry in seven, which is the
+#: size the -2.16 +/- 1.06 arm gap has to be explained against.
 #:
 #: Forty tasks rather than the twelve #270 was written from, for two reasons. Current main
 #: has no 40-task score at all -- the twelve in flight are the tasks that were losing, so
