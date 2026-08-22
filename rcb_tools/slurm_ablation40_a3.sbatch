@@ -53,7 +53,7 @@ echo "arm       : $ARM"
 # A benchmark run measures the clone it was launched from, so the SHA is printed at launch
 # rather than read off the tree afterwards.
 echo "checkout  : $TREE @ $(git -C "$TREE" rev-parse --short HEAD 2>/dev/null)"
-echo "skills    : $(ls "$TREE/src/skills" | wc -l)   pins: $(python3 -c "import json;print(sum(len(v) for v in json.load(open('$TREE/configs/task_skill_pins.json')).values()))")"
+echo "skills    : $(ls "$TREE/src/skills" | wc -l)   pins: $(python3 -c "import json;d=json.load(open('$TREE/configs/task_skill_pins.json'));print(sum(len(v) for k,v in d.items() if not k.startswith('_')))")"
 echo "tasks     : $(echo $TASKS | wc -w)   concurrency: $RCB_MAX_CONCURRENT"
 echo
 
