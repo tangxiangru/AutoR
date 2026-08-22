@@ -89,6 +89,26 @@ def main() -> int:
             out_path.write_text(json.dumps(record, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
             print(json.dumps({"status": record["status"], "out": str(out_path)}))
             return 3
+        # Check whether the log's last line is an error marker rather than a conclusion.
+        # Six R12b bare cells had their entire "conclusion" be the 78-character string
+        # "API Error: Connection lost mid-response", with "is_error": true sitting right
+        # next to it in the JSON, unread. Those six were scored 0/0/0 on a transport
+        # error, which both flatters whichever arm crashes less and reports a network
+        # problem as a capability measurement.
+        try:
+            last_line_json = json.loads(log_file.read_text(encoding="utf-8").strip().splitlines()[-1])
+            if last_line_json.get("is_error"):
+                record["status"] = "no_conclusion"
+                record["note"] = (
+                    f"Log ends with is_error=true. The result field contains an error "
+                    f"message, not a conclusion: {raw[:200]!r}"
+                )
+                out_path.write_text(json.dumps(record, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+                print(json.dumps({"status": record["status"], "out": str(out_path)}))
+                return 3
+        except (json.JSONDecodeError, IndexError, KeyError):
+            pass  # Not a JSON last line or no is_error field; proceed to score
+
         record["conclusion"] = raw
         record["conclusion_chars"] = len(raw)
         if args.task not in gt:

@@ -363,7 +363,7 @@ export CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS=1800000
 export CLAUDE_CODE_USE_VERTEX=1
 export ANTHROPIC_VERTEX_PROJECT_ID="{vertex_project}"
 export CLOUD_ML_REGION="{vertex_region}"
-export OPENAI_BASE_URL="{openai_base_url}"
+{openai_base_url_export}
 export FIREBENCH_RUNS_DIR="{sandboxes}"
 # Node-local /tmp is 13 GB on this cluster and shared with everything else on the node.
 export TMPDIR=/tmp
@@ -392,7 +392,7 @@ SLURM_SCORE_TEMPLATE = """#!/bin/bash
 #SBATCH --error={log_dir}/%A_%a.out
 set -uo pipefail
 export TMPDIR=/tmp
-export OPENAI_BASE_URL="{openai_base_url}"
+{openai_base_url_export}
 umask 022
 echo "[score] array=${{SLURM_ARRAY_TASK_ID}} host=$(hostname) start=$(date -Is)"
 {python} {trial} score-cell --plan {plan} --index "${{SLURM_ARRAY_TASK_ID}}" --draws {draws}
@@ -485,7 +485,11 @@ def do_slurm(args: argparse.Namespace) -> int:
         sandboxes=str(Path(plan["runs_root"]).parent / "sandboxes"),
         vertex_project=os.environ.get("ANTHROPIC_VERTEX_PROJECT_ID", ""),
         vertex_region=os.environ.get("CLOUD_ML_REGION", "us"),
-        openai_base_url=os.environ.get("OPENAI_BASE_URL", ""),
+        openai_base_url_export=(
+            f'export OPENAI_BASE_URL="{os.environ.get("OPENAI_BASE_URL")}"'
+            if os.environ.get("OPENAI_BASE_URL")
+            else "# OPENAI_BASE_URL not set, will use .env or deployment default"
+        ),
     )
     script_path = out_dir / f"{args.job_name}.sbatch"
     script_path.write_text(script, encoding="utf-8")
