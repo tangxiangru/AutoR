@@ -994,36 +994,93 @@ and three more arms with them. Every score below is `tools/score_rcb_run.py --ju
 comparable to these** and the reason is
 [in the lab notebook](docs/researchclawbench-arms.md#three-instruments-over-the-same-39-workspaces).
 
-| arm | n | mean | paired vs bare Claude Code | 95% CI | won |
+This table is **generated**, not maintained by hand — the version that stood here read
+n=35 for arms that had reached 40 and omitted nine arms run since. Regenerate it with:
+
+```bash
+python3 tools/rcb_scoreboard.py --contrasts
+```
+
+Snapshot 2026-08-22. One score per task, from the newest scored workspace; only
+`_score_gpt51.json`, which is `--judge reference --draws 3`.
+
+| arm | n | mean | vs bare Claude Code | 95% CI | W–L |
 |:---|---:|---:|---:|:---|---:|
-| `full40_abl40` — pins struck | 35 | **40.17** | **+9.23 ± 1.59** | +6.13 … +12.34 | 27 of 35 |
-| `full40_a9c2b48` — **all forty** | **40** | 38.80 | **+7.33 ± 1.53** | +4.33 … +10.33 | 30 of 40 |
-| `full40_skills161` | 35 | 38.71 | **+7.82 ± 1.43** | +5.02 … +10.63 | 29 of 35 |
-| `full40_main40` — full pin set | 35 | 37.23 | **+6.00 ± 2.22** | +1.65 … +10.35 | 27 of 35 |
-| `full40_skills` | 39 | 36.89 | **+5.29 ± 1.62** | +2.12 … +8.46 | 30 of 39 |
-| `full40_pins` (`bb32a8c`) | 40 | 34.47 | +2.99 ± 1.54 | −0.03 … +6.01 | 26 of 40 |
-| bare Claude Code (Opus) | 40 | 31.48 | — | — | — |
-| `arm_2ffaeb4` | 40 | 28.75 | −2.73 ± 1.78 | −6.21 … +0.76 | 20 of 40 |
-| `full40` (post-repair, above) | 40 | 23.07 | −8.40 ± 1.78 | −11.90 … −4.91 | 12 of 40 |
+| `pins_on` | 29 | 41.54 | +9.33 ± 1.84 ✳ | +5.61 … +13.05 | 25–4 |
+| `full40_abl40` | 37 | 40.36 | +8.89 ± 1.52 ✳ | +5.82 … +11.97 | 29–8 |
+| `xrev_on` | 26 | 38.99 | +8.75 ± 1.77 ✳ | +5.10 … +12.39 | 21–5 |
+| **`xrev_off`** | **40** | **40.17** | **+8.70 ± 1.58 ✳** | +5.50 … +11.90 | 31–9 |
+| `opcalls_on` | 27 | 40.38 | +8.68 ± 2.17 ✳ | +4.30 … +13.07 | 21–6 |
+| `topo_adaptive` | 25 | 38.46 | +8.40 ± 1.82 ✳ | +4.64 … +12.15 | 22–3 |
+| `full40_skills161` | 37 | 39.36 | +7.80 ± 1.45 ✳ | +4.85 … +10.75 | 30–7 |
+| `full40_a9c2b48` | 39 | 38.48 | +7.35 ± 1.58 ✳ | +4.17 … +10.54 | 29–10 |
+| `opcalls_off` | 26 | 40.74 | +7.32 ± 2.31 ✳ | +2.56 … +12.09 | 20–6 |
+| `figfloor` | 27 | 35.75 | +7.16 ± 1.87 ✳ | +3.38 … +10.93 | 22–5 |
+| `base_a` | 22 | 37.25 | +7.04 ± 2.00 ✳ | +2.88 … +11.20 | 17–5 |
+| `topo_linear` | 36 | 37.24 | +6.81 ± 1.68 ✳ | +3.40 … +10.22 | 27–9 |
+| `full40_main40` | **40** | 38.28 | +6.80 ± 1.70 ✳ | +3.36 … +10.24 | 30–10 |
+| `pins_off` | 29 | 37.10 | +6.47 ± 1.77 ✳ | +2.90 … +10.05 | 24–5 |
+| `base_b` | 24 | 37.11 | +5.86 ± 2.07 ✳ | +1.67 … +10.04 | 17–7 |
+| `full40_skills` | **40** | 37.01 | +5.54 ± 1.59 ✳ | +2.31 … +8.76 | 31–9 |
+| `noskills` | 27 | 36.60 | +5.17 ± 2.82 | −0.52 … +10.87 | 20–7 |
+| `champion_v1` | **40** | 36.38 | +4.90 ± 1.69 ✳ | +1.47 … +8.33 | 28–12 |
+| `full40_pins` | **40** | 34.47 | +2.99 ± 1.54 | −0.13 … +6.11 | 26–14 |
+| `full40_oldpins` | 13 | 34.18 | +1.61 ± 4.38 | −7.94 … +11.15 | 7–6 |
+| **bare Claude Code (Opus)** | **40** | **31.48** | — | | |
+| `full40_v220` | **40** | 28.77 | −2.70 ± 1.79 | −6.32 … +0.92 | 14–26 |
+| `arm_2ffaeb4` | **40** | 28.75 | −2.73 ± 1.78 | −6.32 … +0.87 | 20–20 |
+| `full40` | **40** | 23.07 | −8.40 ± 1.78 ✳ | −12.01 … −4.79 | 12–28 |
 
-**All four of the new intervals exclude zero.** Read against the sentence three paragraphs up —
-"the scaffold is currently worth less than no scaffold" — the scaffold is now ahead of the bare
-agent it wraps, by between 5 and 9 points depending on the arm, on the same judge and the same
-forty tasks. That claim is retired.
+✳ = 95% interval excludes zero. **Bold n** = all forty tasks scored.
 
-**But the arm in front is the one with a set of skills deleted.** `abl40` is `main40` with 41
-task-scoped `SKILL.md` files removed; it is otherwise the same commit and the same flags. Paired
-over the 35 tasks both finished:
+**Do not read the top of that table as a ranking.** Only seven arms have all forty tasks,
+and the arms below forty are not missing tasks at random: the outstanding ones are the slow
+and hard ones, which the control scores *above* its own average on, so a partial arm's
+paired lead reads high. **The best complete arm is `xrev_off` at 40.17, +8.70.**
 
-> `main40` − `abl40` = **−2.75 ± 1.08**, 95% CI −4.88 … −0.63, winning 10 and losing 25.
+### The arms are ahead; nothing inside them is proven
 
-Those 41 skills are worth **negative** two-and-three-quarter points and the interval excludes
-zero. Both arms are still well ahead of the control (+7.01 and +8.81), so they are ahead *despite*
-that skill set rather than because of it. The manipulation is not uniform — the deletions bear on
-a minority of the forty tasks and the rest lose nothing — so the per-affected-task effect is
-larger than −2.75, not smaller.
+Every one-variable contrast available, each pair being one tree apart — and three of them
+are placebos that should come out at zero:
 
-**This is not a verdict on pinning, and an earlier version of this paragraph said it was.** It
+| one-variable contrast | n | difference | sd |
+|:---|---:|---:|---:|
+| cross-review on − off | 26 | −0.87 ± 1.39 | 7.07 |
+| operator calls on − off | 18 | −1.05 ± 0.96 | 4.06 |
+| task-id pins on − off | 21 | +1.82 ± 1.63 | 7.45 |
+| 120-skill pack − 161 | 37 | **+2.16 ± 1.06 ✳** | 6.44 |
+| 120-skill pack − 161 (second pair) | 34 | +0.95 ± 1.48 | 8.64 |
+| adaptive graph − linear | 24 | +0.77 ± 1.28 | 6.27 |
+| figure floor 15 − 3 | 17 | −1.01 ± 1.27 | 5.24 |
+| 45 low-read skills withheld | 16 | −0.59 ± 3.15 | 12.62 |
+| *placebo:* same pack, different code | 37 | +0.33 ± 1.25 | 7.58 |
+| *placebo:* same pack, different code | 36 | +1.34 ± 1.24 | 7.41 |
+| *placebo:* **byte-identical command** | 14 | +2.05 ± 1.51 | 5.66 |
+
+**Ten contrasts, one clears two standard errors — and two of the three placebos are more
+than half its size.** The bottom row is two arms whose command lines are identical
+character for character, and it reads +2.05. That is the scale at which a difference here
+means nothing, and it is larger than most of the rows above it.
+
+So the defensible summary is two sentences. **AutoR is clearly ahead of the bare agent it
+wraps, by about 8 points on the best complete arm.** **Which parts of AutoR are responsible
+is unknown, because no individual change has been shown to beat its own placebo.** How to
+fix that ratio is [how to hill-climb this benchmark](docs/how-to-hill-climb-this-benchmark.md).
+
+Read against the sentence further up — "the scaffold is currently worth less than no
+scaffold" — **that claim is retired**: the scaffold is ahead of the bare agent it wraps on
+every recent arm, on the same judge and the same forty tasks.
+
+**The one contrast that clears its error bar says a skill set is worth negative points.**
+`abl40` is `main40` with 41 task-scoped `SKILL.md` files removed, otherwise the same commit
+and flags, and over the 37 tasks both have finished the 120-skill pack is **+2.16 ± 1.06**
+ahead. Both arms are well clear of the control, so they are ahead *despite* that skill set
+rather than because of it. Two things keep it from being a verdict: a second pair of the
+same contrast (`abl40` − `skills161`) reads only +0.95 ± 1.48, and the byte-identical
+placebo reads +2.05.
+
+**This is not a verdict on pinning either, and an earlier version of this paragraph said it
+was.** It
 read "the pins are worth negative three points", which conflated two different experiments.
 `abl40` deletes skill *files* and leaves 240 pins across 25 tasks in place: pinning is still on in
 both of its arms. The ablation that actually isolates pinning is a different pair, `pins_on`
